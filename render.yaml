@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tech-solution-generator
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: CONFIG_PATH
+        value: /data
+      - key: PORT
+        value: 8000
+    disk:
+      name: config-data
+      mountPath: /data
+      sizeGB: 1

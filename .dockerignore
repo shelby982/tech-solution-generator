@@ -1,0 +1,37 @@
+# 虚拟环境
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 本地配置（含 API Key，不能打进镜像）
+.api_config.json
+
+# 测试与开发
+tests/
+requirements-dev.txt
+*.test.py
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 编辑器与系统文件
+.git/
+.gitignore
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# 临时文件
+*.log
+*.tmp
+tmp/
+temp/
+
+# Docker 自身
+Dockerfile
+.dockerignore

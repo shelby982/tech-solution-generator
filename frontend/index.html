@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>技术方案生成助手</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <style>
+    /* ── Markdown 内容渲染样式 ── */
+    .md h1 { font-size: 1.45em; font-weight: 700; margin: 1em 0 .4em; color: #1e3a8a; }
+    .md h2 { font-size: 1.2em;  font-weight: 700; margin: .9em 0 .35em; color: #1e40af;
+             border-bottom: 1px solid #dbeafe; padding-bottom: .2em; }
+    .md h3 { font-size: 1.05em; font-weight: 600; margin: .8em 0 .3em; color: #1d4ed8; }
+    .md h4 { font-size: .95em;  font-weight: 600; margin: .7em 0 .25em; color: #3730a3; }
+    .md p  { margin: .5em 0; line-height: 1.8; color: #374151; }
+    .md ul, .md ol { padding-left: 1.4em; margin: .4em 0; }
+    .md li { margin: .2em 0; line-height: 1.75; color: #374151; }
+    .md table { border-collapse: collapse; width: 100%; margin: .75em 0; font-size: .88em; }
+    .md th { background: #eff6ff; font-weight: 600; padding: .45em .7em;
+             border: 1px solid #bfdbfe; text-align: left; color: #1e40af; }
+    .md td { padding: .4em .7em; border: 1px solid #dbeafe; }
+    .md tr:nth-child(even) td { background: #f8faff; }
+    .md code { background: #f3f4f6; padding: .12em .38em; border-radius: 3px;
+               font-size: .875em; font-family: ui-monospace, monospace; color: #7c3aed; }
+    .md pre { background: #1e293b; color: #e2e8f0; padding: 1em; border-radius: 6px;
+              overflow-x: auto; margin: .75em 0; }
+    .md pre code { background: none; padding: 0; color: inherit; font-size: .9em; }
+    .md blockquote { border-left: 3px solid #818cf8; padding-left: .9em;
+                     color: #6b7280; margin: .5em 0; font-style: italic; }
+    .md hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+    .md strong { color: #111827; }
+
+    /* ── 拖拽激活态 ── */
+    .drop-active { border-color: #6366f1 !important; background-color: #eef2ff !important; }
+
+    /* ── 流式光标 ── */
+    .streaming-cursor::after {
+      content: '|'; color: #6366f1;
+      animation: blink .7s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── TOC 侧边栏滚动 ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+    /* ── 旋转动画（CSS，不依赖 Tailwind animate-spin 单独加载） ── */
+    .spin { animation: spin .9s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-100 text-gray-800 min-h-screen flex flex-col">
+
+<!-- ════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════ -->
+<header class="bg-gradient-to-r from-indigo-700 to-indigo-600 text-white shadow-lg shrink-0">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <span class="text-2xl select-none">📄</span>
+      <div>
+        <h1 class="text-base font-bold leading-tight">技术方案生成助手</h1>
+        <p class="text-indigo-200 text-xs">上传规范书 → AI 逐章扩写 → 一键下载</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="configStatus" class="hidden text-xs text-indigo-200 bg-indigo-800/50 px-2.5 py-1 rounded-full">
+        ✓ API 已配置
+      </span>
+      <button id="configBtn"
+        class="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 border border-white/25
+               text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+        ⚙️ 配置 API
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════
+     MAIN
+════════════════════════════════════════════════ -->
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+
+  <!-- ══ UPLOAD VIEW ══ -->
+  <div id="uploadView">
+
+    <!-- Drop Zone -->
+    <div id="dropZone"
+      class="border-2 border-dashed border-gray-300 rounded-2xl bg-white cursor-pointer
+             hover:border-indigo-400 hover:bg-indigo-50/40 transition-all p-14 text-center group"
+      onclick="document.getElementById('fileInput').click()">
+
+      <div id="dzIdle">
+        <div class="text-5xl mb-4 group-hover:scale-110 transition-transform select-none">🗂️</div>
+        <p class="text-gray-700 font-medium text-lg mb-1">
+          拖拽文件至此，或 <span class="text-indigo-600 font-semibold">点击选择</span>
+        </p>
+        <p class="text-gray-400 text-sm">支持 PDF / DOCX 格式 · 最大 50 MB</p>
+      </div>
+
+      <div id="dzLoading" class="hidden">
+        <div class="text-4xl mb-4 spin select-none">⟳</div>
+        <p class="text-indigo-600 font-medium">正在解析文档结构，请稍候...</p>
+      </div>
+
+      <input type="file" id="fileInput" accept=".pdf,.docx,.doc" class="hidden">
+    </div>
+
+    <!-- Error Banner -->
+    <div id="uploadError"
+      class="hidden mt-4 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 flex items-start gap-2 text-sm">
+      <span class="text-base shrink-0 mt-0.5">⚠️</span>
+      <p id="uploadErrorMsg"></p>
+    </div>
+
+    <!-- TOC Result Card -->
+    <div id="tocResult" class="hidden mt-5 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/60">
+        <div>
+          <h2 id="docTitle" class="font-semibold text-gray-800 text-base"></h2>
+          <p id="sectionCount" class="text-sm text-gray-400 mt-0.5"></p>
+        </div>
+        <span class="text-green-600 text-xs font-semibold bg-green-50 border border-green-100 px-2.5 py-1 rounded-full">
+          ✓ 解析完成
+        </span>
+      </div>
+      <div id="tocList" class="px-4 py-2 max-h-72 overflow-y-auto"></div>
+    </div>
+
+    <!-- Action Bar -->
+    <div id="actionBar"
+      class="hidden mt-4 bg-white rounded-xl border border-gray-200 px-5 py-4 shadow-sm space-y-3">
+      <p class="text-sm text-gray-500">
+        已识别章节目录，配置好 API Key 后即可开始逐章生成完整技术方案
+      </p>
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- 每章节目标字数 -->
+        <div class="flex items-center gap-2 text-sm">
+          <label for="targetWordsInput" class="text-gray-600 shrink-0 font-medium">每章节目标字数</label>
+          <input type="number" id="targetWordsInput" value="500" min="100" max="10000" step="100"
+            class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
+                   focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+          <span class="text-gray-400">字</span>
+        </div>
+        <div class="flex-1"></div>
+        <!-- 操作按钮 -->
+        <div class="flex gap-2 shrink-0">
+          <button id="configBtnInline"
+            class="flex items-center gap-1.5 border border-gray-200 hover:border-indigo-300
+                   hover:text-indigo-600 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition">
+            ⚙️ 配置 API
+          </button>
+          <button id="startBtn"
+            class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white
+                   px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+            🚀 开始生成方案
+          </button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /uploadView -->
+
+
+  <!-- ══ GENERATE VIEW ══ -->
+  <div id="generateView" class="hidden">
+
+    <!-- Progress Bar Row -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-3 mb-4
+                flex items-center gap-3 flex-wrap">
+      <span class="text-sm font-medium text-gray-600 shrink-0">生成进度</span>
+      <div class="flex-1 min-w-32 bg-gray-100 rounded-full h-2">
+        <div id="progressBar"
+          class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width:0%"></div>
+      </div>
+      <span id="progressText" class="text-sm text-gray-500 shrink-0">0%</span>
+      <span id="progressCount" class="text-sm text-gray-400 shrink-0 w-10 text-right">0/0</span>
+      <span id="totalWordsDisplay" class="hidden text-sm text-indigo-500 font-medium shrink-0 ml-1">0 字</span>
+
+      <div class="flex items-center gap-2 ml-auto shrink-0">
+        <button id="downloadDocxBtn"
+          class="hidden items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white
+                 px-4 py-1.5 rounded-lg text-sm font-semibold transition">
+          ↓ 下载 Word
+        </button>
+        <button id="downloadMdBtn"
+          class="hidden items-center gap-1.5 border border-green-500 text-green-700
+                 hover:bg-green-50 px-4 py-1.5 rounded-lg text-sm font-medium transition">
+          ↓ 下载 MD
+        </button>
+        <button id="backBtn"
+          class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
+                 px-3 py-1.5 rounded-lg text-sm transition">
+          ← 返回
+        </button>
+        <button id="cancelBtn"
+          class="border border-gray-200 hover:border-red-200 text-gray-400 hover:text-red-500
+                 px-3 py-1.5 rounded-lg text-sm transition">
+          ✕ 取消
+        </button>
+      </div>
+    </div>
+
+    <!-- Two-Column Layout -->
+    <div class="flex gap-4" style="height: calc(100vh - 230px); min-height: 420px;">
+
+      <!-- Left: TOC Sidebar -->
+      <div class="w-56 shrink-0 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-gray-100 shrink-0">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">章节目录</p>
+        </div>
+        <div id="genTocList" class="flex-1 overflow-y-auto py-1"></div>
+      </div>
+
+      <!-- Right: Content Panel -->
+      <div class="flex-1 min-w-0 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
+
+        <!-- Empty / connecting state -->
+        <div id="contentEmpty" class="flex-1 flex items-center justify-center text-gray-400">
+          <div class="text-center">
+            <div class="text-4xl mb-3 spin select-none">⟳</div>
+            <p class="text-sm">正在连接生成服务...</p>
+          </div>
+        </div>
+
+        <!-- Actual content -->
+        <div id="contentScroll" class="hidden flex-1 overflow-y-auto px-7 py-6">
+          <!-- Completed sections -->
+          <div id="completedSections" class="space-y-8"></div>
+          <!-- Currently streaming section -->
+          <div id="currentSection" class="hidden mt-8">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-700
+                           px-2.5 py-0.5 rounded-full font-medium">
+                <span class="spin text-xs">⟳</span> 正在生成
+              </span>
+              <h3 id="currentSectionTitle" class="font-semibold text-gray-700 text-sm"></h3>
+            </div>
+            <div id="currentSectionContent" class="md text-gray-700 leading-relaxed streaming-cursor"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div><!-- /generateView -->
+
+</main>
+
+<!-- ════════════════════════════════════════════════
+     CONFIG MODAL
+════════════════════════════════════════════════ -->
+<div id="configModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+
+    <!-- Modal Header -->
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="font-bold text-gray-800 text-lg">⚙️ 模型 API 配置</h2>
+      <button id="closeConfigBtn"
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none transition w-7 h-7
+               flex items-center justify-center rounded-full hover:bg-gray-100">
+        ✕
+      </button>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="px-6 py-5 space-y-4">
+
+      <!-- Provider -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">提供商</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button data-provider="openai"
+            class="provider-btn active-provider py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            OpenAI / 兼容
+          </button>
+          <button data-provider="claude"
+            class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            Anthropic Claude
+          </button>
+          <button data-provider="doubao"
+            class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            🫘 豆包（火山引擎）
+          </button>
+          <button data-provider="kimi"
+            class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            🌙 Kimi（月之暗面）
+          </button>
+        </div>
+      </div>
+
+      <!-- API Key -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+          API Key <span class="text-red-400">*</span>
+        </label>
+        <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+
+      <!-- Base URL -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Base URL</label>
+        <input type="text" id="baseUrlInput"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+
+      <!-- Model -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">模型</label>
+        <input type="text" id="modelInput"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+
+      <!-- Verify Status -->
+      <div id="verifyStatus" class="hidden rounded-lg px-3 py-2 text-sm font-medium"></div>
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="px-6 pb-5 flex items-center gap-2">
+      <button id="verifyBtn"
+        class="flex-1 border border-gray-200 hover:border-indigo-300 hover:text-indigo-600
+               text-gray-600 py-2.5 rounded-lg text-sm font-medium transition">
+        ✓ 验证连接
+      </button>
+      <button id="saveConfigBtn"
+        class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg
+               text-sm font-semibold transition shadow-sm">
+        保存配置
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SCRIPT
+════════════════════════════════════════════════ -->
+<script>
+/* ── 工具 ── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* ── 全局状态 ── */
+const S = {
+  view: 'upload',
+  docId: null,
+  docTitle: '',
+  sections: [],       // [{id, level, title, content_hint}]
+  configSaved: false, // API 已保存
+  apiKeySaved: false, // API Key 已存档（无需重新输入）
+  taskId: null,
+  totalSections: 0,
+  completedCount: 0,
+  eventSource: null,
+  downloadUrl: null,
+  normalClose: false, // 标记是否正常关闭 SSE（用于区分 onerror）
+  tokenBuffer: '',    // 当前章节 token 缓冲
+  renderTimer: null,  // 去抖 timer
+  currentProvider: 'openai',
+  targetWords: 500,   // 每章节目标字数
+  totalWords: 0,      // 已生成总字数
+  sectionWords: {},   // secId → 字数
+};
+
+const DEFAULTS = {
+  openai:  { base_url: 'https://api.openai.com/v1',                     model: 'gpt-4o' },
+  claude:  { base_url: 'https://api.anthropic.com',                     model: 'claude-3-5-sonnet-20241022' },
+  doubao:  { base_url: 'https://ark.cn-beijing.volces.com/api/v3',      model: 'doubao-pro-32k' },
+  kimi:    { base_url: 'https://api.moonshot.cn/v1',                    model: 'moonshot-v1-32k' },
+};
+
+/* ══════════════════════════════════════════
+   UPLOAD
+══════════════════════════════════════════ */
+const dropZone    = $('dropZone');
+const dzIdle      = $('dzIdle');
+const dzLoading   = $('dzLoading');
+const fileInput   = $('fileInput');
+const uploadError = $('uploadError');
+const tocResult   = $('tocResult');
+const actionBar   = $('actionBar');
+
+function setUploading(on) {
+  dzIdle.classList.toggle('hidden', on);
+  dzLoading.classList.toggle('hidden', !on);
+  dropZone.style.pointerEvents = on ? 'none' : '';
+}
+
+function showUploadError(msg) {
+  $('uploadErrorMsg').textContent = msg;
+  uploadError.classList.remove('hidden');
+}
+
+function hideUploadError() { uploadError.classList.add('hidden'); }
+
+async function handleFile(file) {
+  hideUploadError();
+  setUploading(true);
+  tocResult.classList.add('hidden');
+  actionBar.classList.add('hidden');
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '上传失败，请重试');
+    S.docId       = data.doc_id;
+    S.docTitle    = data.title;
+    S.docFilename = data.filename || data.title;   // 原始文件名
+    S.sections    = data.sections;
+    renderTOC(data);
+  } catch (e) {
+    showUploadError(e.message);
+  } finally {
+    setUploading(false);
+  }
+}
+
+function renderTOC(data) {
+  $('docTitle').textContent = data.filename || data.title;   // 优先显示原始文件名
+  $('sectionCount').textContent = `共识别 ${data.sections.length} 个章节`;
+  const list = $('tocList');
+  list.innerHTML = '';
+  data.sections.forEach(sec => {
+    const indent = (sec.level - 1) * 14;
+    const icon   = sec.level === 1 ? '📌' : sec.level === 2 ? '▸' : sec.level === 3 ? '◦' : '·';
+    const div = document.createElement('div');
+    div.className = 'py-2 flex items-start gap-2 text-sm text-gray-700 border-b border-gray-50 last:border-0';
+    div.style.paddingLeft = indent + 'px';
+    div.innerHTML = `
+      <span class="shrink-0 text-gray-400 mt-0.5 select-none">${icon}</span>
+      <div class="min-w-0">
+        <span class="font-medium">${esc(sec.title)}</span>
+        ${sec.content_hint
+          ? `<p class="text-gray-400 text-xs mt-0.5 truncate">${esc(sec.content_hint)}</p>`
+          : ''}
+      </div>`;
+    list.appendChild(div);
+  });
+  tocResult.classList.remove('hidden');
+  actionBar.classList.remove('hidden');
+}
+
+/* Drag & Drop */
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drop-active');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-active'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drop-active');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+
+/* ══════════════════════════════════════════
+   CONFIG MODAL
+══════════════════════════════════════════ */
+const configModal = $('configModal');
+
+function openConfig() {
+  $('verifyStatus').classList.add('hidden');
+  configModal.classList.remove('hidden');
+}
+function closeConfig() { configModal.classList.add('hidden'); }
+
+/* 多个按钮打开 config */
+['configBtn', 'configBtnInline'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('click', openConfig);
+});
+$('closeConfigBtn').addEventListener('click', closeConfig);
+configModal.addEventListener('click', e => { if (e.target === configModal) closeConfig(); });
+
+/* Provider 切换 */
+function applyProviderStyle() {
+  document.querySelectorAll('.provider-btn').forEach(btn => {
+    const active = btn.dataset.provider === S.currentProvider;
+    btn.className = 'provider-btn flex-1 py-2 px-3 rounded-lg border-2 text-sm font-medium transition ' + (
+      active
+        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+    );
+  });
+}
+applyProviderStyle();
+
+document.querySelectorAll('.provider-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    S.currentProvider = btn.dataset.provider;
+    applyProviderStyle();
+    // 仅当字段为空或仍是某个 provider 的默认值时，自动填充
+    const d = DEFAULTS[S.currentProvider];
+    const allBaseUrls  = Object.values(DEFAULTS).map(x => x.base_url);
+    const allModels    = Object.values(DEFAULTS).map(x => x.model);
+    const bu = $('baseUrlInput'), mo = $('modelInput');
+    if (!bu.value || allBaseUrls.includes(bu.value)) bu.value = d.base_url;
+    if (!mo.value || allModels.includes(mo.value))   mo.value = d.model;
+  });
+});
+
+/* 初始填充默认值 */
+$('baseUrlInput').value = DEFAULTS.openai.base_url;
+$('modelInput').value   = DEFAULTS.openai.model;
+
+/* 验证状态显示 */
+function setVerifyStatus(type, msg) {
+  const el = $('verifyStatus');
+  el.className = 'rounded-lg px-3 py-2 text-sm font-medium ' + {
+    info:    'bg-blue-50 text-blue-700',
+    success: 'bg-green-50 text-green-700',
+    error:   'bg-red-50 text-red-700',
+  }[type];
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+/* 辅助：提取 FastAPI 错误信息（detail 可能是数组） */
+function extractErrMsg(err) {
+  if (typeof err.detail === 'string') return err.detail;
+  if (Array.isArray(err.detail) && err.detail.length > 0)
+    return err.detail.map(e => e.msg || JSON.stringify(e)).join('；');
+  return err.message || '未知错误';
+}
+
+/* 保存配置（不关闭弹窗） */
+async function doSave() {
+  const apiKeyEl = $('apiKeyInput');
+  const typedKey = apiKeyEl.value.trim();
+  const keepKey  = S.apiKeySaved && !typedKey;  // 未修改且已存档 → 保留
+
+  if (!keepKey && !typedKey) {
+    setVerifyStatus('error', '请输入 API Key');
+    return false;
+  }
+
+  const baseUrl = $('baseUrlInput').value.trim();
+  const model   = $('modelInput').value.trim();
+
+  const res = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: S.currentProvider,
+      api_key:  keepKey ? '__KEEP__' : typedKey,
+      base_url: baseUrl,
+      model,
+    }),
+  });
+  if (res.ok) {
+    S.configSaved  = true;
+    S.apiKeySaved  = true;
+    $('configStatus').classList.remove('hidden');
+    return true;
+  } else {
+    const err = await res.json().catch(() => ({}));
+    setVerifyStatus('error', '保存失败：' + extractErrMsg(err));
+    return false;
+  }
+}
+
+$('verifyBtn').addEventListener('click', async () => {
+  const ok = await doSave();
+  if (!ok) return;
+  setVerifyStatus('info', '正在验证，请稍候...');
+  $('verifyBtn').disabled = true;
+  try {
+    const res  = await fetch('/api/config/check');
+    const data = await res.json();
+    // 后端返回 { valid: bool, message: str }
+    setVerifyStatus(data.valid ? 'success' : 'error',
+      (data.valid ? '✓ ' : '✗ ') + (data.message || '未知错误'));
+  } catch {
+    setVerifyStatus('error', '验证请求失败，请检查网络');
+  } finally {
+    $('verifyBtn').disabled = false;
+  }
+});
+
+$('saveConfigBtn').addEventListener('click', async () => {
+  const ok = await doSave();
+  if (ok) closeConfig();
+});
+
+
+/* ══════════════════════════════════════════
+   GENERATE
+══════════════════════════════════════════ */
+$('startBtn').addEventListener('click', startGenerate);
+
+async function startGenerate() {
+  if (!S.sections.length) { alert('请先上传技术规范书'); return; }
+  if (!S.configSaved) { openConfig(); return; }
+
+  /* 读取字数设置 */
+  S.targetWords = Math.max(100, Math.min(10000,
+    parseInt($('targetWordsInput')?.value || '500') || 500));
+  S.totalWords   = 0;
+  S.sectionWords = {};
+  $('totalWordsDisplay').classList.add('hidden');
+
+  /* 切换视图 */
+  $('uploadView').classList.add('hidden');
+  $('generateView').classList.remove('hidden');
+  S.totalSections  = S.sections.length;
+  S.completedCount = 0;
+  S.normalClose    = false;
+  ['downloadDocxBtn', 'downloadMdBtn'].forEach(id => $(id).classList.add('hidden'));
+  $('cancelBtn').classList.remove('hidden');
+  $('contentEmpty').classList.remove('hidden');
+  $('contentScroll').classList.add('hidden');
+  $('completedSections').innerHTML = '';
+  $('currentSection').classList.add('hidden');
+  updateProgress(0, S.totalSections);
+  renderGenTOC();
+
+  /* POST /api/generate/start */
+  let taskId;
+  try {
+    const res = await fetch('/api/generate/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sections: S.sections.map(s => ({
+          id: s.id, title: s.title, content: s.content_hint || '', level: s.level,
+        })),
+        target_words: S.targetWords,
+      }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '启动失败'); }
+    const data = await res.json();
+    taskId = data.task_id;
+    S.taskId = taskId;
+  } catch (e) {
+    alert('启动生成失败：' + e.message);
+    $('uploadView').classList.remove('hidden');
+    $('generateView').classList.add('hidden');
+    return;
+  }
+
+  connectSSE(`/api/generate/stream/${taskId}`);
+}
+
+/* ── TOC 侧栏渲染 ── */
+function renderGenTOC() {
+  const list = $('genTocList');
+  list.innerHTML = '';
+  S.sections.forEach(sec => {
+    const div = document.createElement('div');
+    div.id        = 'gtoc-' + sec.id;
+    div.className = 'flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 border-transparent';
+    div.style.paddingLeft = (14 + (sec.level - 1) * 10) + 'px';
+    div.innerHTML = `
+      <span id="gicon-${sec.id}" class="shrink-0 mt-0.5 text-gray-300 text-xs select-none">○</span>
+      <span id="glabel-${sec.id}" class="text-gray-500 leading-snug line-clamp-2">${esc(sec.title)}</span>`;
+    list.appendChild(div);
+  });
+}
+
+function setTocStatus(secId, status) {
+  const item  = $('gtoc-'  + secId);
+  const icon  = $('gicon-' + secId);
+  const label = $('glabel-'+ secId);
+  if (!item) return;
+  const sec = S.sections.find(s => s.id === secId);
+  const pl  = (14 + ((sec?.level ?? 1) - 1) * 10) + 'px';
+  item.style.paddingLeft = pl;
+  const cfg = {
+    active: { bc: 'border-indigo-400', bg: 'bg-indigo-50/70',
+              ic: '⟳', iconCls: 'shrink-0 mt-0.5 text-indigo-500 text-xs select-none spin',
+              lc: 'text-indigo-700 leading-snug line-clamp-2 font-medium' },
+    done:   { bc: 'border-green-400',  bg: 'bg-green-50/60',
+              ic: '✓', iconCls: 'shrink-0 mt-0.5 text-green-500 text-xs select-none',
+              lc: 'text-gray-600 leading-snug line-clamp-2' },
+    error:  { bc: 'border-red-300',    bg: 'bg-red-50/60',
+              ic: '✗', iconCls: 'shrink-0 mt-0.5 text-red-400 text-xs select-none',
+              lc: 'text-red-600 leading-snug line-clamp-2' },
+  }[status] ?? { bc: 'border-transparent', bg: '',
+                  ic: '○', iconCls: 'shrink-0 mt-0.5 text-gray-300 text-xs select-none',
+                  lc: 'text-gray-500 leading-snug line-clamp-2' };
+
+  item.className = `flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 ${cfg.bc} ${cfg.bg}`;
+  item.style.paddingLeft = pl;
+  icon.className  = cfg.iconCls;
+  icon.textContent = cfg.ic;
+  if (label) label.className = cfg.lc;
+}
+
+/* ── 进度 ── */
+function updateProgress(done, total) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  $('progressBar').style.width   = pct + '%';
+  $('progressText').textContent  = pct + '%';
+  $('progressCount').textContent = `${done}/${total}`;
+}
+
+/* ── Token 去抖渲染 ── */
+function appendToken(text) {
+  S.tokenBuffer += text;
+  if (!S.renderTimer) {
+    S.renderTimer = setTimeout(() => {
+      S.renderTimer = null;
+      $('currentSectionContent').innerHTML = marked.parse(S.tokenBuffer);
+      const cs = $('contentScroll');
+      cs.scrollTop = cs.scrollHeight;
+    }, 80);
+  }
+}
+
+/* ── SSE 连接 ── */
+function connectSSE(url) {
+  if (S.eventSource) S.eventSource.close();
+  const es = new EventSource(url);
+  S.eventSource = es;
+
+  es.addEventListener('section_start', e => {
+    const d = JSON.parse(e.data);
+    /* 显示内容区 */
+    $('contentEmpty').classList.add('hidden');
+    $('contentScroll').classList.remove('hidden');
+    /* 重置流式显示 */
+    S.tokenBuffer = '';
+    if (S.renderTimer) { clearTimeout(S.renderTimer); S.renderTimer = null; }
+    $('currentSectionTitle').textContent = d.title;
+    $('currentSectionContent').innerHTML = '';
+    $('currentSection').classList.remove('hidden');
+    setTocStatus(d.section_id, 'active');
+    /* 滚动到当前章节 */
+    setTimeout(() => {
+      $('currentSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  });
+
+  es.addEventListener('token', e => {
+    appendToken(JSON.parse(e.data).text);
+  });
+
+  es.addEventListener('section_done', e => {
+    const d = JSON.parse(e.data);
+    /* 清除去抖 timer */
+    if (S.renderTimer) { clearTimeout(S.renderTimer); S.renderTimer = null; }
+
+    /* 统计本章节字数（中文字符数） */
+    const charCount = (d.content.match(/[一-鿿]/g) || []).length;
+    S.sectionWords[d.section_id] = charCount;
+    S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+
+    /* 更新总字数显示 */
+    const twEl = $('totalWordsDisplay');
+    twEl.textContent = `累计 ${S.totalWords.toLocaleString()} 字`;
+    twEl.classList.remove('hidden');
+
+    /* 将章节移入"已完成"区 */
+    const secInfo = S.sections.find(s => s.id === d.section_id);
+    const card = document.createElement('div');
+    card.className = 'pb-8 border-b border-gray-100 last:border-0';
+    card.innerHTML = `
+      <div class="flex items-center gap-2 mb-4 flex-wrap">
+        <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700
+                     px-2.5 py-0.5 rounded-full font-semibold">✓ 已完成</span>
+        <h3 class="font-semibold text-gray-800 text-sm">${esc(secInfo?.title ?? d.section_id)}</h3>
+        <span class="ml-auto text-xs text-gray-400 shrink-0">${charCount.toLocaleString()} 字</span>
+      </div>
+      <div class="md text-gray-700 leading-relaxed">${marked.parse(d.content)}</div>`;
+    $('completedSections').appendChild(card);
+
+    /* 隐藏流式区 */
+    $('currentSection').classList.add('hidden');
+    S.tokenBuffer = '';
+    S.completedCount++;
+    setTocStatus(d.section_id, 'done');
+    updateProgress(S.completedCount, S.totalSections);
+    const cs = $('contentScroll');
+    cs.scrollTop = cs.scrollHeight;
+  });
+
+  es.addEventListener('all_done', e => {
+    const d = JSON.parse(e.data);
+    S.downloadUrl = d.download_url;
+    S.normalClose = true;
+
+    /* 总字数汇总卡片 */
+    const summary = document.createElement('div');
+    summary.className = 'mt-6 bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-4';
+    summary.innerHTML = `
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-2xl select-none">🎉</span>
+        <div>
+          <p class="font-semibold text-indigo-800 text-sm">全部章节生成完成</p>
+          <p class="text-indigo-600 text-xs mt-0.5">
+            共 <strong>${S.sections.length}</strong> 个章节 ·
+            合计约 <strong>${S.totalWords.toLocaleString()}</strong> 字
+            （目标每章节 ${S.targetWords} 字）
+          </p>
+        </div>
+      </div>`;
+    $('completedSections').appendChild(summary);
+
+    /* 更新进度条总字数为完成状态 */
+    const twEl = $('totalWordsDisplay');
+    twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字`;
+    twEl.classList.remove('hidden');
+
+    _showDownloadBtns();
+    $('cancelBtn').classList.add('hidden');
+    es.close();
+    S.eventSource = null;
+    /* 滚动到底部显示汇总 */
+    setTimeout(() => {
+      $('contentScroll').scrollTop = $('contentScroll').scrollHeight;
+    }, 100);
+  });
+
+  es.addEventListener('error', e => {
+    let msg = '生成过程中发生错误';
+    try { msg = JSON.parse(e.data).message; } catch {}
+    appendErrorCard(msg, 'red');
+    S.normalClose = true;
+    es.close();
+    S.eventSource = null;
+  });
+
+  /* 网络断开（非正常关闭） */
+  es.onerror = () => {
+    if (!S.normalClose && S.eventSource) {
+      appendErrorCard('SSE 连接中断，已生成内容已保留', 'yellow');
+      if (S.completedCount > 0) {
+        S.downloadUrl = `/api/download/${S.taskId}`;
+        _showDownloadBtns();
+      }
+    }
+    if (S.eventSource) { S.eventSource.close(); S.eventSource = null; }
+  };
+}
+
+function appendErrorCard(msg, color) {
+  const cs = $('contentScroll');
+  cs.classList.remove('hidden');
+  $('contentEmpty').classList.add('hidden');
+  const div = document.createElement('div');
+  const cls = color === 'red'
+    ? 'bg-red-50 border-red-200 text-red-700'
+    : 'bg-yellow-50 border-yellow-200 text-yellow-700';
+  div.className = `mt-4 border rounded-xl px-4 py-3 text-sm flex items-center gap-2 ${cls}`;
+  div.innerHTML = `<span>⚠️</span> <span>${esc(msg)}</span>`;
+  $('completedSections').appendChild(div);
+  cs.scrollTop = cs.scrollHeight;
+}
+
+/* ── 取消 ── */
+$('cancelBtn').addEventListener('click', async () => {
+  if (!S.taskId) return;
+  if (!confirm('确定取消？已完成的章节内容将保留。')) return;
+  S.normalClose = true;
+  if (S.eventSource) { S.eventSource.close(); S.eventSource = null; }
+  try { await fetch(`/api/generate/${S.taskId}`, { method: 'DELETE' }); } catch {}
+  $('cancelBtn').classList.add('hidden');
+  if (S.completedCount > 0) {
+    S.downloadUrl = `/api/download/${S.taskId}`;
+    _showDownloadBtns();
+  }
+});
+
+/* ── 显示下载按钮 ── */
+function _showDownloadBtns() {
+  ['downloadDocxBtn', 'downloadMdBtn'].forEach(id => {
+    const b = $(id); b.classList.remove('hidden'); b.classList.add('flex');
+  });
+}
+$('downloadDocxBtn').addEventListener('click', () => {
+  if (S.taskId) window.location.href = `/api/download/${S.taskId}/docx`;
+});
+$('downloadMdBtn').addEventListener('click', () => {
+  if (S.downloadUrl) window.location.href = S.downloadUrl;
+});
+
+/* ── 返回上传页 ── */
+$('backBtn').addEventListener('click', () => {
+  if (S.eventSource) { S.normalClose = true; S.eventSource.close(); S.eventSource = null; }
+  $('generateView').classList.add('hidden');
+  $('uploadView').classList.remove('hidden');
+});
+
+
+/* ══════════════════════════════════════════
+   INIT — 检查是否已有 API 配置
+══════════════════════════════════════════ */
+(async () => {
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const d = await res.json();
+      // 后端返回 { configured: bool, config: { provider, base_url, model, ... } }
+      const cfg = d.config;
+      if (d.configured && cfg?.provider) {
+        S.configSaved  = true;
+        S.apiKeySaved  = true;
+        $('configStatus').classList.remove('hidden');
+        /* 回填当前 provider 状态 */
+        S.currentProvider = cfg.provider;
+        applyProviderStyle();
+        if (cfg.base_url) $('baseUrlInput').value = cfg.base_url;
+        if (cfg.model)    $('modelInput').value   = cfg.model;
+        /* API Key 显示为已存档状态 */
+        const apiKeyEl = $('apiKeyInput');
+        apiKeyEl.placeholder = '已保存 — 如需修改请输入新密钥';
+        apiKeyEl.dataset.saved = 'true';
+        apiKeyEl.addEventListener('input', function onType() {
+          delete apiKeyEl.dataset.saved;
+          S.apiKeySaved = false;
+          apiKeyEl.placeholder = 'sk-...';
+          apiKeyEl.removeEventListener('input', onType);
+        });
+      }
+    }
+  } catch {}
+})();
+</script>
+</body>
+</html>
