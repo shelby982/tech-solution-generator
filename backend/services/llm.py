@@ -99,6 +99,94 @@ async def _verify_claude(config: LLMConfig) -> tuple[bool, str]:
 
 
 # ─────────────────────────────────────────────
+# 文档摘要生成（非流式）
+# ─────────────────────────────────────────────
+
+async def generate_doc_summary(
+    config: LLMConfig,
+    sections: list[dict],
+) -> str:
+    """
+    根据所有章节标题和内容摘要，生成整篇文档的项目概述（~500字）。
+    非流式调用，返回完整文本。
+    """
+    # 拼接所有章节的标题和内容作为输入
+    input_parts = []
+    for sec in sections:
+        title = sec.get("title", "")
+        content = sec.get("content", "")
+        if content:
+            input_parts.append(f"【{title}】{content[:300]}")
+        else:
+            input_parts.append(f"【{title}】")
+
+    doc_outline = "\n".join(input_parts)
+    # 限制输入长度避免超 token
+    if len(doc_outline) > 6000:
+        doc_outline = doc_outline[:6000] + "\n..."
+
+    system_prompt = (
+        "你是一位专业的技术方案分析专家，擅长从技术规范书中提炼项目核心信息。"
+    )
+    user_prompt = (
+        "以下是一份技术规范书的章节目录和各章节核心内容摘要：\n\n"
+        f"---\n{doc_outline}\n---\n\n"
+        "请基于以上内容，提炼出该项目的整体概述，包括：\n"
+        "1. 项目背景与目标\n"
+        "2. 核心技术要求和约束条件\n"
+        "3. 主要工作内容范围\n\n"
+        "要求：\n"
+        "- 字数控制在 500 字左右\n"
+        "- 语言精炼、信息密度高\n"
+        "- 突出关键技术指标和约束\n"
+        "- 使用 Markdown 格式"
+    )
+
+    if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+        return await _generate_oneshot_openai(config, system_prompt, user_prompt)
+    elif config.provider == "claude":
+        return await _generate_oneshot_claude(config, system_prompt, user_prompt)
+    else:
+        raise ValueError(f"不支持的 provider：{config.provider}")
+
+
+async def _generate_oneshot_openai(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=60.0,
+    )
+    response = await client.chat.completions.create(
+        model=config.model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=1500,
+    )
+    return response.choices[0].message.content or ""
+
+
+async def _generate_oneshot_claude(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(
+        api_key=config.api_key,
+        base_url=config.base_url if config.base_url != "https://api.anthropic.com" else None,
+        timeout=60.0,
+    )
+    message = await client.messages.create(
+        model=config.model,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+        max_tokens=1500,
+    )
+    return message.content[0].text if message.content else ""
+
+
+# ─────────────────────────────────────────────
 # 流式生成
 # ─────────────────────────────────────────────
 
@@ -107,6 +195,7 @@ async def stream_generate(
     section_title: str,
     original_content: str,
     target_words: int = 500,
+    doc_summary: str = "",
 ) -> AsyncIterator[str]:
     """
     流式生成单个章节的技术方案内容。
@@ -116,6 +205,7 @@ async def stream_generate(
         section_title:    章节标题
         original_content: 章节原始内容（来自规范书）
         target_words:     目标字数（默认 500 字）
+        doc_summary:      文档整体摘要（作为全局上下文）
 
     Yields:
         str — 每次 yield 一个 token 片段
@@ -124,10 +214,18 @@ async def stream_generate(
         "你是一位专业的技术方案撰写专家，擅长基于技术规范书撰写详细的技术实施方案。"
         "请使用 Markdown 格式输出，内容要专业、具体、可落地。"
     )
-    user_prompt = (
-        f"以下是技术规范书中关于「{section_title}」的原始描述和要求：\n\n"
+
+    # 构建 user_prompt：先注入项目整体摘要，再给出章节内容
+    parts = []
+    if doc_summary:
+        parts.append(
+            f"以下是该项目的整体概述：\n\n"
+            f"===\n{doc_summary}\n===\n\n"
+        )
+    parts.append(
+        f"以下是技术规范书中关于「{section_title}」的核心要求摘要：\n\n"
         f"---\n{original_content}\n---\n\n"
-        f"请基于以上规范，撰写本章节完整的技术方案内容。\n"
+        f"请基于项目整体背景和本章节的规范要求，撰写本章节完整的技术方案内容。\n"
         f"要求：\n"
         f"1. 内容字数不少于 {target_words} 字\n"
         f"2. 深度扩展原文内容，覆盖实施细节、注意事项与技术选型依据\n"
@@ -135,6 +233,7 @@ async def stream_generate(
         f"4. 适当增加图表说明（使用 Markdown 表格）\n"
         f"5. 保持与规范书整体风格一致"
     )
+    user_prompt = "".join(parts)
 
     if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
         async for token in _stream_openai(config, system_prompt, user_prompt):

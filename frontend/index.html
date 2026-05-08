@@ -50,6 +50,24 @@
     /* ── 旋转动画（CSS，不依赖 Tailwind animate-spin 单独加载） ── */
     .spin { animation: spin .9s linear infinite; display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── 解析步骤指示器 ── */
+    .step-active  .step-circle { border-color: #6366f1 !important; background: #6366f1 !important; color: #fff !important; }
+    .step-active  .step-label  { color: #4f46e5 !important; font-weight: 600; }
+    .step-done    .step-circle { border-color: #22c55e !important; background: #22c55e !important; color: #fff !important; }
+    .step-done    .step-label  { color: #16a34a !important; }
+    .step-done    .step-circle::after { content: '✓'; }
+    /* 激活步骤圆圈内数字 → 显示 spinner */
+    .step-active  .step-circle { font-size: 0; }
+    .step-active  .step-circle::after { content: '⟳'; font-size: 12px; animation: spin .9s linear infinite; display: inline-block; }
+
+    /* ★ ▲ 特殊标记样式 */
+    .mark-star  { display:inline-flex; align-items:center; font-size:10px; font-weight:700;
+                  color:#dc2626; background:#fef2f2; border:1px solid #fecaca;
+                  border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
+    .mark-tri   { display:inline-flex; align-items:center; font-size:10px; font-weight:700;
+                  color:#d97706; background:#fffbeb; border:1px solid #fde68a;
+                  border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
   </style>
 </head>
 <body class="bg-slate-100 text-gray-800 min-h-screen flex flex-col">
@@ -101,9 +119,62 @@
         <p class="text-gray-400 text-sm">支持 PDF / DOCX 格式 · 最大 50 MB</p>
       </div>
 
-      <div id="dzLoading" class="hidden">
-        <div class="text-4xl mb-4 spin select-none">⟳</div>
-        <p class="text-indigo-600 font-medium">正在解析文档结构，请稍候...</p>
+      <!-- 解析进度面板（替换原来单一 spinner） -->
+      <div id="dzLoading" class="hidden text-left">
+        <!-- 文件名行 -->
+        <div class="flex items-center gap-2 mb-4 justify-center">
+          <span class="text-2xl select-none">📄</span>
+          <span id="parseFilename" class="text-sm font-semibold text-gray-700 truncate max-w-xs"></span>
+        </div>
+
+        <!-- 4 阶段步骤 -->
+        <div class="flex items-start gap-0 mb-4 justify-center" id="parseSteps">
+          <!-- step 1 -->
+          <div class="flex flex-col items-center w-20" id="pstep-1">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">1</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">读取文件</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-1-2"></div>
+          <!-- step 2 -->
+          <div class="flex flex-col items-center w-20" id="pstep-2">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">2</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">识别格式</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-2-3"></div>
+          <!-- step 3 -->
+          <div class="flex flex-col items-center w-20" id="pstep-3">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">3</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">扫描章节</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-3-4"></div>
+          <!-- step 4 -->
+          <div class="flex flex-col items-center w-20" id="pstep-4">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">4</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">完成</p>
+          </div>
+        </div>
+
+        <!-- 进度条 -->
+        <div class="w-full max-w-sm mx-auto mb-3">
+          <div class="bg-gray-100 rounded-full h-1.5">
+            <div id="parseProgressBar"
+              class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:5%"></div>
+          </div>
+        </div>
+
+        <!-- 当前阶段描述 -->
+        <p id="parseStageText" class="text-indigo-600 text-sm font-medium text-center mb-1">上传文件中...</p>
+
+        <!-- 实时章节扫描滚动条 -->
+        <div id="parseSectionRow" class="hidden flex items-center gap-2 justify-center mt-1">
+          <span class="text-xs text-gray-400">正在扫描:</span>
+          <span id="parseSectionTitle" class="text-xs text-gray-600 font-medium truncate max-w-xs"></span>
+          <span id="parseSectionCount" class="text-xs text-indigo-500 font-semibold shrink-0"></span>
+        </div>
       </div>
 
       <input type="file" id="fileInput" accept=".pdf,.docx,.doc" class="hidden">
@@ -348,6 +419,14 @@ const esc = s => String(s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;')
   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
+/* 字数 → 预估 Word 页数（A4, 宋体小四, 1.5倍行距 ≈ 450字/页） */
+const WORDS_PER_PAGE = 450;
+function estPages(words) {
+  if (words <= 0) return '';
+  const pages = Math.ceil(words / WORDS_PER_PAGE);
+  return `≈${pages}页`;
+}
+
 /* ── 全局状态 ── */
 const S = {
   view: 'upload',
@@ -388,6 +467,9 @@ const uploadError = $('uploadError');
 const tocResult   = $('tocResult');
 const actionBar   = $('actionBar');
 
+/* ── 解析步骤状态管理 ── */
+let _parseESS = null;   // 当前 EventSource 引用，用于中断
+
 function setUploading(on) {
   dzIdle.classList.toggle('hidden', on);
   dzLoading.classList.toggle('hidden', !on);
@@ -401,46 +483,202 @@ function showUploadError(msg) {
 
 function hideUploadError() { uploadError.classList.add('hidden'); }
 
+/* 更新步骤指示器（stepNum: 1-4, status: 'active'|'done'） */
+function setParseStep(stepNum, status) {
+  for (let i = 1; i <= 4; i++) {
+    const el = $('pstep-' + i);
+    if (!el) continue;
+    el.classList.remove('step-active', 'step-done');
+    if (i === stepNum && status === 'active') el.classList.add('step-active');
+    if (i < stepNum || (i === stepNum && status === 'done')) el.classList.add('step-done');
+  }
+  // 步骤间连线颜色
+  [[1,2],[2,3],[3,4]].forEach(([a,b]) => {
+    const line = document.querySelector(`.step-line-${a}-${b}`);
+    if (line) line.style.backgroundColor = stepNum > a ? '#22c55e' : '#e5e7eb';
+  });
+}
+
+/* 解析进度条更新 */
+function setParseProgress(pct, stageText) {
+  $('parseProgressBar').style.width = Math.max(5, pct) + '%';
+  if (stageText) $('parseStageText').textContent = stageText;
+}
+
+/* 显示正在扫描的章节 */
+function showParseSectionScan(title, current, total) {
+  const row = $('parseSectionRow');
+  row.classList.remove('hidden');
+  $('parseSectionTitle').textContent = title;
+  $('parseSectionCount').textContent = total > 0 ? `(${current}/${total})` : `(${current})`;
+}
+
 async function handleFile(file) {
   hideUploadError();
-  setUploading(true);
   tocResult.classList.add('hidden');
   actionBar.classList.add('hidden');
+  setUploading(true);
 
-  const fd = new FormData();
-  fd.append('file', file);
+  // 初始化进度 UI
+  $('parseFilename').textContent = file.name;
+  $('parseSectionRow').classList.add('hidden');
+  setParseStep(1, 'active');
+  setParseProgress(5, '上传文件中...');
 
+  // 关闭残留的 EventSource
+  if (_parseESS) { _parseESS.close(); _parseESS = null; }
+
+  // ── Step 1: POST 上传，获取 job_id ─────────────
+  let jobId;
   try {
+    const fd = new FormData();
+    fd.append('file', file);
     const res = await fetch('/api/upload', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || '上传失败，请重试');
-    S.docId       = data.doc_id;
-    S.docTitle    = data.title;
-    S.docFilename = data.filename || data.title;   // 原始文件名
-    S.sections    = data.sections;
-    renderTOC(data);
+    jobId = data.parse_job_id;
+    setParseStep(1, 'done');
+    setParseStep(2, 'active');
+    setParseProgress(15, '文件已接收，正在识别格式...');
   } catch (e) {
-    showUploadError(e.message);
-  } finally {
     setUploading(false);
+    showUploadError('上传失败：' + e.message);
+    return;
   }
+
+  // ── Step 2-4: 订阅 SSE 进度流 ─────────────────
+  await new Promise((resolve) => {
+    const es = new EventSource(`/api/parse/stream/${jobId}`);
+    _parseESS = es;
+
+    // ★ 关键标志：区分"我们主动关闭"vs"异常断开"
+    // 调用 es.close() 会触发 onerror（某些浏览器），该标志防止误报
+    let closedByUs = false;
+
+    function safeClose() {
+      closedByUs = true;
+      es.close();
+      _parseESS = null;
+    }
+
+    // 超时保护：3 分钟
+    const timeout = setTimeout(() => {
+      safeClose();
+      setUploading(false);
+      showUploadError('解析超时（3分钟），请检查文件是否过大或格式是否正确');
+      resolve();
+    }, 3 * 60 * 1000);
+
+    es.addEventListener('parse_start', () => {
+      setParseStep(2, 'done');
+      setParseStep(3, 'active');
+      setParseProgress(20, '开始扫描文档结构...');
+    });
+
+    es.addEventListener('parse_progress', e => {
+      const d = JSON.parse(e.data);
+      const pct = d.percent >= 0 ? Math.min(85, 20 + d.percent * 0.65) : 30;
+      if (d.stage && d.stage.includes('转换')) {
+        setParseStep(2, 'active');
+        setParseProgress(pct, d.stage);
+      } else {
+        setParseStep(3, 'active');
+        setParseProgress(pct, d.stage || '扫描中...');
+      }
+    });
+
+    es.addEventListener('parse_section', e => {
+      const d = JSON.parse(e.data);
+      setParseStep(3, 'active');
+      const pct = d.total > 0
+        ? Math.min(85, 20 + (d.current / d.total) * 65)
+        : Math.min(85, 20 + d.current * 2);
+      setParseProgress(pct, `扫描章节结构 (${d.current}${d.total > 0 ? '/' + d.total : ''})...`);
+      showParseSectionScan(d.title, d.current, d.total);
+    });
+
+    es.addEventListener('parse_done', e => {
+      clearTimeout(timeout);
+      safeClose();   // ← 用 safeClose，不再直接 es.close()
+      const data = JSON.parse(e.data);
+      setParseStep(3, 'done');
+      setParseStep(4, 'done');
+      setParseProgress(100, '解析完成！');
+
+      setTimeout(() => {
+        setUploading(false);
+        S.docId       = data.doc_id;
+        S.docTitle    = data.title;
+        S.docFilename = file.name;
+        S.sections    = data.sections;
+        renderTOC(data);
+      }, 400);
+
+      resolve();
+    });
+
+    es.addEventListener('error', e => {
+      clearTimeout(timeout);
+      safeClose();
+      setUploading(false);
+      let msg = '解析失败，请重试';
+      try { msg = JSON.parse(e.data).message || msg; } catch {}
+      showUploadError(msg);
+      resolve();
+    });
+
+    // SSE 连接本身出错（真正的网络断线）
+    // 注意：主动 es.close() 在某些浏览器也会触发此回调，用 closedByUs 区分
+    es.onerror = () => {
+      if (closedByUs) return;   // ← 主动关闭引起的，忽略
+      if (es.readyState === EventSource.CLOSED) {
+        clearTimeout(timeout);
+        _parseESS = null;
+        setUploading(false);
+        showUploadError('与服务器的连接中断，请检查后端服务是否运行，然后重试');
+        resolve();
+      }
+      // readyState === CONNECTING：正在重连，等待即可，不报错
+    };
+  });
 }
 
 function renderTOC(data) {
-  $('docTitle').textContent = data.filename || data.title;   // 优先显示原始文件名
+  const displayName = S.docFilename || data.filename || data.title;
+  $('docTitle').textContent = displayName;
   $('sectionCount').textContent = `共识别 ${data.sections.length} 个章节`;
   const list = $('tocList');
   list.innerHTML = '';
+
+  const starCount = data.sections.filter(s => s.special_marks && s.special_marks.includes('★')).length;
+  const triCount  = data.sections.filter(s => s.special_marks && s.special_marks.includes('▲')).length;
+  // 标记统计提示
+  if (starCount || triCount) {
+    const badge = document.createElement('div');
+    badge.className = 'px-4 py-2 text-xs text-gray-400 flex gap-3 border-b border-gray-50';
+    if (starCount) badge.innerHTML += `<span class="mark-star">★</span> 否决条款 ${starCount} 项`;
+    if (triCount)  badge.innerHTML += `<span class="mark-tri">▲</span> 加分项 ${triCount} 项`;
+    list.appendChild(badge);
+  }
+
   data.sections.forEach(sec => {
     const indent = (sec.level - 1) * 14;
     const icon   = sec.level === 1 ? '📌' : sec.level === 2 ? '▸' : sec.level === 3 ? '◦' : '·';
+    const marks  = sec.special_marks || [];
+    const markHtml = marks.map(m =>
+      m === '★' ? '<span class="mark-star">★ 否决</span>' : '<span class="mark-tri">▲ 加分</span>'
+    ).join('');
+
     const div = document.createElement('div');
     div.className = 'py-2 flex items-start gap-2 text-sm text-gray-700 border-b border-gray-50 last:border-0';
     div.style.paddingLeft = indent + 'px';
     div.innerHTML = `
       <span class="shrink-0 text-gray-400 mt-0.5 select-none">${icon}</span>
-      <div class="min-w-0">
-        <span class="font-medium">${esc(sec.title)}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center flex-wrap gap-x-1">
+          <span class="${sec.level === 1 ? 'font-semibold' : 'font-medium'}">${esc(sec.title)}</span>
+          ${markHtml}
+        </div>
         ${sec.content_hint
           ? `<p class="text-gray-400 text-xs mt-0.5 truncate">${esc(sec.content_hint)}</p>`
           : ''}
@@ -640,7 +878,13 @@ async function startGenerate() {
         target_words: S.targetWords,
       }),
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '启动失败'); }
+    if (!res.ok) {
+      const e = await res.json();
+      const msg = typeof e.detail === 'string' ? e.detail
+        : Array.isArray(e.detail) ? e.detail.map(d => d.msg || JSON.stringify(d)).join('；')
+        : JSON.stringify(e.detail) || '启动失败';
+      throw new Error(msg);
+    }
     const data = await res.json();
     taskId = data.task_id;
     S.taskId = taskId;
@@ -726,6 +970,24 @@ function connectSSE(url) {
   const es = new EventSource(url);
   S.eventSource = es;
 
+  /* ── 文档摘要事件 ── */
+  es.addEventListener('doc_summary', e => {
+    const d = JSON.parse(e.data);
+    $('contentEmpty').classList.add('hidden');
+    $('contentScroll').classList.remove('hidden');
+    const card = document.createElement('div');
+    card.id = 'docSummaryCard';
+    card.className = 'mb-6 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4';
+    card.innerHTML = `
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-lg select-none">📋</span>
+        <h3 class="font-semibold text-blue-800 text-sm">项目概述</h3>
+        <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
+      </div>
+      <div class="md text-gray-700 text-sm leading-relaxed">${marked.parse(d.summary)}</div>`;
+    $('completedSections').prepend(card);
+  });
+
   es.addEventListener('section_start', e => {
     const d = JSON.parse(e.data);
     /* 显示内容区 */
@@ -760,7 +1022,7 @@ function connectSSE(url) {
 
     /* 更新总字数显示 */
     const twEl = $('totalWordsDisplay');
-    twEl.textContent = `累计 ${S.totalWords.toLocaleString()} 字`;
+    twEl.textContent = `累计 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
     twEl.classList.remove('hidden');
 
     /* 将章节移入"已完成"区 */
@@ -772,7 +1034,7 @@ function connectSSE(url) {
         <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700
                      px-2.5 py-0.5 rounded-full font-semibold">✓ 已完成</span>
         <h3 class="font-semibold text-gray-800 text-sm">${esc(secInfo?.title ?? d.section_id)}</h3>
-        <span class="ml-auto text-xs text-gray-400 shrink-0">${charCount.toLocaleString()} 字</span>
+        <span class="ml-auto text-xs text-gray-400 shrink-0">${charCount.toLocaleString()} 字 ${estPages(charCount)}</span>
       </div>
       <div class="md text-gray-700 leading-relaxed">${marked.parse(d.content)}</div>`;
     $('completedSections').appendChild(card);
@@ -803,6 +1065,7 @@ function connectSSE(url) {
           <p class="text-indigo-600 text-xs mt-0.5">
             共 <strong>${S.sections.length}</strong> 个章节 ·
             合计约 <strong>${S.totalWords.toLocaleString()}</strong> 字
+            · 预估 <strong>${estPages(S.totalWords)}</strong>
             （目标每章节 ${S.targetWords} 字）
           </p>
         </div>

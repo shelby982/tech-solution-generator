@@ -46,3 +46,49 @@ def sse_all_done(task_id: str) -> str:
 
 def sse_error(message: str) -> str:
     return format_sse_event("error", {"message": message})
+
+
+def sse_doc_summary(summary: str) -> str:
+    """文档摘要事件：生成开始前先推送整体项目摘要"""
+    return format_sse_event("doc_summary", {"summary": summary})
+
+
+# ── 文档解析进度事件 ──────────────────────────
+
+def sse_parse_start(filename: str) -> str:
+    """解析开始：告知前端文件已接收，开始处理"""
+    return format_sse_event("parse_start", {"filename": filename})
+
+
+def sse_parse_progress(stage: str, current: int, total: int) -> str:
+    """
+    解析进度更新。
+    stage:   当前阶段描述，如"扫描第 3/70 页"或章节标题
+    current: 当前进度值（-1 表示不定进度）
+    total:   总量（-1 表示不定进度）
+    """
+    return format_sse_event("parse_progress", {
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "percent": round(current / total * 100) if total > 0 else -1,
+    })
+
+
+def sse_parse_section(title: str, current: int, total: int) -> str:
+    """扫描到一个新章节标题"""
+    return format_sse_event("parse_section", {
+        "title": title,
+        "current": current,
+        "total": total,
+    })
+
+
+def sse_parse_done(doc_id: str, title: str, section_count: int, sections: list) -> str:
+    """解析全部完成，携带完整目录数据"""
+    return format_sse_event("parse_done", {
+        "doc_id": doc_id,
+        "title": title,
+        "section_count": section_count,
+        "sections": sections,
+    })

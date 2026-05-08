@@ -33,7 +33,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from services.config_store import config_store
-from services.llm import stream_generate
+from services.llm import stream_generate, generate_doc_summary
 from services.task_store import task_store, TaskStatus, GenerationTask
 from utils.sse import (
     sse_token,
@@ -41,6 +41,7 @@ from utils.sse import (
     sse_section_done,
     sse_all_done,
     sse_error,
+    sse_doc_summary,
     format_sse_event,
 )
 
@@ -55,7 +56,7 @@ router = APIRouter(tags=["generate"])
 class SectionInput(BaseModel):
     id: str = Field(..., min_length=1, description="章节 ID，如 s1")
     title: str = Field(..., min_length=1, max_length=200, description="章节标题")
-    content: str = Field(default="", max_length=10_000, description="章节原始内容（用于 LLM 上下文，可为空）")
+    content: str = Field(default="", description="章节原始内容（用于 LLM 上下文，可为空）")
     level: int = Field(default=1, ge=1, le=4, description="章节层级 1-4")
 
 
@@ -63,7 +64,7 @@ class GenerateStartRequest(BaseModel):
     sections: list[SectionInput] = Field(
         ...,
         min_length=1,
-        max_length=50,
+        max_length=1000,
         description="待生成章节列表（按顺序逐章节生成）",
     )
     target_words: int = Field(
@@ -111,6 +112,25 @@ async def _run_generation(task: GenerationTask) -> None:
         sections = task.sections
         total = len(sections)
 
+        # ── 第一步：生成文档摘要 ──────────────────
+        logger.info(f"[{task.task_id}] 开始生成文档摘要...")
+        try:
+            summary = await generate_doc_summary(config, sections)
+            task.doc_summary = summary
+            await task.queue.put(("doc_summary", {"summary": summary}))
+            logger.info(f"[{task.task_id}] 文档摘要生成完成（{len(summary)} 字符）")
+        except Exception as e:
+            logger.warning(f"[{task.task_id}] 文档摘要生成失败，继续生成章节：{e}")
+            task.doc_summary = ""
+
+        # ── 取消检查 ──────────────────────────────
+        if task.cancel_event.is_set():
+            task.status = TaskStatus.CANCELLED
+            await task.queue.put(("error", "生成已被用户取消"))
+            await task.queue.put((None, None))
+            return
+
+        # ── 第二步：逐章节生成 ────────────────────
         for idx, sec_input in enumerate(sections):
             sec_id    = sec_input["id"]
             sec_title = sec_input["title"]
@@ -135,7 +155,8 @@ async def _run_generation(task: GenerationTask) -> None:
             full_content_parts: list[str] = []
             try:
                 async for token_text in stream_generate(
-                    config, sec_title, sec_content, task.target_words
+                    config, sec_title, sec_content, task.target_words,
+                    doc_summary=task.doc_summary,
                 ):
                     # 每个 token 前都检查取消
                     if task.cancel_event.is_set():
@@ -214,11 +235,14 @@ async def _sse_event_generator(
     """
     # ── 晚连接：任务已结束 ──────────────────────
     if task.status == TaskStatus.COMPLETED:
+        if task.doc_summary:
+            yield sse_doc_summary(task.doc_summary)
+            await asyncio.sleep(0)
         for sec in task.sections:
             result = task.results.get(sec["id"])
             if result and result.done:
                 yield sse_section_done(result.section_id, result.content, 1.0)
-                await asyncio.sleep(0)  # 让出事件循环，避免阻塞
+                await asyncio.sleep(0)
         yield sse_all_done(task.task_id)
         return
 
@@ -251,7 +275,10 @@ async def _sse_event_generator(
             break
 
         # 根据事件类型格式化 SSE
-        if event_type == "token":
+        if event_type == "doc_summary":
+            yield sse_doc_summary(data["summary"])
+
+        elif event_type == "token":
             yield sse_token(data["text"])
 
         elif event_type == "section_start":

@@ -63,6 +63,7 @@ class GenerationTask:
     target_words: int = 500
     status: TaskStatus = TaskStatus.PENDING
     error_message: str = ""
+    doc_summary: str = ""
     results: Dict[str, SectionResult] = field(default_factory=dict)
 
     # 由路由层在 async 上下文注入，避免在模块导入时绑定到错误的事件循环
@@ -112,6 +113,8 @@ class GenerationTask:
     def get_all_content(self) -> str:
         """将所有已生成章节内容合并为 Markdown 字符串（按输入顺序）"""
         parts = []
+        if self.doc_summary:
+            parts.append(f"## 项目概述\n\n{self.doc_summary}")
         for sec in self.sections:
             result = self.results.get(sec["id"])
             if result and result.done and result.content:

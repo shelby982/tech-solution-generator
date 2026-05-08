@@ -49,7 +49,18 @@ if lsof -iTCP:$PORT -sTCP:LISTEN -t &>/dev/null 2>&1; then
 fi
 
 # ── 3. 创建 / 激活虚拟环境 ───────────────────────
-if [ ! -d "$VENV_DIR" ]; then
+# 检测 venv 是否有效（解释器路径可能因项目移动而失效）
+VENV_VALID=false
+if [ -d "$VENV_DIR" ]; then
+    if "$VENV_DIR/bin/python" --version &>/dev/null 2>&1; then
+        VENV_VALID=true
+    else
+        warn "检测到虚拟环境已损坏（解释器路径失效），正在重建..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
+
+if [ "$VENV_VALID" = false ]; then
     info "创建虚拟环境..."
     "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
