@@ -256,12 +256,7 @@
                  px-4 py-1.5 rounded-lg text-sm font-semibold transition">
           ↓ 下载 Word
         </button>
-        <button id="downloadMdBtn"
-          class="hidden items-center gap-1.5 border border-green-500 text-green-700
-                 hover:bg-green-50 px-4 py-1.5 rounded-lg text-sm font-medium transition">
-          ↓ 下载 MD
-        </button>
-        <button id="backBtn"
+<button id="backBtn"
           class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
                  px-3 py-1.5 rounded-lg text-sm transition">
           ← 返回
@@ -359,6 +354,14 @@
             class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
             🌙 Kimi（月之暗面）
           </button>
+          <button data-provider="minimax"
+            class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            MiniMax
+          </button>
+          <button data-provider="deepseek"
+            class="provider-btn py-2 px-3 rounded-lg border-2 text-sm font-medium transition">
+            🐋 DeepSeek
+          </button>
         </div>
       </div>
 
@@ -450,10 +453,12 @@ const S = {
 };
 
 const DEFAULTS = {
-  openai:  { base_url: 'https://api.openai.com/v1',                     model: 'gpt-4o' },
-  claude:  { base_url: 'https://api.anthropic.com',                     model: 'claude-3-5-sonnet-20241022' },
-  doubao:  { base_url: 'https://ark.cn-beijing.volces.com/api/v3',      model: 'doubao-pro-32k' },
-  kimi:    { base_url: 'https://api.moonshot.cn/v1',                    model: 'moonshot-v1-32k' },
+  openai:   { base_url: 'https://api.openai.com/v1',                     model: 'gpt-4o' },
+  claude:   { base_url: 'https://api.anthropic.com',                     model: 'claude-3-5-sonnet-20241022' },
+  doubao:   { base_url: 'https://ark.cn-beijing.volces.com/api/v3',      model: 'doubao-pro-32k' },
+  kimi:     { base_url: 'https://api.moonshot.cn/v1',                    model: 'moonshot-v1-32k' },
+  minimax:  { base_url: 'https://api.minimax.chat/v1',                   model: 'MiniMax-Text-01' },
+  deepseek: { base_url: 'https://api.deepseek.com/v1',                   model: 'deepseek-chat' },
 };
 
 /* ══════════════════════════════════════════
@@ -856,7 +861,7 @@ async function startGenerate() {
   S.totalSections  = S.sections.length;
   S.completedCount = 0;
   S.normalClose    = false;
-  ['downloadDocxBtn', 'downloadMdBtn'].forEach(id => $(id).classList.add('hidden'));
+  $('downloadDocxBtn').classList.add('hidden');
   $('cancelBtn').classList.remove('hidden');
   $('contentEmpty').classList.remove('hidden');
   $('contentScroll').classList.add('hidden');
@@ -1074,7 +1079,7 @@ function connectSSE(url) {
 
     /* 更新进度条总字数为完成状态 */
     const twEl = $('totalWordsDisplay');
-    twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字`;
+    twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
     twEl.classList.remove('hidden');
 
     _showDownloadBtns();
@@ -1139,15 +1144,10 @@ $('cancelBtn').addEventListener('click', async () => {
 
 /* ── 显示下载按钮 ── */
 function _showDownloadBtns() {
-  ['downloadDocxBtn', 'downloadMdBtn'].forEach(id => {
-    const b = $(id); b.classList.remove('hidden'); b.classList.add('flex');
-  });
+  const b = $('downloadDocxBtn'); b.classList.remove('hidden'); b.classList.add('flex');
 }
 $('downloadDocxBtn').addEventListener('click', () => {
   if (S.taskId) window.location.href = `/api/download/${S.taskId}/docx`;
-});
-$('downloadMdBtn').addEventListener('click', () => {
-  if (S.downloadUrl) window.location.href = S.downloadUrl;
 });
 
 /* ── 返回上传页 ── */

@@ -47,7 +47,7 @@ class ConfigRequest(BaseModel):
     @field_validator("provider")
     @classmethod
     def validate_provider(cls, v: str) -> str:
-        allowed = {"openai", "claude", "doubao", "kimi"}
+        allowed = {"openai", "claude", "doubao", "kimi", "minimax", "deepseek"}
         v = v.lower().strip()
         if v not in allowed:
             raise ValueError(f"provider 必须是 {allowed} 之一，收到：{v!r}")
@@ -221,6 +221,27 @@ async def list_providers():
                     "moonshot-v1-8k",
                     "moonshot-v1-32k",
                     "moonshot-v1-128k",
+                ],
+            },
+            {
+                "id": "minimax",
+                "name": "MiniMax",
+                "default_base_url": DEFAULT_BASE_URLS["minimax"],
+                "default_model": DEFAULT_MODELS["minimax"],
+                "model_examples": [
+                    "MiniMax-Text-01",
+                    "abab6.5s-chat",
+                    "abab6.5g-chat",
+                ],
+            },
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "default_base_url": DEFAULT_BASE_URLS["deepseek"],
+                "default_model": DEFAULT_MODELS["deepseek"],
+                "model_examples": [
+                    "deepseek-chat",
+                    "deepseek-reasoner",
                 ],
             },
         ]

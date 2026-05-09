@@ -49,22 +49,26 @@ class LLMConfig:
 
 # 默认 Base URL 映射
 DEFAULT_BASE_URLS = {
-    "openai":  "https://api.openai.com/v1",
-    "claude":  "https://api.anthropic.com",
-    "doubao":  "https://ark.cn-beijing.volces.com/api/v3",
-    "kimi":    "https://api.moonshot.cn/v1",
+    "openai":    "https://api.openai.com/v1",
+    "claude":    "https://api.anthropic.com",
+    "doubao":    "https://ark.cn-beijing.volces.com/api/v3",
+    "kimi":      "https://api.moonshot.cn/v1",
+    "minimax":   "https://api.minimax.chat/v1",
+    "deepseek":  "https://api.deepseek.com/v1",
 }
 
 # 默认模型映射
 DEFAULT_MODELS = {
-    "openai":  "gpt-4o",
-    "claude":  "claude-3-5-sonnet-20241022",
-    "doubao":  "doubao-pro-32k",
-    "kimi":    "moonshot-v1-32k",
+    "openai":    "gpt-4o",
+    "claude":    "claude-3-5-sonnet-20241022",
+    "doubao":    "doubao-pro-32k",
+    "kimi":      "moonshot-v1-32k",
+    "minimax":   "MiniMax-Text-01",
+    "deepseek":  "deepseek-chat",
 }
 
 # OpenAI 兼容的 provider 集合（共用 openai SDK 路径）
-OPENAI_COMPATIBLE_PROVIDERS = {"openai", "doubao", "kimi"}
+OPENAI_COMPATIBLE_PROVIDERS = {"openai", "doubao", "kimi", "minimax", "deepseek"}
 
 
 class ConfigStore:
