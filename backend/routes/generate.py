@@ -39,6 +39,7 @@ from utils.sse import (
     sse_token,
     sse_section_start,
     sse_section_done,
+    sse_section_skip,
     sse_all_done,
     sse_error,
     sse_doc_summary,
@@ -141,6 +142,20 @@ async def _run_generation(task: GenerationTask) -> None:
                 task.status = TaskStatus.CANCELLED
                 await task.queue.put(("error", "生成已被用户取消"))
                 break
+
+            # ── 原文为空则跳过，不调用 LLM ────────
+            if not sec_content.strip():
+                logger.info(f"[{task.task_id}] 章节「{sec_title}」原文为空，跳过生成 ({idx+1}/{total})")
+                task.results[sec_id].done = True
+                progress = (idx + 1) / total
+                await task.queue.put(("section_skip", {
+                    "section_id": sec_id,
+                    "title": sec_title,
+                    "index": idx,
+                    "total": total,
+                    "progress": round(progress, 2),
+                }))
+                continue
 
             # ── 通知章节开始 ──────────────────────
             logger.info(f"[{task.task_id}] 开始生成章节 ({idx+1}/{total})：{sec_title}")
@@ -294,6 +309,13 @@ async def _sse_event_generator(
             yield sse_section_done(
                 data["section_id"],
                 data["content"],
+                data["progress"],
+            )
+
+        elif event_type == "section_skip":
+            yield sse_section_skip(
+                data["section_id"],
+                data["title"],
                 data["progress"],
             )
 

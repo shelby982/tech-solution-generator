@@ -53,6 +53,15 @@ def sse_doc_summary(summary: str) -> str:
     return format_sse_event("doc_summary", {"summary": summary})
 
 
+def sse_section_skip(section_id: str, title: str, progress: float) -> str:
+    """章节跳过事件：原文为空，不调用 LLM，直接跳过"""
+    return format_sse_event("section_skip", {
+        "section_id": section_id,
+        "title": title,
+        "progress": round(progress, 2),
+    })
+
+
 # ── 文档解析进度事件 ──────────────────────────
 
 def sse_parse_start(filename: str) -> str:

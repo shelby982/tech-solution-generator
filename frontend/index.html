@@ -934,6 +934,9 @@ function setTocStatus(secId, status) {
     done:   { bc: 'border-green-400',  bg: 'bg-green-50/60',
               ic: '✓', iconCls: 'shrink-0 mt-0.5 text-green-500 text-xs select-none',
               lc: 'text-gray-600 leading-snug line-clamp-2' },
+    skip:   { bc: 'border-gray-200',   bg: '',
+              ic: '—', iconCls: 'shrink-0 mt-0.5 text-gray-300 text-xs select-none',
+              lc: 'text-gray-400 leading-snug line-clamp-2 line-through' },
     error:  { bc: 'border-red-300',    bg: 'bg-red-50/60',
               ic: '✗', iconCls: 'shrink-0 mt-0.5 text-red-400 text-xs select-none',
               lc: 'text-red-600 leading-snug line-clamp-2' },
@@ -1052,6 +1055,13 @@ function connectSSE(url) {
     updateProgress(S.completedCount, S.totalSections);
     const cs = $('contentScroll');
     cs.scrollTop = cs.scrollHeight;
+  });
+
+  es.addEventListener('section_skip', e => {
+    const d = JSON.parse(e.data);
+    S.completedCount++;
+    setTocStatus(d.section_id, 'skip');
+    updateProgress(S.completedCount, S.totalSections);
   });
 
   es.addEventListener('all_done', e => {

@@ -191,6 +191,20 @@ def _extract_toc_from_sdt(document) -> list[TocEntry]:
     return entries
 
 
+def _find_sdt_toc_end(paragraphs) -> int:
+    """
+    扫描 paragraphs，找到最后一个 TOC 样式段落的索引+1。
+    用于 SDT 目录路径的 body_start，确保正文匹配从目录区之后开始。
+    """
+    last_toc_idx = -1
+    scan_limit = min(len(paragraphs), 300)
+    for i in range(scan_limit):
+        style_name = (paragraphs[i].style.name or "").lower().strip() if paragraphs[i].style else ""
+        if style_name in _TOC_STYLES:
+            last_toc_idx = i
+    return last_toc_idx + 1 if last_toc_idx >= 0 else 0
+
+
 def _parse_toc_paragraphs_from_xml(sdt_content, document) -> list[TocEntry]:
     """从 SDT Content 的 XML 中解析 TOC 段落"""
     from docx.oxml.ns import qn
@@ -225,8 +239,11 @@ def _toc_style_to_level(style_name: str) -> int:
 # TOC 提取：手动编写的目录
 # ─────────────────────────────────────────────
 
-def _extract_toc_manual(paragraphs) -> list[TocEntry]:
-    """扫描文档前部，查找手动编写的目录区域并提取条目"""
+def _extract_toc_manual(paragraphs) -> tuple[list[TocEntry], int]:
+    """扫描文档前部，查找手动编写的目录区域并提取条目。
+    返回 (entries, toc_end_idx)，toc_end_idx 为目录区最后一段的索引+1，
+    供调用方跳过目录区直接在正文中匹配标题。
+    """
     toc_start_idx = -1
     scan_limit = min(len(paragraphs), 80)
 
@@ -237,10 +254,11 @@ def _extract_toc_manual(paragraphs) -> list[TocEntry]:
             break
 
     if toc_start_idx < 0:
-        return []
+        return [], 0
 
     entries: list[TocEntry] = []
     blank_count = 0
+    toc_end_idx = toc_start_idx
 
     for i in range(toc_start_idx, min(len(paragraphs), toc_start_idx + 200)):
         raw_text = paragraphs[i].text.strip()
@@ -265,13 +283,15 @@ def _extract_toc_manual(paragraphs) -> list[TocEntry]:
 
         if level is not None and len(title) < 100:
             entries.append(TocEntry(level=level, title=title, raw_title=raw_text, special_marks=marks))
+            toc_end_idx = i + 1
         elif entries and len(title) < 80:
             # 可能是无编号的顶级标题（如 "技术方案概述"）
             style_name = (paragraphs[i].style.name or "").lower() if paragraphs[i].style else ""
             if "heading" in style_name or "标题" in style_name:
                 entries.append(TocEntry(level=1, title=title, raw_title=raw_text, special_marks=marks))
+                toc_end_idx = i + 1
 
-    return entries
+    return entries, toc_end_idx
 
 
 def _clean_toc_line(text: str) -> str:
@@ -290,9 +310,11 @@ def _map_toc_to_body(
     toc_entries: list[TocEntry],
     paragraphs,
     progress_callback: Optional[Callable] = None,
+    body_start: int = 0,
 ) -> list[tuple[TocEntry, str]]:
     """
     将目录条目映射到正文中对应的标题位置，提取该标题到下一个标题之间的内容。
+    body_start: 从此段落索引开始搜索正文标题，用于跳过文档前部的目录区域。
     """
     if progress_callback:
         progress_callback("映射目录到正文...", 0, len(toc_entries))
@@ -302,13 +324,20 @@ def _map_toc_to_body(
 
     # 为每个 TOC 条目找到正文中对应的段落位置
     matched_positions: list[int] = []
-    last_pos = 0
+    last_pos = body_start
 
     for entry in toc_entries:
         pos = _find_heading_in_body(entry, para_texts, last_pos)
         matched_positions.append(pos)
         if pos >= 0:
             last_pos = pos + 1
+
+    matched_count = sum(1 for p in matched_positions if p >= 0)
+    logger.info(
+        f"TOC正文匹配结果：{matched_count}/{len(toc_entries)} 条命中，"
+        f"body_start={body_start}，"
+        f"命中位置范围：{[p for p in matched_positions if p >= 0][:5]}..."
+    )
 
     # 提取每个条目对应区间的正文
     results: list[tuple[TocEntry, str]] = []
@@ -519,10 +548,18 @@ def parse_docx(
 
     toc_entries = _extract_toc_from_sdt(document)
     toc_source = "Word内置目录"
+    body_start = 0
+
+    if toc_entries:
+        # SDT TOC 的条目段落被展开到 paragraphs 中，需找到 TOC 样式段落的结束位置
+        # 以此作为 body_start，避免 _map_toc_to_body 命中 TOC 区块本身
+        body_start = _find_sdt_toc_end(paragraphs)
 
     if not toc_entries:
-        toc_entries = _extract_toc_manual(paragraphs)
+        toc_entries, body_start = _extract_toc_manual(paragraphs)
         toc_source = "手动目录"
+
+    logger.info(f"TOC提取路径：{toc_source}，条目数：{len(toc_entries)}，body_start：{body_start}")
 
     if not toc_entries:
         if progress_callback:
@@ -533,8 +570,8 @@ def parse_docx(
     if progress_callback:
         progress_callback(f"从{toc_source}提取到 {len(toc_entries)} 个章节", 0, len(toc_entries))
 
-    # Phase 2: 映射到正文
-    mapped = _map_toc_to_body(toc_entries, paragraphs, progress_callback)
+    # Phase 2: 映射到正文（body_start 跳过目录区，避免命中目录页本身）
+    mapped = _map_toc_to_body(toc_entries, paragraphs, progress_callback, body_start=body_start)
 
     # Phase 3: 构建 Section 列表（含内容提炼）
     if progress_callback:
