@@ -111,14 +111,19 @@ class GenerationTask:
         }
 
     def get_all_content(self) -> str:
-        """将所有已生成章节内容合并为 Markdown 字符串（按输入顺序）"""
+        """将所有已生成章节内容合并为 Markdown 字符串（按输入顺序，保留层级）"""
         parts = []
         if self.doc_summary:
             parts.append(f"## 项目概述\n\n{self.doc_summary}")
         for sec in self.sections:
             result = self.results.get(sec["id"])
-            if result and result.done and result.content:
-                parts.append(f"## {result.title}\n\n{result.content}")
+            if result and result.done:
+                level = sec.get("level", 1)
+                heading = "#" * min(level + 1, 6)  # level 1 → ##，level 4 → #####
+                if result.content:
+                    parts.append(f"{heading} {result.title}\n\n{result.content}")
+                else:
+                    parts.append(f"{heading} {result.title}")
         return "\n\n---\n\n".join(parts)
 
 

@@ -31,7 +31,6 @@ def sections_to_docx(
     """
     from docx import Document
     from docx.shared import Pt, Cm, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
 
@@ -49,13 +48,9 @@ def sections_to_docx(
 
     _apply_heading_styles(doc)
 
-    # ── 文档标题 ──────────────────────────────
-    title_para = doc.add_heading(doc_title, level=0)
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     # ── 各章节 ────────────────────────────────
     for sec_data in sections:
-        if not sec_data.get("done") or not (sec_data.get("content") or "").strip():
+        if not sec_data.get("done"):
             continue
 
         sec_level = min(int(sec_data.get("level", 1)), 4)
@@ -63,13 +58,31 @@ def sections_to_docx(
         sec_content = sec_data.get("content", "")
 
         doc.add_heading(sec_title, level=sec_level)
-        _parse_markdown(doc, sec_content)
+        if sec_content.strip():
+            _parse_markdown(doc, _strip_leading_headings(sec_content))
 
     # ── 序列化 ────────────────────────────────
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+# ─────────────────────────────────────────────
+# 辅助：剥离内容首部重复标题行
+# ─────────────────────────────────────────────
+
+def _strip_leading_headings(content: str) -> str:
+    """去除 LLM 输出内容开头的 # 标题行，避免与 doc.add_heading 产生重复标题"""
+    lines = content.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if re.match(r'^#{1,6}\s+', stripped) or stripped == "":
+            i += 1
+        else:
+            break
+    return "\n".join(lines[i:])
 
 
 # ─────────────────────────────────────────────

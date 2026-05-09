@@ -166,27 +166,50 @@ async def _run_generation(task: GenerationTask) -> None:
                 "total": total,
             }))
 
-            # ── 流式生成 ──────────────────────────
+            # ── 流式生成（含重试）─────────────────
             full_content_parts: list[str] = []
-            try:
-                async for token_text in stream_generate(
-                    config, sec_title, sec_content, task.target_words,
-                    doc_summary=task.doc_summary,
-                ):
-                    # 每个 token 前都检查取消
-                    if task.cancel_event.is_set():
-                        break
-                    full_content_parts.append(token_text)
-                    await task.queue.put(("token", {"text": token_text}))
+            MAX_RETRIES = 2
+            RETRY_DELAY = 3.0
+            section_failed = False
 
-            except Exception as llm_err:
-                err_msg = f"章节「{sec_title}」生成失败：{llm_err}"
-                logger.exception(f"[{task.task_id}] {err_msg}")
-                task.status = TaskStatus.ERROR
-                task.error_message = err_msg
-                await task.queue.put(("error", err_msg))
-                await task.queue.put((None, None))
-                return
+            for attempt in range(MAX_RETRIES + 1):
+                full_content_parts = []
+                try:
+                    async for token_text in stream_generate(
+                        config, sec_title, sec_content, task.target_words,
+                        doc_summary=task.doc_summary,
+                    ):
+                        if task.cancel_event.is_set():
+                            break
+                        full_content_parts.append(token_text)
+                        await task.queue.put(("token", {"text": token_text}))
+                    break  # 成功，退出重试循环
+
+                except Exception as llm_err:
+                    if attempt < MAX_RETRIES and not task.cancel_event.is_set():
+                        logger.warning(
+                            f"[{task.task_id}] 章节「{sec_title}」第 {attempt+1} 次失败，"
+                            f"{RETRY_DELAY}s 后重试：{llm_err}"
+                        )
+                        await asyncio.sleep(RETRY_DELAY)
+                        continue
+                    # 重试耗尽，跳过本章节继续后续
+                    logger.exception(
+                        f"[{task.task_id}] 章节「{sec_title}」重试 {MAX_RETRIES} 次后仍失败，跳过：{llm_err}"
+                    )
+                    await task.queue.put(("section_skip", {
+                        "section_id": sec_id,
+                        "title": sec_title,
+                        "index": idx,
+                        "total": total,
+                        "progress": round((idx + 1) / total, 2),
+                    }))
+                    task.results[sec_id].done = True
+                    section_failed = True
+                    break
+
+            if section_failed:
+                continue
 
             # 再次检查取消（生成中途被取消）
             if task.cancel_event.is_set():
@@ -256,7 +279,10 @@ async def _sse_event_generator(
         for sec in task.sections:
             result = task.results.get(sec["id"])
             if result and result.done:
-                yield sse_section_done(result.section_id, result.content, 1.0)
+                if result.content:
+                    yield sse_section_done(result.section_id, result.content, 1.0)
+                else:
+                    yield sse_section_skip(result.section_id, result.title, 1.0)
                 await asyncio.sleep(0)
         yield sse_all_done(task.task_id)
         return

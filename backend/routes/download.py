@@ -73,10 +73,11 @@ async def download_docx(task_id: str):
     task = _get_ready_task(task_id)
 
     # 收集已完成章节数据（含 level / title / content）
+    # done=True 且 content 为空的章节（被跳过）仍保留标题，确保目录结构完整
     sections_data = []
     for sec in task.sections:
         result = task.results.get(sec["id"])
-        if result and result.done and result.content:
+        if result and result.done:
             sections_data.append({
                 "id":      sec["id"],
                 "title":   sec["title"],
