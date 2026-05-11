@@ -1559,11 +1559,12 @@ function renderGenTOC() {
   S.sections.forEach(sec => {
     const div = document.createElement('div');
     div.id        = 'gtoc-' + sec.id;
-    div.className = 'flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 border-transparent';
+    div.className = 'flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 border-transparent cursor-pointer';
     div.style.paddingLeft = (14 + (sec.level - 1) * 10) + 'px';
     div.innerHTML = `
       <span id="gicon-${sec.id}" class="shrink-0 mt-0.5 text-gray-300 text-xs select-none">○</span>
       <span id="glabel-${sec.id}" class="text-gray-500 leading-snug line-clamp-2">${esc(sec.title)}</span>`;
+    div.addEventListener('click', () => scrollToSection(sec.id));
     list.appendChild(div);
   });
 }
@@ -1593,11 +1594,34 @@ function setTocStatus(secId, status) {
                   ic: '○', iconCls: 'shrink-0 mt-0.5 text-gray-300 text-xs select-none',
                   lc: 'text-gray-500 leading-snug line-clamp-2' };
 
-  item.className = `flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 ${cfg.bc} ${cfg.bg}`;
+  item.className = `flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 cursor-pointer ${cfg.bc} ${cfg.bg}`;
   item.style.paddingLeft = pl;
   icon.className  = cfg.iconCls;
   icon.textContent = cfg.ic;
   if (label) label.className = cfg.lc;
+}
+
+/* ── 点击 TOC 跳转到对应章节 ── */
+function scrollToSection(secId) {
+  const cs = $('contentScroll');
+  if (!cs) return;
+
+  // 优先找已完成的卡片
+  const card = $('sec-card-' + secId);
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+
+  // 该章节正在流式生成
+  const tocItem = $('gtoc-' + secId);
+  const isActive = tocItem && tocItem.className.includes('border-indigo-400');
+  if (isActive) {
+    const cur = $('currentSection');
+    if (cur && !cur.classList.contains('hidden')) {
+      cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
 }
 
 /* ── 进度 ── */
