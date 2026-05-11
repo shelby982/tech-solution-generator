@@ -26,7 +26,8 @@ SSE 事件类型：
 
 import asyncio
 import logging
-from typing import AsyncIterator
+import uuid
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -192,7 +193,14 @@ async def _run_generation(task: GenerationTask) -> None:
                             f"[{task.task_id}] 章节「{sec_title}」第 {attempt+1} 次失败，"
                             f"{RETRY_DELAY}s 后重试：{llm_err}"
                         )
-                        await asyncio.sleep(RETRY_DELAY)
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(task.cancel_event.wait()),
+                                timeout=RETRY_DELAY,
+                            )
+                            break  # cancel_event 触发，提前退出重试
+                        except asyncio.TimeoutError:
+                            pass   # 正常超时，继续重试
                         continue
                     # 重试耗尽，跳过本章节继续后续
                     logger.exception(
@@ -210,10 +218,6 @@ async def _run_generation(task: GenerationTask) -> None:
                     break
 
             if section_failed:
-                if task.cancel_event.is_set():
-                    task.status = TaskStatus.CANCELLED
-                    await task.queue.put(("error", "生成已被用户取消"))
-                    break
                 continue
 
             # 再次检查取消（生成中途被取消）
@@ -489,3 +493,138 @@ async def cancel_task(task_id: str):
         return {"message": "已发送取消信号，生成将在当前 token 完成后停止", "task_id": task_id}
     else:
         return {"message": "取消信号发送失败（任务可能刚刚结束）", "task_id": task_id, "status": task.status}
+
+
+# ─────────────────────────────────────────────
+# 单章节重新生成
+# ─────────────────────────────────────────────
+
+class RegenStartRequest(BaseModel):
+    section_title: str = Field(..., min_length=1, max_length=200)
+    section_content: str = Field(default="", description="章节原文（给 LLM 参考）")
+    target_words: int = Field(default=500, ge=100, le=10000)
+    extra_prompt: str = Field(default="", max_length=1000, description="追加给 LLM 的优化说明")
+    config_id: Optional[str] = Field(default=None, description="指定 API 配置 id；None 表示按优先级轮询")
+
+
+class PatchSectionRequest(BaseModel):
+    content: str
+
+
+async def _run_regen(task: GenerationTask, body: RegenStartRequest, config_id: Optional[str]) -> None:
+    """单章节重新生成后台协程（轻量版，无文档摘要步骤）"""
+    task.status = TaskStatus.RUNNING
+    sec_id = task.sections[0]["id"]
+    sec_title = body.section_title
+
+    try:
+        if config_id:
+            cfg = config_store.get_by_id(config_id)
+            if cfg is None:
+                raise ValueError(f"指定的 API 配置不存在：{config_id}")
+            configs, rr_index = [cfg], 0
+        else:
+            configs, rr_index = config_store.get_configs_and_next_index()
+
+        await task.queue.put(("section_start", {
+            "section_id": sec_id,
+            "title": sec_title,
+            "index": 0,
+            "total": 1,
+        }))
+
+        full_parts: list[str] = []
+        MAX_RETRIES = 2
+        RETRY_DELAY = 3.0
+
+        for attempt in range(MAX_RETRIES + 1):
+            full_parts = []
+            try:
+                async for token_text in dispatch_stream_generate(
+                    configs, rr_index, sec_title, body.section_content,
+                    body.target_words, doc_summary="", extra_prompt=body.extra_prompt,
+                ):
+                    if task.cancel_event.is_set():
+                        break
+                    full_parts.append(token_text)
+                    await task.queue.put(("token", {"text": token_text}))
+                break
+            except Exception as e:
+                if attempt < MAX_RETRIES and not task.cancel_event.is_set():
+                    logger.warning(f"[regen/{task.task_id}] 第 {attempt+1} 次失败，{RETRY_DELAY}s 后重试：{e}")
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(task.cancel_event.wait()),
+                            timeout=RETRY_DELAY,
+                        )
+                        break  # cancel_event 触发，提前退出重试
+                    except asyncio.TimeoutError:
+                        pass   # 正常超时，继续重试
+                    continue
+                raise
+
+        if task.cancel_event.is_set():
+            task.status = TaskStatus.CANCELLED
+            await task.queue.put(("error", "重新生成已被用户取消"))
+        else:
+            full_content = "".join(full_parts)
+            task.results[sec_id].content = full_content
+            task.results[sec_id].done = True
+            task.status = TaskStatus.COMPLETED
+            logger.info(f"[regen/{task.task_id}] 章节「{sec_title}」重新生成完成（{len(full_content)} 字符）")
+            await task.queue.put(("section_done", {
+                "section_id": sec_id,
+                "content": full_content,
+                "progress": 1.0,
+            }))
+            await task.queue.put(("all_done", {"task_id": task.task_id}))
+
+    except Exception as err:
+        err_msg = f"重新生成失败：{err}"
+        logger.exception(f"[regen/{task.task_id}] {err_msg}")
+        task.status = TaskStatus.ERROR
+        task.error_message = err_msg
+        await task.queue.put(("error", err_msg))
+    finally:
+        await task.queue.put((None, None))
+
+
+@router.post("/generate/regen/start")
+async def start_regen(body: RegenStartRequest):
+    """启动单章节重新生成任务，返回 task_id 和 SSE 流 URL"""
+    if not config_store.is_configured():
+        raise HTTPException(status_code=400, detail="未配置 API Key，请先在「设置」页面完成配置")
+
+    if body.config_id and config_store.get_by_id(body.config_id) is None:
+        raise HTTPException(status_code=400, detail=f"指定的 API 配置不存在：{body.config_id}")
+
+    sec_id = str(uuid.uuid4())
+    task = task_store.create(
+        [{"id": sec_id, "title": body.section_title, "content": body.section_content, "level": 1}],
+        target_words=body.target_words,
+    )
+    task.queue = asyncio.Queue()
+    task.cancel_event = asyncio.Event()
+
+    asyncio.create_task(
+        _run_regen(task, body, body.config_id),
+        name=f"regen-{task.task_id[:8]}",
+    )
+
+    logger.info(f"创建重新生成任务：task_id={task.task_id}，章节=「{body.section_title}」")
+    return {
+        "task_id": task.task_id,
+        "section_id": sec_id,
+        "stream_url": f"/api/generate/stream/{task.task_id}",
+    }
+
+
+@router.patch("/generate/{task_id}/section/{section_id}")
+async def patch_section_content(task_id: str, section_id: str, body: PatchSectionRequest):
+    """手动编辑后同步更新主任务的章节内容（供下载时使用）"""
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
+    if section_id in task.results:
+        task.results[section_id].content = body.content
+    return {"ok": True}

@@ -102,6 +102,17 @@ async def serve_frontend():
     })
 
 
+@app.get("/api/readme", include_in_schema=False)
+async def get_readme():
+    """返回项目 README.md 的文本内容"""
+    readme_path = os.path.normpath(os.path.join(_this_dir, "..", "README.md"))
+    if not os.path.isfile(readme_path):
+        return JSONResponse(status_code=404, content={"detail": "README.md 不存在"})
+    with open(readme_path, encoding="utf-8") as f:
+        content = f.read()
+    return JSONResponse(content={"content": content})
+
+
 @app.get("/health", tags=["system"])
 async def health_check():
     """健康检查"""

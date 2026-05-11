@@ -198,6 +198,7 @@ async def stream_generate(
     original_content: str,
     target_words: int = 500,
     doc_summary: str = "",
+    extra_prompt: str = "",
 ) -> AsyncIterator[str]:
     """
     流式生成单个章节的技术方案内容。
@@ -240,6 +241,9 @@ async def stream_generate(
     )
     user_prompt = "".join(parts)
 
+    if extra_prompt:
+        user_prompt += f"\n\n额外优化要求：{extra_prompt}"
+
     if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
         async for token in _stream_openai(config, system_prompt, user_prompt):
             yield token
@@ -274,7 +278,7 @@ async def _stream_openai(
     )
     async for chunk in stream:
         delta = chunk.choices[0].delta.content if chunk.choices else None
-        if delta:
+        if delta is not None:
             yield delta
 
 
@@ -311,6 +315,7 @@ async def dispatch_stream_generate(
     original_content: str,
     target_words: int = 500,
     doc_summary: str = "",
+    extra_prompt: str = "",
 ) -> AsyncGenerator[str, None]:
     """
     从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
@@ -331,7 +336,7 @@ async def dispatch_stream_generate(
         started = False  # 是否已开始 yield token
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
-            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary):
+            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary, extra_prompt):
                 started = True
                 yield token
             return  # 成功，退出

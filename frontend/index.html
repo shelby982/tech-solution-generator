@@ -91,6 +91,11 @@
                text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
         ⚙️ 配置 API
       </button>
+      <button id="readmeBtn"
+        class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20
+               text-white/80 hover:text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+        📖 使用说明
+      </button>
     </div>
   </div>
 </header>
@@ -313,6 +318,226 @@
 </main>
 
 <!-- ════════════════════════════════════════════════
+     README MODAL
+════════════════════════════════════════════════ -->
+<div id="readmeModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:780px;max-height:90vh">
+
+    <!-- Header -->
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-bold text-gray-800 text-lg">📖 使用说明</h2>
+        <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 快速上手指南</p>
+      </div>
+      <button id="closeReadmeBtn"
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none transition w-7 h-7
+               flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+      <!-- 工作流程 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">1</span>
+          整体工作流程
+        </h3>
+        <div class="flex items-stretch gap-1.5 flex-wrap">
+          <div class="flex-1 min-w-[120px] bg-indigo-50 rounded-xl px-4 py-3 text-center">
+            <div class="text-xl mb-1">📄</div>
+            <div class="text-xs font-semibold text-indigo-700">上传规范书</div>
+            <div class="text-xs text-indigo-400 mt-0.5">docx / pdf / doc</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[120px] bg-violet-50 rounded-xl px-4 py-3 text-center">
+            <div class="text-xl mb-1">🔍</div>
+            <div class="text-xs font-semibold text-violet-700">自动解析目录</div>
+            <div class="text-xs text-violet-400 mt-0.5">章节结构 + 原文</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[120px] bg-blue-50 rounded-xl px-4 py-3 text-center">
+            <div class="text-xl mb-1">⚙️</div>
+            <div class="text-xs font-semibold text-blue-700">配置 API</div>
+            <div class="text-xs text-blue-400 mt-0.5">首次使用配置</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[120px] bg-emerald-50 rounded-xl px-4 py-3 text-center">
+            <div class="text-xl mb-1">✨</div>
+            <div class="text-xs font-semibold text-emerald-700">AI 逐章扩写</div>
+            <div class="text-xs text-emerald-400 mt-0.5">实时流式生成</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[120px] bg-amber-50 rounded-xl px-4 py-3 text-center">
+            <div class="text-xl mb-1">📥</div>
+            <div class="text-xs font-semibold text-amber-700">下载 Word</div>
+            <div class="text-xs text-amber-400 mt-0.5">格式规范文档</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 上传文件要求 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">2</span>
+          上传文件要求
+        </h3>
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div class="border border-emerald-200 bg-emerald-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-emerald-600 font-bold text-xs bg-emerald-100 px-1.5 py-0.5 rounded">.docx</span>
+              <span class="text-xs text-emerald-600 font-semibold">首选</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">包含 Word 内置目录，章节层级识别最准确。标题使用「标题 1/2/3/4」样式或标准编号前缀（一、1. (1) ①）效果最佳。</p>
+          </div>
+          <div class="border border-blue-200 bg-blue-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-blue-600 font-bold text-xs bg-blue-100 px-1.5 py-0.5 rounded">.pdf</span>
+              <span class="text-xs text-blue-500 font-semibold">可检索 PDF</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">需可用鼠标选中文字（非扫描件）。标题字号需明显大于正文，或带标准数字编号前缀。</p>
+          </div>
+          <div class="border border-gray-200 bg-gray-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-gray-500 font-bold text-xs bg-gray-200 px-1.5 py-0.5 rounded">.doc</span>
+              <span class="text-xs text-gray-400 font-semibold">旧格式</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">需服务器安装 LibreOffice 自动转换，建议提前另存为 .docx 格式后上传。</p>
+          </div>
+        </div>
+        <div class="mt-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex gap-2.5">
+          <span class="text-amber-500 shrink-0 mt-0.5">💡</span>
+          <p class="text-xs text-amber-700 leading-relaxed">生成质量的关键在于原文内容充实度——章节原文越详细（含技术指标、功能描述、约束条件），AI 扩写效果越好。仅有标题、无正文的章节将被自动跳过。</p>
+        </div>
+      </section>
+
+      <!-- API 配置 + 生成参数 并排 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        <!-- API 配置 -->
+        <section>
+          <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">3</span>
+            API 配置
+          </h3>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">OpenAI</span>
+              <span class="text-xs text-gray-400">gpt-4o / gpt-4o-mini</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">Anthropic Claude</span>
+              <span class="text-xs text-gray-400">claude-3-5-sonnet</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">DeepSeek</span>
+              <span class="text-xs text-gray-400">deepseek-chat（性价比高）</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">豆包 / Kimi / MiniMax</span>
+              <span class="text-xs text-gray-400">支持 OpenAI 兼容接口</span>
+            </div>
+          </div>
+          <p class="text-xs text-gray-400 mt-2 leading-relaxed">配置一次后自动保存，重启服务无需重新输入。支持同时配置多个 API，按优先级轮询调用。</p>
+        </section>
+
+        <!-- 生成参数 + 操作说明 -->
+        <section>
+          <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">4</span>
+            生成参数与操作
+          </h3>
+          <div class="space-y-2">
+            <div class="bg-gray-50 rounded-xl px-3 py-2.5">
+              <div class="text-xs font-semibold text-gray-700 mb-1">目标字数</div>
+              <div class="flex gap-1.5 flex-wrap">
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">200–500 · 概述快速生成</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">500–1000 · 常规技术章节</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">1000+ · 核心功能详述</span>
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5">
+              <div class="text-xs font-semibold text-gray-700">生成后可操作</div>
+              <div class="flex items-start gap-1.5">
+                <span class="text-indigo-500 text-xs shrink-0 mt-0.5">✏</span>
+                <span class="text-xs text-gray-600">点击「编辑」直接修改章节内容，保存后字数自动更新</span>
+              </div>
+              <div class="flex items-start gap-1.5">
+                <span class="text-indigo-500 text-xs shrink-0 mt-0.5">↺</span>
+                <span class="text-xs text-gray-600">点击「重新生成」可选择不同 API、追加优化说明，单章节重新生成</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 常见问题 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">5</span>
+          常见问题
+        </h3>
+        <div class="space-y-2">
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
+                            hover:bg-gray-100 transition list-none">
+              章节识别数量为 0 或很少？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              DOCX：检查是否有目录页，或标题是否使用「标题 1/2/3/4」样式，或是否包含标准编号前缀（一、1. (1) 等）。<br>
+              PDF：确认 PDF 可检索（鼠标可选中文字），且标题字号明显大于正文。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
+                            hover:bg-gray-100 transition list-none">
+              很多章节显示为「已跳过」？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              说明该章节在规范书中只有标题、无正文内容。系统不会对空章节无中生有，最终 Word 文档中会保留对应标题，确保文档结构与规范书一致。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
+                            hover:bg-gray-100 transition list-none">
+              生成中途断开，已完成内容会丢失吗？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              不会。已完成的章节保存在服务器内存中，可直接点击「下载 Word」导出已完成部分。刷新页面或重新发起生成才会清空。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
+                            hover:bg-gray-100 transition list-none">
+              豆包 API 提示模型不存在？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              豆包（火山引擎）需在控制台创建推理接入点，模型 ID 格式为 ep-xxxxxxxx-xxxxx（接入点 ID）。在配置面板「模型」字段填写实际接入点 ID。
+            </div>
+          </details>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between shrink-0">
+      <span class="text-xs text-gray-400">更多技术细节见项目 README.md</span>
+      <button id="closeReadmeFooterBtn"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm">
+        知道了
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
      CONFIG MODAL
 ════════════════════════════════════════════════ -->
 <div id="configModal"
@@ -489,6 +714,7 @@ const S = {
   targetWords: 500,   // 每章节目标字数
   totalWords: 0,      // 已生成总字数
   sectionWords: {},   // secId → 字数
+  scrollLocked: null, // 锁定滚动到指定 secId（用户编辑/重新生成时）
 };
 
 const DEFAULTS = {
@@ -749,6 +975,19 @@ fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.
 
 
 /* ══════════════════════════════════════════
+   README MODAL
+══════════════════════════════════════════ */
+(function () {
+  const modal = $('readmeModal');
+  const close = () => modal.classList.add('hidden');
+
+  $('readmeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
+  $('closeReadmeBtn').addEventListener('click', close);
+  $('closeReadmeFooterBtn').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+})();
+
+/* ══════════════════════════════════════════
    CONFIG MODAL（多配置管理）
 ══════════════════════════════════════════ */
 const configModal = $('configModal');
@@ -770,6 +1009,7 @@ configModal.addEventListener('click', e => { if (e.target === configModal) close
 /* ── 状态变量 ── */
 let addCurrentProvider = 'openai';
 let editingConfigId    = null;   // null = 新增模式; string = 编辑指定 id
+let currentConfigs     = [];     // 当前已配置的 API 列表，供重新生成面板使用
 
 /* ── 拖拽排序（模块级，只初始化一次）── */
 let dragSrcId         = null;
@@ -1055,8 +1295,11 @@ function renderConfigList(configs) {
     });
   });
 
-  // 初次进入有配置态时，默认显示新增面板
-  if (!editingConfigId) showAddForm();
+  // 仅在首次进入有配置态（或无编辑状态）时重置右侧面板，避免覆盖正在输入的内容
+  const wasFullVisible = !$('configBodyFull').classList.contains('hidden');
+  if (!editingConfigId && !wasFullVisible) showAddForm();
+  // 同步供重新生成面板使用
+  currentConfigs = configs.slice();
 }
 
 /* ── 新增 / 编辑提交（全局，用于两套布局）── */
@@ -1292,8 +1535,6 @@ function appendToken(text) {
     S.renderTimer = setTimeout(() => {
       S.renderTimer = null;
       $('currentSectionContent').innerHTML = marked.parse(S.tokenBuffer);
-      const cs = $('contentScroll');
-      cs.scrollTop = cs.scrollHeight;
     }, 80);
   }
 }
@@ -1334,10 +1575,6 @@ function connectSSE(url) {
     $('currentSectionContent').innerHTML = '';
     $('currentSection').classList.remove('hidden');
     setTocStatus(d.section_id, 'active');
-    /* 滚动到当前章节 */
-    setTimeout(() => {
-      $('currentSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
   });
 
   es.addEventListener('token', e => {
@@ -1361,17 +1598,8 @@ function connectSSE(url) {
 
     /* 将章节移入"已完成"区 */
     const secInfo = S.sections.find(s => s.id === d.section_id);
-    const card = document.createElement('div');
-    card.className = 'pb-8 border-b border-gray-100 last:border-0';
-    card.innerHTML = `
-      <div class="flex items-center gap-2 mb-4 flex-wrap">
-        <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700
-                     px-2.5 py-0.5 rounded-full font-semibold">✓ 已完成</span>
-        <h3 class="font-semibold text-gray-800 text-sm">${esc(secInfo?.title ?? d.section_id)}</h3>
-        <span class="ml-auto text-xs text-gray-400 shrink-0">${charCount.toLocaleString()} 字 ${estPages(charCount)}</span>
-      </div>
-      <div class="md text-gray-700 leading-relaxed">${marked.parse(d.content)}</div>`;
-    $('completedSections').appendChild(card);
+    const secTitle = secInfo?.title ?? d.section_id;
+    createSectionCard(d.section_id, secTitle, d.content, charCount);
 
     /* 隐藏流式区 */
     $('currentSection').classList.add('hidden');
@@ -1379,8 +1607,6 @@ function connectSSE(url) {
     S.completedCount++;
     setTocStatus(d.section_id, 'done');
     updateProgress(S.completedCount, S.totalSections);
-    const cs = $('contentScroll');
-    cs.scrollTop = cs.scrollHeight;
   });
 
   es.addEventListener('section_skip', e => {
@@ -1422,10 +1648,6 @@ function connectSSE(url) {
     $('cancelBtn').classList.add('hidden');
     es.close();
     S.eventSource = null;
-    /* 滚动到底部显示汇总 */
-    setTimeout(() => {
-      $('contentScroll').scrollTop = $('contentScroll').scrollHeight;
-    }, 100);
   });
 
   es.addEventListener('error', e => {
@@ -1461,7 +1683,353 @@ function appendErrorCard(msg, color) {
   div.className = `mt-4 border rounded-xl px-4 py-3 text-sm flex items-center gap-2 ${cls}`;
   div.innerHTML = `<span>⚠️</span> <span>${esc(msg)}</span>`;
   $('completedSections').appendChild(div);
-  cs.scrollTop = cs.scrollHeight;
+}
+
+/* ══════════════════════════════════════════
+   单章节编辑 & 重新生成
+══════════════════════════════════════════ */
+const sectionCards = new Map();
+// secId → { rawContent, title, charCount, originalContent, cardEl, regenTaskId, regenEs }
+
+/* 锁定滚动视图到指定章节卡片 */
+function lockScrollTo(secId) {
+  S.scrollLocked = secId;
+  const entry = sectionCards.get(secId);
+  if (entry?.cardEl) {
+    entry.cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+/* 解除滚动锁定 */
+function unlockScroll() {
+  S.scrollLocked = null;
+}
+
+/* 构建"已完成"状态的卡片 HTML */
+function buildDoneHTML(secId, title, rawContent, charCount) {
+  const pages = estPages(charCount);
+  return `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full font-semibold shrink-0">✓ 已完成</span>
+      <span class="text-gray-400 text-xs shrink-0 sec-wordcount">${charCount.toLocaleString()} 字 ${pages ? pages : ''}</span>
+      <div class="ml-auto flex gap-1 shrink-0">
+        <button class="sec-edit-btn text-xs text-gray-400 hover:text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition" title="编辑">✏ 编辑</button>
+        <button class="sec-regen-btn text-xs text-gray-400 hover:text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition" title="重新生成">↺ 重新生成</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(title)}</h3>
+      <div class="md text-gray-700 leading-relaxed">${marked.parse(rawContent)}</div>
+    </div>`;
+}
+
+/* 创建并注册章节卡片 */
+function createSectionCard(secId, title, rawContent, charCount) {
+  const secInfo = S.sections.find(s => s.id === secId);
+  const originalContent = secInfo?.content_hint || '';
+  const card = document.createElement('div');
+  card.id = `sec-card-${secId}`;
+  card.className = 'pb-8 border-b border-gray-100 last:border-0';
+  card.innerHTML = buildDoneHTML(secId, title, rawContent, charCount);
+  $('completedSections').appendChild(card);
+  sectionCards.set(secId, { rawContent, title, charCount, originalContent, cardEl: card, regenTaskId: null, regenEs: null });
+  bindCardEvents(secId);
+}
+
+/* 绑定卡片内的所有交互按钮（事件委托到 cardEl） */
+function bindCardEvents(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  const card = entry.cardEl;
+  card.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.classList.contains('sec-edit-btn'))    enterEditMode(secId);
+    if (btn.classList.contains('sec-regen-btn'))   openRegenPanel(secId);
+    if (btn.classList.contains('sec-save-btn'))    saveEdit(secId);
+    if (btn.classList.contains('sec-editcancel-btn')) cancelEdit(secId);
+    if (btn.classList.contains('regen-cancel-btn'))   cancelRegen(secId);
+    if (btn.classList.contains('regen-confirm-btn'))  startRegen(secId);
+    if (btn.classList.contains('regen-stop-btn'))     stopRegen(secId);
+  });
+}
+
+/* ── 编辑模式 ── */
+function enterEditMode(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry || entry.regenEs) return;  // 生成中不允许编辑
+  lockScrollTo(secId);
+  const card  = entry.cardEl;
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0">✏ 编辑中</span>
+      <div class="ml-auto flex gap-1 shrink-0">
+        <button class="sec-editcancel-btn text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition">取消</button>
+        <button class="sec-save-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded transition">保存</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-2">${esc(entry.title)}</h3>
+      <textarea class="sec-edit-textarea w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition
+                       leading-relaxed resize-y min-h-[200px]">${esc(entry.rawContent)}</textarea>
+    </div>`;
+  const ta = card.querySelector('.sec-edit-textarea');
+  ta.style.height = ta.scrollHeight + 'px';
+}
+
+function saveEdit(secId) {
+  const entry = sectionCards.get(secId);
+  const ta    = entry.cardEl.querySelector('.sec-edit-textarea');
+  if (!ta) return;
+  const newContent = ta.value;
+  const charCount  = (newContent.match(/[一-鿿]/g) || []).length;
+  entry.rawContent = newContent;
+  entry.charCount  = charCount;
+  S.sectionWords[secId] = charCount;
+  S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+  // 同步更新到主任务（用于下载）
+  if (S.taskId) {
+    fetch(`/api/generate/${S.taskId}/section/${secId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: newContent }),
+    }).catch(() => {});
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, newContent, charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  // 更新累计字数显示
+  const twEl = $('totalWordsDisplay');
+  if (twEl) twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+}
+
+function cancelEdit(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+/* ── 重新生成面板 ── */
+function openRegenPanel(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry || entry.regenEs) return;  // 生成中不允许重复打开
+  lockScrollTo(secId);
+  const card  = entry.cardEl;
+  const apiOptions = [
+    `<option value="__auto__">自动（按优先级顺序）</option>`,
+    ...currentConfigs.map(c => {
+      const label = (PROVIDER_LABEL[c.provider] || c.provider) + ' / ' + c.model;
+      return `<option value="${esc(c.id)}">${esc(label)}</option>`;
+    }),
+  ].join('');
+
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0">↺ 重新生成</span>
+      <div class="ml-auto">
+        <button class="regen-cancel-btn text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition">取消</button>
+      </div>
+    </div>
+    <div class="regen-panel bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3 space-y-2">
+      <div class="flex gap-2 flex-wrap items-center">
+        <label class="text-xs text-gray-500 shrink-0">API 配置</label>
+        <select class="regen-api-select flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white min-w-[180px]">
+          ${apiOptions}
+        </select>
+        <label class="text-xs text-gray-500 shrink-0">目标字数</label>
+        <input type="number" class="regen-words-input w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                                    focus:outline-none focus:ring-2 focus:ring-indigo-300"
+               value="${S.targetWords}" min="100" max="10000" step="100">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">追加说明（可选）</label>
+        <textarea class="regen-extra-input w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                         focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none h-16"
+                  placeholder="如：更简洁、增加案例、突出技术亮点..."></textarea>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button class="regen-cancel-btn text-xs text-gray-400 hover:text-gray-600 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
+        <button class="regen-confirm-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded transition">确认重新生成</button>
+      </div>
+    </div>
+    <div class="sec-body opacity-50">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(entry.title)}</h3>
+      <div class="md text-gray-700 leading-relaxed">${marked.parse(entry.rawContent)}</div>
+    </div>`;
+}
+
+function cancelRegen(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+/* ── 开始重新生成 ── */
+async function startRegen(secId) {
+  const entry   = sectionCards.get(secId);
+  const card    = entry.cardEl;
+  const panel   = card.querySelector('.regen-panel');
+  const configId  = panel.querySelector('.regen-api-select').value;
+  const words     = parseInt(panel.querySelector('.regen-words-input').value) || S.targetWords;
+  const extra     = panel.querySelector('.regen-extra-input').value.trim();
+  const finalConfigId = configId === '__auto__' ? null : configId;
+
+  // 关闭已有的 regen 流（防止并发）
+  if (entry.regenEs) { entry.regenEs.close(); entry.regenEs = null; }
+
+  // 切换到"生成中"状态
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0 regen-progress-label">↺ 生成中... 0字</span>
+      <div class="ml-auto">
+        <button class="regen-stop-btn text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition">停止</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(entry.title)}</h3>
+      <div class="md text-gray-700 leading-relaxed regen-stream-area streaming-cursor"></div>
+    </div>`;
+  bindCardEvents(secId);
+
+  // 标记为"等待 fetch"阶段
+  entry.regenTaskId = null;
+  entry.regenEs = null;
+  let cancelled = false;  // 由 stopRegen 在 fetch 期间通过 entry.regenTaskId===null 检测
+
+  try {
+    const res = await fetch('/api/generate/regen/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section_title: entry.title,
+        section_content: entry.originalContent,
+        target_words: words,
+        extra_prompt: extra,
+        config_id: finalConfigId,
+      }),
+    });
+
+    // 如果 fetch 期间 stopRegen 已被调用（card 已重置），直接放弃
+    if (card.querySelector('.regen-stop-btn') === null) return;
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _regenError(secId, err.detail || '启动失败');
+      return;
+    }
+    const { task_id, stream_url } = await res.json();
+    entry.regenTaskId = task_id;
+
+    // 再次检查：stopRegen 可能在 res.json() 期间触发
+    if (card.querySelector('.regen-stop-btn') === null) {
+      fetch(`/api/generate/${task_id}`, { method: 'DELETE' }).catch(() => {});
+      return;
+    }
+
+    const es = new EventSource(stream_url);
+    entry.regenEs = es;
+    let buffer = '';
+    let rafPending = false;
+
+    // 捕获 DOM 引用（此时 card.innerHTML 未变）
+    const streamArea = card.querySelector('.regen-stream-area');
+    const progressLabel = card.querySelector('.regen-progress-label');
+
+    const cleanup = () => {
+      es.close();
+      if (entry.regenEs === es) entry.regenEs = null;
+    };
+
+    es.addEventListener('token', ev => {
+      buffer += JSON.parse(ev.data).text;
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          if (streamArea.isConnected) streamArea.innerHTML = marked.parse(buffer);
+          const cnt = (buffer.match(/[一-鿿]/g) || []).length;
+          if (progressLabel.isConnected) progressLabel.textContent = `↺ 生成中... ${cnt.toLocaleString()}字`;
+        });
+      }
+    });
+
+    es.addEventListener('section_done', ev => {
+      const d = JSON.parse(ev.data);
+      cleanup();
+      _regenDone(secId, d.content);
+    });
+
+    es.addEventListener('all_done', () => cleanup());
+
+    es.addEventListener('error', ev => {
+      let msg = '重新生成失败';
+      try { msg = JSON.parse(ev.data).message; } catch {}
+      cleanup();
+      _regenError(secId, msg);
+    });
+
+    es.onerror = () => {
+      cleanup();
+      _regenError(secId, 'SSE 连接中断');
+    };
+
+  } catch (e) {
+    _regenError(secId, '网络请求失败：' + e.message);
+  }
+}
+
+function stopRegen(secId) {
+  const entry = sectionCards.get(secId);
+  if (entry.regenEs) { entry.regenEs.close(); entry.regenEs = null; }
+  if (entry.regenTaskId) {
+    fetch(`/api/generate/${entry.regenTaskId}`, { method: 'DELETE' }).catch(() => {});
+    entry.regenTaskId = null;
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+function _regenDone(secId, newContent) {
+  const entry = sectionCards.get(secId);
+  const charCount = (newContent.match(/[一-鿿]/g) || []).length;
+  entry.rawContent = newContent;
+  entry.charCount  = charCount;
+  S.sectionWords[secId] = charCount;
+  S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+  // 同步写回主任务（用于下载）
+  if (S.taskId) {
+    fetch(`/api/generate/${S.taskId}/section/${secId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: newContent }),
+    }).catch(() => {});
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, newContent, charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  const twEl = $('totalWordsDisplay');
+  if (twEl) twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+  entry.regenTaskId = null;
+}
+
+function _regenError(secId, msg) {
+  const entry = sectionCards.get(secId);
+  // 恢复原内容，在卡片顶部显示错误提示
+  entry.cardEl.innerHTML = `
+    <div class="mb-3 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs flex items-center gap-2">
+      <span>⚠️</span><span>${esc(msg)}</span>
+    </div>` + buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  entry.regenTaskId = null;
+  entry.regenEs = null;
 }
 
 /* ── 取消 ── */
@@ -1504,6 +2072,7 @@ $('backBtn').addEventListener('click', () => {
       const d = await res.json();
       if (d.configs && d.configs.length > 0) {
         S.configSaved = true;
+        currentConfigs = d.configs;
         const top = d.configs[0];
         const cs = $('configStatus');
         cs.textContent = `✓ ${top.model}`;
