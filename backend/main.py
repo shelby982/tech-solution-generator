@@ -17,6 +17,7 @@ from routes.upload import router as upload_router
 from routes.config import router as config_router
 from routes.generate import router as generate_router
 from routes.download import router as download_router
+from routes.changelog import router as changelog_router
 
 # ── 日志配置 ──────────────────────────────────
 logging.basicConfig(
@@ -71,10 +72,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ── 路由注册 ──────────────────────────────────
-app.include_router(upload_router,   prefix="/api")
-app.include_router(config_router,   prefix="/api")
-app.include_router(generate_router, prefix="/api")
-app.include_router(download_router, prefix="/api")
+app.include_router(upload_router,    prefix="/api")
+app.include_router(config_router,    prefix="/api")
+app.include_router(generate_router,  prefix="/api")
+app.include_router(download_router,  prefix="/api")
+app.include_router(changelog_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────

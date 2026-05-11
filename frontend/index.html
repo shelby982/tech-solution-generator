@@ -31,6 +31,9 @@
     .md hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
     .md strong { color: #111827; }
 
+    /* ── changelog 箭头旋转 ── */
+    .rotate-90 { transform: rotate(90deg); }
+
     /* ── 拖拽激活态 ── */
     .drop-active { border-color: #6366f1 !important; background-color: #eef2ff !important; }
 
@@ -90,11 +93,6 @@
         class="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 border border-white/25
                text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
         ⚙️ 配置 API
-      </button>
-      <button id="readmeBtn"
-        class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20
-               text-white/80 hover:text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
-        📖 使用说明
       </button>
     </div>
   </div>
@@ -318,24 +316,83 @@
 </main>
 
 <!-- ════════════════════════════════════════════════
-     README MODAL
+     FOOTER
+════════════════════════════════════════════════ -->
+<footer class="bg-white border-t border-gray-100 mt-6">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+
+      <!-- 左：品牌 -->
+      <div class="flex items-center gap-2 text-gray-400 text-xs select-none">
+        <span class="text-base">📄</span>
+        <span class="font-medium text-gray-500">技术方案生成助手</span>
+        <span id="footerVersion" class="text-gray-300">v1.5.0</span>
+      </div>
+
+      <!-- 中：三个入口 -->
+      <div class="flex items-center gap-1">
+        <button id="footerChangelogBtn"
+          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
+                 hover:bg-indigo-50 transition font-medium">
+          <span class="text-base leading-none">📋</span> 更新记录
+        </button>
+        <span class="text-gray-200 select-none">|</span>
+        <button id="footerReadmeBtn"
+          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
+                 hover:bg-indigo-50 transition font-medium">
+          <span class="text-base leading-none">📖</span> 使用说明
+        </button>
+        <span class="text-gray-200 select-none">|</span>
+        <button id="footerAuthorBtn"
+          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
+                 hover:bg-indigo-50 transition font-medium">
+          <span class="text-base leading-none">👤</span> 关于作者
+        </button>
+      </div>
+
+      <!-- 右：版权 -->
+      <div class="text-xs text-gray-300 select-none">© 2026 jianghe</div>
+
+    </div>
+  </div>
+</footer>
+
+<!-- ════════════════════════════════════════════════
+     FOOTER MODAL — 版本更新记录
+════════════════════════════════════════════════ -->
+<div id="changelogModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:560px;max-height:85vh">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-bold text-gray-800 text-base">📋 版本更新记录</h2>
+        <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 迭代历史</p>
+      </div>
+      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
+                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-5">
+      <div id="changelogList" class="space-y-3 text-xs text-gray-500">
+        <p class="text-gray-300 italic">加载中...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     FOOTER MODAL — 使用说明
 ════════════════════════════════════════════════ -->
 <div id="readmeModal"
   class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
   <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:780px;max-height:90vh">
-
-    <!-- Header -->
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
       <div>
-        <h2 class="font-bold text-gray-800 text-lg">📖 使用说明</h2>
+        <h2 class="font-bold text-gray-800 text-base">📖 使用说明</h2>
         <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 快速上手指南</p>
       </div>
-      <button id="closeReadmeBtn"
-        class="text-gray-400 hover:text-gray-600 text-xl leading-none transition w-7 h-7
-               flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
+                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
     </div>
-
-    <!-- Body -->
     <div class="flex-1 overflow-y-auto px-6 py-5 space-y-6">
 
       <!-- 工作流程 -->
@@ -345,32 +402,32 @@
           整体工作流程
         </h3>
         <div class="flex items-stretch gap-1.5 flex-wrap">
-          <div class="flex-1 min-w-[120px] bg-indigo-50 rounded-xl px-4 py-3 text-center">
-            <div class="text-xl mb-1">📄</div>
+          <div class="flex-1 min-w-[100px] bg-indigo-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">📄</div>
             <div class="text-xs font-semibold text-indigo-700">上传规范书</div>
             <div class="text-xs text-indigo-400 mt-0.5">docx / pdf / doc</div>
           </div>
           <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
-          <div class="flex-1 min-w-[120px] bg-violet-50 rounded-xl px-4 py-3 text-center">
-            <div class="text-xl mb-1">🔍</div>
+          <div class="flex-1 min-w-[100px] bg-violet-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">🔍</div>
             <div class="text-xs font-semibold text-violet-700">自动解析目录</div>
             <div class="text-xs text-violet-400 mt-0.5">章节结构 + 原文</div>
           </div>
           <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
-          <div class="flex-1 min-w-[120px] bg-blue-50 rounded-xl px-4 py-3 text-center">
-            <div class="text-xl mb-1">⚙️</div>
+          <div class="flex-1 min-w-[100px] bg-blue-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">⚙️</div>
             <div class="text-xs font-semibold text-blue-700">配置 API</div>
             <div class="text-xs text-blue-400 mt-0.5">首次使用配置</div>
           </div>
           <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
-          <div class="flex-1 min-w-[120px] bg-emerald-50 rounded-xl px-4 py-3 text-center">
-            <div class="text-xl mb-1">✨</div>
+          <div class="flex-1 min-w-[100px] bg-emerald-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">✨</div>
             <div class="text-xs font-semibold text-emerald-700">AI 逐章扩写</div>
             <div class="text-xs text-emerald-400 mt-0.5">实时流式生成</div>
           </div>
           <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
-          <div class="flex-1 min-w-[120px] bg-amber-50 rounded-xl px-4 py-3 text-center">
-            <div class="text-xl mb-1">📥</div>
+          <div class="flex-1 min-w-[100px] bg-amber-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">📥</div>
             <div class="text-xs font-semibold text-amber-700">下载 Word</div>
             <div class="text-xs text-amber-400 mt-0.5">格式规范文档</div>
           </div>
@@ -414,8 +471,6 @@
 
       <!-- API 配置 + 生成参数 并排 -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-        <!-- API 配置 -->
         <section>
           <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
             <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">3</span>
@@ -439,10 +494,8 @@
               <span class="text-xs text-gray-400">支持 OpenAI 兼容接口</span>
             </div>
           </div>
-          <p class="text-xs text-gray-400 mt-2 leading-relaxed">配置一次后自动保存，重启服务无需重新输入。支持同时配置多个 API，按优先级轮询调用。</p>
+          <p class="text-xs text-gray-400 mt-2 leading-relaxed">配置一次后自动保存，支持多个 API 按优先级轮询调用。</p>
         </section>
-
-        <!-- 生成参数 + 操作说明 -->
         <section>
           <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
             <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">4</span>
@@ -450,22 +503,22 @@
           </h3>
           <div class="space-y-2">
             <div class="bg-gray-50 rounded-xl px-3 py-2.5">
-              <div class="text-xs font-semibold text-gray-700 mb-1">目标字数</div>
+              <div class="text-xs font-semibold text-gray-700 mb-1">目标字数参考</div>
               <div class="flex gap-1.5 flex-wrap">
-                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">200–500 · 概述快速生成</span>
-                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">500–1000 · 常规技术章节</span>
-                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">1000+ · 核心功能详述</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">200–500 · 概述</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">500–1000 · 常规</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">1000+ · 详述</span>
               </div>
             </div>
             <div class="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5">
               <div class="text-xs font-semibold text-gray-700">生成后可操作</div>
               <div class="flex items-start gap-1.5">
                 <span class="text-indigo-500 text-xs shrink-0 mt-0.5">✏</span>
-                <span class="text-xs text-gray-600">点击「编辑」直接修改章节内容，保存后字数自动更新</span>
+                <span class="text-xs text-gray-600">点击「编辑」直接修改，保存后字数自动更新</span>
               </div>
               <div class="flex items-start gap-1.5">
                 <span class="text-indigo-500 text-xs shrink-0 mt-0.5">↺</span>
-                <span class="text-xs text-gray-600">点击「重新生成」可选择不同 API、追加优化说明，单章节重新生成</span>
+                <span class="text-xs text-gray-600">点击「重新生成」可选择不同 API、追加优化说明单章重生成</span>
               </div>
             </div>
           </div>
@@ -480,60 +533,100 @@
         </h3>
         <div class="space-y-2">
           <details class="group bg-gray-50 rounded-xl overflow-hidden">
-            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
-                            hover:bg-gray-100 transition list-none">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
               章节识别数量为 0 或很少？
               <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
             </summary>
             <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
-              DOCX：检查是否有目录页，或标题是否使用「标题 1/2/3/4」样式，或是否包含标准编号前缀（一、1. (1) 等）。<br>
+              DOCX：检查标题是否使用「标题 1/2/3/4」样式，或包含标准编号前缀（一、1. (1) 等）。<br>
               PDF：确认 PDF 可检索（鼠标可选中文字），且标题字号明显大于正文。
             </div>
           </details>
           <details class="group bg-gray-50 rounded-xl overflow-hidden">
-            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
-                            hover:bg-gray-100 transition list-none">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
               很多章节显示为「已跳过」？
               <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
             </summary>
             <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
-              说明该章节在规范书中只有标题、无正文内容。系统不会对空章节无中生有，最终 Word 文档中会保留对应标题，确保文档结构与规范书一致。
+              说明该章节在规范书中只有标题、无正文内容。系统不会无中生有，Word 文档中会保留标题，结构与规范书一致。
             </div>
           </details>
           <details class="group bg-gray-50 rounded-xl overflow-hidden">
-            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
-                            hover:bg-gray-100 transition list-none">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
               生成中途断开，已完成内容会丢失吗？
               <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
             </summary>
             <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
-              不会。已完成的章节保存在服务器内存中，可直接点击「下载 Word」导出已完成部分。刷新页面或重新发起生成才会清空。
+              不会。已完成章节保存在服务器内存中，可直接点击「下载 Word」导出已完成部分。
             </div>
           </details>
           <details class="group bg-gray-50 rounded-xl overflow-hidden">
-            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none
-                            hover:bg-gray-100 transition list-none">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
               豆包 API 提示模型不存在？
               <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
             </summary>
             <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
-              豆包（火山引擎）需在控制台创建推理接入点，模型 ID 格式为 ep-xxxxxxxx-xxxxx（接入点 ID）。在配置面板「模型」字段填写实际接入点 ID。
+              豆包（火山引擎）需在控制台创建推理接入点，模型 ID 格式为 ep-xxxxxxxx-xxxxx。在配置面板「模型」字段填写接入点 ID。
             </div>
           </details>
         </div>
       </section>
 
     </div>
+  </div>
+</div>
 
-    <!-- Footer -->
-    <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between shrink-0">
-      <span class="text-xs text-gray-400">更多技术细节见项目 README.md</span>
-      <button id="closeReadmeFooterBtn"
-        class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm">
-        知道了
-      </button>
+<!-- ════════════════════════════════════════════════
+     FOOTER MODAL — 关于作者
+════════════════════════════════════════════════ -->
+<div id="authorModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:400px">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+      <h2 class="font-bold text-gray-800 text-base">关于作者</h2>
+      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
+                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
     </div>
-
+    <div class="px-6 py-6 space-y-5">
+      <!-- 头像 + 名字 -->
+      <div class="flex items-center gap-4">
+        <span class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 text-white
+                     flex items-center justify-center font-bold text-2xl shrink-0 select-none shadow-md">J</span>
+        <div>
+          <p class="font-bold text-gray-800 text-lg leading-tight">jianghe</p>
+          <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 作者</p>
+        </div>
+      </div>
+      <!-- 简介 -->
+      <p class="text-sm text-gray-500 leading-relaxed">
+        专注于 AI 辅助文档生成工具的探索与实践，致力于提升技术方案撰写效率，让工程师从繁琐的文档工作中解放出来。
+      </p>
+      <!-- GitHub 链接 -->
+      <a href="https://github.com/wanliangxin" target="_blank" rel="noopener noreferrer"
+        class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-300
+               hover:bg-indigo-50 transition group">
+        <svg class="w-5 h-5 text-gray-500 group-hover:text-indigo-600 shrink-0 transition" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483
+                   0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466
+                   -.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832
+                   .092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688
+                   -.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004
+                   1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7
+                   1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338
+                   -.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+        </svg>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-700 group-hover:text-indigo-700 transition">GitHub</p>
+          <p class="text-xs text-gray-400 truncate">github.com/wanliangxin</p>
+        </div>
+        <span class="ml-auto text-gray-300 group-hover:text-indigo-400 transition text-sm">→</span>
+      </a>
+      <!-- 版本 -->
+      <div class="flex items-center gap-2 text-xs text-gray-400 pt-1">
+        <span>🛠</span>
+        <span>当前版本：<span id="authorVersion" class="text-indigo-400 font-medium"></span></span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -973,19 +1066,6 @@ dropZone.addEventListener('drop', e => {
 });
 fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
-
-/* ══════════════════════════════════════════
-   README MODAL
-══════════════════════════════════════════ */
-(function () {
-  const modal = $('readmeModal');
-  const close = () => modal.classList.add('hidden');
-
-  $('readmeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
-  $('closeReadmeBtn').addEventListener('click', close);
-  $('closeReadmeFooterBtn').addEventListener('click', close);
-  modal.addEventListener('click', e => { if (e.target === modal) close(); });
-})();
 
 /* ══════════════════════════════════════════
    CONFIG MODAL（多配置管理）
@@ -2080,6 +2160,70 @@ $('backBtn').addEventListener('click', () => {
       }
     }
   } catch {}
+})();
+
+/* ══════════════════════════════════════════
+   FOOTER MODALS
+══════════════════════════════════════════ */
+(function () {
+  function openModal(id) { $(id).classList.remove('hidden'); }
+  function closeModal(id) { $(id).classList.add('hidden'); }
+
+  // 打开按钮
+  $('footerChangelogBtn').addEventListener('click', () => openModal('changelogModal'));
+  $('footerReadmeBtn').addEventListener('click',    () => openModal('readmeModal'));
+  $('footerAuthorBtn').addEventListener('click',    () => openModal('authorModal'));
+
+  // 所有 Modal 的关闭按钮（统一用 .footer-modal-close 类）
+  document.querySelectorAll('.footer-modal-close').forEach(btn => {
+    btn.addEventListener('click', () => btn.closest('[id$="Modal"]').classList.add('hidden'));
+  });
+
+  // 点击遮罩关闭
+  ['changelogModal', 'readmeModal', 'authorModal'].forEach(id => {
+    $(id).addEventListener('click', e => { if (e.target === $(id)) closeModal(id); });
+  });
+})();
+
+/* ══════════════════════════════════════════
+   FOOTER — 版本记录加载
+══════════════════════════════════════════ */
+(async function loadChangelog() {
+  const container = $('changelogList');
+  try {
+    const res = await fetch('/api/changelog');
+    if (!res.ok) throw new Error('请求失败');
+    const list = await res.json();
+
+    // 更新 footer 底部版本号 & 作者弹窗版本号
+    if (list.length > 0) {
+      $('footerVersion').textContent = list[0].version;
+      $('authorVersion').textContent = list[0].version;
+    }
+
+    container.innerHTML = list.map((item, idx) => `
+      <div class="changelog-item border border-gray-100 rounded-lg overflow-hidden">
+        <button class="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50 transition"
+                onclick="this.closest('.changelog-item').querySelector('.changelog-body').classList.toggle('hidden');
+                         this.querySelector('.changelog-arrow').classList.toggle('rotate-90')">
+          <div class="flex items-center gap-2">
+            <span class="font-semibold text-indigo-600 text-xs">${esc(item.version)}</span>
+            <span class="text-gray-300 text-xs">${esc(item.date)}</span>
+            ${idx === 0 ? '<span class="text-xs bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full">最新</span>' : ''}
+          </div>
+          <span class="changelog-arrow text-gray-300 text-xs transition-transform duration-150">▸</span>
+        </button>
+        <div class="changelog-body ${idx === 0 ? '' : 'hidden'} px-3 pb-2.5 space-y-1 border-t border-gray-100 pt-2">
+          ${item.changes.map(c => `
+            <div class="flex items-start gap-1.5">
+              <span class="text-indigo-300 shrink-0 mt-0.5">·</span>
+              <span class="text-gray-500 leading-relaxed">${esc(c)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch {
+    container.innerHTML = '<p class="text-gray-300 italic text-xs">暂无更新记录</p>';
+  }
 })();
 </script>
 </body>
