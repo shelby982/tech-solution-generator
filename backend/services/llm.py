@@ -2,10 +2,11 @@
 LLM 调用封装
 支持 OpenAI（含兼容模式）、Anthropic Claude、豆包、Kimi 等 provider。
 豆包和 Kimi 均使用 OpenAI 兼容接口。
+多 API 配置时支持轮询 + 故障 fallback。
 """
 
 import logging
-from typing import AsyncIterator
+from typing import AsyncGenerator, AsyncIterator
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 logger = logging.getLogger(__name__)
@@ -297,3 +298,80 @@ async def _stream_claude(
     ) as stream:
         async for text in stream.text_stream:
             yield text
+
+
+# ─────────────────────────────────────────────
+# 多 API 调度（轮询 + Fallback）
+# ─────────────────────────────────────────────
+
+async def dispatch_stream_generate(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    section_title: str,
+    original_content: str,
+    target_words: int = 500,
+    doc_summary: str = "",
+) -> AsyncGenerator[str, None]:
+    """
+    从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
+
+    Fallback 策略：
+    - 仅在首个 token 到达之前发生的错误才 fallback（连接失败、认证失败等）
+    - 一旦开始 yield token，说明流已建立，此时的错误由外层重试逻辑处理，
+      避免将已发送的 token 与新一轮生成内容混在一起造成重复。
+    全部 API 均在首 token 前失败时，上抛最后一个异常。
+    """
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先在「设置」中添加配置")
+
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_start_index + i) % n]
+        started = False  # 是否已开始 yield token
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
+            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary):
+                started = True
+                yield token
+            return  # 成功，退出
+        except Exception as e:
+            if started:
+                # 流已开始，不能 fallback（前端已收到部分内容），直接上抛
+                raise
+            last_error = e
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 连接失败，"
+                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+            )
+
+    raise last_error  # type: ignore[misc]
+
+
+async def dispatch_doc_summary(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    sections: list[dict],
+) -> str:
+    """
+    从 rr_start_index 指定的 API 开始尝试生成文档摘要，失败时自动 fallback 到下一个。
+    全部失败时上抛最后一个异常。
+    """
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先在「设置」中添加配置")
+
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_start_index + i) % n]
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 生成文档摘要")
+            return await generate_doc_summary(config, sections)
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 摘要生成失败，"
+                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+            )
+
+    raise last_error  # type: ignore[misc]

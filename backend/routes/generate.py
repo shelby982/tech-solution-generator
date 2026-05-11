@@ -33,7 +33,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from services.config_store import config_store
-from services.llm import stream_generate, generate_doc_summary
+from services.llm import dispatch_stream_generate, dispatch_doc_summary
 from services.task_store import task_store, TaskStatus, GenerationTask
 from utils.sse import (
     sse_token,
@@ -99,8 +99,7 @@ async def _run_generation(task: GenerationTask) -> None:
         ("error",         "错误信息字符串")
         (None, None)      # sentinel，通知 SSE 生成器结束循环
     """
-    config = config_store.get()
-    if config is None:
+    if not config_store.is_configured():
         task.status = TaskStatus.ERROR
         task.error_message = "未配置 API Key，请先在「设置」中配置"
         await task.queue.put(("error", task.error_message))
@@ -116,7 +115,8 @@ async def _run_generation(task: GenerationTask) -> None:
         # ── 第一步：生成文档摘要 ──────────────────
         logger.info(f"[{task.task_id}] 开始生成文档摘要...")
         try:
-            summary = await generate_doc_summary(config, sections)
+            configs, rr_index = config_store.get_configs_and_next_index()
+            summary = await dispatch_doc_summary(configs, rr_index, sections)
             task.doc_summary = summary
             await task.queue.put(("doc_summary", {"summary": summary}))
             logger.info(f"[{task.task_id}] 文档摘要生成完成（{len(summary)} 字符）")
@@ -175,8 +175,9 @@ async def _run_generation(task: GenerationTask) -> None:
             for attempt in range(MAX_RETRIES + 1):
                 full_content_parts = []
                 try:
-                    async for token_text in stream_generate(
-                        config, sec_title, sec_content, task.target_words,
+                    configs, rr_index = config_store.get_configs_and_next_index()
+                    async for token_text in dispatch_stream_generate(
+                        configs, rr_index, sec_title, sec_content, task.target_words,
                         doc_summary=task.doc_summary,
                     ):
                         if task.cancel_event.is_set():
@@ -209,6 +210,10 @@ async def _run_generation(task: GenerationTask) -> None:
                     break
 
             if section_failed:
+                if task.cancel_event.is_set():
+                    task.status = TaskStatus.CANCELLED
+                    await task.queue.put(("error", "生成已被用户取消"))
+                    break
                 continue
 
             # 再次检查取消（生成中途被取消）
