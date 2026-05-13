@@ -225,6 +225,7 @@ class ConfigStore:
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            CONFIG_FILE.chmod(0o600)
             logger.debug(f"配置已持久化到 {CONFIG_FILE}，共 {len(data)} 条")
         except Exception as e:
             logger.warning(f"配置文件写入失败（配置仍在内存中）：{e}")

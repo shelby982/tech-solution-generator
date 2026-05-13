@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
 
 from services.task_store import task_store, TaskStatus
+from utils.validators import validate_uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
@@ -22,6 +23,7 @@ router = APIRouter(tags=["download"])
 # ─────────────────────────────────────────────
 
 def _get_ready_task(task_id: str):
+    validate_uuid(task_id, "task_id")
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")

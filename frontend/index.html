@@ -6,6 +6,7 @@
   <title>技术方案生成助手</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     /* ── Markdown 内容渲染样式 ── */
     .md h1 { font-size: 1.45em; font-weight: 700; margin: 1em 0 .4em; color: #1e3a8a; }
@@ -778,6 +779,11 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;')
   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* marked 配置：禁用原始 HTML 直通，所有 HTML 标签被转义 */
+marked.use({ breaks: true, gfm: true, html: false });
+/* safeParse：marked 输出再经 DOMPurify 过滤，防止 XSS */
+const safeParse = md => DOMPurify.sanitize(marked.parse(md || ''));
 
 /* 字数 → 预估 Word 页数（A4, 宋体小四, 1.5倍行距 ≈ 450字/页） */
 const WORDS_PER_PAGE = 450;
@@ -1638,7 +1644,7 @@ function appendToken(text) {
   if (!S.renderTimer) {
     S.renderTimer = setTimeout(() => {
       S.renderTimer = null;
-      $('currentSectionContent').innerHTML = marked.parse(S.tokenBuffer);
+      $('currentSectionContent').innerHTML = safeParse(S.tokenBuffer);
     }, 80);
   }
 }
@@ -1663,7 +1669,7 @@ function connectSSE(url) {
         <h3 class="font-semibold text-blue-800 text-sm">项目概述</h3>
         <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
       </div>
-      <div class="md text-gray-700 text-sm leading-relaxed">${marked.parse(d.summary)}</div>`;
+      <div class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>`;
     $('completedSections').prepend(card);
   });
 
@@ -1823,7 +1829,7 @@ function buildDoneHTML(secId, title, rawContent, charCount) {
     </div>
     <div class="sec-body">
       <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(title)}</h3>
-      <div class="md text-gray-700 leading-relaxed">${marked.parse(rawContent)}</div>
+      <div class="md text-gray-700 leading-relaxed">${safeParse(rawContent)}</div>
     </div>`;
 }
 
@@ -1876,7 +1882,8 @@ function enterEditMode(secId) {
       <h3 class="font-semibold text-gray-800 text-sm mb-2">${esc(entry.title)}</h3>
       <textarea class="sec-edit-textarea w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700
                        focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition
-                       leading-relaxed resize-y min-h-[200px]">${esc(entry.rawContent)}</textarea>
+                       leading-relaxed resize-y min-h-[200px]"
+                maxlength="500000">${esc(entry.rawContent)}</textarea>
     </div>`;
   const ta = card.querySelector('.sec-edit-textarea');
   ta.style.height = ta.scrollHeight + 'px';
@@ -1953,6 +1960,7 @@ function openRegenPanel(secId) {
         <label class="text-xs text-gray-500 block mb-1">追加说明（可选）</label>
         <textarea class="regen-extra-input w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs
                          focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none h-16"
+                  maxlength="1000"
                   placeholder="如：更简洁、增加案例、突出技术亮点..."></textarea>
       </div>
       <div class="flex justify-end gap-2">
@@ -1962,7 +1970,7 @@ function openRegenPanel(secId) {
     </div>
     <div class="sec-body opacity-50">
       <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(entry.title)}</h3>
-      <div class="md text-gray-700 leading-relaxed">${marked.parse(entry.rawContent)}</div>
+      <div class="md text-gray-700 leading-relaxed">${safeParse(entry.rawContent)}</div>
     </div>`;
 }
 
@@ -2056,7 +2064,7 @@ async function startRegen(secId) {
         rafPending = true;
         requestAnimationFrame(() => {
           rafPending = false;
-          if (streamArea.isConnected) streamArea.innerHTML = marked.parse(buffer);
+          if (streamArea.isConnected) streamArea.innerHTML = safeParse(buffer);
           const cnt = (buffer.match(/[一-鿿]/g) || []).length;
           if (progressLabel.isConnected) progressLabel.textContent = `↺ 生成中... ${cnt.toLocaleString()}字`;
         });

@@ -41,9 +41,9 @@ async def verify_api_key(config: LLMConfig) -> tuple[bool, str]:
 
 async def _verify_openai(config: LLMConfig) -> tuple[bool, str]:
     """验证 OpenAI（或兼容模式）API Key"""
-    try:
-        from openai import AsyncOpenAI, AuthenticationError, APIConnectionError
+    from openai import AsyncOpenAI, AuthenticationError, APIConnectionError
 
+    try:
         client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
@@ -71,9 +71,9 @@ async def _verify_openai(config: LLMConfig) -> tuple[bool, str]:
 
 async def _verify_claude(config: LLMConfig) -> tuple[bool, str]:
     """验证 Anthropic Claude API Key"""
-    try:
-        import anthropic
+    import anthropic
 
+    try:
         client = anthropic.AsyncAnthropic(
             api_key=config.api_key,
             base_url=config.base_url if config.base_url != "https://api.anthropic.com" else None,

@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from services.config_store import config_store
 from services.llm import dispatch_stream_generate, dispatch_doc_summary
 from services.task_store import task_store, TaskStatus, GenerationTask
+from utils.validators import validate_uuid
 from utils.sse import (
     sse_token,
     sse_section_start,
@@ -58,7 +59,7 @@ router = APIRouter(tags=["generate"])
 class SectionInput(BaseModel):
     id: str = Field(..., min_length=1, description="章节 ID，如 s1")
     title: str = Field(..., min_length=1, max_length=200, description="章节标题")
-    content: str = Field(default="", description="章节原始内容（用于 LLM 上下文，可为空）")
+    content: str = Field(default="", description="章节原始内容（用于 LLM 上下文，可为空）", max_length=200_000)
     level: int = Field(default=1, ge=1, le=4, description="章节层级 1-4")
 
 
@@ -422,6 +423,7 @@ async def stream_generate_sse(task_id: str, request: Request):
       Cache-Control: no-cache
       X-Accel-Buffering: no   （禁用 Nginx 缓冲）
     """
+    validate_uuid(task_id, "task_id")
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
@@ -458,6 +460,7 @@ async def get_task_status(task_id: str):
       task_id, status, progress (0~1), total_sections,
       completed_sections, error_message
     """
+    validate_uuid(task_id, "task_id")
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
@@ -472,6 +475,7 @@ async def cancel_task(task_id: str):
     - RUNNING 状态：发送取消信号，后台协程在下一个 token 循环时停止
     - 其他状态：返回当前状态说明，不报错
     """
+    validate_uuid(task_id, "task_id")
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
@@ -501,14 +505,15 @@ async def cancel_task(task_id: str):
 
 class RegenStartRequest(BaseModel):
     section_title: str = Field(..., min_length=1, max_length=200)
-    section_content: str = Field(default="", description="章节原文（给 LLM 参考）")
+    section_content: str = Field(default="", description="章节原文（给 LLM 参考）", max_length=200_000)
     target_words: int = Field(default=500, ge=100, le=10000)
     extra_prompt: str = Field(default="", max_length=1000, description="追加给 LLM 的优化说明")
-    config_id: Optional[str] = Field(default=None, description="指定 API 配置 id；None 表示按优先级轮询")
+    config_id: Optional[str] = Field(default=None, description="指定 API 配置 id；None 表示按优先级轮询",
+                                     pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
 class PatchSectionRequest(BaseModel):
-    content: str
+    content: str = Field(..., max_length=500_000)
 
 
 async def _run_regen(task: GenerationTask, body: RegenStartRequest, config_id: Optional[str]) -> None:
@@ -622,6 +627,8 @@ async def start_regen(body: RegenStartRequest):
 @router.patch("/generate/{task_id}/section/{section_id}")
 async def patch_section_content(task_id: str, section_id: str, body: PatchSectionRequest):
     """手动编辑后同步更新主任务的章节内容（供下载时使用）"""
+    validate_uuid(task_id, "task_id")
+    validate_uuid(section_id, "section_id")
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")

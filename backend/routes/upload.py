@@ -22,6 +22,7 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.parser import parse_document
+from utils.validators import validate_uuid
 from utils.sse import (
     sse_parse_start, sse_parse_progress, sse_parse_section,
     sse_parse_done, sse_error,
@@ -86,6 +87,7 @@ class ParseJobStore:
             old_job = self._jobs.pop(old_id, None)
             if old_job:
                 old_job.file_data = b""
+                old_job.result = None
 
 
 parse_job_store = ParseJobStore()
@@ -157,6 +159,7 @@ async def parse_stream(job_id: str):
       parse_done     — 解析完成，携带完整目录
       error          — 解析失败
     """
+    validate_uuid(job_id, "job_id")
     job = parse_job_store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"解析任务不存在：{job_id}")

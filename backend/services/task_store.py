@@ -179,7 +179,9 @@ class TaskStore:
         """保留最新的 MAX_TASKS 个任务（调用方已持有锁）"""
         while len(self._order) > self.MAX_TASKS:
             old_id = self._order.pop(0)
-            self._tasks.pop(old_id, None)
+            old_task = self._tasks.pop(old_id, None)
+            if old_task and old_task.cancel_event is not None:
+                old_task.cancel_event.set()
 
 
 # 全局单例

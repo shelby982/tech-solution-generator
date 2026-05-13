@@ -48,11 +48,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS（开发阶段允许所有来源）────────────────
+# ── CORS（本服务为本地单机部署，仅允许同源）──
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -64,10 +64,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.exception(f"未处理的异常 [{request.method} {request.url.path}]: {exc}")
     return JSONResponse(
         status_code=500,
-        content={
-            "detail": "服务器内部错误，请稍后重试",
-            "error_type": type(exc).__name__,
-        },
+        content={"detail": "服务器内部错误，请稍后重试"},
     )
 
 

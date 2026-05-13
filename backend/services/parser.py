@@ -867,6 +867,7 @@ def _parse_doc_via_convert(
 ) -> ParsedDocument:
     import subprocess
     import tempfile
+    import shutil
 
     if progress_callback:
         progress_callback("检测到旧版 .doc 格式，正在转换...", 0, -1)
@@ -874,39 +875,43 @@ def _parse_doc_via_convert(
     out_dir = tempfile.mkdtemp(prefix="tsg_doc_convert_")
     stem = Path(filename).stem if filename else "document"
 
-    if isinstance(file_source, str):
-        doc_path = file_source
-    else:
-        doc_path = os.path.join(out_dir, f"{stem}.doc")
-        with open(doc_path, "wb") as f:
-            f.write(file_source.read())
-
     try:
-        result = subprocess.run(
-            ["soffice", "--headless", "--convert-to", "docx", doc_path, "--outdir", out_dir],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            raise ValueError(f".doc 转换失败：{result.stderr.strip()}")
-    except FileNotFoundError:
-        raise ValueError(
-            "该文件实际为旧版 .doc 格式（非 .docx），"
-            "服务器未安装 LibreOffice 无法自动转换。"
-            "请先用 Word 或 WPS 将文件「另存为」.docx 格式后重新上传。"
-        )
-    except subprocess.TimeoutExpired:
-        raise ValueError(".doc 转换超时（120s），请尝试上传较小的文件")
+        if isinstance(file_source, str):
+            doc_path = file_source
+        else:
+            doc_path = os.path.join(out_dir, f"{stem}.doc")
+            with open(doc_path, "wb") as f:
+                f.write(file_source.read())
 
-    converted = Path(out_dir) / f"{stem}.docx"
-    if not converted.exists():
-        raise ValueError(
-            "该文件实际为旧版 .doc 格式，自动转换失败。"
-            "请先用 Word 或 WPS 将文件「另存为」.docx 格式后重新上传。"
-        )
+        try:
+            result = subprocess.run(
+                ["soffice", "--headless", "--convert-to", "docx", doc_path, "--outdir", out_dir],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise ValueError(f".doc 转换失败：{result.stderr.strip()}")
+        except FileNotFoundError:
+            raise ValueError(
+                "该文件实际为旧版 .doc 格式（非 .docx），"
+                "服务器未安装 LibreOffice 无法自动转换。"
+                "请先用 Word 或 WPS 将文件「另存为」.docx 格式后重新上传。"
+            )
+        except subprocess.TimeoutExpired:
+            raise ValueError(".doc 转换超时（120s），请尝试上传较小的文件")
 
-    if progress_callback:
-        progress_callback("格式转换完成，开始解析...", 0, -1)
+        converted = Path(out_dir) / f"{stem}.docx"
+        if not converted.exists():
+            raise ValueError(
+                "该文件实际为旧版 .doc 格式，自动转换失败。"
+                "请先用 Word 或 WPS 将文件「另存为」.docx 格式后重新上传。"
+            )
 
-    return parse_docx(str(converted), filename, progress_callback)
+        if progress_callback:
+            progress_callback("格式转换完成，开始解析...", 0, -1)
+
+        return parse_docx(str(converted), filename, progress_callback)
+
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
