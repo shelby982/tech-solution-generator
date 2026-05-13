@@ -229,12 +229,180 @@
           <button id="startBtn"
             class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white
                    px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
-            🚀 开始生成方案
+            ✨ 提炼规范书核心内容
           </button>
         </div>
       </div>
     </div>
   </div><!-- /uploadView -->
+
+
+  <!-- ══ EXTRACT VIEW ══ -->
+  <div id="extractView" class="hidden">
+
+    <!-- 提炼中 loading 状态 -->
+    <div id="extractLoading" class="flex flex-col items-center justify-center py-24 gap-4">
+      <div class="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin"></div>
+      <p class="text-gray-600 font-medium">正在提炼规范书核心内容...</p>
+      <p class="text-gray-400 text-sm">AI 正在分析文档结构，提取项目关键信息</p>
+    </div>
+
+    <!-- 提炼完成：摘要 + 模板选择 -->
+    <div id="extractResult" class="hidden space-y-5">
+
+      <!-- 摘要卡片（可编辑） -->
+      <div id="extractSummaryCard" class="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-lg select-none">📋</span>
+          <h3 class="font-semibold text-blue-800 text-sm">规范书核心内容</h3>
+          <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
+          <span class="flex-1"></span>
+          <button id="extractSummaryEditBtn"
+            class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">
+            ✏️ 编辑
+          </button>
+        </div>
+        <div id="extractSummaryView" class="md text-gray-700 text-sm leading-relaxed"></div>
+        <div id="extractSummaryEditArea" class="hidden space-y-2">
+          <textarea id="extractSummaryTextarea"
+            class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y
+                   focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            rows="12" maxlength="5000"></textarea>
+          <div class="flex items-center gap-2 justify-end">
+            <button id="extractSummaryCancelBtn"
+              class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">
+              取消
+            </button>
+            <button id="extractSummarySaveBtn"
+              class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">
+              保存
+            </button>
+          </div>
+        </div>
+        <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
+          此概述将作为全局背景注入所有章节的生成 Prompt，可手动修正后再开始生成。
+        </p>
+      </div>
+
+      <!-- 模板选择卡片 -->
+      <div class="bg-white border border-gray-200 rounded-xl px-5 py-4">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-lg select-none">📝</span>
+          <h3 class="font-semibold text-gray-800 text-sm">选择生成模式</h3>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <!-- 选项 A：直接扩写 -->
+          <label id="templateOptionA"
+            class="flex flex-col gap-2 border-2 border-indigo-500 bg-indigo-50 rounded-xl p-4 cursor-pointer transition">
+            <input type="radio" name="templateMode" value="expand" class="hidden" checked>
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full border-2 border-indigo-500 bg-indigo-500 flex items-center justify-center shrink-0">
+                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+              </span>
+              <span class="text-sm font-semibold text-indigo-700">直接扩写</span>
+            </div>
+            <p class="text-xs text-gray-500 leading-relaxed">
+              AI 按照规范书原文结构逐段扩写，保留原文逻辑框架，补充背景说明和应用场景。
+            </p>
+          </label>
+          <!-- 选项 B：自定义模板 -->
+          <label id="templateOptionB"
+            class="flex flex-col gap-2 border-2 border-gray-200 bg-white rounded-xl p-4 cursor-pointer hover:border-indigo-300 transition">
+            <input type="radio" name="templateMode" value="custom" class="hidden">
+            <div class="flex items-center gap-2">
+              <span id="templateBRadio"
+                class="w-4 h-4 rounded-full border-2 border-gray-300 shrink-0"></span>
+              <span class="text-sm font-semibold text-gray-700">自定义模板</span>
+            </div>
+            <p class="text-xs text-gray-500 leading-relaxed">
+              自定义每章节的输出结构和风格，AI 将参照你编写的 Markdown 模板进行生成。
+            </p>
+            <button id="openTemplateEditorBtn"
+              class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400
+                     rounded-lg px-3 py-1.5 transition w-fit">
+              ✏️ 编辑模板内容
+            </button>
+          </label>
+        </div>
+        <!-- 已编辑模板预览（自定义模板选中时显示） -->
+        <div id="templatePreview" class="hidden mt-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-medium text-gray-600">当前模板预览</span>
+            <button id="editTemplateAgainBtn" class="text-xs text-indigo-500 hover:text-indigo-700">重新编辑</button>
+          </div>
+          <pre id="templatePreviewText" class="text-xs text-gray-500 whitespace-pre-wrap line-clamp-4 font-mono"></pre>
+        </div>
+      </div>
+
+      <!-- 底部操作栏 -->
+      <div class="flex items-center justify-between">
+        <button id="extractBackBtn"
+          class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
+                 px-4 py-2 rounded-lg text-sm transition">
+          ← 返回重新上传
+        </button>
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2 text-sm">
+            <label for="extractTargetWordsInput" class="text-gray-500 shrink-0">每章节目标字数</label>
+            <input type="number" id="extractTargetWordsInput" value="500" min="100" max="10000" step="100"
+              class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
+                     focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+            <span class="text-gray-400">字</span>
+          </div>
+          <button id="startGenerateBtn"
+            class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white
+                   px-6 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+            🚀 开始生成方案
+          </button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /extractView -->
+
+
+  <!-- ══ 模板编辑弹窗 ══ -->
+  <div id="templateModal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <div>
+          <h2 class="text-base font-bold text-gray-800">编辑生成模板</h2>
+          <p class="text-xs text-gray-400 mt-0.5">使用 Markdown 格式描述各章节的输出结构，AI 将参照此模板风格生成内容</p>
+        </div>
+        <button id="templateModalClose" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      </div>
+      <div class="flex-1 overflow-y-auto px-6 py-4">
+        <textarea id="templateEditorTextarea"
+          class="w-full h-72 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-mono
+                 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          maxlength="10000"
+          placeholder="示例模板（可修改或清空后重新编写）：
+
+## 背景概述
+（简要说明本章节的建设背景和必要性）
+
+## 建设目标
+（列出本章节的核心目标，使用有序列表）
+
+## 技术方案
+（详细描述技术实现方案，可包含子标题）
+
+## 预期效果
+（说明实施后的预期效果和价值）"></textarea>
+        <p class="text-xs text-gray-400 mt-2">字数限制：10,000 字 · 支持标准 Markdown 语法</p>
+      </div>
+      <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 shrink-0">
+        <button id="templateModalCancel"
+          class="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-lg border border-gray-200 hover:border-gray-300 transition">
+          取消
+        </button>
+        <button id="templateModalConfirm"
+          class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-medium transition">
+          确认模板
+        </button>
+      </div>
+    </div>
+  </div>
 
 
   <!-- ══ GENERATE VIEW ══ -->
@@ -814,6 +982,9 @@ const S = {
   totalWords: 0,      // 已生成总字数
   sectionWords: {},   // secId → 字数
   scrollLocked: null, // 锁定滚动到指定 secId（用户编辑/重新生成时）
+  docSummary: '',    // AI 提炼的项目概述（用于 regen 上下文注入）
+  docTemplate: '',   // 用户自定义生成模板（空=直接扩写）
+  useTemplate: false,// 是否启用自定义模板
 };
 
 const DEFAULTS = {
@@ -1497,21 +1668,182 @@ $('cancelEditBtn').addEventListener('click', showAddForm);
 /* ══════════════════════════════════════════
    GENERATE
 ══════════════════════════════════════════ */
-$('startBtn').addEventListener('click', startGenerate);
+$('startBtn').addEventListener('click', startExtract);
 
-async function startGenerate() {
+/* ── 第一阶段：提炼规范书核心内容 ── */
+async function startExtract() {
   if (!S.sections.length) { alert('请先上传技术规范书'); return; }
   if (!S.configSaved) { openConfig(); return; }
 
-  /* 读取字数设置 */
+  // 防并发：提炼期间禁用按钮
+  const btn = $('startBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提炼中...';
+
+  // 切换到提炼视图（loading 状态）
+  $('uploadView').classList.add('hidden');
+  $('extractView').classList.remove('hidden');
+  $('extractLoading').classList.remove('hidden');
+  $('extractResult').classList.add('hidden');
+  S.docSummary = '';
+  S.docTemplate = '';
+  S.useTemplate = false;
+
+  try {
+    const res = await fetch('/api/generate/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sections: S.sections.map(s => ({
+          id: s.id, title: s.title, content: s.content_hint || '', level: s.level,
+        })),
+      }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const msg = typeof e.detail === 'string' ? e.detail : '提炼失败，请重试';
+      throw new Error(msg);
+    }
+    const { summary } = await res.json();
+    S.docSummary = summary;
+    showExtractResult(summary);
+  } catch (e) {
+    alert('提炼失败：' + e.message);
+    $('extractView').classList.add('hidden');
+    $('uploadView').classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ 提炼规范书核心内容';
+  }
+}
+
+/* ── 显示提炼结果视图 ── */
+function showExtractResult(summary) {
+  $('extractLoading').classList.add('hidden');
+  $('extractResult').classList.remove('hidden');
+
+  // 渲染摘要
+  $('extractSummaryView').innerHTML = safeParse(summary);
+  // 确保摘要处于只读态（二次提炼后重置编辑态）
+  $('extractSummaryView').classList.remove('hidden');
+  $('extractSummaryEditArea').classList.add('hidden');
+  $('extractSummaryEditBtn').classList.remove('hidden');
+
+  // 重置模板选择 UI 到默认「直接扩写」状态（修复二：二次提炼 UI 状态不重置）
+  const optA = $('templateOptionA');
+  const optB = $('templateOptionB');
+  const radioB = $('templateBRadio');
+  optA.className = optA.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+  optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+  radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
+  radioB.innerHTML = '';
+  $('templatePreview').classList.add('hidden');
+  document.querySelector('input[name="templateMode"][value="expand"]').checked = true;
+
+  // 摘要编辑交互（.onclick 赋值，幂等安全）
+  $('extractSummaryEditBtn').onclick = () => {
+    $('extractSummaryTextarea').value = S.docSummary;
+    $('extractSummaryView').classList.add('hidden');
+    $('extractSummaryEditArea').classList.remove('hidden');
+    $('extractSummaryEditBtn').classList.add('hidden');
+    $('extractSummaryTextarea').focus();
+  };
+  $('extractSummaryCancelBtn').onclick = () => {
+    $('extractSummaryView').classList.remove('hidden');
+    $('extractSummaryEditArea').classList.add('hidden');
+    $('extractSummaryEditBtn').classList.remove('hidden');
+  };
+  $('extractSummarySaveBtn').onclick = () => {
+    const v = $('extractSummaryTextarea').value.trim();
+    if (!v) return;
+    S.docSummary = v;
+    $('extractSummaryView').innerHTML = safeParse(v);
+    $('extractSummaryView').classList.remove('hidden');
+    $('extractSummaryEditArea').classList.add('hidden');
+    $('extractSummaryEditBtn').classList.remove('hidden');
+  };
+
+  // 模板选择交互（修复一：改为 .onchange 赋值避免重复绑定；修复三：切回自定义模板时刷新预览）
+  document.querySelectorAll('input[name="templateMode"]').forEach(radio => {
+    radio.onchange = () => {
+      const isCustom = radio.value === 'custom';
+      S.useTemplate = isCustom;
+
+      if (isCustom) {
+        optA.className = optA.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+        optB.className = optB.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+        radioB.className = radioB.className.replace('border-gray-300', 'border-indigo-500 bg-indigo-500');
+        radioB.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-white block mx-auto"></span>';
+        if (S.docTemplate) {
+          // 修复三：已有模板内容时直接显示预览，不强制重开编辑器
+          $('templatePreviewText').textContent = S.docTemplate.length > 300
+            ? S.docTemplate.slice(0, 300) + '...' : S.docTemplate;
+          $('templatePreview').classList.remove('hidden');
+        } else {
+          openTemplateModal();
+        }
+      } else {
+        optA.className = optA.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+        optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+        radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
+        radioB.innerHTML = '';
+        $('templatePreview').classList.add('hidden');
+      }
+    };
+  });
+
+  $('openTemplateEditorBtn').onclick = e => { e.preventDefault(); openTemplateModal(); };
+  $('editTemplateAgainBtn').onclick = openTemplateModal;
+}
+
+/* ── 模板弹窗 ── */
+function openTemplateModal() {
+  $('templateEditorTextarea').value = S.docTemplate;
+  $('templateModal').classList.remove('hidden');
+  $('templateEditorTextarea').focus();
+}
+function closeTemplateModal() {
+  $('templateModal').classList.add('hidden');
+}
+$('templateModalClose').addEventListener('click', closeTemplateModal);
+$('templateModalCancel').addEventListener('click', closeTemplateModal);
+$('templateModal').addEventListener('click', e => {
+  if (e.target === $('templateModal')) closeTemplateModal();
+});
+$('templateModalConfirm').addEventListener('click', () => {
+  const t = $('templateEditorTextarea').value.trim();
+  S.docTemplate = t;
+  closeTemplateModal();
+  if (t) {
+    $('templatePreviewText').textContent = t.length > 300 ? t.slice(0, 300) + '...' : t;
+    $('templatePreview').classList.remove('hidden');
+  } else {
+    $('templatePreview').classList.add('hidden');
+  }
+});
+
+/* ── 返回重新上传 ── */
+$('extractBackBtn').addEventListener('click', () => {
+  $('extractView').classList.add('hidden');
+  $('uploadView').classList.remove('hidden');
+});
+
+/* ── 第二阶段：开始生成 ── */
+$('startGenerateBtn').addEventListener('click', startGenerate);
+
+async function startGenerate() {
+  if (!S.sections.length) return;
+  if (!S.configSaved) { openConfig(); return; }
+
+  /* 读取字数设置（优先从提炼视图的字数输入框取，兜底用上传视图的） */
   S.targetWords = Math.max(100, Math.min(10000,
-    parseInt($('targetWordsInput')?.value || '500') || 500));
+    parseInt($('extractTargetWordsInput')?.value || $('targetWordsInput')?.value || '500') || 500));
   S.totalWords   = 0;
   S.sectionWords = {};
   $('totalWordsDisplay').classList.add('hidden');
 
   /* 切换视图 */
-  $('uploadView').classList.add('hidden');
+  $('extractView').classList.add('hidden');
   $('generateView').classList.remove('hidden');
   S.totalSections  = S.sections.length;
   S.completedCount = 0;
@@ -1525,7 +1857,7 @@ async function startGenerate() {
   updateProgress(0, S.totalSections);
   renderGenTOC();
 
-  /* POST /api/generate/start */
+  /* POST /api/generate/start（携带已提炼摘要和模板，跳过后端重复提炼） */
   let taskId;
   try {
     const res = await fetch('/api/generate/start', {
@@ -1536,6 +1868,8 @@ async function startGenerate() {
           id: s.id, title: s.title, content: s.content_hint || '', level: s.level,
         })),
         target_words: S.targetWords,
+        doc_summary: S.docSummary,
+        doc_template: S.useTemplate ? S.docTemplate : '',
       }),
     });
     if (!res.ok) {
@@ -1550,7 +1884,7 @@ async function startGenerate() {
     S.taskId = taskId;
   } catch (e) {
     alert('启动生成失败：' + e.message);
-    $('uploadView').classList.remove('hidden');
+    $('extractView').classList.remove('hidden');
     $('generateView').classList.add('hidden');
     return;
   }
@@ -1658,6 +1992,7 @@ function connectSSE(url) {
   /* ── 文档摘要事件 ── */
   es.addEventListener('doc_summary', e => {
     const d = JSON.parse(e.data);
+    S.docSummary = d.summary;
     $('contentEmpty').classList.add('hidden');
     $('contentScroll').classList.remove('hidden');
     const card = document.createElement('div');
@@ -1668,9 +2003,62 @@ function connectSSE(url) {
         <span class="text-lg select-none">📋</span>
         <h3 class="font-semibold text-blue-800 text-sm">项目概述</h3>
         <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
+        <span class="flex-1"></span>
+        <button id="summaryEditBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">✏️ 编辑</button>
       </div>
-      <div class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>`;
+      <div id="summaryViewArea" class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>
+      <div id="summaryEditArea" class="hidden space-y-2">
+        <textarea id="summaryTextarea" class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" rows="10" maxlength="5000"></textarea>
+        <div class="flex items-center gap-2 justify-end">
+          <button id="summaryCancelBtn" class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
+          <button id="summarySaveBtn" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">保存</button>
+        </div>
+      </div>
+      <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
+        此概述将作为全局背景注入所有章节的生成 Prompt。如 AI 提炼有误，可手动编辑后再生成。
+      </p>`;
     $('completedSections').prepend(card);
+
+    /* 编辑 / 保存 / 取消 交互 */
+    card.querySelector('#summaryEditBtn').addEventListener('click', () => {
+      const ta = card.querySelector('#summaryTextarea');
+      ta.value = S.docSummary;
+      card.querySelector('#summaryViewArea').classList.add('hidden');
+      card.querySelector('#summaryEditArea').classList.remove('hidden');
+      card.querySelector('#summaryEditBtn').classList.add('hidden');
+      ta.focus();
+    });
+
+    card.querySelector('#summaryCancelBtn').addEventListener('click', () => {
+      card.querySelector('#summaryViewArea').classList.remove('hidden');
+      card.querySelector('#summaryEditArea').classList.add('hidden');
+      card.querySelector('#summaryEditBtn').classList.remove('hidden');
+    });
+
+    card.querySelector('#summarySaveBtn').addEventListener('click', async () => {
+      const newSummary = card.querySelector('#summaryTextarea').value.trim();
+      if (!newSummary) return;
+      const btn = card.querySelector('#summarySaveBtn');
+      btn.textContent = '保存中...';
+      btn.disabled = true;
+      try {
+        if (S.taskId) {
+          await fetch(`/api/generate/${S.taskId}/summary`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary: newSummary }),
+          });
+        }
+        S.docSummary = newSummary;
+        card.querySelector('#summaryViewArea').innerHTML = safeParse(newSummary);
+        card.querySelector('#summaryViewArea').classList.remove('hidden');
+        card.querySelector('#summaryEditArea').classList.add('hidden');
+        card.querySelector('#summaryEditBtn').classList.remove('hidden');
+      } catch {
+        btn.textContent = '保存';
+        btn.disabled = false;
+      }
+    });
   });
 
   es.addEventListener('section_start', e => {
@@ -2023,6 +2411,8 @@ async function startRegen(secId) {
         section_content: entry.originalContent,
         target_words: words,
         extra_prompt: extra,
+        doc_summary: S.docSummary,
+        doc_template: S.useTemplate ? S.docTemplate : '',
         config_id: finalConfigId,
       }),
     });
@@ -2170,7 +2560,9 @@ $('downloadDocxBtn').addEventListener('click', () => {
 $('backBtn').addEventListener('click', () => {
   if (S.eventSource) { S.normalClose = true; S.eventSource.close(); S.eventSource = null; }
   $('generateView').classList.add('hidden');
-  $('uploadView').classList.remove('hidden');
+  $('extractView').classList.remove('hidden');
+  $('extractLoading').classList.add('hidden');
+  $('extractResult').classList.remove('hidden');
 });
 
 

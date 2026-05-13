@@ -64,6 +64,7 @@ class GenerationTask:
     status: TaskStatus = TaskStatus.PENDING
     error_message: str = ""
     doc_summary: str = ""
+    doc_template: str = ""
     results: Dict[str, SectionResult] = field(default_factory=dict)
 
     # 由路由层在 async 上下文注入，避免在模块导入时绑定到错误的事件循环
@@ -143,13 +144,13 @@ class TaskStore:
         self._order: list[str] = []          # 按创建顺序记录 task_id
         self._lock = threading.Lock()
 
-    def create(self, sections: list, target_words: int = 500) -> "GenerationTask":
+    def create(self, sections: list, target_words: int = 500, doc_summary: str = "", doc_template: str = "") -> "GenerationTask":
         """
         创建新任务并存储。
         注意：queue 和 cancel_event 由调用方在 async 上下文中设置。
         """
         task_id = str(uuid.uuid4())
-        task = GenerationTask(task_id=task_id, sections=sections, target_words=target_words)
+        task = GenerationTask(task_id=task_id, sections=sections, target_words=target_words, doc_summary=doc_summary, doc_template=doc_template)
         with self._lock:
             self._tasks[task_id] = task
             self._order.append(task_id)

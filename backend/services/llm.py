@@ -108,51 +108,64 @@ async def generate_doc_summary(
     sections: list[dict],
 ) -> str:
     """
-    根据所有章节标题和内容摘要，生成整篇文档的项目概述（~500字）。
+    根据所有章节标题和内容，生成整篇文档的结构化项目概述。
     非流式调用，返回完整文本。
     """
-    # 拼接所有章节的标题和内容作为输入
+    # 按内容长度加权分配字符配额，内容丰富的节获得更多配额
+    TOTAL_BUDGET = 8000
+    sections_with_content = [(s, len(s.get("content", ""))) for s in sections]
+    total_len = sum(l for _, l in sections_with_content) or 1
+
     input_parts = []
-    for sec in sections:
+    for sec, content_len in sections_with_content:
         title = sec.get("title", "")
         content = sec.get("content", "")
         if content:
-            input_parts.append(f"【{title}】{content[:300]}")
+            # 按内容比例分配配额，最少 100 字、最多 1500 字
+            quota = max(100, min(1500, int(TOTAL_BUDGET * content_len / total_len)))
+            input_parts.append(f"【{title}】\n{content[:quota]}")
         else:
             input_parts.append(f"【{title}】")
 
-    doc_outline = "\n".join(input_parts)
-    # 限制输入长度避免超 token
-    if len(doc_outline) > 6000:
-        doc_outline = doc_outline[:6000] + "\n..."
+    doc_outline = "\n\n".join(input_parts)
+    if len(doc_outline) > TOTAL_BUDGET:
+        doc_outline = doc_outline[:TOTAL_BUDGET] + "\n..."
 
     system_prompt = (
         "你是一位专业的技术方案分析专家，擅长从技术规范书中忠实提炼项目核心信息。"
         "你只基于原文内容进行提炼，不推断或补充原文未明确提及的信息。"
+        "提炼结果必须保留原文中所有数值、技术指标、标准编号，不得模糊化处理。"
     )
     user_prompt = (
-        "以下是一份技术规范书的章节目录和各章节原文内容摘要：\n\n"
+        "以下是一份技术规范书的章节目录和各章节原文内容：\n\n"
         f"---\n{doc_outline}\n---\n\n"
-        "请严格基于以上原文内容，提炼出该项目的整体概述，包括：\n"
-        "1. 项目背景与目标\n"
-        "2. 核心技术要求和约束条件\n"
-        "3. 主要工作内容范围\n\n"
+        "请严格基于以上原文，按如下结构提炼项目核心信息：\n\n"
+        "## 项目基本信息\n"
+        "- 项目名称：（从原文提取，如无则填【未明确】）\n"
+        "- 建设单位（甲方）：（从原文提取，如无则填【未明确】）\n"
+        "- 承建单位（乙方）：（从原文提取，如无则填【未明确】）\n\n"
+        "## 核心技术要求\n"
+        "（每条一行，用-列出，必须保留原文中的具体数值和技术指标）\n\n"
+        "## 硬性约束条件\n"
+        "（工期要求、验收标准、引用的规范标准编号等，每条一行）\n\n"
+        "## 主要建设范围\n"
+        "（主要功能模块或建设内容，每条一行）\n\n"
         "要求：\n"
-        "- 字数控制在 500 字左右\n"
         "- 所有内容严格来源于原文，不添加原文未提及的内容\n"
-        "- 语言精炼、信息密度高，突出关键技术指标和约束\n"
-        "- 使用 Markdown 格式"
+        "- 保留所有数值、百分比、标准编号等关键技术参数原文\n"
+        "- 如原文中某项信息确实不存在，该条目填【原文未提及】\n"
+        "- 总字数控制在 800 字以内"
     )
 
     if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-        return await _generate_oneshot_openai(config, system_prompt, user_prompt)
+        return await _generate_oneshot_openai(config, system_prompt, user_prompt, max_tokens=2000)
     elif config.provider == "claude":
-        return await _generate_oneshot_claude(config, system_prompt, user_prompt)
+        return await _generate_oneshot_claude(config, system_prompt, user_prompt, max_tokens=2000)
     else:
         raise ValueError(f"不支持的 provider：{config.provider}")
 
 
-async def _generate_oneshot_openai(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
+async def _generate_oneshot_openai(config: LLMConfig, system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(
@@ -166,12 +179,12 @@ async def _generate_oneshot_openai(config: LLMConfig, system_prompt: str, user_p
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=1500,
+        max_tokens=max_tokens,
     )
     return response.choices[0].message.content or ""
 
 
-async def _generate_oneshot_claude(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
+async def _generate_oneshot_claude(config: LLMConfig, system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str:
     import anthropic
 
     client = anthropic.AsyncAnthropic(
@@ -183,7 +196,7 @@ async def _generate_oneshot_claude(config: LLMConfig, system_prompt: str, user_p
         model=config.model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
-        max_tokens=1500,
+        max_tokens=max_tokens,
     )
     return message.content[0].text if message.content else ""
 
@@ -199,6 +212,7 @@ async def stream_generate(
     target_words: int = 500,
     doc_summary: str = "",
     extra_prompt: str = "",
+    doc_template: str = "",
 ) -> AsyncIterator[str]:
     """
     流式生成单个章节的技术方案内容。
@@ -223,9 +237,11 @@ async def stream_generate(
     # 构建 user_prompt：先注入项目整体摘要，再给出章节内容
     parts = []
     if doc_summary:
+        # 截断保护：摘要最多注入 3000 字符，避免超窗
+        safe_summary = doc_summary[:3000] + ("\n..." if len(doc_summary) > 3000 else "")
         parts.append(
             f"以下是该项目的整体概述：\n\n"
-            f"===\n{doc_summary}\n===\n\n"
+            f"===\n{safe_summary}\n===\n\n"
         )
     parts.append(
         f"以下是技术规范书中关于「{section_title}」的原文内容结构：\n\n"
@@ -240,6 +256,15 @@ async def stream_generate(
         f"5. 专业适配：贴合平台运营、资源汇聚、系统整合、生态建设、服务输出、账号统一、办公联动等政企信息化通用专业语境，用词贴合汇报材料、建设方案、平台介绍文案风格。"
     )
     user_prompt = "".join(parts)
+
+    if doc_template:
+        # 截断保护：模板最多注入 5000 字符
+        safe_template = doc_template[:5000] + ("\n..." if len(doc_template) > 5000 else "")
+        user_prompt += (
+            f"\n\n请严格参照以下模板的结构和风格来组织本章节的输出内容，"
+            f"保持模板的段落结构顺序，用实际内容填充各部分：\n\n"
+            f"===模板===\n{safe_template}\n===模板结束==="
+        )
 
     if extra_prompt:
         user_prompt += f"\n\n额外优化要求：{extra_prompt}"
@@ -316,6 +341,7 @@ async def dispatch_stream_generate(
     target_words: int = 500,
     doc_summary: str = "",
     extra_prompt: str = "",
+    doc_template: str = "",
 ) -> AsyncGenerator[str, None]:
     """
     从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
@@ -336,7 +362,7 @@ async def dispatch_stream_generate(
         started = False  # 是否已开始 yield token
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
-            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary, extra_prompt):
+            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary, extra_prompt, doc_template):
                 started = True
                 yield token
             return  # 成功，退出

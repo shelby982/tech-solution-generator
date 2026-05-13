@@ -57,7 +57,7 @@ router = APIRouter(tags=["generate"])
 # ─────────────────────────────────────────────
 
 class SectionInput(BaseModel):
-    id: str = Field(..., min_length=1, description="章节 ID，如 s1")
+    id: str = Field(..., min_length=1, max_length=100, description="章节 ID，如 s1")
     title: str = Field(..., min_length=1, max_length=200, description="章节标题")
     content: str = Field(default="", description="章节原始内容（用于 LLM 上下文，可为空）", max_length=200_000)
     level: int = Field(default=1, ge=1, le=4, description="章节层级 1-4")
@@ -76,6 +76,8 @@ class GenerateStartRequest(BaseModel):
         le=10000,
         description="每章节目标字数（100～10000），默认 500",
     )
+    doc_summary: str = Field(default="", max_length=5000, description="已提炼的摘要，非空时跳过内置提炼步骤")
+    doc_template: str = Field(default="", max_length=10000, description="生成模板（Markdown），空=直接扩写")
 
 
 class GenerateStartResponse(BaseModel):
@@ -114,17 +116,21 @@ async def _run_generation(task: GenerationTask) -> None:
         sections = task.sections
         total = len(sections)
 
-        # ── 第一步：生成文档摘要 ──────────────────
-        logger.info(f"[{task.task_id}] 开始生成文档摘要...")
-        try:
-            configs, rr_index = config_store.get_configs_and_next_index()
-            summary = await dispatch_doc_summary(configs, rr_index, sections)
-            task.doc_summary = summary
-            await task.queue.put(("doc_summary", {"summary": summary}))
-            logger.info(f"[{task.task_id}] 文档摘要生成完成（{len(summary)} 字符）")
-        except Exception as e:
-            logger.warning(f"[{task.task_id}] 文档摘要生成失败，继续生成章节：{e}")
-            task.doc_summary = ""
+        # ── 第一步：生成文档摘要（若已提炼则跳过 LLM 调用）──
+        if task.doc_summary:
+            logger.info(f"[{task.task_id}] 使用已提炼摘要，跳过 LLM 提炼步骤（{len(task.doc_summary)} 字符）")
+            await task.queue.put(("doc_summary", {"summary": task.doc_summary}))
+        else:
+            logger.info(f"[{task.task_id}] 开始生成文档摘要...")
+            try:
+                configs, rr_index = config_store.get_configs_and_next_index()
+                summary = await dispatch_doc_summary(configs, rr_index, sections)
+                task.doc_summary = summary
+                await task.queue.put(("doc_summary", {"summary": summary}))
+                logger.info(f"[{task.task_id}] 文档摘要生成完成（{len(summary)} 字符）")
+            except Exception as e:
+                logger.warning(f"[{task.task_id}] 文档摘要生成失败，继续生成章节：{e}")
+                task.doc_summary = ""
 
         # ── 取消检查 ──────────────────────────────
         if task.cancel_event.is_set():
@@ -181,6 +187,7 @@ async def _run_generation(task: GenerationTask) -> None:
                     async for token_text in dispatch_stream_generate(
                         configs, rr_index, sec_title, sec_content, task.target_words,
                         doc_summary=task.doc_summary,
+                        doc_template=task.doc_template,
                     ):
                         if task.cancel_event.is_set():
                             break
@@ -368,6 +375,30 @@ async def _sse_event_generator(
 # 路由定义
 # ─────────────────────────────────────────────
 
+class ExtractRequest(BaseModel):
+    sections: list[SectionInput] = Field(..., min_length=1, max_length=1000)
+
+
+@router.post("/generate/extract")
+async def extract_doc_summary(request_body: ExtractRequest):
+    """
+    独立提炼端点：接收章节列表，返回结构化项目概述。
+    非流式，前端 loading 等待结果。
+    """
+    if not config_store.is_configured():
+        raise HTTPException(status_code=400, detail="未配置 API Key，请先在「设置」页面完成配置")
+
+    sections = [s.model_dump() for s in request_body.sections]
+    try:
+        configs, rr_index = config_store.get_configs_and_next_index()
+        summary = await dispatch_doc_summary(configs, rr_index, sections)
+    except Exception as e:
+        logger.exception(f"提炼文档摘要失败：{e}")
+        raise HTTPException(status_code=500, detail="规范书核心内容提炼失败，请稍后重试")
+
+    return {"summary": summary}
+
+
 @router.post("/generate/start", response_model=GenerateStartResponse)
 async def start_generate(request_body: GenerateStartRequest):
     """
@@ -388,7 +419,12 @@ async def start_generate(request_body: GenerateStartRequest):
     sections = [s.model_dump() for s in request_body.sections]
 
     # 创建任务（附带 target_words）
-    task = task_store.create(sections, target_words=request_body.target_words)
+    task = task_store.create(
+        sections,
+        target_words=request_body.target_words,
+        doc_summary=request_body.doc_summary,
+        doc_template=request_body.doc_template,
+    )
 
     # 在 async 上下文内创建 asyncio 原语（确保绑定到当前事件循环）
     task.queue = asyncio.Queue()
@@ -508,12 +544,29 @@ class RegenStartRequest(BaseModel):
     section_content: str = Field(default="", description="章节原文（给 LLM 参考）", max_length=200_000)
     target_words: int = Field(default=500, ge=100, le=10000)
     extra_prompt: str = Field(default="", max_length=1000, description="追加给 LLM 的优化说明")
+    doc_summary: str = Field(default="", max_length=5000, description="全局项目摘要（继承自主任务）")
+    doc_template: str = Field(default="", max_length=10000, description="生成模板（继承自主任务）")
     config_id: Optional[str] = Field(default=None, description="指定 API 配置 id；None 表示按优先级轮询",
                                      pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
 class PatchSectionRequest(BaseModel):
     content: str = Field(..., max_length=500_000)
+
+
+class PatchSummaryRequest(BaseModel):
+    summary: str = Field(..., max_length=5000)
+
+
+@router.patch("/generate/{task_id}/summary")
+async def patch_doc_summary(task_id: str, body: PatchSummaryRequest):
+    """用户手动修改项目概述后，同步更新 task.doc_summary"""
+    validate_uuid(task_id, "task_id")
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
+    task.doc_summary = body.summary
+    return {"ok": True}
 
 
 async def _run_regen(task: GenerationTask, body: RegenStartRequest, config_id: Optional[str]) -> None:
@@ -547,7 +600,8 @@ async def _run_regen(task: GenerationTask, body: RegenStartRequest, config_id: O
             try:
                 async for token_text in dispatch_stream_generate(
                     configs, rr_index, sec_title, body.section_content,
-                    body.target_words, doc_summary="", extra_prompt=body.extra_prompt,
+                    body.target_words, doc_summary=body.doc_summary,
+                    extra_prompt=body.extra_prompt, doc_template=body.doc_template,
                 ):
                     if task.cancel_event.is_set():
                         break
