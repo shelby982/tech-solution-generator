@@ -73,6 +73,41 @@
                   color:#d97706; background:#fffbeb; border:1px solid #fde68a;
                   border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
   </style>
+  <style>
+    @keyframes bubble-rise {
+      0%   { transform: translateY(0) scale(1);   opacity: 0.9; }
+      80%  { opacity: 0.85; }
+      100% { transform: translateY(-600px) scale(0.7); opacity: 0; }
+    }
+    @keyframes burst-particle {
+      0%   { transform: translate(0,0) scale(1); opacity: 1; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
+    @keyframes combo-pop {
+      0%   { opacity:0; transform:translate(-50%,-50%) scale(0.4); }
+      30%  { opacity:1; transform:translate(-50%,-50%) scale(1.3); }
+      100% { opacity:0; transform:translate(-50%,-80%) scale(1); }
+    }
+    @keyframes toast-slide {
+      0%   { opacity:0; transform:translateX(60px); }
+      15%  { opacity:1; transform:translateX(0); }
+      80%  { opacity:1; transform:translateX(0); }
+      100% { opacity:0; transform:translateX(60px); }
+    }
+    .bubble-el {
+      position:absolute;
+      border-radius:50%;
+      cursor:pointer;
+      pointer-events:auto;
+      animation: bubble-rise linear forwards;
+    }
+    .burst-el {
+      position:absolute;
+      border-radius:50%;
+      pointer-events:none;
+      animation: burst-particle 0.6s ease-out forwards;
+    }
+  </style>
 </head>
 <body class="bg-slate-100 text-gray-800 h-screen overflow-hidden flex flex-col">
 
@@ -240,23 +275,40 @@
   <div id="extractView" class="hidden flex flex-col h-full pt-6 min-h-0">
 
     <!-- 提炼中 loading 状态 -->
-    <div id="extractLoading" class="flex-1 flex flex-col items-center justify-start pt-20 gap-5">
-      <div class="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin shrink-0"></div>
-      <div class="text-center">
-        <p class="text-gray-600 font-medium mb-1">正在提炼规范书核心内容...</p>
-        <p class="text-gray-400 text-sm">AI 正在分析文档结构，提取项目关键信息</p>
-      </div>
-      <!-- 进度条 -->
-      <div class="w-64">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs text-gray-400">提炼进度</span>
-          <span id="extractProgressPct" class="text-xs font-semibold text-indigo-600">0%</span>
+    <div id="extractLoading" class="flex-1 flex flex-col items-center min-h-0 pt-8 gap-5">
+      <!-- 顶部状态条 -->
+      <div class="shrink-0 flex flex-col items-center gap-3 px-6">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin shrink-0"></div>
+          <p class="text-gray-600 font-medium">正在提炼规范书核心内容...</p>
         </div>
-        <div class="bg-gray-100 rounded-full h-1.5">
-          <div id="extractProgressBar"
-            class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:0%"></div>
+        <div class="w-72">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs text-gray-400">提炼进度</span>
+            <span id="extractProgressPct" class="text-xs font-semibold text-indigo-600">0%</span>
+          </div>
+          <div class="bg-gray-100 rounded-full h-1.5">
+            <div id="extractProgressBar"
+              class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:0%"></div>
+          </div>
         </div>
       </div>
+      <!-- 游戏区（固定高度，居中展示，不撑满屏幕） -->
+      <div id="bubbleGameArea" class="shrink-0 relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 select-none" style="width:min(680px,94vw);height:clamp(240px,38vh,420px);">
+        <!-- 分数 + 称号弹出区 -->
+        <div class="absolute top-3 right-4 flex items-center gap-2 z-10">
+          <div id="titleBoomEl" class="pointer-events-none opacity-0 flex items-center gap-1" style="transition:opacity 0.12s ease,transform 0.18s cubic-bezier(.2,1.4,.4,1);transform:scale(0.6);">
+            <span id="titleBoomIcon" style="font-size:1.1rem;line-height:1"></span>
+            <span id="titleBoomName" style="font-size:0.8rem;font-weight:800;color:#4338ca;white-space:nowrap"></span>
+          </div>
+          <span class="text-xs text-indigo-400">得分</span>
+          <span id="bubbleScore" class="text-lg font-bold text-indigo-600 tabular-nums">0</span>
+        </div>
+        <!-- 连击文字 -->
+        <div id="bubbleCombo" class="absolute left-1/2 top-1/2 pointer-events-none z-20 font-extrabold text-amber-400 text-3xl opacity-0" style="text-shadow:0 2px 8px rgba(251,191,36,0.6)"></div>
+      </div>
+      <!-- 游戏区下方提示 -->
+      <p class="shrink-0 text-xs text-indigo-300">点击表情包打发时间，等 AI 提炼完成～</p>
     </div>
 
     <!-- 提炼完成：摘要 + 模板选择 -->
@@ -879,7 +931,7 @@ const DEFAULTS = {
   claude:   { base_url: 'https://api.anthropic.com',                     model: 'claude-3-5-sonnet-20241022' },
   doubao:   { base_url: 'https://ark.cn-beijing.volces.com/api/v3',      model: 'doubao-pro-32k' },
   kimi:     { base_url: 'https://api.moonshot.cn/v1',                    model: 'moonshot-v1-32k' },
-  minimax:  { base_url: 'https://api.minimax.chat/v1',                   model: 'MiniMax-Text-01' },
+  minimax:  { base_url: 'https://api.minimax.chat/v1',                   model: 'MiniMax-M2.7' },
   deepseek: { base_url: 'https://api.deepseek.com/v1',                   model: 'deepseek-chat' },
 };
 
@@ -1569,6 +1621,7 @@ async function startExtract() {
   $('extractView').classList.remove('hidden');
   $('extractLoading').classList.remove('hidden');
   $('extractResult').classList.add('hidden');
+  window.startBubbleGame?.();
   S.docSummary = '';
   S.docTemplate = '';
   S.useTemplate = false;
@@ -1608,10 +1661,11 @@ async function startExtract() {
     S.docSummary = summary;
     clearInterval(timer);
     setExtractPct(100);
-    // 短暂停留让用户看到 100%，再切换视图
-    setTimeout(() => showExtractResult(summary), 300);
+    // 进度到 100% 后给 5 秒冲刺时间，再切视图
+    startCountdown(5, () => showExtractResult(summary));
   } catch (e) {
     clearInterval(timer);
+    window._stopBubbleGame?.();
     alert('提炼失败：' + e.message);
     $('extractView').classList.add('hidden');
     $('uploadView').classList.remove('hidden');
@@ -1621,8 +1675,40 @@ async function startExtract() {
   }
 }
 
+/* ── 提炼完成倒计时冲刺 ── */
+function startCountdown(sec, onDone) {
+  window._stopBubbleGame?.();   // 停止生成新气泡，展示称号覆盖层
+  // 在游戏区右上角追加倒计时 badge
+  const area = document.getElementById('bubbleGameArea');
+  if (!area) { setTimeout(onDone, sec * 1000); return; }
+
+  const badge = document.createElement('div');
+  badge.id = 'cdBadge';
+  badge.style.cssText = 'position:absolute;top:10px;left:14px;z-index:40;display:flex;flex-direction:column;align-items:center;line-height:1;pointer-events:none;';
+  badge.innerHTML = `<span style="font-size:0.65rem;color:#6366f1;font-weight:600;letter-spacing:.05em;">倒计时</span><span id="cdNum" style="font-size:2rem;font-weight:900;color:#4338ca;text-shadow:0 2px 8px rgba(99,102,241,.4)">${sec}</span>`;
+  area.appendChild(badge);
+
+  let left = sec;
+  const iv = setInterval(() => {
+    left--;
+    const numEl = document.getElementById('cdNum');
+    if (numEl) {
+      numEl.textContent = left;
+      numEl.style.animation = 'none';
+      void numEl.offsetWidth;
+      numEl.style.animation = 'combo-pop .5s ease-out forwards';
+    }
+    if (left <= 0) {
+      clearInterval(iv);
+      badge.remove();
+      onDone();
+    }
+  }, 1000);
+}
+
 /* ── 显示提炼结果视图 ── */
 function showExtractResult(summary) {
+  window._stopBubbleGame?.();
   $('extractLoading').classList.add('hidden');
   $('extractResult').classList.remove('hidden');
 
@@ -2514,6 +2600,140 @@ $('backBtn').addEventListener('click', () => {
   ['readmeModal'].forEach(id => {
     $(id).addEventListener('click', e => { if (e.target === $(id)) closeModal(id); });
   });
+
+  /* ── 气泡点击小游戏 ── */
+  window.startBubbleGame = function() {
+    const area = document.getElementById('bubbleGameArea');
+    const scoreEl = document.getElementById('bubbleScore');
+    const comboEl = document.getElementById('bubbleCombo');
+    if (!area) return;
+
+    let score = 0, combo = 0, lastHit = 0, spawnTimer = null;
+    const bubbles = new Set();
+    const emojis = ['😂','🤣','😭','😅','🥹','😍','🤩','😎','🤔','😱','🤯','🥳','😤','🫡','🤡','👻','💀','🐶','🐱','🦊','🐼','🐨','🦁','🐸','🐙','🦋','🌈','🔥','⭐','🎉','🎊','💎','🍕','🍜','🧋','🍭','🚀','🛸','🎮','🏆'];
+
+    const titles = [
+      { threshold: 1,  icon: '🐣', name: '菜鸟练习生', desc: '刚刚起步，继续加油！' },
+      { threshold: 5,  icon: '🐥', name: '表情包猎手', desc: '已经上手了，不错哦！' },
+      { threshold: 10, icon: '🎯', name: '点击达人',   desc: '手速不慢，颇有天赋！' },
+      { threshold: 20, icon: '🔥', name: '连击狂魔',   desc: '指尖生火，势不可挡！' },
+      { threshold: 35, icon: '⚡', name: '闪电手指',   desc: '神乎其技，令人叹服！' },
+      { threshold: 50, icon: '👑', name: '表情包之王', desc: '无人能及，传说境界！' },
+    ];
+    const unlockedTiers = new Set();
+
+    function updateScore() { if (scoreEl) scoreEl.textContent = score; }
+
+    function showTitleBoom(t) {
+      const el = document.getElementById('titleBoomEl');
+      const iconEl = document.getElementById('titleBoomIcon');
+      const nameEl = document.getElementById('titleBoomName');
+      if (!el) return;
+      iconEl.textContent = t.icon;
+      nameEl.textContent = t.name;
+      el.style.opacity = '1';
+      el.style.transform = 'scale(1)';
+      clearTimeout(el._hideTimer);
+      el._hideTimer = setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'scale(0.6)';
+      }, 1000);
+    }
+
+    function showCombo(n) {
+      if (!comboEl) return;
+      comboEl.textContent = n + ' 连击!';
+      comboEl.style.opacity = '0';
+      comboEl.style.animation = 'none';
+      void comboEl.offsetWidth;
+      comboEl.style.animation = 'combo-pop 0.9s ease-out forwards';
+    }
+
+    function burst(cx, cy) {
+      const rect = area.getBoundingClientRect();
+      const ax = cx - rect.left, ay = cy - rect.top;
+      const burstEmojis = ['✨','💥','⭐','🌟','💫'];
+      for (let i = 0; i < 6; i++) {
+        const p = document.createElement('div');
+        p.className = 'burst-el';
+        const angle = (Math.PI * 2 * i) / 6;
+        const dist = 35 + Math.random() * 25;
+        p.style.cssText = `left:${ax}px;top:${ay}px;font-size:14px;background:none;width:auto;height:auto;--tx:${Math.cos(angle)*dist}px;--ty:${Math.sin(angle)*dist}px;`;
+        p.textContent = burstEmojis[Math.floor(Math.random() * burstEmojis.length)];
+        area.appendChild(p);
+        setTimeout(() => p.remove(), 620);
+      }
+    }
+
+    function spawnBubble() {
+      if (bubbles.size >= 14) return;
+      const size = 44 + Math.floor(Math.random() * 20);
+      const areaW = area.clientWidth;
+      const x = size / 2 + Math.random() * Math.max(0, areaW - size);
+      const dur = 1.5 + Math.random() * 1;
+      const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+      const el = document.createElement('div');
+      el.className = 'bubble-el';
+      // bottom 定位确保从底边出发，向上飘升
+      el.style.cssText = `width:${size}px;height:${size}px;left:${x - size/2}px;bottom:${-size}px;display:flex;align-items:center;justify-content:center;font-size:${size * 0.6}px;background:rgba(255,255,255,0.7);box-shadow:0 4px 14px rgba(99,102,241,0.15);animation-duration:${dur}s;`;
+      el.textContent = emoji;
+      bubbles.add(el);
+
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        if (el.classList.contains('popped')) return;
+        el.classList.add('popped');
+        bubbles.delete(el);
+        el.remove();
+
+        score++;
+        updateScore();
+
+        // 每到达一个称号阶段实时全屏弹出，1秒消失
+        titles.forEach(t => {
+          if (score === t.threshold && !unlockedTiers.has(t.threshold)) {
+            unlockedTiers.add(t.threshold);
+            showTitleBoom(t);
+          }
+        });
+
+        const now = Date.now();
+        combo = (now - lastHit < 1000) ? combo + 1 : 1;
+        lastHit = now;
+        if (combo >= 3) showCombo(combo);
+
+        burst(e.clientX, e.clientY);
+      });
+
+      area.appendChild(el);
+      setTimeout(() => { if (bubbles.has(el)) { bubbles.delete(el); el.remove(); } }, dur * 1000);
+    }
+
+    spawnTimer = setInterval(spawnBubble, 450);
+    spawnBubble();
+
+    window._stopBubbleGame = function() {
+      clearInterval(spawnTimer);
+      spawnTimer = null;
+      bubbles.clear();
+      if (area) {
+        area.querySelectorAll('.bubble-el,.burst-el').forEach(n => n.remove());
+      }
+
+      if (!area) return;
+
+      // 当前最高称号
+      const reached = titles.filter(t => score >= t.threshold);
+      const t = reached.length ? reached[reached.length - 1] : { icon: '🐣', name: '菜鸟练习生', desc: '刚刚起步，继续加油！' };
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(238,242,255,0.92);backdrop-filter:blur(4px);border-radius:inherit;z-index:30;pointer-events:none;opacity:0;transition:opacity 0.4s ease;';
+      overlay.innerHTML = `<div style="font-size:2.8rem;line-height:1">${t.icon}</div><div style="font-size:1.1rem;font-weight:800;color:#4338ca">${t.name}</div><div style="font-size:0.8rem;color:#6366f1">${t.desc}</div><div style="font-size:0.75rem;color:#a5b4fc;margin-top:2px">本次得分 <b style="color:#4f46e5">${score}</b> 分</div>`;
+      area.appendChild(overlay);
+      requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+    };
+  };
 })();
 
 </script>

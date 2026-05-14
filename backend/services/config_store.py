@@ -77,7 +77,7 @@ DEFAULT_MODELS = {
     "claude":    "claude-3-5-sonnet-20241022",
     "doubao":    "doubao-pro-32k",
     "kimi":      "moonshot-v1-32k",
-    "minimax":   "MiniMax-Text-01",
+    "minimax":   "MiniMax-M2.7",
     "deepseek":  "deepseek-chat",
 }
 

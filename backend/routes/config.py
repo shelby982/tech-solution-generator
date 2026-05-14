@@ -216,6 +216,7 @@ async def list_providers():
                 "default_base_url": DEFAULT_BASE_URLS["minimax"],
                 "default_model": DEFAULT_MODELS["minimax"],
                 "model_examples": [
+                    "MiniMax-M2.7",
                     "MiniMax-Text-01",
                     "abab6.5s-chat",
                     "abab6.5g-chat",
