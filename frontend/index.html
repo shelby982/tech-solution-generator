@@ -74,7 +74,7 @@
                   border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
   </style>
 </head>
-<body class="bg-slate-100 text-gray-800 min-h-screen flex flex-col">
+<body class="bg-slate-100 text-gray-800 h-screen overflow-hidden flex flex-col">
 
 <!-- ════════════════════════════════════════════════
      HEADER
@@ -95,6 +95,11 @@
                text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
         ⚙️ 配置 API
       </button>
+      <button id="headerReadmeBtn"
+        class="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 border border-white/25
+               text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+        📖 使用说明
+      </button>
     </div>
   </div>
 </header>
@@ -102,14 +107,17 @@
 <!-- ════════════════════════════════════════════════
      MAIN
 ════════════════════════════════════════════════ -->
-<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+<main class="flex-1 min-h-0 max-w-7xl mx-auto w-full px-4 sm:px-6 overflow-hidden flex flex-col">
 
   <!-- ══ UPLOAD VIEW ══ -->
-  <div id="uploadView">
+  <div id="uploadView" class="flex flex-col h-full pt-6 min-h-0">
+
+    <!-- 可滚动内容区 -->
+    <div class="flex-1 min-h-0 flex flex-col gap-4">
 
     <!-- Drop Zone -->
     <div id="dropZone"
-      class="border-2 border-dashed border-gray-300 rounded-2xl bg-white cursor-pointer
+      class="shrink-0 border-2 border-dashed border-gray-300 rounded-2xl bg-white cursor-pointer
              hover:border-indigo-400 hover:bg-indigo-50/40 transition-all p-14 text-center group"
       onclick="document.getElementById('fileInput').click()">
 
@@ -184,14 +192,14 @@
 
     <!-- Error Banner -->
     <div id="uploadError"
-      class="hidden mt-4 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 flex items-start gap-2 text-sm">
+      class="hidden shrink-0 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 flex items-start gap-2 text-sm">
       <span class="text-base shrink-0 mt-0.5">⚠️</span>
       <p id="uploadErrorMsg"></p>
     </div>
 
     <!-- TOC Result Card -->
-    <div id="tocResult" class="hidden mt-5 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/60">
+    <div id="tocResult" class="hidden flex-1 min-h-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/60 shrink-0">
         <div>
           <h2 id="docTitle" class="font-semibold text-gray-800 text-base"></h2>
           <p id="sectionCount" class="text-sm text-gray-400 mt-0.5"></p>
@@ -200,15 +208,14 @@
           ✓ 解析完成
         </span>
       </div>
-      <div id="tocList" class="px-4 py-2 max-h-72 overflow-y-auto"></div>
+      <div id="tocList" class="px-4 py-2 flex-1 overflow-y-auto"></div>
     </div>
 
-    <!-- Action Bar -->
+    </div><!-- /内容区 -->
+
+    <!-- Action Bar（固定底部） -->
     <div id="actionBar"
-      class="hidden mt-4 bg-white rounded-xl border border-gray-200 px-5 py-4 shadow-sm space-y-3">
-      <p class="text-sm text-gray-500">
-        已识别章节目录，配置好 API Key 后即可开始逐章生成完整技术方案
-      </p>
+      class="hidden shrink-0 bg-white border-t border-gray-200 px-5 py-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
       <div class="flex flex-wrap items-center gap-3">
         <!-- 每章节目标字数 -->
         <div class="flex items-center gap-2 text-sm">
@@ -219,40 +226,45 @@
           <span class="text-gray-400">字</span>
         </div>
         <div class="flex-1"></div>
-        <!-- 操作按钮 -->
-        <div class="flex gap-2 shrink-0">
-          <button id="configBtnInline"
-            class="flex items-center gap-1.5 border border-gray-200 hover:border-indigo-300
-                   hover:text-indigo-600 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition">
-            ⚙️ 配置 API
-          </button>
-          <button id="startBtn"
-            class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white
-                   px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
-            ✨ 提炼规范书核心内容
-          </button>
-        </div>
+        <button id="startBtn"
+          class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white
+                 px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+          ✨ 提炼规范书核心内容
+        </button>
       </div>
     </div>
   </div><!-- /uploadView -->
 
 
   <!-- ══ EXTRACT VIEW ══ -->
-  <div id="extractView" class="hidden">
+  <div id="extractView" class="hidden flex flex-col h-full pt-6 min-h-0">
 
     <!-- 提炼中 loading 状态 -->
-    <div id="extractLoading" class="flex flex-col items-center justify-center py-24 gap-4">
-      <div class="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin"></div>
-      <p class="text-gray-600 font-medium">正在提炼规范书核心内容...</p>
-      <p class="text-gray-400 text-sm">AI 正在分析文档结构，提取项目关键信息</p>
+    <div id="extractLoading" class="flex-1 flex flex-col items-center justify-start pt-20 gap-5">
+      <div class="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin shrink-0"></div>
+      <div class="text-center">
+        <p class="text-gray-600 font-medium mb-1">正在提炼规范书核心内容...</p>
+        <p class="text-gray-400 text-sm">AI 正在分析文档结构，提取项目关键信息</p>
+      </div>
+      <!-- 进度条 -->
+      <div class="w-64">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs text-gray-400">提炼进度</span>
+          <span id="extractProgressPct" class="text-xs font-semibold text-indigo-600">0%</span>
+        </div>
+        <div class="bg-gray-100 rounded-full h-1.5">
+          <div id="extractProgressBar"
+            class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:0%"></div>
+        </div>
+      </div>
     </div>
 
     <!-- 提炼完成：摘要 + 模板选择 -->
-    <div id="extractResult" class="hidden space-y-5">
+    <div id="extractResult" class="hidden flex flex-col flex-1 min-h-0 pt-4">
 
-      <!-- 摘要卡片（可编辑） -->
-      <div id="extractSummaryCard" class="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
-        <div class="flex items-center gap-2 mb-3">
+      <!-- 摘要卡片（撑满主区域） -->
+      <div id="extractSummaryCard" class="flex-1 min-h-0 flex flex-col bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-0">
+        <div class="flex items-center gap-2 mb-1 shrink-0">
           <span class="text-lg select-none">📋</span>
           <h3 class="font-semibold text-blue-800 text-sm">规范书核心内容</h3>
           <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
@@ -262,13 +274,16 @@
             ✏️ 编辑
           </button>
         </div>
-        <div id="extractSummaryView" class="md text-gray-700 text-sm leading-relaxed"></div>
-        <div id="extractSummaryEditArea" class="hidden space-y-2">
+        <p class="text-xs text-blue-400 mb-3 shrink-0">
+          💡 此概述将作为全局背景注入所有章节的生成 Prompt，可手动修正后再开始生成。
+        </p>
+        <div id="extractSummaryView" class="flex-1 overflow-y-auto md text-gray-700 text-sm leading-relaxed pr-1"></div>
+        <div id="extractSummaryEditArea" class="hidden flex flex-col flex-1 min-h-0 space-y-2">
           <textarea id="extractSummaryTextarea"
-            class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y
+            class="flex-1 min-h-0 w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-none
                    focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-            rows="12" maxlength="5000"></textarea>
-          <div class="flex items-center gap-2 justify-end">
+            maxlength="5000"></textarea>
+          <div class="flex items-center gap-2 justify-end shrink-0">
             <button id="extractSummaryCancelBtn"
               class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">
               取消
@@ -279,83 +294,73 @@
             </button>
           </div>
         </div>
-        <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
-          此概述将作为全局背景注入所有章节的生成 Prompt，可手动修正后再开始生成。
-        </p>
       </div>
 
-      <!-- 模板选择卡片 -->
-      <div class="bg-white border border-gray-200 rounded-xl px-5 py-4">
-        <div class="flex items-center gap-2 mb-4">
-          <span class="text-lg select-none">📝</span>
-          <h3 class="font-semibold text-gray-800 text-sm">选择生成模式</h3>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <!-- 选项 A：直接扩写 -->
-          <label id="templateOptionA"
-            class="flex flex-col gap-2 border-2 border-indigo-500 bg-indigo-50 rounded-xl p-4 cursor-pointer transition">
-            <input type="radio" name="templateMode" value="expand" class="hidden" checked>
-            <div class="flex items-center gap-2">
-              <span class="w-4 h-4 rounded-full border-2 border-indigo-500 bg-indigo-500 flex items-center justify-center shrink-0">
+      <!-- 底部固定区：生成模式 + 操作栏 -->
+      <div class="shrink-0 bg-white border-t border-gray-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+
+        <!-- 生成模式选择（紧凑横排） -->
+        <div class="px-5 pt-3 pb-2">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-sm select-none">📝</span>
+            <span class="text-xs font-semibold text-gray-700">选择生成模式</span>
+          </div>
+          <div class="flex gap-3">
+            <!-- 选项 A：直接扩写 -->
+            <label id="templateOptionA"
+              class="flex-1 flex items-center gap-2 border-2 border-indigo-500 bg-indigo-50 rounded-lg px-3 py-2 cursor-pointer transition">
+              <input type="radio" name="templateMode" value="expand" class="hidden" checked>
+              <span class="w-3.5 h-3.5 rounded-full border-2 border-indigo-500 bg-indigo-500 flex items-center justify-center shrink-0">
                 <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
               </span>
-              <span class="text-sm font-semibold text-indigo-700">直接扩写</span>
-            </div>
-            <p class="text-xs text-gray-500 leading-relaxed">
-              AI 按照规范书原文结构逐段扩写，保留原文逻辑框架，补充背景说明和应用场景。
-            </p>
-          </label>
-          <!-- 选项 B：自定义模板 -->
-          <label id="templateOptionB"
-            class="flex flex-col gap-2 border-2 border-gray-200 bg-white rounded-xl p-4 cursor-pointer hover:border-indigo-300 transition">
-            <input type="radio" name="templateMode" value="custom" class="hidden">
-            <div class="flex items-center gap-2">
-              <span id="templateBRadio"
-                class="w-4 h-4 rounded-full border-2 border-gray-300 shrink-0"></span>
-              <span class="text-sm font-semibold text-gray-700">自定义模板</span>
-            </div>
-            <p class="text-xs text-gray-500 leading-relaxed">
-              自定义每章节的输出结构和风格，AI 将参照你编写的 Markdown 模板进行生成。
-            </p>
-            <button id="openTemplateEditorBtn"
-              class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400
-                     rounded-lg px-3 py-1.5 transition w-fit">
-              ✏️ 编辑模板内容
-            </button>
-          </label>
-        </div>
-        <!-- 已编辑模板预览（自定义模板选中时显示） -->
-        <div id="templatePreview" class="hidden mt-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-medium text-gray-600">当前模板预览</span>
-            <button id="editTemplateAgainBtn" class="text-xs text-indigo-500 hover:text-indigo-700">重新编辑</button>
+              <div class="min-w-0">
+                <span class="text-xs font-semibold text-indigo-700">直接扩写</span>
+                <p class="text-xs text-gray-400 truncate">保留原文结构逐段扩写</p>
+              </div>
+            </label>
+            <!-- 选项 B：自定义模板 -->
+            <label id="templateOptionB"
+              class="flex-1 flex items-center gap-2 border-2 border-gray-200 bg-white rounded-lg px-3 py-2 cursor-pointer hover:border-indigo-300 transition">
+              <input type="radio" name="templateMode" value="custom" class="hidden">
+              <span id="templateBRadio" class="w-3.5 h-3.5 rounded-full border-2 border-gray-300 shrink-0"></span>
+              <div class="flex-1 min-w-0">
+                <span class="text-xs font-semibold text-gray-700">自定义模板</span>
+                <p class="text-xs text-gray-400 truncate">参照自定义结构生成</p>
+              </div>
+              <button id="openTemplateEditorBtn"
+                class="shrink-0 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400
+                       rounded px-2 py-1 transition">
+                ✏️ 编辑
+              </button>
+            </label>
           </div>
-          <pre id="templatePreviewText" class="text-xs text-gray-500 whitespace-pre-wrap line-clamp-4 font-mono"></pre>
+          <!-- 已编辑模板预览（已移除，不再展示） -->
+        </div>
+
+        <!-- 操作按钮行 -->
+        <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+          <button id="extractBackBtn"
+            class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
+                   px-4 py-2 rounded-lg text-sm transition">
+            ← 返回重新上传
+          </button>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 text-sm">
+              <label for="extractTargetWordsInput" class="text-gray-500 shrink-0">每章节目标字数</label>
+              <input type="number" id="extractTargetWordsInput" value="500" min="100" max="10000" step="100"
+                class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+              <span class="text-gray-400">字</span>
+            </div>
+            <button id="startGenerateBtn"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white
+                     px-6 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+              🚀 开始生成方案
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- 底部操作栏 -->
-      <div class="flex items-center justify-between">
-        <button id="extractBackBtn"
-          class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
-                 px-4 py-2 rounded-lg text-sm transition">
-          ← 返回重新上传
-        </button>
-        <div class="flex items-center gap-3">
-          <div class="flex items-center gap-2 text-sm">
-            <label for="extractTargetWordsInput" class="text-gray-500 shrink-0">每章节目标字数</label>
-            <input type="number" id="extractTargetWordsInput" value="500" min="100" max="10000" step="100"
-              class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
-                     focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
-            <span class="text-gray-400">字</span>
-          </div>
-          <button id="startGenerateBtn"
-            class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white
-                   px-6 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
-            🚀 开始生成方案
-          </button>
-        </div>
-      </div>
     </div>
   </div><!-- /extractView -->
 
@@ -406,7 +411,7 @@
 
 
   <!-- ══ GENERATE VIEW ══ -->
-  <div id="generateView" class="hidden">
+  <div id="generateView" class="hidden pt-6">
 
     <!-- Progress Bar Row -->
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-3 mb-4
@@ -464,7 +469,7 @@
         <!-- Actual content -->
         <div id="contentScroll" class="hidden flex-1 overflow-y-auto px-7 py-6">
           <!-- Completed sections -->
-          <div id="completedSections" class="space-y-8"></div>
+          <div id="completedSections" class="space-y-4"></div>
           <!-- Currently streaming section -->
           <div id="currentSection" class="hidden mt-8">
             <div class="flex items-center gap-2 mb-3">
@@ -483,70 +488,6 @@
   </div><!-- /generateView -->
 
 </main>
-
-<!-- ════════════════════════════════════════════════
-     FOOTER
-════════════════════════════════════════════════ -->
-<footer class="bg-white border-t border-gray-100 mt-6">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-5">
-    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-
-      <!-- 左：品牌 -->
-      <div class="flex items-center gap-2 text-gray-400 text-xs select-none">
-        <span class="text-base">📄</span>
-        <span class="font-medium text-gray-500">技术方案生成助手</span>
-        <span id="footerVersion" class="text-gray-300">v1.5.0</span>
-      </div>
-
-      <!-- 中：三个入口 -->
-      <div class="flex items-center gap-1">
-        <button id="footerChangelogBtn"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
-                 hover:bg-indigo-50 transition font-medium">
-          <span class="text-base leading-none">📋</span> 更新记录
-        </button>
-        <span class="text-gray-200 select-none">|</span>
-        <button id="footerReadmeBtn"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
-                 hover:bg-indigo-50 transition font-medium">
-          <span class="text-base leading-none">📖</span> 使用说明
-        </button>
-        <span class="text-gray-200 select-none">|</span>
-        <button id="footerAuthorBtn"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-indigo-600
-                 hover:bg-indigo-50 transition font-medium">
-          <span class="text-base leading-none">👤</span> 关于作者
-        </button>
-      </div>
-
-      <!-- 右：版权 -->
-      <div class="text-xs text-gray-300 select-none">© 2026 jianghe</div>
-
-    </div>
-  </div>
-</footer>
-
-<!-- ════════════════════════════════════════════════
-     FOOTER MODAL — 版本更新记录
-════════════════════════════════════════════════ -->
-<div id="changelogModal"
-  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:560px;max-height:85vh">
-    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-      <div>
-        <h2 class="font-bold text-gray-800 text-base">📋 版本更新记录</h2>
-        <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 迭代历史</p>
-      </div>
-      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
-                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
-    </div>
-    <div class="flex-1 overflow-y-auto px-6 py-5">
-      <div id="changelogList" class="space-y-3 text-xs text-gray-500">
-        <p class="text-gray-300 italic">加载中...</p>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- ════════════════════════════════════════════════
      FOOTER MODAL — 使用说明
@@ -741,60 +682,6 @@
         </div>
       </section>
 
-    </div>
-  </div>
-</div>
-
-<!-- ════════════════════════════════════════════════
-     FOOTER MODAL — 关于作者
-════════════════════════════════════════════════ -->
-<div id="authorModal"
-  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:400px">
-    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-      <h2 class="font-bold text-gray-800 text-base">关于作者</h2>
-      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
-                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
-    </div>
-    <div class="px-6 py-6 space-y-5">
-      <!-- 头像 + 名字 -->
-      <div class="flex items-center gap-4">
-        <span class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 text-white
-                     flex items-center justify-center font-bold text-2xl shrink-0 select-none shadow-md">J</span>
-        <div>
-          <p class="font-bold text-gray-800 text-lg leading-tight">jianghe</p>
-          <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 作者</p>
-        </div>
-      </div>
-      <!-- 简介 -->
-      <p class="text-sm text-gray-500 leading-relaxed">
-        专注于 AI 辅助文档生成工具的探索与实践，致力于提升技术方案撰写效率，让工程师从繁琐的文档工作中解放出来。
-      </p>
-      <!-- GitHub 链接 -->
-      <a href="https://github.com/wanliangxin" target="_blank" rel="noopener noreferrer"
-        class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-300
-               hover:bg-indigo-50 transition group">
-        <svg class="w-5 h-5 text-gray-500 group-hover:text-indigo-600 shrink-0 transition" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483
-                   0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466
-                   -.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832
-                   .092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688
-                   -.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004
-                   1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7
-                   1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338
-                   -.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-        </svg>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-gray-700 group-hover:text-indigo-700 transition">GitHub</p>
-          <p class="text-xs text-gray-400 truncate">github.com/wanliangxin</p>
-        </div>
-        <span class="ml-auto text-gray-300 group-hover:text-indigo-400 transition text-sm">→</span>
-      </a>
-      <!-- 版本 -->
-      <div class="flex items-center gap-2 text-xs text-gray-400 pt-1">
-        <span>🛠</span>
-        <span>当前版本：<span id="authorVersion" class="text-indigo-400 font-medium"></span></span>
-      </div>
     </div>
   </div>
 </div>
@@ -1255,10 +1142,7 @@ function openConfig() {
 }
 function closeConfig() { configModal.classList.add('hidden'); }
 
-['configBtn', 'configBtnInline'].forEach(id => {
-  const el = $(id);
-  if (el) el.addEventListener('click', openConfig);
-});
+$('configBtn').addEventListener('click', openConfig);
 $('closeConfigBtn').addEventListener('click', closeConfig);
 $('doneConfigBtn').addEventListener('click', closeConfig);
 configModal.addEventListener('click', e => { if (e.target === configModal) closeConfig(); });
@@ -1689,6 +1573,22 @@ async function startExtract() {
   S.docTemplate = '';
   S.useTemplate = false;
 
+  // 模拟进度：0→90% 缓速爬升，收到响应后跳到 100%
+  let pct = 0;
+  const bar = $('extractProgressBar');
+  const pctText = $('extractProgressPct');
+  function setExtractPct(v) {
+    pct = Math.min(v, 100);
+    bar.style.width = pct + '%';
+    pctText.textContent = Math.round(pct) + '%';
+  }
+  setExtractPct(0);
+  const timer = setInterval(() => {
+    // 越接近 90% 增速越慢，最多到 90
+    const remaining = 90 - pct;
+    if (remaining > 0) setExtractPct(pct + remaining * 0.06);
+  }, 300);
+
   try {
     const res = await fetch('/api/generate/extract', {
       method: 'POST',
@@ -1706,8 +1606,12 @@ async function startExtract() {
     }
     const { summary } = await res.json();
     S.docSummary = summary;
-    showExtractResult(summary);
+    clearInterval(timer);
+    setExtractPct(100);
+    // 短暂停留让用户看到 100%，再切换视图
+    setTimeout(() => showExtractResult(summary), 300);
   } catch (e) {
+    clearInterval(timer);
     alert('提炼失败：' + e.message);
     $('extractView').classList.add('hidden');
     $('uploadView').classList.remove('hidden');
@@ -1737,7 +1641,6 @@ function showExtractResult(summary) {
   optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
   radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
   radioB.innerHTML = '';
-  $('templatePreview').classList.add('hidden');
   document.querySelector('input[name="templateMode"][value="expand"]').checked = true;
 
   // 摘要编辑交互（.onclick 赋值，幂等安全）
@@ -1774,26 +1677,17 @@ function showExtractResult(summary) {
         optB.className = optB.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
         radioB.className = radioB.className.replace('border-gray-300', 'border-indigo-500 bg-indigo-500');
         radioB.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-white block mx-auto"></span>';
-        if (S.docTemplate) {
-          // 修复三：已有模板内容时直接显示预览，不强制重开编辑器
-          $('templatePreviewText').textContent = S.docTemplate.length > 300
-            ? S.docTemplate.slice(0, 300) + '...' : S.docTemplate;
-          $('templatePreview').classList.remove('hidden');
-        } else {
-          openTemplateModal();
-        }
+        openTemplateModal();
       } else {
         optA.className = optA.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
         optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
         radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
         radioB.innerHTML = '';
-        $('templatePreview').classList.add('hidden');
       }
     };
   });
 
   $('openTemplateEditorBtn').onclick = e => { e.preventDefault(); openTemplateModal(); };
-  $('editTemplateAgainBtn').onclick = openTemplateModal;
 }
 
 /* ── 模板弹窗 ── */
@@ -1814,12 +1708,6 @@ $('templateModalConfirm').addEventListener('click', () => {
   const t = $('templateEditorTextarea').value.trim();
   S.docTemplate = t;
   closeTemplateModal();
-  if (t) {
-    $('templatePreviewText').textContent = t.length > 300 ? t.slice(0, 300) + '...' : t;
-    $('templatePreview').classList.remove('hidden');
-  } else {
-    $('templatePreview').classList.add('hidden');
-  }
 });
 
 /* ── 返回重新上传 ── */
@@ -1997,30 +1885,49 @@ function connectSSE(url) {
     $('contentScroll').classList.remove('hidden');
     const card = document.createElement('div');
     card.id = 'docSummaryCard';
-    card.className = 'mb-6 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4';
+    card.className = 'mb-4 bg-blue-50 border border-blue-200 rounded-xl px-5 py-3';
     card.innerHTML = `
-      <div class="flex items-center gap-2 mb-3">
-        <span class="text-lg select-none">📋</span>
+      <div class="flex items-center gap-2">
+        <span class="text-base select-none">📋</span>
         <h3 class="font-semibold text-blue-800 text-sm">项目概述</h3>
         <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
         <span class="flex-1"></span>
-        <button id="summaryEditBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">✏️ 编辑</button>
+        <button id="summaryToggleBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">展开 ▾</button>
+        <button id="summaryEditBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200 ml-1">✏️ 编辑</button>
       </div>
-      <div id="summaryViewArea" class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>
-      <div id="summaryEditArea" class="hidden space-y-2">
-        <textarea id="summaryTextarea" class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" rows="10" maxlength="5000"></textarea>
-        <div class="flex items-center gap-2 justify-end">
-          <button id="summaryCancelBtn" class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
-          <button id="summarySaveBtn" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">保存</button>
+      <div id="summaryCollapsible" class="hidden mt-3">
+        <div id="summaryViewArea" class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>
+        <div id="summaryEditArea" class="hidden space-y-2">
+          <textarea id="summaryTextarea" class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" rows="10" maxlength="5000"></textarea>
+          <div class="flex items-center gap-2 justify-end">
+            <button id="summaryCancelBtn" class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
+            <button id="summarySaveBtn" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">保存</button>
+          </div>
         </div>
-      </div>
-      <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
-        此概述将作为全局背景注入所有章节的生成 Prompt。如 AI 提炼有误，可手动编辑后再生成。
-      </p>`;
+        <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
+          此概述将作为全局背景注入所有章节的生成 Prompt。如 AI 提炼有误，可手动编辑后再生成。
+        </p>
+      </div>`;
     $('completedSections').prepend(card);
+
+    /* 展开 / 收起 */
+    const collapsible = card.querySelector('#summaryCollapsible');
+    const toggleBtn   = card.querySelector('#summaryToggleBtn');
+    function collapse() {
+      collapsible.classList.add('hidden');
+      toggleBtn.textContent = '展开 ▾';
+    }
+    function expand() {
+      collapsible.classList.remove('hidden');
+      toggleBtn.textContent = '收起 ▴';
+    }
+    toggleBtn.addEventListener('click', () => {
+      collapsible.classList.contains('hidden') ? expand() : collapse();
+    });
 
     /* 编辑 / 保存 / 取消 交互 */
     card.querySelector('#summaryEditBtn').addEventListener('click', () => {
+      expand();
       const ta = card.querySelector('#summaryTextarea');
       ta.value = S.docSummary;
       card.querySelector('#summaryViewArea').classList.add('hidden');
@@ -2033,6 +1940,7 @@ function connectSSE(url) {
       card.querySelector('#summaryViewArea').classList.remove('hidden');
       card.querySelector('#summaryEditArea').classList.add('hidden');
       card.querySelector('#summaryEditBtn').classList.remove('hidden');
+      collapse();
     });
 
     card.querySelector('#summarySaveBtn').addEventListener('click', async () => {
@@ -2054,6 +1962,7 @@ function connectSSE(url) {
         card.querySelector('#summaryViewArea').classList.remove('hidden');
         card.querySelector('#summaryEditArea').classList.add('hidden');
         card.querySelector('#summaryEditBtn').classList.remove('hidden');
+        collapse();
       } catch {
         btn.textContent = '保存';
         btn.disabled = false;
@@ -2594,9 +2503,7 @@ $('backBtn').addEventListener('click', () => {
   function closeModal(id) { $(id).classList.add('hidden'); }
 
   // 打开按钮
-  $('footerChangelogBtn').addEventListener('click', () => openModal('changelogModal'));
-  $('footerReadmeBtn').addEventListener('click',    () => openModal('readmeModal'));
-  $('footerAuthorBtn').addEventListener('click',    () => openModal('authorModal'));
+  $('headerReadmeBtn').addEventListener('click', () => openModal('readmeModal'));
 
   // 所有 Modal 的关闭按钮（统一用 .footer-modal-close 类）
   document.querySelectorAll('.footer-modal-close').forEach(btn => {
@@ -2604,51 +2511,11 @@ $('backBtn').addEventListener('click', () => {
   });
 
   // 点击遮罩关闭
-  ['changelogModal', 'readmeModal', 'authorModal'].forEach(id => {
+  ['readmeModal'].forEach(id => {
     $(id).addEventListener('click', e => { if (e.target === $(id)) closeModal(id); });
   });
 })();
 
-/* ══════════════════════════════════════════
-   FOOTER — 版本记录加载
-══════════════════════════════════════════ */
-(async function loadChangelog() {
-  const container = $('changelogList');
-  try {
-    const res = await fetch('/api/changelog');
-    if (!res.ok) throw new Error('请求失败');
-    const list = await res.json();
-
-    // 更新 footer 底部版本号 & 作者弹窗版本号
-    if (list.length > 0) {
-      $('footerVersion').textContent = list[0].version;
-      $('authorVersion').textContent = list[0].version;
-    }
-
-    container.innerHTML = list.map((item, idx) => `
-      <div class="changelog-item border border-gray-100 rounded-lg overflow-hidden">
-        <button class="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50 transition"
-                onclick="this.closest('.changelog-item').querySelector('.changelog-body').classList.toggle('hidden');
-                         this.querySelector('.changelog-arrow').classList.toggle('rotate-90')">
-          <div class="flex items-center gap-2">
-            <span class="font-semibold text-indigo-600 text-xs">${esc(item.version)}</span>
-            <span class="text-gray-300 text-xs">${esc(item.date)}</span>
-            ${idx === 0 ? '<span class="text-xs bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full">最新</span>' : ''}
-          </div>
-          <span class="changelog-arrow text-gray-300 text-xs transition-transform duration-150">▸</span>
-        </button>
-        <div class="changelog-body ${idx === 0 ? '' : 'hidden'} px-3 pb-2.5 space-y-1 border-t border-gray-100 pt-2">
-          ${item.changes.map(c => `
-            <div class="flex items-start gap-1.5">
-              <span class="text-indigo-300 shrink-0 mt-0.5">·</span>
-              <span class="text-gray-500 leading-relaxed">${esc(c)}</span>
-            </div>`).join('')}
-        </div>
-      </div>`).join('');
-  } catch {
-    container.innerHTML = '<p class="text-gray-300 italic text-xs">暂无更新记录</p>';
-  }
-})();
 </script>
 </body>
 </html>
