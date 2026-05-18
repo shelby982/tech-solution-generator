@@ -22,6 +22,7 @@ from routes.projects import router as projects_router
 from routes.materials import router as materials_router
 from routes.blocks import router as blocks_router
 from routes.revisions import router as revisions_router
+from routes.export import router as export_router
 
 # ── 日志配置 ──────────────────────────────────
 logging.basicConfig(
@@ -87,6 +88,7 @@ app.include_router(projects_router,  prefix="/api")
 app.include_router(materials_router, prefix="/api")
 app.include_router(blocks_router,   prefix="/api")
 app.include_router(revisions_router, prefix="/api")
+app.include_router(export_router,   prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
