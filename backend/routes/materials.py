@@ -102,7 +102,7 @@ async def generate_outline(project_id: int):
         file_path = main_material["file_path"]
         filename = main_material["filename"]
 
-    abs_path = UPLOAD_ROOT.parent / file_path  # backend/data/ + uploads/...
+    abs_path = UPLOAD_ROOT / str(project_id) / filename
     suffix = Path(filename).suffix.lower()
 
     async def event_generator():
