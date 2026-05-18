@@ -36,6 +36,11 @@ async def lifespan(app: FastAPI):
     logger.info("  访问地址：http://localhost:8000")
     logger.info("  API 文档：http://localhost:8000/docs")
     logger.info("════════════════════════════════════")
+    # 初始化 SQLite 数据库（幂等，CREATE TABLE IF NOT EXISTS）
+    from db import get_db, init_db
+    async with get_db() as conn:
+        await init_db(conn)
+    logger.info("SQLite 数据库已初始化")
     yield
     logger.info("服务已关闭")
 
