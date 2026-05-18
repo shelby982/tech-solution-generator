@@ -1,0 +1,2741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>技术方案生成助手</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <style>
+    /* ── Markdown 内容渲染样式 ── */
+    .md h1 { font-size: 1.45em; font-weight: 700; margin: 1em 0 .4em; color: #1e3a8a; }
+    .md h2 { font-size: 1.2em;  font-weight: 700; margin: .9em 0 .35em; color: #1e40af;
+             border-bottom: 1px solid #dbeafe; padding-bottom: .2em; }
+    .md h3 { font-size: 1.05em; font-weight: 600; margin: .8em 0 .3em; color: #1d4ed8; }
+    .md h4 { font-size: .95em;  font-weight: 600; margin: .7em 0 .25em; color: #3730a3; }
+    .md p  { margin: .5em 0; line-height: 1.8; color: #374151; }
+    .md ul, .md ol { padding-left: 1.4em; margin: .4em 0; }
+    .md li { margin: .2em 0; line-height: 1.75; color: #374151; }
+    .md table { border-collapse: collapse; width: 100%; margin: .75em 0; font-size: .88em; }
+    .md th { background: #eff6ff; font-weight: 600; padding: .45em .7em;
+             border: 1px solid #bfdbfe; text-align: left; color: #1e40af; }
+    .md td { padding: .4em .7em; border: 1px solid #dbeafe; }
+    .md tr:nth-child(even) td { background: #f8faff; }
+    .md code { background: #f3f4f6; padding: .12em .38em; border-radius: 3px;
+               font-size: .875em; font-family: ui-monospace, monospace; color: #7c3aed; }
+    .md pre { background: #1e293b; color: #e2e8f0; padding: 1em; border-radius: 6px;
+              overflow-x: auto; margin: .75em 0; }
+    .md pre code { background: none; padding: 0; color: inherit; font-size: .9em; }
+    .md blockquote { border-left: 3px solid #818cf8; padding-left: .9em;
+                     color: #6b7280; margin: .5em 0; font-style: italic; }
+    .md hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+    .md strong { color: #111827; }
+
+    /* ── changelog 箭头旋转 ── */
+    .rotate-90 { transform: rotate(90deg); }
+
+    /* ── 拖拽激活态 ── */
+    .drop-active { border-color: #6366f1 !important; background-color: #eef2ff !important; }
+
+    /* ── 流式光标 ── */
+    .streaming-cursor::after {
+      content: '|'; color: #6366f1;
+      animation: blink .7s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── TOC 侧边栏滚动 ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+    /* ── 旋转动画（CSS，不依赖 Tailwind animate-spin 单独加载） ── */
+    .spin { animation: spin .9s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── 解析步骤指示器 ── */
+    .step-active  .step-circle { border-color: #6366f1 !important; background: #6366f1 !important; color: #fff !important; }
+    .step-active  .step-label  { color: #4f46e5 !important; font-weight: 600; }
+    .step-done    .step-circle { border-color: #22c55e !important; background: #22c55e !important; color: #fff !important; }
+    .step-done    .step-label  { color: #16a34a !important; }
+    .step-done    .step-circle::after { content: '✓'; }
+    /* 激活步骤圆圈内数字 → 显示 spinner */
+    .step-active  .step-circle { font-size: 0; }
+    .step-active  .step-circle::after { content: '⟳'; font-size: 12px; animation: spin .9s linear infinite; display: inline-block; }
+
+    /* ★ ▲ 特殊标记样式 */
+    .mark-star  { display:inline-flex; align-items:center; font-size:10px; font-weight:700;
+                  color:#dc2626; background:#fef2f2; border:1px solid #fecaca;
+                  border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
+    .mark-tri   { display:inline-flex; align-items:center; font-size:10px; font-weight:700;
+                  color:#d97706; background:#fffbeb; border:1px solid #fde68a;
+                  border-radius:4px; padding:0 4px; margin-left:4px; line-height:16px; }
+  </style>
+  <style>
+    @keyframes bubble-rise {
+      0%   { transform: translateY(0) scale(1);   opacity: 0.9; }
+      80%  { opacity: 0.85; }
+      100% { transform: translateY(-600px) scale(0.7); opacity: 0; }
+    }
+    @keyframes burst-particle {
+      0%   { transform: translate(0,0) scale(1); opacity: 1; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
+    @keyframes combo-pop {
+      0%   { opacity:0; transform:translate(-50%,-50%) scale(0.4); }
+      30%  { opacity:1; transform:translate(-50%,-50%) scale(1.3); }
+      100% { opacity:0; transform:translate(-50%,-80%) scale(1); }
+    }
+    @keyframes toast-slide {
+      0%   { opacity:0; transform:translateX(60px); }
+      15%  { opacity:1; transform:translateX(0); }
+      80%  { opacity:1; transform:translateX(0); }
+      100% { opacity:0; transform:translateX(60px); }
+    }
+    .bubble-el {
+      position:absolute;
+      border-radius:50%;
+      cursor:pointer;
+      pointer-events:auto;
+      animation: bubble-rise linear forwards;
+    }
+    .burst-el {
+      position:absolute;
+      border-radius:50%;
+      pointer-events:none;
+      animation: burst-particle 0.6s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-gray-800 h-screen overflow-hidden flex flex-col">
+
+<!-- ════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════ -->
+<header class="bg-gradient-to-r from-indigo-700 to-indigo-600 text-white shadow-lg shrink-0">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <span class="text-2xl select-none">📄</span>
+      <div>
+        <h1 class="text-base font-bold leading-tight">技术方案生成助手</h1>
+        <p class="text-indigo-200 text-xs">上传规范书 → AI 逐章扩写 → 一键下载</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="configStatus" class="hidden text-xs text-indigo-200 bg-indigo-800/50 px-2.5 py-1 rounded-full"></span>
+      <button id="configBtn"
+        class="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 border border-white/25
+               text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+        ⚙️ 配置 API
+      </button>
+      <button id="headerReadmeBtn"
+        class="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 border border-white/25
+               text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+        📖 使用说明
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════
+     MAIN
+════════════════════════════════════════════════ -->
+<main class="flex-1 min-h-0 max-w-7xl mx-auto w-full px-4 sm:px-6 overflow-hidden flex flex-col">
+
+  <!-- ══ UPLOAD VIEW ══ -->
+  <div id="uploadView" class="flex flex-col h-full pt-6 min-h-0">
+
+    <!-- 可滚动内容区 -->
+    <div class="flex-1 min-h-0 flex flex-col gap-4">
+
+    <!-- Drop Zone -->
+    <div id="dropZone"
+      class="shrink-0 border-2 border-dashed border-gray-300 rounded-2xl bg-white cursor-pointer
+             hover:border-indigo-400 hover:bg-indigo-50/40 transition-all p-14 text-center group"
+      onclick="document.getElementById('fileInput').click()">
+
+      <div id="dzIdle">
+        <div class="text-5xl mb-4 group-hover:scale-110 transition-transform select-none">🗂️</div>
+        <p class="text-gray-700 font-medium text-lg mb-1">
+          拖拽文件至此，或 <span class="text-indigo-600 font-semibold">点击选择</span>
+        </p>
+        <p class="text-gray-400 text-sm">支持 PDF / DOCX 格式 · 最大 50 MB</p>
+      </div>
+
+      <!-- 解析进度面板（替换原来单一 spinner） -->
+      <div id="dzLoading" class="hidden text-left">
+        <!-- 文件名行 -->
+        <div class="flex items-center gap-2 mb-4 justify-center">
+          <span class="text-2xl select-none">📄</span>
+          <span id="parseFilename" class="text-sm font-semibold text-gray-700 truncate max-w-xs"></span>
+        </div>
+
+        <!-- 4 阶段步骤 -->
+        <div class="flex items-start gap-0 mb-4 justify-center" id="parseSteps">
+          <!-- step 1 -->
+          <div class="flex flex-col items-center w-20" id="pstep-1">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">1</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">读取文件</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-1-2"></div>
+          <!-- step 2 -->
+          <div class="flex flex-col items-center w-20" id="pstep-2">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">2</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">识别格式</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-2-3"></div>
+          <!-- step 3 -->
+          <div class="flex flex-col items-center w-20" id="pstep-3">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">3</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">扫描章节</p>
+          </div>
+          <div class="w-8 h-0.5 bg-gray-200 mt-3.5 step-line-3-4"></div>
+          <!-- step 4 -->
+          <div class="flex flex-col items-center w-20" id="pstep-4">
+            <div class="w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
+                        border-gray-300 bg-white text-gray-400 step-circle">4</div>
+            <p class="text-xs text-gray-400 mt-1 text-center leading-tight step-label">完成</p>
+          </div>
+        </div>
+
+        <!-- 进度条 -->
+        <div class="w-full max-w-sm mx-auto mb-3">
+          <div class="bg-gray-100 rounded-full h-1.5">
+            <div id="parseProgressBar"
+              class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:5%"></div>
+          </div>
+        </div>
+
+        <!-- 当前阶段描述 -->
+        <p id="parseStageText" class="text-indigo-600 text-sm font-medium text-center mb-1">上传文件中...</p>
+
+        <!-- 实时章节扫描滚动条 -->
+        <div id="parseSectionRow" class="hidden flex items-center gap-2 justify-center mt-1">
+          <span class="text-xs text-gray-400">正在扫描:</span>
+          <span id="parseSectionTitle" class="text-xs text-gray-600 font-medium truncate max-w-xs"></span>
+          <span id="parseSectionCount" class="text-xs text-indigo-500 font-semibold shrink-0"></span>
+        </div>
+      </div>
+
+      <input type="file" id="fileInput" accept=".pdf,.docx,.doc" class="hidden">
+    </div>
+
+    <!-- Error Banner -->
+    <div id="uploadError"
+      class="hidden shrink-0 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 flex items-start gap-2 text-sm">
+      <span class="text-base shrink-0 mt-0.5">⚠️</span>
+      <p id="uploadErrorMsg"></p>
+    </div>
+
+    <!-- TOC Result Card -->
+    <div id="tocResult" class="hidden flex-1 min-h-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/60 shrink-0">
+        <div>
+          <h2 id="docTitle" class="font-semibold text-gray-800 text-base"></h2>
+          <p id="sectionCount" class="text-sm text-gray-400 mt-0.5"></p>
+        </div>
+        <span class="text-green-600 text-xs font-semibold bg-green-50 border border-green-100 px-2.5 py-1 rounded-full">
+          ✓ 解析完成
+        </span>
+      </div>
+      <div id="tocList" class="px-4 py-2 flex-1 overflow-y-auto"></div>
+    </div>
+
+    </div><!-- /内容区 -->
+
+    <!-- Action Bar（固定底部） -->
+    <div id="actionBar"
+      class="hidden shrink-0 bg-white border-t border-gray-200 px-5 py-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- 每章节目标字数 -->
+        <div class="flex items-center gap-2 text-sm">
+          <label for="targetWordsInput" class="text-gray-600 shrink-0 font-medium">每章节目标字数</label>
+          <input type="number" id="targetWordsInput" value="500" min="100" max="10000" step="100"
+            class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
+                   focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+          <span class="text-gray-400">字</span>
+        </div>
+        <div class="flex-1"></div>
+        <button id="startBtn"
+          class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white
+                 px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+          ✨ 提炼规范书核心内容
+        </button>
+      </div>
+    </div>
+  </div><!-- /uploadView -->
+
+
+  <!-- ══ EXTRACT VIEW ══ -->
+  <div id="extractView" class="hidden flex flex-col h-full pt-6 min-h-0">
+
+    <!-- 提炼中 loading 状态 -->
+    <div id="extractLoading" class="flex-1 flex flex-col items-center min-h-0 pt-8 gap-5">
+      <!-- 顶部状态条 -->
+      <div class="shrink-0 flex flex-col items-center gap-3 px-6">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 spin shrink-0"></div>
+          <p class="text-gray-600 font-medium">正在提炼规范书核心内容...</p>
+        </div>
+        <div class="w-72">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs text-gray-400">提炼进度</span>
+            <span id="extractProgressPct" class="text-xs font-semibold text-indigo-600">0%</span>
+          </div>
+          <div class="bg-gray-100 rounded-full h-1.5">
+            <div id="extractProgressBar"
+              class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <!-- 游戏区（固定高度，居中展示，不撑满屏幕） -->
+      <div id="bubbleGameArea" class="shrink-0 relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 select-none" style="width:min(680px,94vw);height:clamp(240px,38vh,420px);">
+        <!-- 分数 + 称号弹出区 -->
+        <div class="absolute top-3 right-4 flex items-center gap-2 z-10">
+          <div id="titleBoomEl" class="pointer-events-none opacity-0 flex items-center gap-1" style="transition:opacity 0.12s ease,transform 0.18s cubic-bezier(.2,1.4,.4,1);transform:scale(0.6);">
+            <span id="titleBoomIcon" style="font-size:1.1rem;line-height:1"></span>
+            <span id="titleBoomName" style="font-size:0.8rem;font-weight:800;color:#4338ca;white-space:nowrap"></span>
+          </div>
+          <span class="text-xs text-indigo-400">得分</span>
+          <span id="bubbleScore" class="text-lg font-bold text-indigo-600 tabular-nums">0</span>
+        </div>
+        <!-- 连击文字 -->
+        <div id="bubbleCombo" class="absolute left-1/2 top-1/2 pointer-events-none z-20 font-extrabold text-amber-400 text-3xl opacity-0" style="text-shadow:0 2px 8px rgba(251,191,36,0.6)"></div>
+      </div>
+      <!-- 游戏区下方提示 -->
+      <p class="shrink-0 text-xs text-indigo-300">点击表情包打发时间，等 AI 提炼完成～</p>
+    </div>
+
+    <!-- 提炼完成：摘要 + 模板选择 -->
+    <div id="extractResult" class="hidden flex flex-col flex-1 min-h-0 pt-4">
+
+      <!-- 摘要卡片（撑满主区域） -->
+      <div id="extractSummaryCard" class="flex-1 min-h-0 flex flex-col bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-0">
+        <div class="flex items-center gap-2 mb-1 shrink-0">
+          <span class="text-lg select-none">📋</span>
+          <h3 class="font-semibold text-blue-800 text-sm">规范书核心内容</h3>
+          <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
+          <span class="flex-1"></span>
+          <button id="extractSummaryEditBtn"
+            class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">
+            ✏️ 编辑
+          </button>
+        </div>
+        <p class="text-xs text-blue-400 mb-3 shrink-0">
+          💡 此概述将作为全局背景注入所有章节的生成 Prompt，可手动修正后再开始生成。
+        </p>
+        <div id="extractSummaryView" class="flex-1 overflow-y-auto md text-gray-700 text-sm leading-relaxed pr-1"></div>
+        <div id="extractSummaryEditArea" class="hidden flex flex-col flex-1 min-h-0 space-y-2">
+          <textarea id="extractSummaryTextarea"
+            class="flex-1 min-h-0 w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-none
+                   focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            maxlength="5000"></textarea>
+          <div class="flex items-center gap-2 justify-end shrink-0">
+            <button id="extractSummaryCancelBtn"
+              class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">
+              取消
+            </button>
+            <button id="extractSummarySaveBtn"
+              class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部固定区：生成模式 + 操作栏 -->
+      <div class="shrink-0 bg-white border-t border-gray-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+
+        <!-- 生成模式选择（紧凑横排） -->
+        <div class="px-5 pt-3 pb-2">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-sm select-none">📝</span>
+            <span class="text-xs font-semibold text-gray-700">选择生成模式</span>
+          </div>
+          <div class="flex gap-3">
+            <!-- 选项 A：直接扩写 -->
+            <label id="templateOptionA"
+              class="flex-1 flex items-center gap-2 border-2 border-indigo-500 bg-indigo-50 rounded-lg px-3 py-2 cursor-pointer transition">
+              <input type="radio" name="templateMode" value="expand" class="hidden" checked>
+              <span class="w-3.5 h-3.5 rounded-full border-2 border-indigo-500 bg-indigo-500 flex items-center justify-center shrink-0">
+                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+              </span>
+              <div class="min-w-0">
+                <span class="text-xs font-semibold text-indigo-700">直接扩写</span>
+                <p class="text-xs text-gray-400 truncate">保留原文结构逐段扩写</p>
+              </div>
+            </label>
+            <!-- 选项 B：自定义模板 -->
+            <label id="templateOptionB"
+              class="flex-1 flex items-center gap-2 border-2 border-gray-200 bg-white rounded-lg px-3 py-2 cursor-pointer hover:border-indigo-300 transition">
+              <input type="radio" name="templateMode" value="custom" class="hidden">
+              <span id="templateBRadio" class="w-3.5 h-3.5 rounded-full border-2 border-gray-300 shrink-0"></span>
+              <div class="flex-1 min-w-0">
+                <span class="text-xs font-semibold text-gray-700">自定义模板</span>
+                <p class="text-xs text-gray-400 truncate">参照自定义结构生成</p>
+              </div>
+              <button id="openTemplateEditorBtn"
+                class="shrink-0 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400
+                       rounded px-2 py-1 transition">
+                ✏️ 编辑
+              </button>
+            </label>
+          </div>
+          <!-- 已编辑模板预览（已移除，不再展示） -->
+        </div>
+
+        <!-- 操作按钮行 -->
+        <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+          <button id="extractBackBtn"
+            class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
+                   px-4 py-2 rounded-lg text-sm transition">
+            ← 返回重新上传
+          </button>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 text-sm">
+              <label for="extractTargetWordsInput" class="text-gray-500 shrink-0">每章节目标字数</label>
+              <input type="number" id="extractTargetWordsInput" value="500" min="100" max="10000" step="100"
+                class="border border-gray-200 rounded-lg px-2.5 py-1.5 w-24 text-sm text-center
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+              <span class="text-gray-400">字</span>
+            </div>
+            <button id="startGenerateBtn"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white
+                     px-6 py-2 rounded-lg text-sm font-semibold transition shadow-sm shadow-indigo-200/60">
+              🚀 开始生成方案
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /extractView -->
+
+
+  <!-- ══ 模板编辑弹窗 ══ -->
+  <div id="templateModal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <div>
+          <h2 class="text-base font-bold text-gray-800">编辑生成模板</h2>
+          <p class="text-xs text-gray-400 mt-0.5">使用 Markdown 格式描述各章节的输出结构，AI 将参照此模板风格生成内容</p>
+        </div>
+        <button id="templateModalClose" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      </div>
+      <div class="flex-1 overflow-y-auto px-6 py-4">
+        <textarea id="templateEditorTextarea"
+          class="w-full h-72 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-mono
+                 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          maxlength="10000"
+          placeholder="示例模板（可修改或清空后重新编写）：
+
+## 背景概述
+（简要说明本章节的建设背景和必要性）
+
+## 建设目标
+（列出本章节的核心目标，使用有序列表）
+
+## 技术方案
+（详细描述技术实现方案，可包含子标题）
+
+## 预期效果
+（说明实施后的预期效果和价值）"></textarea>
+        <p class="text-xs text-gray-400 mt-2">字数限制：10,000 字 · 支持标准 Markdown 语法</p>
+      </div>
+      <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 shrink-0">
+        <button id="templateModalCancel"
+          class="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-lg border border-gray-200 hover:border-gray-300 transition">
+          取消
+        </button>
+        <button id="templateModalConfirm"
+          class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-medium transition">
+          确认模板
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ GENERATE VIEW ══ -->
+  <div id="generateView" class="hidden pt-6">
+
+    <!-- Progress Bar Row -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-3 mb-4
+                flex items-center gap-3 flex-wrap">
+      <span class="text-sm font-medium text-gray-600 shrink-0">生成进度</span>
+      <div class="flex-1 min-w-32 bg-gray-100 rounded-full h-2">
+        <div id="progressBar"
+          class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width:0%"></div>
+      </div>
+      <span id="progressText" class="text-sm text-gray-500 shrink-0">0%</span>
+      <span id="progressCount" class="text-sm text-gray-400 shrink-0 w-10 text-right">0/0</span>
+      <span id="totalWordsDisplay" class="hidden text-sm text-indigo-500 font-medium shrink-0 ml-1">0 字</span>
+
+      <div class="flex items-center gap-2 ml-auto shrink-0">
+        <button id="downloadDocxBtn"
+          class="hidden items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white
+                 px-4 py-1.5 rounded-lg text-sm font-semibold transition">
+          ↓ 下载 Word
+        </button>
+<button id="backBtn"
+          class="border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700
+                 px-3 py-1.5 rounded-lg text-sm transition">
+          ← 返回
+        </button>
+        <button id="cancelBtn"
+          class="border border-gray-200 hover:border-red-200 text-gray-400 hover:text-red-500
+                 px-3 py-1.5 rounded-lg text-sm transition">
+          ✕ 取消
+        </button>
+      </div>
+    </div>
+
+    <!-- Two-Column Layout -->
+    <div class="flex gap-4" style="height: calc(100vh - 230px); min-height: 420px;">
+
+      <!-- Left: TOC Sidebar -->
+      <div class="w-56 shrink-0 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-gray-100 shrink-0">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">章节目录</p>
+        </div>
+        <div id="genTocList" class="flex-1 overflow-y-auto py-1"></div>
+      </div>
+
+      <!-- Right: Content Panel -->
+      <div class="flex-1 min-w-0 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
+
+        <!-- Empty / connecting state -->
+        <div id="contentEmpty" class="flex-1 flex items-center justify-center text-gray-400">
+          <div class="text-center">
+            <div class="text-4xl mb-3 spin select-none">⟳</div>
+            <p class="text-sm">正在连接生成服务...</p>
+          </div>
+        </div>
+
+        <!-- Actual content -->
+        <div id="contentScroll" class="hidden flex-1 overflow-y-auto px-7 py-6">
+          <!-- Completed sections -->
+          <div id="completedSections" class="space-y-4"></div>
+          <!-- Currently streaming section -->
+          <div id="currentSection" class="hidden mt-8">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-700
+                           px-2.5 py-0.5 rounded-full font-medium">
+                <span class="spin text-xs">⟳</span> 正在生成
+              </span>
+              <h3 id="currentSectionTitle" class="font-semibold text-gray-700 text-sm"></h3>
+            </div>
+            <div id="currentSectionContent" class="md text-gray-700 leading-relaxed streaming-cursor"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div><!-- /generateView -->
+
+</main>
+
+<!-- ════════════════════════════════════════════════
+     FOOTER MODAL — 使用说明
+════════════════════════════════════════════════ -->
+<div id="readmeModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:780px;max-height:90vh">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-bold text-gray-800 text-base">📖 使用说明</h2>
+        <p class="text-xs text-gray-400 mt-0.5">技术方案生成助手 · 快速上手指南</p>
+      </div>
+      <button class="footer-modal-close text-gray-400 hover:text-gray-600 text-xl leading-none transition
+                     w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+      <!-- 工作流程 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">1</span>
+          整体工作流程
+        </h3>
+        <div class="flex items-stretch gap-1.5 flex-wrap">
+          <div class="flex-1 min-w-[100px] bg-indigo-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">📄</div>
+            <div class="text-xs font-semibold text-indigo-700">上传规范书</div>
+            <div class="text-xs text-indigo-400 mt-0.5">docx / pdf / doc</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[100px] bg-violet-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">🔍</div>
+            <div class="text-xs font-semibold text-violet-700">自动解析目录</div>
+            <div class="text-xs text-violet-400 mt-0.5">章节结构 + 原文</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[100px] bg-blue-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">⚙️</div>
+            <div class="text-xs font-semibold text-blue-700">配置 API</div>
+            <div class="text-xs text-blue-400 mt-0.5">首次使用配置</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[100px] bg-emerald-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">✨</div>
+            <div class="text-xs font-semibold text-emerald-700">AI 逐章扩写</div>
+            <div class="text-xs text-emerald-400 mt-0.5">实时流式生成</div>
+          </div>
+          <div class="flex items-center text-gray-300 font-bold text-lg shrink-0">→</div>
+          <div class="flex-1 min-w-[100px] bg-amber-50 rounded-xl px-3 py-2.5 text-center">
+            <div class="text-lg mb-1">📥</div>
+            <div class="text-xs font-semibold text-amber-700">下载 Word</div>
+            <div class="text-xs text-amber-400 mt-0.5">格式规范文档</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 上传文件要求 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">2</span>
+          上传文件要求
+        </h3>
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div class="border border-emerald-200 bg-emerald-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-emerald-600 font-bold text-xs bg-emerald-100 px-1.5 py-0.5 rounded">.docx</span>
+              <span class="text-xs text-emerald-600 font-semibold">首选</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">包含 Word 内置目录，章节层级识别最准确。标题使用「标题 1/2/3/4」样式或标准编号前缀（一、1. (1) ①）效果最佳。</p>
+          </div>
+          <div class="border border-blue-200 bg-blue-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-blue-600 font-bold text-xs bg-blue-100 px-1.5 py-0.5 rounded">.pdf</span>
+              <span class="text-xs text-blue-500 font-semibold">可检索 PDF</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">需可用鼠标选中文字（非扫描件）。标题字号需明显大于正文，或带标准数字编号前缀。</p>
+          </div>
+          <div class="border border-gray-200 bg-gray-50 rounded-xl p-3">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-gray-500 font-bold text-xs bg-gray-200 px-1.5 py-0.5 rounded">.doc</span>
+              <span class="text-xs text-gray-400 font-semibold">旧格式</span>
+            </div>
+            <p class="text-xs text-gray-600 leading-relaxed">需服务器安装 LibreOffice 自动转换，建议提前另存为 .docx 格式后上传。</p>
+          </div>
+        </div>
+        <div class="mt-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex gap-2.5">
+          <span class="text-amber-500 shrink-0 mt-0.5">💡</span>
+          <p class="text-xs text-amber-700 leading-relaxed">生成质量的关键在于原文内容充实度——章节原文越详细（含技术指标、功能描述、约束条件），AI 扩写效果越好。仅有标题、无正文的章节将被自动跳过。</p>
+        </div>
+      </section>
+
+      <!-- API 配置 + 生成参数 并排 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <section>
+          <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">3</span>
+            API 配置
+          </h3>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">OpenAI</span>
+              <span class="text-xs text-gray-400">gpt-4o / gpt-4o-mini</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">Anthropic Claude</span>
+              <span class="text-xs text-gray-400">claude-3-5-sonnet</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">DeepSeek</span>
+              <span class="text-xs text-gray-400">deepseek-chat（性价比高）</span>
+            </div>
+            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <span class="text-xs font-medium text-gray-700">豆包 / Kimi / MiniMax</span>
+              <span class="text-xs text-gray-400">支持 OpenAI 兼容接口</span>
+            </div>
+          </div>
+          <p class="text-xs text-gray-400 mt-2 leading-relaxed">配置一次后自动保存，支持多个 API 按优先级轮询调用。</p>
+        </section>
+        <section>
+          <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">4</span>
+            生成参数与操作
+          </h3>
+          <div class="space-y-2">
+            <div class="bg-gray-50 rounded-xl px-3 py-2.5">
+              <div class="text-xs font-semibold text-gray-700 mb-1">目标字数参考</div>
+              <div class="flex gap-1.5 flex-wrap">
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">200–500 · 概述</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">500–1000 · 常规</span>
+                <span class="text-xs bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-500">1000+ · 详述</span>
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5">
+              <div class="text-xs font-semibold text-gray-700">生成后可操作</div>
+              <div class="flex items-start gap-1.5">
+                <span class="text-indigo-500 text-xs shrink-0 mt-0.5">✏</span>
+                <span class="text-xs text-gray-600">点击「编辑」直接修改，保存后字数自动更新</span>
+              </div>
+              <div class="flex items-start gap-1.5">
+                <span class="text-indigo-500 text-xs shrink-0 mt-0.5">↺</span>
+                <span class="text-xs text-gray-600">点击「重新生成」可选择不同 API、追加优化说明单章重生成</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 常见问题 -->
+      <section>
+        <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+          <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-xs flex items-center justify-center font-bold shrink-0">5</span>
+          常见问题
+        </h3>
+        <div class="space-y-2">
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
+              章节识别数量为 0 或很少？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              DOCX：检查标题是否使用「标题 1/2/3/4」样式，或包含标准编号前缀（一、1. (1) 等）。<br>
+              PDF：确认 PDF 可检索（鼠标可选中文字），且标题字号明显大于正文。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
+              很多章节显示为「已跳过」？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              说明该章节在规范书中只有标题、无正文内容。系统不会无中生有，Word 文档中会保留标题，结构与规范书一致。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
+              生成中途断开，已完成内容会丢失吗？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              不会。已完成章节保存在服务器内存中，可直接点击「下载 Word」导出已完成部分。
+            </div>
+          </details>
+          <details class="group bg-gray-50 rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 text-xs font-medium text-gray-700 cursor-pointer flex items-center justify-between select-none hover:bg-gray-100 transition list-none">
+              豆包 API 提示模型不存在？
+              <span class="text-gray-400 group-open:rotate-90 transition-transform duration-150">▸</span>
+            </summary>
+            <div class="px-4 pb-3 text-xs text-gray-500 leading-relaxed border-t border-gray-100 pt-2.5">
+              豆包（火山引擎）需在控制台创建推理接入点，模型 ID 格式为 ep-xxxxxxxx-xxxxx。在配置面板「模型」字段填写接入点 ID。
+            </div>
+          </details>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     CONFIG MODAL
+════════════════════════════════════════════════ -->
+<div id="configModal"
+  class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style="max-width:680px;max-height:90vh">
+
+    <!-- Header -->
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+      <h2 class="font-bold text-gray-800 text-lg">⚙️ API 配置管理</h2>
+      <button id="closeConfigBtn"
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none transition w-7 h-7
+               flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+    </div>
+
+    <!-- ① 无配置态：全宽新增表单 -->
+    <div id="configBodyEmpty" class="px-6 py-5 space-y-3 overflow-y-auto">
+      <p class="text-xs text-gray-400 mb-1">尚未配置任何 API，请先添加一个</p>
+      <!-- Provider -->
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1.5">提供商</label>
+        <div class="grid grid-cols-3 gap-1.5">
+          <button data-provider="openai"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">OpenAI / 兼容</button>
+          <button data-provider="claude"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">Anthropic Claude</button>
+          <button data-provider="doubao"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🫘 豆包</button>
+          <button data-provider="kimi"    class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🌙 Kimi</button>
+          <button data-provider="minimax" class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">MiniMax</button>
+          <button data-provider="deepseek"class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🐋 DeepSeek</button>
+        </div>
+      </div>
+      <!-- API Key -->
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1.5">API Key <span class="text-red-400">*</span></label>
+        <input type="password" id="addApiKeyInput" placeholder="sk-..." autocomplete="off"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+      <!-- Base URL -->
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1.5">Base URL</label>
+        <input type="text" id="addBaseUrlInput"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+      <!-- Model -->
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1.5">模型</label>
+        <input type="text" id="addModelInput"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+      </div>
+      <div id="addStatus" class="hidden rounded-lg px-3 py-2 text-xs font-medium"></div>
+      <div class="flex gap-2 pt-1">
+        <button id="addAndVerifyBtn"
+          class="flex-1 border border-gray-200 hover:border-indigo-300 hover:text-indigo-600 text-gray-600 py-2 rounded-lg text-sm font-medium transition">
+          验证并添加
+        </button>
+        <button id="addOnlyBtn"
+          class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-semibold transition shadow-sm">
+          直接添加
+        </button>
+      </div>
+    </div>
+
+    <!-- ② 有配置态：左右双列 -->
+    <div id="configBodyFull" class="hidden flex-1 flex overflow-hidden min-h-0">
+
+      <!-- 左列：已配置列表 -->
+      <div class="w-52 shrink-0 border-r border-gray-100 flex flex-col">
+        <div class="px-4 pt-4 pb-2 flex items-center justify-between shrink-0">
+          <span class="text-xs font-medium text-gray-500">已配置 API</span>
+          <span id="configCountBadge" class="text-xs text-gray-400"></span>
+        </div>
+        <div id="configList" class="flex-1 overflow-y-auto px-3 pb-4 space-y-1"></div>
+      </div>
+
+      <!-- 右列：新增 / 编辑面板 -->
+      <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        <div id="rightPanelTitle" class="text-xs font-semibold text-gray-500 mb-0.5">+ 新增 API 配置</div>
+        <!-- Provider（复用同一套 .add-provider-btn） -->
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1.5">提供商</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button data-provider="openai"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">OpenAI / 兼容</button>
+            <button data-provider="claude"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">Anthropic Claude</button>
+            <button data-provider="doubao"  class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🫘 豆包</button>
+            <button data-provider="kimi"    class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🌙 Kimi</button>
+            <button data-provider="minimax" class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">MiniMax</button>
+            <button data-provider="deepseek"class="add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition">🐋 DeepSeek</button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1.5">API Key <span class="text-red-400">*</span></label>
+          <input type="password" id="addApiKeyInputFull" placeholder="sk-..." autocomplete="off"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1.5">Base URL</label>
+          <input type="text" id="addBaseUrlInputFull"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1.5">模型</label>
+          <input type="text" id="addModelInputFull"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+        </div>
+        <div id="addStatusFull" class="hidden rounded-lg px-3 py-2 text-xs font-medium"></div>
+        <div class="flex gap-2 pt-1">
+          <button id="cancelEditBtn"
+            class="hidden border border-gray-200 hover:border-gray-300 text-gray-500 py-2 px-3 rounded-lg text-sm font-medium transition">
+            取消
+          </button>
+          <button id="addAndVerifyBtnFull"
+            class="flex-1 border border-gray-200 hover:border-indigo-300 hover:text-indigo-600 text-gray-600 py-2 rounded-lg text-sm font-medium transition">
+            验证并添加
+          </button>
+          <button id="addOnlyBtnFull"
+            class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-semibold transition shadow-sm">
+            直接添加
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between shrink-0">
+      <span class="text-xs text-gray-400">拖动左侧列表调整优先级，顺序即实际调用顺序</span>
+      <button id="doneConfigBtn"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition shadow-sm">
+        完成
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SCRIPT
+════════════════════════════════════════════════ -->
+<script>
+/* ── 工具 ── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* marked 配置：禁用原始 HTML 直通，所有 HTML 标签被转义 */
+marked.use({ breaks: true, gfm: true, html: false });
+/* safeParse：marked 输出再经 DOMPurify 过滤，防止 XSS */
+const safeParse = md => DOMPurify.sanitize(marked.parse(md || ''));
+
+/* 字数 → 预估 Word 页数（A4, 宋体小四, 1.5倍行距 ≈ 450字/页） */
+const WORDS_PER_PAGE = 450;
+function estPages(words) {
+  if (words <= 0) return '';
+  const pages = Math.ceil(words / WORDS_PER_PAGE);
+  return `≈${pages}页`;
+}
+
+/* ── 全局状态 ── */
+const S = {
+  view: 'upload',
+  docId: null,
+  docTitle: '',
+  sections: [],       // [{id, level, title, content_hint}]
+  configSaved: false, // API 已保存
+  apiKeySaved: false, // API Key 已存档（无需重新输入）
+  taskId: null,
+  totalSections: 0,
+  completedCount: 0,
+  eventSource: null,
+  downloadUrl: null,
+  normalClose: false, // 标记是否正常关闭 SSE（用于区分 onerror）
+  tokenBuffer: '',    // 当前章节 token 缓冲
+  renderTimer: null,  // 去抖 timer
+  currentProvider: 'openai',
+  targetWords: 500,   // 每章节目标字数
+  totalWords: 0,      // 已生成总字数
+  sectionWords: {},   // secId → 字数
+  scrollLocked: null, // 锁定滚动到指定 secId（用户编辑/重新生成时）
+  docSummary: '',    // AI 提炼的项目概述（用于 regen 上下文注入）
+  docTemplate: '',   // 用户自定义生成模板（空=直接扩写）
+  useTemplate: false,// 是否启用自定义模板
+};
+
+const DEFAULTS = {
+  openai:   { base_url: 'https://api.openai.com/v1',                     model: 'gpt-4o' },
+  claude:   { base_url: 'https://api.anthropic.com',                     model: 'claude-3-5-sonnet-20241022' },
+  doubao:   { base_url: 'https://ark.cn-beijing.volces.com/api/v3',      model: 'doubao-pro-32k' },
+  kimi:     { base_url: 'https://api.moonshot.cn/v1',                    model: 'moonshot-v1-32k' },
+  minimax:  { base_url: 'https://api.minimax.chat/v1',                   model: 'MiniMax-M2.7' },
+  deepseek: { base_url: 'https://api.deepseek.com/v1',                   model: 'deepseek-chat' },
+};
+
+/* ══════════════════════════════════════════
+   UPLOAD
+══════════════════════════════════════════ */
+const dropZone    = $('dropZone');
+const dzIdle      = $('dzIdle');
+const dzLoading   = $('dzLoading');
+const fileInput   = $('fileInput');
+const uploadError = $('uploadError');
+const tocResult   = $('tocResult');
+const actionBar   = $('actionBar');
+
+/* ── 解析步骤状态管理 ── */
+let _parseESS = null;   // 当前 EventSource 引用，用于中断
+
+function setUploading(on) {
+  dzIdle.classList.toggle('hidden', on);
+  dzLoading.classList.toggle('hidden', !on);
+  dropZone.style.pointerEvents = on ? 'none' : '';
+}
+
+function showUploadError(msg) {
+  $('uploadErrorMsg').textContent = msg;
+  uploadError.classList.remove('hidden');
+}
+
+function hideUploadError() { uploadError.classList.add('hidden'); }
+
+/* 更新步骤指示器（stepNum: 1-4, status: 'active'|'done'） */
+function setParseStep(stepNum, status) {
+  for (let i = 1; i <= 4; i++) {
+    const el = $('pstep-' + i);
+    if (!el) continue;
+    el.classList.remove('step-active', 'step-done');
+    if (i === stepNum && status === 'active') el.classList.add('step-active');
+    if (i < stepNum || (i === stepNum && status === 'done')) el.classList.add('step-done');
+  }
+  // 步骤间连线颜色
+  [[1,2],[2,3],[3,4]].forEach(([a,b]) => {
+    const line = document.querySelector(`.step-line-${a}-${b}`);
+    if (line) line.style.backgroundColor = stepNum > a ? '#22c55e' : '#e5e7eb';
+  });
+}
+
+/* 解析进度条更新 */
+function setParseProgress(pct, stageText) {
+  $('parseProgressBar').style.width = Math.max(5, pct) + '%';
+  if (stageText) $('parseStageText').textContent = stageText;
+}
+
+/* 显示正在扫描的章节 */
+function showParseSectionScan(title, current, total) {
+  const row = $('parseSectionRow');
+  row.classList.remove('hidden');
+  $('parseSectionTitle').textContent = title;
+  $('parseSectionCount').textContent = total > 0 ? `(${current}/${total})` : `(${current})`;
+}
+
+async function handleFile(file) {
+  hideUploadError();
+  tocResult.classList.add('hidden');
+  actionBar.classList.add('hidden');
+  setUploading(true);
+
+  // 初始化进度 UI
+  $('parseFilename').textContent = file.name;
+  $('parseSectionRow').classList.add('hidden');
+  setParseStep(1, 'active');
+  setParseProgress(5, '上传文件中...');
+
+  // 关闭残留的 EventSource
+  if (_parseESS) { _parseESS.close(); _parseESS = null; }
+
+  // ── Step 1: POST 上传，获取 job_id ─────────────
+  let jobId;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '上传失败，请重试');
+    jobId = data.parse_job_id;
+    setParseStep(1, 'done');
+    setParseStep(2, 'active');
+    setParseProgress(15, '文件已接收，正在识别格式...');
+  } catch (e) {
+    setUploading(false);
+    showUploadError('上传失败：' + e.message);
+    return;
+  }
+
+  // ── Step 2-4: 订阅 SSE 进度流 ─────────────────
+  await new Promise((resolve) => {
+    const es = new EventSource(`/api/parse/stream/${jobId}`);
+    _parseESS = es;
+
+    // ★ 关键标志：区分"我们主动关闭"vs"异常断开"
+    // 调用 es.close() 会触发 onerror（某些浏览器），该标志防止误报
+    let closedByUs = false;
+
+    function safeClose() {
+      closedByUs = true;
+      es.close();
+      _parseESS = null;
+    }
+
+    // 超时保护：3 分钟
+    const timeout = setTimeout(() => {
+      safeClose();
+      setUploading(false);
+      showUploadError('解析超时（3分钟），请检查文件是否过大或格式是否正确');
+      resolve();
+    }, 3 * 60 * 1000);
+
+    es.addEventListener('parse_start', () => {
+      setParseStep(2, 'done');
+      setParseStep(3, 'active');
+      setParseProgress(20, '开始扫描文档结构...');
+    });
+
+    es.addEventListener('parse_progress', e => {
+      const d = JSON.parse(e.data);
+      const pct = d.percent >= 0 ? Math.min(85, 20 + d.percent * 0.65) : 30;
+      if (d.stage && d.stage.includes('转换')) {
+        setParseStep(2, 'active');
+        setParseProgress(pct, d.stage);
+      } else {
+        setParseStep(3, 'active');
+        setParseProgress(pct, d.stage || '扫描中...');
+      }
+    });
+
+    es.addEventListener('parse_section', e => {
+      const d = JSON.parse(e.data);
+      setParseStep(3, 'active');
+      const pct = d.total > 0
+        ? Math.min(85, 20 + (d.current / d.total) * 65)
+        : Math.min(85, 20 + d.current * 2);
+      setParseProgress(pct, `扫描章节结构 (${d.current}${d.total > 0 ? '/' + d.total : ''})...`);
+      showParseSectionScan(d.title, d.current, d.total);
+    });
+
+    es.addEventListener('parse_done', e => {
+      clearTimeout(timeout);
+      safeClose();   // ← 用 safeClose，不再直接 es.close()
+      const data = JSON.parse(e.data);
+      setParseStep(3, 'done');
+      setParseStep(4, 'done');
+      setParseProgress(100, '解析完成！');
+
+      setTimeout(() => {
+        setUploading(false);
+        S.docId       = data.doc_id;
+        S.docTitle    = data.title;
+        S.docFilename = file.name;
+        S.sections    = data.sections;
+        renderTOC(data);
+      }, 400);
+
+      resolve();
+    });
+
+    es.addEventListener('error', e => {
+      clearTimeout(timeout);
+      safeClose();
+      setUploading(false);
+      let msg = '解析失败，请重试';
+      try { msg = JSON.parse(e.data).message || msg; } catch {}
+      showUploadError(msg);
+      resolve();
+    });
+
+    // SSE 连接本身出错（真正的网络断线）
+    // 注意：主动 es.close() 在某些浏览器也会触发此回调，用 closedByUs 区分
+    es.onerror = () => {
+      if (closedByUs) return;   // ← 主动关闭引起的，忽略
+      if (es.readyState === EventSource.CLOSED) {
+        clearTimeout(timeout);
+        _parseESS = null;
+        setUploading(false);
+        showUploadError('与服务器的连接中断，请检查后端服务是否运行，然后重试');
+        resolve();
+      }
+      // readyState === CONNECTING：正在重连，等待即可，不报错
+    };
+  });
+}
+
+function renderTOC(data) {
+  const displayName = S.docFilename || data.filename || data.title;
+  $('docTitle').textContent = displayName;
+  $('sectionCount').textContent = `共识别 ${data.sections.length} 个章节`;
+  const list = $('tocList');
+  list.innerHTML = '';
+
+  const starCount = data.sections.filter(s => s.special_marks && s.special_marks.includes('★')).length;
+  const triCount  = data.sections.filter(s => s.special_marks && s.special_marks.includes('▲')).length;
+  // 标记统计提示
+  if (starCount || triCount) {
+    const badge = document.createElement('div');
+    badge.className = 'px-4 py-2 text-xs text-gray-400 flex gap-3 border-b border-gray-50';
+    if (starCount) badge.innerHTML += `<span class="mark-star">★</span> 否决条款 ${starCount} 项`;
+    if (triCount)  badge.innerHTML += `<span class="mark-tri">▲</span> 加分项 ${triCount} 项`;
+    list.appendChild(badge);
+  }
+
+  data.sections.forEach(sec => {
+    const indent = (sec.level - 1) * 14;
+    const icon   = sec.level === 1 ? '📌' : sec.level === 2 ? '▸' : sec.level === 3 ? '◦' : '·';
+    const marks  = sec.special_marks || [];
+    const markHtml = marks.map(m =>
+      m === '★' ? '<span class="mark-star">★ 否决</span>' : '<span class="mark-tri">▲ 加分</span>'
+    ).join('');
+
+    const div = document.createElement('div');
+    div.className = 'py-2 flex items-start gap-2 text-sm text-gray-700 border-b border-gray-50 last:border-0';
+    div.style.paddingLeft = indent + 'px';
+    div.innerHTML = `
+      <span class="shrink-0 text-gray-400 mt-0.5 select-none">${icon}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center flex-wrap gap-x-1">
+          <span class="${sec.level === 1 ? 'font-semibold' : 'font-medium'}">${esc(sec.title)}</span>
+          ${markHtml}
+        </div>
+        ${sec.content_hint
+          ? `<p class="text-gray-400 text-xs mt-0.5 truncate">${esc(sec.content_hint)}</p>`
+          : ''}
+      </div>`;
+    list.appendChild(div);
+  });
+  tocResult.classList.remove('hidden');
+  actionBar.classList.remove('hidden');
+}
+
+/* Drag & Drop */
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drop-active');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-active'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drop-active');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+
+/* ══════════════════════════════════════════
+   CONFIG MODAL（多配置管理）
+══════════════════════════════════════════ */
+const configModal = $('configModal');
+
+function openConfig() {
+  configModal.classList.remove('hidden');
+  refreshConfigList();
+}
+function closeConfig() { configModal.classList.add('hidden'); }
+
+$('configBtn').addEventListener('click', openConfig);
+$('closeConfigBtn').addEventListener('click', closeConfig);
+$('doneConfigBtn').addEventListener('click', closeConfig);
+configModal.addEventListener('click', e => { if (e.target === configModal) closeConfig(); });
+
+/* ── 状态变量 ── */
+let addCurrentProvider = 'openai';
+let editingConfigId    = null;   // null = 新增模式; string = 编辑指定 id
+let currentConfigs     = [];     // 当前已配置的 API 列表，供重新生成面板使用
+
+/* ── 拖拽排序（模块级，只初始化一次）── */
+let dragSrcId         = null;
+let dropIndicatorItem = null;
+let dropIndicatorPos  = null;
+
+function clearIndicator() {
+  if (dropIndicatorItem) {
+    dropIndicatorItem.classList.remove('border-t-2', 'border-b-2', 'border-indigo-400');
+    dropIndicatorItem = null;
+    dropIndicatorPos  = null;
+  }
+}
+
+function setIndicator(item, isUpper) {
+  const pos = isUpper ? 'top' : 'bottom';
+  if (dropIndicatorItem === item && dropIndicatorPos === pos) return;
+  clearIndicator();
+  item.classList.add(isUpper ? 'border-t-2' : 'border-b-2', 'border-indigo-400');
+  dropIndicatorItem = item;
+  dropIndicatorPos  = pos;
+}
+
+(function initDragDrop() {
+  const list = $('configList');
+
+  list.addEventListener('dragstart', e => {
+    const item = e.target.closest('.cfg-item');
+    if (!item) return;
+    dragSrcId = item.dataset.configId;
+    e.dataTransfer.effectAllowed = 'move';
+    requestAnimationFrame(() => item.classList.add('opacity-40'));
+  });
+
+  list.addEventListener('dragend', e => {
+    const item = e.target.closest('.cfg-item');
+    if (item) item.classList.remove('opacity-40');
+    clearIndicator();
+    dragSrcId = null;
+  });
+
+  list.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.target.closest('.cfg-item');
+    if (!target || target.dataset.configId === dragSrcId) { clearIndicator(); return; }
+    const rect = target.getBoundingClientRect();
+    setIndicator(target, e.clientY < rect.top + rect.height / 2);
+  });
+
+  list.addEventListener('dragleave', e => {
+    if (!list.contains(e.relatedTarget)) clearIndicator();
+  });
+
+  list.addEventListener('drop', async e => {
+    e.preventDefault();
+    clearIndicator();
+    if (!dragSrcId) return;
+    const target = e.target.closest('.cfg-item');
+    if (!target || target.dataset.configId === dragSrcId) return;
+
+    const cur = list._currentConfigs;
+    if (!cur) return;
+    const srcIdx = cur.findIndex(c => c.id === dragSrcId);
+    const dstIdx = cur.findIndex(c => c.id === target.dataset.configId);
+    if (srcIdx < 0 || dstIdx < 0) return;
+
+    const rect     = target.getBoundingClientRect();
+    const isUpper  = e.clientY < rect.top + rect.height / 2;
+    const insertAt = isUpper ? dstIdx : dstIdx + 1;
+
+    const [moved]    = cur.splice(srcIdx, 1);
+    const realInsert = insertAt > srcIdx ? insertAt - 1 : insertAt;
+    cur.splice(realInsert, 0, moved);
+
+    renderConfigList(cur);
+
+    try {
+      const res = await fetch('/api/configs/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ordered_ids: cur.map(c => c.id) }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      refreshConfigList();
+    }
+  });
+})();
+
+/* ── Provider 切换（作用于两套布局中的所有 .add-provider-btn）── */
+function applyAddProviderStyle() {
+  document.querySelectorAll('.add-provider-btn').forEach(btn => {
+    const active = btn.dataset.provider === addCurrentProvider;
+    btn.className = 'add-provider-btn py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition ' + (
+      active
+        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+    );
+  });
+}
+applyAddProviderStyle();
+
+document.querySelectorAll('.add-provider-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    addCurrentProvider = btn.dataset.provider;
+    applyAddProviderStyle();
+    const d = DEFAULTS[addCurrentProvider];
+    const allBaseUrls = Object.values(DEFAULTS).map(x => x.base_url);
+    const allModels   = Object.values(DEFAULTS).map(x => x.model);
+    // 同步两套布局的输入框
+    ['addBaseUrlInput', 'addBaseUrlInputFull'].forEach(id => {
+      const el = $(id); if (!el) return;
+      if (!el.value || allBaseUrls.includes(el.value)) el.value = d.base_url;
+    });
+    ['addModelInput', 'addModelInputFull'].forEach(id => {
+      const el = $(id); if (!el) return;
+      if (!el.value || allModels.includes(el.value)) el.value = d.model;
+    });
+  });
+});
+
+/* 初始填充默认值 */
+$('addBaseUrlInput').value    = DEFAULTS.openai.base_url;
+$('addModelInput').value      = DEFAULTS.openai.model;
+$('addBaseUrlInputFull').value = DEFAULTS.openai.base_url;
+$('addModelInputFull').value   = DEFAULTS.openai.model;
+
+/* ── 状态提示（自动路由到当前可见布局）── */
+function setAddStatus(type, msg) {
+  const cls = 'rounded-lg px-3 py-2 text-xs font-medium ' + {
+    info:    'bg-blue-50 text-blue-700',
+    success: 'bg-green-50 text-green-700',
+    error:   'bg-red-50 text-red-700',
+  }[type];
+  // 两个都更新，由 hidden 类控制哪个可见
+  ['addStatus', 'addStatusFull'].forEach(id => {
+    const el = $(id);
+    el.className = cls;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  });
+}
+
+/* ── 辅助：提取 FastAPI 错误信息 ── */
+function extractErrMsg(err) {
+  if (typeof err.detail === 'string') return err.detail;
+  if (Array.isArray(err.detail) && err.detail.length > 0)
+    return err.detail.map(e => e.msg || JSON.stringify(e)).join('；');
+  return err.message || '未知错误';
+}
+
+/* ── 刷新配置列表 ── */
+async function refreshConfigList() {
+  try {
+    const res = await fetch('/api/configs');
+    if (!res.ok) return;
+    const d = await res.json();
+    renderConfigList(d.configs || []);
+  } catch {}
+}
+
+const PROVIDER_LABEL = {
+  openai: 'OpenAI', claude: 'Claude', doubao: '豆包',
+  kimi: 'Kimi', minimax: 'MiniMax', deepseek: 'DeepSeek',
+};
+
+/* ── 切换到新增模式（右侧面板）── */
+function showAddForm() {
+  editingConfigId = null;
+  $('rightPanelTitle').textContent = '+ 新增 API 配置';
+  $('cancelEditBtn').classList.add('hidden');
+  $('addAndVerifyBtnFull').textContent = '验证并添加';
+  $('addOnlyBtnFull').textContent = '直接添加';
+  $('addApiKeyInputFull').value = '';
+  $('addApiKeyInputFull').placeholder = 'sk-...';
+  addCurrentProvider = 'openai';
+  applyAddProviderStyle();
+  $('addBaseUrlInputFull').value = DEFAULTS.openai.base_url;
+  $('addModelInputFull').value   = DEFAULTS.openai.model;
+  $('addStatusFull').classList.add('hidden');
+}
+
+/* ── 切换到编辑模式（右侧面板）── */
+function showEditForm(cfg) {
+  editingConfigId = cfg.id;
+  $('rightPanelTitle').textContent = '编辑 API 配置';
+  $('cancelEditBtn').classList.remove('hidden');
+  $('addAndVerifyBtnFull').textContent = '验证并保存';
+  $('addOnlyBtnFull').textContent = '保存';
+  addCurrentProvider = cfg.provider;
+  applyAddProviderStyle();
+  $('addApiKeyInputFull').value = '';
+  $('addApiKeyInputFull').placeholder = '已保存 — 如需修改请输入新密钥';
+  $('addBaseUrlInputFull').value = cfg.base_url;
+  $('addModelInputFull').value   = cfg.model;
+  $('addStatusFull').classList.add('hidden');
+}
+
+/* ── 渲染配置列表（同时控制布局切换）── */
+function renderConfigList(configs) {
+  S.configSaved = configs.length > 0;
+
+  // 更新 header 状态指示
+  const configStatus = $('configStatus');
+  if (configStatus) {
+    if (configs.length === 0) {
+      configStatus.classList.add('hidden');
+    } else {
+      const top = configs[0];
+      configStatus.textContent = `✓ ${top.model}`;
+      configStatus.classList.remove('hidden');
+    }
+  }
+
+  if (configs.length === 0) {
+    // 无配置：显示全宽表单，隐藏双列布局
+    $('configBodyEmpty').classList.remove('hidden');
+    $('configBodyFull').classList.add('hidden');
+    // 重置空布局的输入框
+    $('addApiKeyInput').value = '';
+    $('addStatus').classList.add('hidden');
+    addCurrentProvider = 'openai';
+    applyAddProviderStyle();
+    $('addBaseUrlInput').value = DEFAULTS.openai.base_url;
+    $('addModelInput').value   = DEFAULTS.openai.model;
+    return;
+  }
+
+  // 有配置：显示双列布局，隐藏全宽表单
+  $('configBodyEmpty').classList.add('hidden');
+  $('configBodyFull').classList.remove('hidden');
+  $('configBodyFull').style.display = 'flex';
+
+  const list = $('configList');
+  const badge = $('configCountBadge');
+  badge.textContent = configs.length;
+  list._currentConfigs = configs.slice();
+
+  list.innerHTML = configs.map((cfg, i) => {
+    const label = PROVIDER_LABEL[cfg.provider] || cfg.provider;
+    const verifiedBadge = cfg.verified
+      ? '<span class="text-green-600 text-xs font-medium shrink-0">✓</span>'
+      : '<span class="text-gray-300 text-xs shrink-0">—</span>';
+    return `
+      <div class="cfg-item flex items-center gap-1.5 px-2 py-2 rounded-lg border border-gray-200 bg-gray-50 transition-colors"
+           draggable="true" data-config-id="${esc(cfg.id)}">
+        <span class="drag-handle shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 select-none"
+              title="拖动调整顺序">⠿</span>
+        <span class="text-xs text-gray-400 w-3.5 shrink-0 tabular-nums">${i + 1}</span>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-medium text-gray-800 truncate">${esc(label)}</div>
+          <div class="text-xs text-gray-400 truncate">${esc(cfg.model)}</div>
+        </div>
+        ${verifiedBadge}
+        <button class="edit-cfg-btn text-gray-400 hover:text-indigo-600 transition shrink-0 text-xs px-1 py-0.5 rounded hover:bg-indigo-50"
+          data-id="${esc(cfg.id)}" title="编辑">✏</button>
+        <button class="delete-cfg-btn text-gray-300 hover:text-red-500 transition shrink-0 text-sm leading-none px-1"
+          data-id="${esc(cfg.id)}" title="删除">×</button>
+      </div>`;
+  }).join('');
+
+  /* 编辑按钮 */
+  list.querySelectorAll('.edit-cfg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cfg = list._currentConfigs.find(c => c.id === btn.dataset.id);
+      if (cfg) showEditForm(cfg);
+    });
+  });
+
+  /* 删除按钮 */
+  list.querySelectorAll('.delete-cfg-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        const res = await fetch(`/api/configs/${encodeURIComponent(btn.dataset.id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        // 若正在编辑该条，退回新增模式
+        if (editingConfigId === btn.dataset.id) showAddForm();
+        refreshConfigList();
+      } catch {
+        setAddStatus('error', '删除失败，请重试');
+      }
+    });
+  });
+
+  // 仅在首次进入有配置态（或无编辑状态）时重置右侧面板，避免覆盖正在输入的内容
+  const wasFullVisible = !$('configBodyFull').classList.contains('hidden');
+  if (!editingConfigId && !wasFullVisible) showAddForm();
+  // 同步供重新生成面板使用
+  currentConfigs = configs.slice();
+}
+
+/* ── 新增 / 编辑提交（全局，用于两套布局）── */
+async function doAddConfig(autoVerify = false) {
+  const inFull = !$('configBodyFull').classList.contains('hidden');
+
+  // 根据当前布局读取输入框
+  const apiKey  = inFull ? $('addApiKeyInputFull').value.trim() : $('addApiKeyInput').value.trim();
+  const baseUrl = inFull ? $('addBaseUrlInputFull').value.trim() : $('addBaseUrlInput').value.trim();
+  const model   = inFull ? $('addModelInputFull').value.trim()   : $('addModelInput').value.trim();
+
+  if (editingConfigId) {
+    /* ── 编辑模式：PUT ── */
+    const finalKey = apiKey || '__KEEP__';
+    if (apiKey && apiKey.length < 8) { setAddStatus('error', 'API Key 长度异常，请检查'); return; }
+
+    setAddStatus('info', autoVerify ? '验证中...' : '保存中...');
+    try {
+      const res = await fetch(`/api/configs/${encodeURIComponent(editingConfigId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: addCurrentProvider, api_key: finalKey, base_url: baseUrl, model }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setAddStatus('error', '保存失败：' + extractErrMsg(err));
+        return;
+      }
+
+      if (autoVerify) {
+        const vr = await fetch(`/api/configs/${encodeURIComponent(editingConfigId)}/check`);
+        const vd = await vr.json();
+        setAddStatus(vd.valid ? 'success' : 'error',
+          vd.valid ? '✓ 验证通过，已保存' : '✗ 验证失败：' + vd.message);
+        if (!vd.valid) { refreshConfigList(); return; }
+      } else {
+        setAddStatus('success', '已保存');
+      }
+
+      setTimeout(() => {
+        $('addStatusFull').classList.add('hidden');
+        showAddForm();
+        refreshConfigList();
+      }, 1200);
+    } catch {
+      setAddStatus('error', '网络请求失败，请重试');
+    }
+
+  } else {
+    /* ── 新增模式：POST ── */
+    if (!apiKey) { setAddStatus('error', '请输入 API Key'); return; }
+    if (apiKey.length < 8) { setAddStatus('error', 'API Key 长度异常，请检查'); return; }
+
+    setAddStatus('info', '添加中...');
+    try {
+      const res = await fetch('/api/configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: addCurrentProvider, api_key: apiKey, base_url: baseUrl, model }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setAddStatus('error', '添加失败：' + extractErrMsg(err));
+        return;
+      }
+      const d = await res.json();
+      const newId = d.config?.id;
+
+      if (autoVerify && newId) {
+        setAddStatus('info', '正在验证...');
+        let verifyOk = false;
+        try {
+          const vr = await fetch(`/api/configs/${encodeURIComponent(newId)}/check`);
+          const vd = await vr.json();
+          verifyOk = vd.valid;
+          setAddStatus(vd.valid ? 'success' : 'error',
+            vd.valid ? '✓ 验证通过，已添加' : '✗ 验证失败：' + vd.message);
+        } catch {
+          setAddStatus('error', '已添加，但验证请求失败');
+        }
+        if (!verifyOk) { refreshConfigList(); return; }
+      } else {
+        setAddStatus('success', '已添加');
+      }
+
+      // 清空表单
+      if (inFull) {
+        $('addApiKeyInputFull').value = '';
+      } else {
+        $('addApiKeyInput').value = '';
+      }
+      setTimeout(() => {
+        ['addStatus', 'addStatusFull'].forEach(id => $(id).classList.add('hidden'));
+        refreshConfigList();
+      }, 1200);
+    } catch {
+      setAddStatus('error', '网络请求失败，请重试');
+    }
+  }
+}
+
+$('addAndVerifyBtn').addEventListener('click', () => doAddConfig(true));
+$('addOnlyBtn').addEventListener('click', () => doAddConfig(false));
+$('addAndVerifyBtnFull').addEventListener('click', () => doAddConfig(true));
+$('addOnlyBtnFull').addEventListener('click', () => doAddConfig(false));
+$('cancelEditBtn').addEventListener('click', showAddForm);
+
+
+/* ══════════════════════════════════════════
+   GENERATE
+══════════════════════════════════════════ */
+$('startBtn').addEventListener('click', startExtract);
+
+/* ── 第一阶段：提炼规范书核心内容 ── */
+async function startExtract() {
+  if (!S.sections.length) { alert('请先上传技术规范书'); return; }
+  if (!S.configSaved) { openConfig(); return; }
+
+  // 防并发：提炼期间禁用按钮
+  const btn = $('startBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提炼中...';
+
+  // 切换到提炼视图（loading 状态）
+  $('uploadView').classList.add('hidden');
+  $('extractView').classList.remove('hidden');
+  $('extractLoading').classList.remove('hidden');
+  $('extractResult').classList.add('hidden');
+  window.startBubbleGame?.();
+  S.docSummary = '';
+  S.docTemplate = '';
+  S.useTemplate = false;
+
+  // 模拟进度：0→90% 缓速爬升，收到响应后跳到 100%
+  let pct = 0;
+  const bar = $('extractProgressBar');
+  const pctText = $('extractProgressPct');
+  function setExtractPct(v) {
+    pct = Math.min(v, 100);
+    bar.style.width = pct + '%';
+    pctText.textContent = Math.round(pct) + '%';
+  }
+  setExtractPct(0);
+  const timer = setInterval(() => {
+    // 越接近 90% 增速越慢，最多到 90
+    const remaining = 90 - pct;
+    if (remaining > 0) setExtractPct(pct + remaining * 0.06);
+  }, 300);
+
+  try {
+    const res = await fetch('/api/generate/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sections: S.sections.map(s => ({
+          id: s.id, title: s.title, content: s.content_hint || '', level: s.level,
+        })),
+      }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const msg = typeof e.detail === 'string' ? e.detail : '提炼失败，请重试';
+      throw new Error(msg);
+    }
+    const { summary } = await res.json();
+    S.docSummary = summary;
+    clearInterval(timer);
+    setExtractPct(100);
+    // 进度到 100% 后给 5 秒冲刺时间，再切视图
+    startCountdown(5, () => showExtractResult(summary));
+  } catch (e) {
+    clearInterval(timer);
+    window._stopBubbleGame?.();
+    alert('提炼失败：' + e.message);
+    $('extractView').classList.add('hidden');
+    $('uploadView').classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ 提炼规范书核心内容';
+  }
+}
+
+/* ── 提炼完成倒计时冲刺 ── */
+function startCountdown(sec, onDone) {
+  window._stopBubbleGame?.();   // 停止生成新气泡，展示称号覆盖层
+  // 在游戏区右上角追加倒计时 badge
+  const area = document.getElementById('bubbleGameArea');
+  if (!area) { setTimeout(onDone, sec * 1000); return; }
+
+  const badge = document.createElement('div');
+  badge.id = 'cdBadge';
+  badge.style.cssText = 'position:absolute;top:10px;left:14px;z-index:40;display:flex;flex-direction:column;align-items:center;line-height:1;pointer-events:none;';
+  badge.innerHTML = `<span style="font-size:0.65rem;color:#6366f1;font-weight:600;letter-spacing:.05em;">倒计时</span><span id="cdNum" style="font-size:2rem;font-weight:900;color:#4338ca;text-shadow:0 2px 8px rgba(99,102,241,.4)">${sec}</span>`;
+  area.appendChild(badge);
+
+  let left = sec;
+  const iv = setInterval(() => {
+    left--;
+    const numEl = document.getElementById('cdNum');
+    if (numEl) {
+      numEl.textContent = left;
+      numEl.style.animation = 'none';
+      void numEl.offsetWidth;
+      numEl.style.animation = 'combo-pop .5s ease-out forwards';
+    }
+    if (left <= 0) {
+      clearInterval(iv);
+      badge.remove();
+      onDone();
+    }
+  }, 1000);
+}
+
+/* ── 显示提炼结果视图 ── */
+function showExtractResult(summary) {
+  window._stopBubbleGame?.();
+  $('extractLoading').classList.add('hidden');
+  $('extractResult').classList.remove('hidden');
+
+  // 渲染摘要
+  $('extractSummaryView').innerHTML = safeParse(summary);
+  // 确保摘要处于只读态（二次提炼后重置编辑态）
+  $('extractSummaryView').classList.remove('hidden');
+  $('extractSummaryEditArea').classList.add('hidden');
+  $('extractSummaryEditBtn').classList.remove('hidden');
+
+  // 重置模板选择 UI 到默认「直接扩写」状态（修复二：二次提炼 UI 状态不重置）
+  const optA = $('templateOptionA');
+  const optB = $('templateOptionB');
+  const radioB = $('templateBRadio');
+  optA.className = optA.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+  optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+  radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
+  radioB.innerHTML = '';
+  document.querySelector('input[name="templateMode"][value="expand"]').checked = true;
+
+  // 摘要编辑交互（.onclick 赋值，幂等安全）
+  $('extractSummaryEditBtn').onclick = () => {
+    $('extractSummaryTextarea').value = S.docSummary;
+    $('extractSummaryView').classList.add('hidden');
+    $('extractSummaryEditArea').classList.remove('hidden');
+    $('extractSummaryEditBtn').classList.add('hidden');
+    $('extractSummaryTextarea').focus();
+  };
+  $('extractSummaryCancelBtn').onclick = () => {
+    $('extractSummaryView').classList.remove('hidden');
+    $('extractSummaryEditArea').classList.add('hidden');
+    $('extractSummaryEditBtn').classList.remove('hidden');
+  };
+  $('extractSummarySaveBtn').onclick = () => {
+    const v = $('extractSummaryTextarea').value.trim();
+    if (!v) return;
+    S.docSummary = v;
+    $('extractSummaryView').innerHTML = safeParse(v);
+    $('extractSummaryView').classList.remove('hidden');
+    $('extractSummaryEditArea').classList.add('hidden');
+    $('extractSummaryEditBtn').classList.remove('hidden');
+  };
+
+  // 模板选择交互（修复一：改为 .onchange 赋值避免重复绑定；修复三：切回自定义模板时刷新预览）
+  document.querySelectorAll('input[name="templateMode"]').forEach(radio => {
+    radio.onchange = () => {
+      const isCustom = radio.value === 'custom';
+      S.useTemplate = isCustom;
+
+      if (isCustom) {
+        optA.className = optA.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+        optB.className = optB.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+        radioB.className = radioB.className.replace('border-gray-300', 'border-indigo-500 bg-indigo-500');
+        radioB.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-white block mx-auto"></span>';
+        openTemplateModal();
+      } else {
+        optA.className = optA.className.replace('border-gray-200 bg-white', 'border-indigo-500 bg-indigo-50');
+        optB.className = optB.className.replace('border-indigo-500 bg-indigo-50', 'border-gray-200 bg-white');
+        radioB.className = radioB.className.replace('border-indigo-500 bg-indigo-500', 'border-gray-300');
+        radioB.innerHTML = '';
+      }
+    };
+  });
+
+  $('openTemplateEditorBtn').onclick = e => { e.preventDefault(); openTemplateModal(); };
+}
+
+/* ── 模板弹窗 ── */
+function openTemplateModal() {
+  $('templateEditorTextarea').value = S.docTemplate;
+  $('templateModal').classList.remove('hidden');
+  $('templateEditorTextarea').focus();
+}
+function closeTemplateModal() {
+  $('templateModal').classList.add('hidden');
+}
+$('templateModalClose').addEventListener('click', closeTemplateModal);
+$('templateModalCancel').addEventListener('click', closeTemplateModal);
+$('templateModal').addEventListener('click', e => {
+  if (e.target === $('templateModal')) closeTemplateModal();
+});
+$('templateModalConfirm').addEventListener('click', () => {
+  const t = $('templateEditorTextarea').value.trim();
+  S.docTemplate = t;
+  closeTemplateModal();
+});
+
+/* ── 返回重新上传 ── */
+$('extractBackBtn').addEventListener('click', () => {
+  $('extractView').classList.add('hidden');
+  $('uploadView').classList.remove('hidden');
+});
+
+/* ── 第二阶段：开始生成 ── */
+$('startGenerateBtn').addEventListener('click', startGenerate);
+
+async function startGenerate() {
+  if (!S.sections.length) return;
+  if (!S.configSaved) { openConfig(); return; }
+
+  /* 读取字数设置（优先从提炼视图的字数输入框取，兜底用上传视图的） */
+  S.targetWords = Math.max(100, Math.min(10000,
+    parseInt($('extractTargetWordsInput')?.value || $('targetWordsInput')?.value || '500') || 500));
+  S.totalWords   = 0;
+  S.sectionWords = {};
+  $('totalWordsDisplay').classList.add('hidden');
+
+  /* 切换视图 */
+  $('extractView').classList.add('hidden');
+  $('generateView').classList.remove('hidden');
+  S.totalSections  = S.sections.length;
+  S.completedCount = 0;
+  S.normalClose    = false;
+  $('downloadDocxBtn').classList.add('hidden');
+  $('cancelBtn').classList.remove('hidden');
+  $('contentEmpty').classList.remove('hidden');
+  $('contentScroll').classList.add('hidden');
+  $('completedSections').innerHTML = '';
+  $('currentSection').classList.add('hidden');
+  updateProgress(0, S.totalSections);
+  renderGenTOC();
+
+  /* POST /api/generate/start（携带已提炼摘要和模板，跳过后端重复提炼） */
+  let taskId;
+  try {
+    const res = await fetch('/api/generate/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sections: S.sections.map(s => ({
+          id: s.id, title: s.title, content: s.content_hint || '', level: s.level,
+        })),
+        target_words: S.targetWords,
+        doc_summary: S.docSummary,
+        doc_template: S.useTemplate ? S.docTemplate : '',
+      }),
+    });
+    if (!res.ok) {
+      const e = await res.json();
+      const msg = typeof e.detail === 'string' ? e.detail
+        : Array.isArray(e.detail) ? e.detail.map(d => d.msg || JSON.stringify(d)).join('；')
+        : JSON.stringify(e.detail) || '启动失败';
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    taskId = data.task_id;
+    S.taskId = taskId;
+  } catch (e) {
+    alert('启动生成失败：' + e.message);
+    $('extractView').classList.remove('hidden');
+    $('generateView').classList.add('hidden');
+    return;
+  }
+
+  connectSSE(`/api/generate/stream/${taskId}`);
+}
+
+/* ── TOC 侧栏渲染 ── */
+function renderGenTOC() {
+  const list = $('genTocList');
+  list.innerHTML = '';
+  S.sections.forEach(sec => {
+    const div = document.createElement('div');
+    div.id        = 'gtoc-' + sec.id;
+    div.className = 'flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 border-transparent cursor-pointer';
+    div.style.paddingLeft = (14 + (sec.level - 1) * 10) + 'px';
+    div.innerHTML = `
+      <span id="gicon-${sec.id}" class="shrink-0 mt-0.5 text-gray-300 text-xs select-none">○</span>
+      <span id="glabel-${sec.id}" class="text-gray-500 leading-snug line-clamp-2">${esc(sec.title)}</span>`;
+    div.addEventListener('click', () => scrollToSection(sec.id));
+    list.appendChild(div);
+  });
+}
+
+function setTocStatus(secId, status) {
+  const item  = $('gtoc-'  + secId);
+  const icon  = $('gicon-' + secId);
+  const label = $('glabel-'+ secId);
+  if (!item) return;
+  const sec = S.sections.find(s => s.id === secId);
+  const pl  = (14 + ((sec?.level ?? 1) - 1) * 10) + 'px';
+  item.style.paddingLeft = pl;
+  const cfg = {
+    active: { bc: 'border-indigo-400', bg: 'bg-indigo-50/70',
+              ic: '⟳', iconCls: 'shrink-0 mt-0.5 text-indigo-500 text-xs select-none spin',
+              lc: 'text-indigo-700 leading-snug line-clamp-2 font-medium' },
+    done:   { bc: 'border-green-400',  bg: 'bg-green-50/60',
+              ic: '✓', iconCls: 'shrink-0 mt-0.5 text-green-500 text-xs select-none',
+              lc: 'text-gray-600 leading-snug line-clamp-2' },
+    skip:   { bc: 'border-gray-200',   bg: '',
+              ic: '—', iconCls: 'shrink-0 mt-0.5 text-gray-300 text-xs select-none',
+              lc: 'text-gray-400 leading-snug line-clamp-2 line-through' },
+    error:  { bc: 'border-red-300',    bg: 'bg-red-50/60',
+              ic: '✗', iconCls: 'shrink-0 mt-0.5 text-red-400 text-xs select-none',
+              lc: 'text-red-600 leading-snug line-clamp-2' },
+  }[status] ?? { bc: 'border-transparent', bg: '',
+                  ic: '○', iconCls: 'shrink-0 mt-0.5 text-gray-300 text-xs select-none',
+                  lc: 'text-gray-500 leading-snug line-clamp-2' };
+
+  item.className = `flex items-start gap-2 py-2.5 px-4 text-sm border-l-2 cursor-pointer ${cfg.bc} ${cfg.bg}`;
+  item.style.paddingLeft = pl;
+  icon.className  = cfg.iconCls;
+  icon.textContent = cfg.ic;
+  if (label) label.className = cfg.lc;
+}
+
+/* ── 点击 TOC 跳转到对应章节 ── */
+function scrollToSection(secId) {
+  const cs = $('contentScroll');
+  if (!cs) return;
+
+  // 优先找已完成的卡片
+  const card = $('sec-card-' + secId);
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+
+  // 该章节正在流式生成
+  const tocItem = $('gtoc-' + secId);
+  const isActive = tocItem && tocItem.className.includes('border-indigo-400');
+  if (isActive) {
+    const cur = $('currentSection');
+    if (cur && !cur.classList.contains('hidden')) {
+      cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+}
+
+/* ── 进度 ── */
+function updateProgress(done, total) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  $('progressBar').style.width   = pct + '%';
+  $('progressText').textContent  = pct + '%';
+  $('progressCount').textContent = `${done}/${total}`;
+}
+
+/* ── Token 去抖渲染 ── */
+function appendToken(text) {
+  S.tokenBuffer += text;
+  if (!S.renderTimer) {
+    S.renderTimer = setTimeout(() => {
+      S.renderTimer = null;
+      $('currentSectionContent').innerHTML = safeParse(S.tokenBuffer);
+    }, 80);
+  }
+}
+
+/* ── SSE 连接 ── */
+function connectSSE(url) {
+  if (S.eventSource) S.eventSource.close();
+  const es = new EventSource(url);
+  S.eventSource = es;
+
+  /* ── 文档摘要事件 ── */
+  es.addEventListener('doc_summary', e => {
+    const d = JSON.parse(e.data);
+    S.docSummary = d.summary;
+    $('contentEmpty').classList.add('hidden');
+    $('contentScroll').classList.remove('hidden');
+    const card = document.createElement('div');
+    card.id = 'docSummaryCard';
+    card.className = 'mb-4 bg-blue-50 border border-blue-200 rounded-xl px-5 py-3';
+    card.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="text-base select-none">📋</span>
+        <h3 class="font-semibold text-blue-800 text-sm">项目概述</h3>
+        <span class="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">AI 提炼</span>
+        <span class="flex-1"></span>
+        <button id="summaryToggleBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200">展开 ▾</button>
+        <button id="summaryEditBtn" class="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100 transition border border-blue-200 ml-1">✏️ 编辑</button>
+      </div>
+      <div id="summaryCollapsible" class="hidden mt-3">
+        <div id="summaryViewArea" class="md text-gray-700 text-sm leading-relaxed">${safeParse(d.summary)}</div>
+        <div id="summaryEditArea" class="hidden space-y-2">
+          <textarea id="summaryTextarea" class="w-full border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-700 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" rows="10" maxlength="5000"></textarea>
+          <div class="flex items-center gap-2 justify-end">
+            <button id="summaryCancelBtn" class="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
+            <button id="summarySaveBtn" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition">保存</button>
+          </div>
+        </div>
+        <p class="text-xs text-blue-400 mt-3 border-t border-blue-100 pt-2">
+          此概述将作为全局背景注入所有章节的生成 Prompt。如 AI 提炼有误，可手动编辑后再生成。
+        </p>
+      </div>`;
+    $('completedSections').prepend(card);
+
+    /* 展开 / 收起 */
+    const collapsible = card.querySelector('#summaryCollapsible');
+    const toggleBtn   = card.querySelector('#summaryToggleBtn');
+    function collapse() {
+      collapsible.classList.add('hidden');
+      toggleBtn.textContent = '展开 ▾';
+    }
+    function expand() {
+      collapsible.classList.remove('hidden');
+      toggleBtn.textContent = '收起 ▴';
+    }
+    toggleBtn.addEventListener('click', () => {
+      collapsible.classList.contains('hidden') ? expand() : collapse();
+    });
+
+    /* 编辑 / 保存 / 取消 交互 */
+    card.querySelector('#summaryEditBtn').addEventListener('click', () => {
+      expand();
+      const ta = card.querySelector('#summaryTextarea');
+      ta.value = S.docSummary;
+      card.querySelector('#summaryViewArea').classList.add('hidden');
+      card.querySelector('#summaryEditArea').classList.remove('hidden');
+      card.querySelector('#summaryEditBtn').classList.add('hidden');
+      ta.focus();
+    });
+
+    card.querySelector('#summaryCancelBtn').addEventListener('click', () => {
+      card.querySelector('#summaryViewArea').classList.remove('hidden');
+      card.querySelector('#summaryEditArea').classList.add('hidden');
+      card.querySelector('#summaryEditBtn').classList.remove('hidden');
+      collapse();
+    });
+
+    card.querySelector('#summarySaveBtn').addEventListener('click', async () => {
+      const newSummary = card.querySelector('#summaryTextarea').value.trim();
+      if (!newSummary) return;
+      const btn = card.querySelector('#summarySaveBtn');
+      btn.textContent = '保存中...';
+      btn.disabled = true;
+      try {
+        if (S.taskId) {
+          await fetch(`/api/generate/${S.taskId}/summary`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary: newSummary }),
+          });
+        }
+        S.docSummary = newSummary;
+        card.querySelector('#summaryViewArea').innerHTML = safeParse(newSummary);
+        card.querySelector('#summaryViewArea').classList.remove('hidden');
+        card.querySelector('#summaryEditArea').classList.add('hidden');
+        card.querySelector('#summaryEditBtn').classList.remove('hidden');
+        collapse();
+      } catch {
+        btn.textContent = '保存';
+        btn.disabled = false;
+      }
+    });
+  });
+
+  es.addEventListener('section_start', e => {
+    const d = JSON.parse(e.data);
+    /* 显示内容区 */
+    $('contentEmpty').classList.add('hidden');
+    $('contentScroll').classList.remove('hidden');
+    /* 重置流式显示 */
+    S.tokenBuffer = '';
+    if (S.renderTimer) { clearTimeout(S.renderTimer); S.renderTimer = null; }
+    $('currentSectionTitle').textContent = d.title;
+    $('currentSectionContent').innerHTML = '';
+    $('currentSection').classList.remove('hidden');
+    setTocStatus(d.section_id, 'active');
+  });
+
+  es.addEventListener('token', e => {
+    appendToken(JSON.parse(e.data).text);
+  });
+
+  es.addEventListener('section_done', e => {
+    const d = JSON.parse(e.data);
+    /* 清除去抖 timer */
+    if (S.renderTimer) { clearTimeout(S.renderTimer); S.renderTimer = null; }
+
+    /* 统计本章节字数（中文字符数） */
+    const charCount = (d.content.match(/[一-鿿]/g) || []).length;
+    S.sectionWords[d.section_id] = charCount;
+    S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+
+    /* 更新总字数显示 */
+    const twEl = $('totalWordsDisplay');
+    twEl.textContent = `累计 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+    twEl.classList.remove('hidden');
+
+    /* 将章节移入"已完成"区 */
+    const secInfo = S.sections.find(s => s.id === d.section_id);
+    const secTitle = secInfo?.title ?? d.section_id;
+    createSectionCard(d.section_id, secTitle, d.content, charCount);
+
+    /* 隐藏流式区 */
+    $('currentSection').classList.add('hidden');
+    S.tokenBuffer = '';
+    S.completedCount++;
+    setTocStatus(d.section_id, 'done');
+    updateProgress(S.completedCount, S.totalSections);
+  });
+
+  es.addEventListener('section_skip', e => {
+    const d = JSON.parse(e.data);
+    S.completedCount++;
+    setTocStatus(d.section_id, 'skip');
+    updateProgress(S.completedCount, S.totalSections);
+  });
+
+  es.addEventListener('all_done', e => {
+    const d = JSON.parse(e.data);
+    S.downloadUrl = d.download_url;
+    S.normalClose = true;
+
+    /* 总字数汇总卡片 */
+    const summary = document.createElement('div');
+    summary.className = 'mt-6 bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-4';
+    summary.innerHTML = `
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-2xl select-none">🎉</span>
+        <div>
+          <p class="font-semibold text-indigo-800 text-sm">全部章节生成完成</p>
+          <p class="text-indigo-600 text-xs mt-0.5">
+            共 <strong>${S.sections.length}</strong> 个章节 ·
+            合计约 <strong>${S.totalWords.toLocaleString()}</strong> 字
+            · 预估 <strong>${estPages(S.totalWords)}</strong>
+            （目标每章节 ${S.targetWords} 字）
+          </p>
+        </div>
+      </div>`;
+    $('completedSections').appendChild(summary);
+
+    /* 更新进度条总字数为完成状态 */
+    const twEl = $('totalWordsDisplay');
+    twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+    twEl.classList.remove('hidden');
+
+    _showDownloadBtns();
+    $('cancelBtn').classList.add('hidden');
+    es.close();
+    S.eventSource = null;
+  });
+
+  es.addEventListener('error', e => {
+    let msg = '生成过程中发生错误';
+    try { msg = JSON.parse(e.data).message; } catch {}
+    appendErrorCard(msg, 'red');
+    S.normalClose = true;
+    es.close();
+    S.eventSource = null;
+  });
+
+  /* 网络断开（非正常关闭） */
+  es.onerror = () => {
+    if (!S.normalClose && S.eventSource) {
+      appendErrorCard('SSE 连接中断，已生成内容已保留', 'yellow');
+      if (S.completedCount > 0) {
+        S.downloadUrl = `/api/download/${S.taskId}`;
+        _showDownloadBtns();
+      }
+    }
+    if (S.eventSource) { S.eventSource.close(); S.eventSource = null; }
+  };
+}
+
+function appendErrorCard(msg, color) {
+  const cs = $('contentScroll');
+  cs.classList.remove('hidden');
+  $('contentEmpty').classList.add('hidden');
+  const div = document.createElement('div');
+  const cls = color === 'red'
+    ? 'bg-red-50 border-red-200 text-red-700'
+    : 'bg-yellow-50 border-yellow-200 text-yellow-700';
+  div.className = `mt-4 border rounded-xl px-4 py-3 text-sm flex items-center gap-2 ${cls}`;
+  div.innerHTML = `<span>⚠️</span> <span>${esc(msg)}</span>`;
+  $('completedSections').appendChild(div);
+}
+
+/* ══════════════════════════════════════════
+   单章节编辑 & 重新生成
+══════════════════════════════════════════ */
+const sectionCards = new Map();
+// secId → { rawContent, title, charCount, originalContent, cardEl, regenTaskId, regenEs }
+
+/* 锁定滚动视图到指定章节卡片 */
+function lockScrollTo(secId) {
+  S.scrollLocked = secId;
+  const entry = sectionCards.get(secId);
+  if (entry?.cardEl) {
+    entry.cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+/* 解除滚动锁定 */
+function unlockScroll() {
+  S.scrollLocked = null;
+}
+
+/* 构建"已完成"状态的卡片 HTML */
+function buildDoneHTML(secId, title, rawContent, charCount) {
+  const pages = estPages(charCount);
+  return `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full font-semibold shrink-0">✓ 已完成</span>
+      <span class="text-gray-400 text-xs shrink-0 sec-wordcount">${charCount.toLocaleString()} 字 ${pages ? pages : ''}</span>
+      <div class="ml-auto flex gap-1 shrink-0">
+        <button class="sec-edit-btn text-xs text-gray-400 hover:text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition" title="编辑">✏ 编辑</button>
+        <button class="sec-regen-btn text-xs text-gray-400 hover:text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition" title="重新生成">↺ 重新生成</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(title)}</h3>
+      <div class="md text-gray-700 leading-relaxed">${safeParse(rawContent)}</div>
+    </div>`;
+}
+
+/* 创建并注册章节卡片 */
+function createSectionCard(secId, title, rawContent, charCount) {
+  const secInfo = S.sections.find(s => s.id === secId);
+  const originalContent = secInfo?.content_hint || '';
+  const card = document.createElement('div');
+  card.id = `sec-card-${secId}`;
+  card.className = 'pb-8 border-b border-gray-100 last:border-0';
+  card.innerHTML = buildDoneHTML(secId, title, rawContent, charCount);
+  $('completedSections').appendChild(card);
+  sectionCards.set(secId, { rawContent, title, charCount, originalContent, cardEl: card, regenTaskId: null, regenEs: null });
+  bindCardEvents(secId);
+}
+
+/* 绑定卡片内的所有交互按钮（事件委托到 cardEl） */
+function bindCardEvents(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  const card = entry.cardEl;
+  card.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.classList.contains('sec-edit-btn'))    enterEditMode(secId);
+    if (btn.classList.contains('sec-regen-btn'))   openRegenPanel(secId);
+    if (btn.classList.contains('sec-save-btn'))    saveEdit(secId);
+    if (btn.classList.contains('sec-editcancel-btn')) cancelEdit(secId);
+    if (btn.classList.contains('regen-cancel-btn'))   cancelRegen(secId);
+    if (btn.classList.contains('regen-confirm-btn'))  startRegen(secId);
+    if (btn.classList.contains('regen-stop-btn'))     stopRegen(secId);
+  });
+}
+
+/* ── 编辑模式 ── */
+function enterEditMode(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry || entry.regenEs) return;  // 生成中不允许编辑
+  lockScrollTo(secId);
+  const card  = entry.cardEl;
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0">✏ 编辑中</span>
+      <div class="ml-auto flex gap-1 shrink-0">
+        <button class="sec-editcancel-btn text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition">取消</button>
+        <button class="sec-save-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded transition">保存</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-2">${esc(entry.title)}</h3>
+      <textarea class="sec-edit-textarea w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition
+                       leading-relaxed resize-y min-h-[200px]"
+                maxlength="500000">${esc(entry.rawContent)}</textarea>
+    </div>`;
+  const ta = card.querySelector('.sec-edit-textarea');
+  ta.style.height = ta.scrollHeight + 'px';
+}
+
+function saveEdit(secId) {
+  const entry = sectionCards.get(secId);
+  const ta    = entry.cardEl.querySelector('.sec-edit-textarea');
+  if (!ta) return;
+  const newContent = ta.value;
+  const charCount  = (newContent.match(/[一-鿿]/g) || []).length;
+  entry.rawContent = newContent;
+  entry.charCount  = charCount;
+  S.sectionWords[secId] = charCount;
+  S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+  // 同步更新到主任务（用于下载）
+  if (S.taskId) {
+    fetch(`/api/generate/${S.taskId}/section/${secId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: newContent }),
+    }).catch(() => {});
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, newContent, charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  // 更新累计字数显示
+  const twEl = $('totalWordsDisplay');
+  if (twEl) twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+}
+
+function cancelEdit(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+/* ── 重新生成面板 ── */
+function openRegenPanel(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry || entry.regenEs) return;  // 生成中不允许重复打开
+  lockScrollTo(secId);
+  const card  = entry.cardEl;
+  const apiOptions = [
+    `<option value="__auto__">自动（按优先级顺序）</option>`,
+    ...currentConfigs.map(c => {
+      const label = (PROVIDER_LABEL[c.provider] || c.provider) + ' / ' + c.model;
+      return `<option value="${esc(c.id)}">${esc(label)}</option>`;
+    }),
+  ].join('');
+
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0">↺ 重新生成</span>
+      <div class="ml-auto">
+        <button class="regen-cancel-btn text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition">取消</button>
+      </div>
+    </div>
+    <div class="regen-panel bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3 space-y-2">
+      <div class="flex gap-2 flex-wrap items-center">
+        <label class="text-xs text-gray-500 shrink-0">API 配置</label>
+        <select class="regen-api-select flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                       focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white min-w-[180px]">
+          ${apiOptions}
+        </select>
+        <label class="text-xs text-gray-500 shrink-0">目标字数</label>
+        <input type="number" class="regen-words-input w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                                    focus:outline-none focus:ring-2 focus:ring-indigo-300"
+               value="${S.targetWords}" min="100" max="10000" step="100">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">追加说明（可选）</label>
+        <textarea class="regen-extra-input w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs
+                         focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none h-16"
+                  maxlength="1000"
+                  placeholder="如：更简洁、增加案例、突出技术亮点..."></textarea>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button class="regen-cancel-btn text-xs text-gray-400 hover:text-gray-600 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-300 transition">取消</button>
+        <button class="regen-confirm-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded transition">确认重新生成</button>
+      </div>
+    </div>
+    <div class="sec-body opacity-50">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(entry.title)}</h3>
+      <div class="md text-gray-700 leading-relaxed">${safeParse(entry.rawContent)}</div>
+    </div>`;
+}
+
+function cancelRegen(secId) {
+  const entry = sectionCards.get(secId);
+  if (!entry) return;
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+/* ── 开始重新生成 ── */
+async function startRegen(secId) {
+  const entry   = sectionCards.get(secId);
+  const card    = entry.cardEl;
+  const panel   = card.querySelector('.regen-panel');
+  const configId  = panel.querySelector('.regen-api-select').value;
+  const words     = parseInt(panel.querySelector('.regen-words-input').value) || S.targetWords;
+  const extra     = panel.querySelector('.regen-extra-input').value.trim();
+  const finalConfigId = configId === '__auto__' ? null : configId;
+
+  // 关闭已有的 regen 流（防止并发）
+  if (entry.regenEs) { entry.regenEs.close(); entry.regenEs = null; }
+
+  // 切换到"生成中"状态
+  card.innerHTML = `
+    <div class="sec-header flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
+      <span class="text-xs font-semibold text-indigo-600 shrink-0 regen-progress-label">↺ 生成中... 0字</span>
+      <div class="ml-auto">
+        <button class="regen-stop-btn text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition">停止</button>
+      </div>
+    </div>
+    <div class="sec-body">
+      <h3 class="font-semibold text-gray-800 text-sm mb-3">${esc(entry.title)}</h3>
+      <div class="md text-gray-700 leading-relaxed regen-stream-area streaming-cursor"></div>
+    </div>`;
+  bindCardEvents(secId);
+
+  // 标记为"等待 fetch"阶段
+  entry.regenTaskId = null;
+  entry.regenEs = null;
+  let cancelled = false;  // 由 stopRegen 在 fetch 期间通过 entry.regenTaskId===null 检测
+
+  try {
+    const res = await fetch('/api/generate/regen/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section_title: entry.title,
+        section_content: entry.originalContent,
+        target_words: words,
+        extra_prompt: extra,
+        doc_summary: S.docSummary,
+        doc_template: S.useTemplate ? S.docTemplate : '',
+        config_id: finalConfigId,
+      }),
+    });
+
+    // 如果 fetch 期间 stopRegen 已被调用（card 已重置），直接放弃
+    if (card.querySelector('.regen-stop-btn') === null) return;
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _regenError(secId, err.detail || '启动失败');
+      return;
+    }
+    const { task_id, stream_url } = await res.json();
+    entry.regenTaskId = task_id;
+
+    // 再次检查：stopRegen 可能在 res.json() 期间触发
+    if (card.querySelector('.regen-stop-btn') === null) {
+      fetch(`/api/generate/${task_id}`, { method: 'DELETE' }).catch(() => {});
+      return;
+    }
+
+    const es = new EventSource(stream_url);
+    entry.regenEs = es;
+    let buffer = '';
+    let rafPending = false;
+
+    // 捕获 DOM 引用（此时 card.innerHTML 未变）
+    const streamArea = card.querySelector('.regen-stream-area');
+    const progressLabel = card.querySelector('.regen-progress-label');
+
+    const cleanup = () => {
+      es.close();
+      if (entry.regenEs === es) entry.regenEs = null;
+    };
+
+    es.addEventListener('token', ev => {
+      buffer += JSON.parse(ev.data).text;
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          if (streamArea.isConnected) streamArea.innerHTML = safeParse(buffer);
+          const cnt = (buffer.match(/[一-鿿]/g) || []).length;
+          if (progressLabel.isConnected) progressLabel.textContent = `↺ 生成中... ${cnt.toLocaleString()}字`;
+        });
+      }
+    });
+
+    es.addEventListener('section_done', ev => {
+      const d = JSON.parse(ev.data);
+      cleanup();
+      _regenDone(secId, d.content);
+    });
+
+    es.addEventListener('all_done', () => cleanup());
+
+    es.addEventListener('error', ev => {
+      let msg = '重新生成失败';
+      try { msg = JSON.parse(ev.data).message; } catch {}
+      cleanup();
+      _regenError(secId, msg);
+    });
+
+    es.onerror = () => {
+      cleanup();
+      _regenError(secId, 'SSE 连接中断');
+    };
+
+  } catch (e) {
+    _regenError(secId, '网络请求失败：' + e.message);
+  }
+}
+
+function stopRegen(secId) {
+  const entry = sectionCards.get(secId);
+  if (entry.regenEs) { entry.regenEs.close(); entry.regenEs = null; }
+  if (entry.regenTaskId) {
+    fetch(`/api/generate/${entry.regenTaskId}`, { method: 'DELETE' }).catch(() => {});
+    entry.regenTaskId = null;
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+}
+
+function _regenDone(secId, newContent) {
+  const entry = sectionCards.get(secId);
+  const charCount = (newContent.match(/[一-鿿]/g) || []).length;
+  entry.rawContent = newContent;
+  entry.charCount  = charCount;
+  S.sectionWords[secId] = charCount;
+  S.totalWords = Object.values(S.sectionWords).reduce((a, b) => a + b, 0);
+  // 同步写回主任务（用于下载）
+  if (S.taskId) {
+    fetch(`/api/generate/${S.taskId}/section/${secId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: newContent }),
+    }).catch(() => {});
+  }
+  entry.cardEl.innerHTML = buildDoneHTML(secId, entry.title, newContent, charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  const twEl = $('totalWordsDisplay');
+  if (twEl) twEl.textContent = `共 ${S.totalWords.toLocaleString()} 字 ${estPages(S.totalWords)}`;
+  entry.regenTaskId = null;
+}
+
+function _regenError(secId, msg) {
+  const entry = sectionCards.get(secId);
+  // 恢复原内容，在卡片顶部显示错误提示
+  entry.cardEl.innerHTML = `
+    <div class="mb-3 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs flex items-center gap-2">
+      <span>⚠️</span><span>${esc(msg)}</span>
+    </div>` + buildDoneHTML(secId, entry.title, entry.rawContent, entry.charCount);
+  bindCardEvents(secId);
+  unlockScroll();
+  entry.regenTaskId = null;
+  entry.regenEs = null;
+}
+
+/* ── 取消 ── */
+$('cancelBtn').addEventListener('click', async () => {
+  if (!S.taskId) return;
+  if (!confirm('确定取消？已完成的章节内容将保留。')) return;
+  S.normalClose = true;
+  if (S.eventSource) { S.eventSource.close(); S.eventSource = null; }
+  try { await fetch(`/api/generate/${S.taskId}`, { method: 'DELETE' }); } catch {}
+  $('cancelBtn').classList.add('hidden');
+  if (S.completedCount > 0) {
+    S.downloadUrl = `/api/download/${S.taskId}`;
+    _showDownloadBtns();
+  }
+});
+
+/* ── 显示下载按钮 ── */
+function _showDownloadBtns() {
+  const b = $('downloadDocxBtn'); b.classList.remove('hidden'); b.classList.add('flex');
+}
+$('downloadDocxBtn').addEventListener('click', () => {
+  if (S.taskId) window.location.href = `/api/download/${S.taskId}/docx`;
+});
+
+/* ── 返回上传页 ── */
+$('backBtn').addEventListener('click', () => {
+  if (S.eventSource) { S.normalClose = true; S.eventSource.close(); S.eventSource = null; }
+  $('generateView').classList.add('hidden');
+  $('extractView').classList.remove('hidden');
+  $('extractLoading').classList.add('hidden');
+  $('extractResult').classList.remove('hidden');
+});
+
+
+/* ══════════════════════════════════════════
+   INIT — 检查是否已有 API 配置
+══════════════════════════════════════════ */
+(async () => {
+  try {
+    const res = await fetch('/api/configs');
+    if (res.ok) {
+      const d = await res.json();
+      if (d.configs && d.configs.length > 0) {
+        S.configSaved = true;
+        currentConfigs = d.configs;
+        const top = d.configs[0];
+        const cs = $('configStatus');
+        cs.textContent = `✓ ${top.model}`;
+        cs.classList.remove('hidden');
+      }
+    }
+  } catch {}
+})();
+
+/* ══════════════════════════════════════════
+   FOOTER MODALS
+══════════════════════════════════════════ */
+(function () {
+  function openModal(id) { $(id).classList.remove('hidden'); }
+  function closeModal(id) { $(id).classList.add('hidden'); }
+
+  // 打开按钮
+  $('headerReadmeBtn').addEventListener('click', () => openModal('readmeModal'));
+
+  // 所有 Modal 的关闭按钮（统一用 .footer-modal-close 类）
+  document.querySelectorAll('.footer-modal-close').forEach(btn => {
+    btn.addEventListener('click', () => btn.closest('[id$="Modal"]').classList.add('hidden'));
+  });
+
+  // 点击遮罩关闭
+  ['readmeModal'].forEach(id => {
+    $(id).addEventListener('click', e => { if (e.target === $(id)) closeModal(id); });
+  });
+
+  /* ── 气泡点击小游戏 ── */
+  window.startBubbleGame = function() {
+    const area = document.getElementById('bubbleGameArea');
+    const scoreEl = document.getElementById('bubbleScore');
+    const comboEl = document.getElementById('bubbleCombo');
+    if (!area) return;
+
+    let score = 0, combo = 0, lastHit = 0, spawnTimer = null;
+    const bubbles = new Set();
+    const emojis = ['😂','🤣','😭','😅','🥹','😍','🤩','😎','🤔','😱','🤯','🥳','😤','🫡','🤡','👻','💀','🐶','🐱','🦊','🐼','🐨','🦁','🐸','🐙','🦋','🌈','🔥','⭐','🎉','🎊','💎','🍕','🍜','🧋','🍭','🚀','🛸','🎮','🏆'];
+
+    const titles = [
+      { threshold: 1,  icon: '🐣', name: '菜鸟练习生', desc: '刚刚起步，继续加油！' },
+      { threshold: 5,  icon: '🐥', name: '表情包猎手', desc: '已经上手了，不错哦！' },
+      { threshold: 10, icon: '🎯', name: '点击达人',   desc: '手速不慢，颇有天赋！' },
+      { threshold: 20, icon: '🔥', name: '连击狂魔',   desc: '指尖生火，势不可挡！' },
+      { threshold: 35, icon: '⚡', name: '闪电手指',   desc: '神乎其技，令人叹服！' },
+      { threshold: 50, icon: '👑', name: '表情包之王', desc: '无人能及，传说境界！' },
+    ];
+    const unlockedTiers = new Set();
+
+    function updateScore() { if (scoreEl) scoreEl.textContent = score; }
+
+    function showTitleBoom(t) {
+      const el = document.getElementById('titleBoomEl');
+      const iconEl = document.getElementById('titleBoomIcon');
+      const nameEl = document.getElementById('titleBoomName');
+      if (!el) return;
+      iconEl.textContent = t.icon;
+      nameEl.textContent = t.name;
+      el.style.opacity = '1';
+      el.style.transform = 'scale(1)';
+      clearTimeout(el._hideTimer);
+      el._hideTimer = setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'scale(0.6)';
+      }, 1000);
+    }
+
+    function showCombo(n) {
+      if (!comboEl) return;
+      comboEl.textContent = n + ' 连击!';
+      comboEl.style.opacity = '0';
+      comboEl.style.animation = 'none';
+      void comboEl.offsetWidth;
+      comboEl.style.animation = 'combo-pop 0.9s ease-out forwards';
+    }
+
+    function burst(cx, cy) {
+      const rect = area.getBoundingClientRect();
+      const ax = cx - rect.left, ay = cy - rect.top;
+      const burstEmojis = ['✨','💥','⭐','🌟','💫'];
+      for (let i = 0; i < 6; i++) {
+        const p = document.createElement('div');
+        p.className = 'burst-el';
+        const angle = (Math.PI * 2 * i) / 6;
+        const dist = 35 + Math.random() * 25;
+        p.style.cssText = `left:${ax}px;top:${ay}px;font-size:14px;background:none;width:auto;height:auto;--tx:${Math.cos(angle)*dist}px;--ty:${Math.sin(angle)*dist}px;`;
+        p.textContent = burstEmojis[Math.floor(Math.random() * burstEmojis.length)];
+        area.appendChild(p);
+        setTimeout(() => p.remove(), 620);
+      }
+    }
+
+    function spawnBubble() {
+      if (bubbles.size >= 14) return;
+      const size = 44 + Math.floor(Math.random() * 20);
+      const areaW = area.clientWidth;
+      const x = size / 2 + Math.random() * Math.max(0, areaW - size);
+      const dur = 1.5 + Math.random() * 1;
+      const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+      const el = document.createElement('div');
+      el.className = 'bubble-el';
+      // bottom 定位确保从底边出发，向上飘升
+      el.style.cssText = `width:${size}px;height:${size}px;left:${x - size/2}px;bottom:${-size}px;display:flex;align-items:center;justify-content:center;font-size:${size * 0.6}px;background:rgba(255,255,255,0.7);box-shadow:0 4px 14px rgba(99,102,241,0.15);animation-duration:${dur}s;`;
+      el.textContent = emoji;
+      bubbles.add(el);
+
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        if (el.classList.contains('popped')) return;
+        el.classList.add('popped');
+        bubbles.delete(el);
+        el.remove();
+
+        score++;
+        updateScore();
+
+        // 每到达一个称号阶段实时全屏弹出，1秒消失
+        titles.forEach(t => {
+          if (score === t.threshold && !unlockedTiers.has(t.threshold)) {
+            unlockedTiers.add(t.threshold);
+            showTitleBoom(t);
+          }
+        });
+
+        const now = Date.now();
+        combo = (now - lastHit < 1000) ? combo + 1 : 1;
+        lastHit = now;
+        if (combo >= 3) showCombo(combo);
+
+        burst(e.clientX, e.clientY);
+      });
+
+      area.appendChild(el);
+      setTimeout(() => { if (bubbles.has(el)) { bubbles.delete(el); el.remove(); } }, dur * 1000);
+    }
+
+    spawnTimer = setInterval(spawnBubble, 450);
+    spawnBubble();
+
+    window._stopBubbleGame = function() {
+      clearInterval(spawnTimer);
+      spawnTimer = null;
+      bubbles.clear();
+      if (area) {
+        area.querySelectorAll('.bubble-el,.burst-el').forEach(n => n.remove());
+      }
+
+      if (!area) return;
+
+      // 当前最高称号
+      const reached = titles.filter(t => score >= t.threshold);
+      const t = reached.length ? reached[reached.length - 1] : { icon: '🐣', name: '菜鸟练习生', desc: '刚刚起步，继续加油！' };
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(238,242,255,0.92);backdrop-filter:blur(4px);border-radius:inherit;z-index:30;pointer-events:none;opacity:0;transition:opacity 0.4s ease;';
+      overlay.innerHTML = `<div style="font-size:2.8rem;line-height:1">${t.icon}</div><div style="font-size:1.1rem;font-weight:800;color:#4338ca">${t.name}</div><div style="font-size:0.8rem;color:#6366f1">${t.desc}</div><div style="font-size:0.75rem;color:#a5b4fc;margin-top:2px">本次得分 <b style="color:#4f46e5">${score}</b> 分</div>`;
+      area.appendChild(overlay);
+      requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+    };
+  };
+})();
+
+</script>
+</body>
+</html>

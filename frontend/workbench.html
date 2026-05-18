@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBidding · Compact Workbench</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="workspace-shell">
+      <main class="workspace-main-shell">
+        <header class="project-header">
+          <a class="project-name" href="/projects">项目画廊</a>
+          <nav class="process-tabs" aria-label="项目流程">
+            <a class="process-tab" href="/project-init">项目信息</a>
+            <a class="process-tab active" href="/workbench">材料撰写</a>
+            <a class="process-tab" href="/diff-review">审核导出</a>
+          </nav>
+          <div class="project-actions">
+            <button class="icon-button" type="button" aria-label="切换主题">◐</button>
+            <button class="icon-button" type="button" aria-label="项目设置">⚙</button>
+          </div>
+        </header>
+
+        <section class="workspace-layout authoring-workspace" data-workbench>
+          <aside class="compact-card outline-pane" aria-label="文档大纲">
+            <div class="outline-pane-header">
+              <h3>文档大纲</h3>
+            </div>
+            <button class="outline-exit-drill" type="button" data-exit-drill hidden>返回上层</button>
+            <nav class="doc-outline" aria-label="章节导航">
+            </nav>
+          </aside>
+
+          <main class="compact-card editor-pane" aria-label="材料撰写编辑区">
+            <div class="editor-toolbar">
+              <nav class="breadcrumb" data-breadcrumb aria-label="当前位置"></nav>
+            </div>
+
+            <article class="tiptap-shell" aria-label="Tiptap 编辑器占位壳">
+            </article>
+          </main>
+
+          <aside class="compact-card context-pane" aria-label="上下文信息">
+            <section class="context-section ai-module-section">
+              <div class="context-header inline">
+                <h3>AI 功能</h3>
+                <span class="badge info" data-current-block-id></span>
+              </div>
+              <div class="ai-action-grid">
+                <button type="button" data-ai-action="润色当前块">润色</button>
+                <button type="button" data-ai-action="补充当前块">补充</button>
+                <button type="button" data-ai-action="调整风格">风格</button>
+                <button type="button" data-ai-action="续写当前块">续写</button>
+                <button type="button" data-ai-action="按当前域查漏">查漏</button>
+                <button type="button" data-ai-action="用 rg 检索潜在要求">检索要求</button>
+                <button type="button" data-ai-action="解释选区">解释选区</button>
+                <button type="button" data-ai-action="选区补充证据">补证据</button>
+              </div>
+              <div class="ai-suggestion" data-ai-suggestion hidden>
+                <strong>AI 建议</strong>
+                <p data-ai-suggestion-text></p>
+                <div class="suggestion-actions">
+                  <button class="button primary" type="button" data-suggestion-action="accept">接受</button>
+                  <button class="button" type="button" data-suggestion-action="diff">查看差异</button>
+                  <button class="button" type="button" data-suggestion-action="dismiss">放弃</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="context-section">
+              <h4>当前标题域</h4>
+              <strong data-context-domain></strong>
+              <p data-context-scope></p>
+            </section>
+
+            <section class="context-section">
+              <h4>当前块</h4>
+              <strong data-context-title></strong>
+              <p data-context-expression></p>
+            </section>
+
+            <section class="context-section">
+              <h4>得分要求</h4>
+              <p data-context-requirement></p>
+              <p data-context-score></p>
+              <p class="source-line" data-context-source></p>
+            </section>
+
+            <section class="context-section">
+              <h4>潜在要求</h4>
+              <p data-context-potential></p>
+            </section>
+
+            <section class="context-section block-history-section">
+              <h4>版本管理</h4>
+              <div class="block-history" data-block-history></div>
+              <div class="history-preview" data-history-preview hidden>
+                <strong>历史预览</strong>
+                <p data-history-preview-text></p>
+                <button class="button" type="button" data-restore-block>回溯到此版本</button>
+              </div>
+            </section>
+          </aside>
+        </section>
+
+        <details class="ai-status-drawer">
+          <summary>
+            <span class="status-grip"></span>
+            <strong>AI 进程</strong>
+            <span>编辑协作模式</span>
+          </summary>
+          <div class="status-drawer-body">
+            <div>块级历史已开启 · AI 建议需确认后写入</div>
+            <div class="status-log-row"><span>下一步</span><span>展开后承载 agent 队列、日志、成本和错误恢复。</span></div>
+          </div>
+        </details>
+      </main>
+    </div>
+    <script type="module" src="./assets/workbench.js"></script>
+  </body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBidding · Projects Gallery</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell gallery-page">
+      <header class="gallery-header">
+        <div class="gallery-title">
+          <div class="eyebrow">Project Vaults</div>
+          <h1>项目画廊</h1>
+          <p>这是 gallery 的扩展视图，支持按阶段、revision、并行生成状态快速筛选。</p>
+        </div>
+        <div class="top-actions">
+          <button id="btn-new-vault" class="button primary">+ 新建 Vault</button>
+        </div>
+      </header>
+
+      <section class="card" style="margin-bottom: 18px;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <div class="chip-row">
+            <span class="chip success">内容生产</span>
+            <span class="chip warn">待确认预判</span>
+            <span class="chip danger">回修优先</span>
+            <span class="chip info">并行生成中</span>
+          </div>
+          <div class="chip-row">
+            <span class="chip">按截止日</span>
+            <span class="chip">按问题数</span>
+            <span class="chip">按 revision 更新</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="gallery-grid">
+      </section>
+    </div>
+
+    <script type="module">
+      import { api } from './assets/api.js';
+
+      const grid = document.querySelector('.gallery-grid');
+      const btnNew = document.getElementById('btn-new-vault');
+
+      const STATUS_MAP = {
+        init:      ['warn',    '初始化中'],
+        authoring: ['success', '内容生产'],
+        reviewing: ['danger',  '待审核'],
+        done:      ['info',    '已完成'],
+      };
+
+      function renderCard(p) {
+        const [cls, label] = STATUS_MAP[p.status] || ['', p.status];
+        return `
+          <a class="project-card" href="/workbench?projectId=${p.id}">
+            <div class="project-top">
+              <div>
+                <span class="badge ${cls}">${label}</span>
+                <h3 style="margin-top:12px;">${p.name}</h3>
+                <div class="muted">${p.deadline ? '截止：' + p.deadline : ''}</div>
+              </div>
+              <span class="chip">${p.id}</span>
+            </div>
+          </a>`;
+      }
+
+      async function loadProjects() {
+        const projects = await api.projects.list();
+        if (!projects.length) {
+          grid.innerHTML = '<p class="muted" style="padding:24px;">暂无项目，点击右上角新建。</p>';
+          return;
+        }
+        grid.innerHTML = projects.map(renderCard).join('');
+      }
+
+      btnNew.addEventListener('click', async () => {
+        const name = prompt('输入项目名称：');
+        if (!name?.trim()) return;
+        await api.projects.create({ name: name.trim() });
+        await loadProjects();
+      });
+
+      loadProjects();
+    </script>
+  </body>
+</html>

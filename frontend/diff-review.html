@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBidding · Diff Review</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="workspace-shell">
+      <main class="workspace-main-shell">
+        <header class="project-header">
+          <a class="project-name" href="/projects">项目画廊</a>
+          <nav class="process-tabs" aria-label="项目流程">
+            <a class="process-tab" href="/project-init">项目信息</a>
+            <a class="process-tab" href="/workbench">材料撰写</a>
+            <a class="process-tab active" href="/diff-review">审核导出</a>
+          </nav>
+          <div class="project-actions">
+            <button class="icon-button" type="button" aria-label="切换主题">◐</button>
+            <button class="icon-button" type="button" aria-label="项目设置">⚙</button>
+          </div>
+        </header>
+
+        <section class="metric-grid workbench-metrics">
+          <div class="metric-card">
+            <div class="metric-label">revision 对</div>
+            <div class="metric-value">当前版本</div>
+            <div class="muted">最新修订</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">变化块</div>
+            <div class="metric-value metric-changed">0</div>
+            <div class="muted">待处理</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">受影响章节</div>
+            <div class="metric-value metric-affected">0</div>
+            <div class="muted">待审核</div>
+          </div>
+        </section>
+
+        <section class="diff-layout">
+          <aside class="compact-card nav-pane">
+            <div class="compact-header">
+              <div>
+                <div class="eyebrow">Revision Chain</div>
+                <h3>版本链与影响入口</h3>
+              </div>
+              <span class="badge info">delta + snapshot</span>
+            </div>
+
+            <div class="outline-tree" id="revision-chain">
+              <p class="muted" style="padding:12px;">加载中...</p>
+            </div>
+
+            <div class="compact-divider"></div>
+
+            <div class="toolbar" style="margin-top: 12px;">
+              <div class="mini-button primary">按章节看</div>
+              <div class="mini-button">按问题看</div>
+            </div>
+          </aside>
+
+          <section class="compact-card">
+            <div class="editor-toolbar">
+              <div class="chip-row">
+                <span class="chip">同步滚动</span>
+                <span class="chip">折叠未变化片段</span>
+                <span class="chip info">normalized view</span>
+              </div>
+              <div class="toolbar">
+                <div class="mini-button">上一个差异</div>
+                <div class="mini-button">下一个差异</div>
+                <button id="btn-accept-mapping" class="mini-button primary" type="button">接受映射建议</button>
+              </div>
+            </div>
+
+            <div class="diff-columns" style="margin-top: 12px;">
+              <section class="diff-pane">
+                <div class="compact-header">
+                  <div>
+                    <div class="eyebrow">Base Revision</div>
+                    <h3>旧版本</h3>
+                  </div>
+                  <span class="badge success">左侧基线</span>
+                </div>
+                <div class="diff-list" id="diff-left">
+                  <p class="muted">加载中...</p>
+                </div>
+              </section>
+
+              <section class="diff-pane">
+                <div class="compact-header">
+                  <div>
+                    <div class="eyebrow">Compare Revision</div>
+                    <h3>当前修订版</h3>
+                  </div>
+                  <span class="badge info">右侧当前版</span>
+                </div>
+                <div class="diff-list" id="diff-right">
+                  <p class="muted">加载中...</p>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <aside class="compact-card">
+            <div class="compact-header">
+              <div>
+                <div class="eyebrow">Export</div>
+                <h3>导出</h3>
+              </div>
+              <span class="badge success">ready</span>
+            </div>
+
+            <div class="right-stack">
+              <div class="side-card">
+                <div class="compact-header">
+                  <div>
+                    <h3>导出操作</h3>
+                  </div>
+                </div>
+                <div class="quick-grid">
+                  <button id="btn-export-word" class="option-card" type="button">导出 Word</button>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <details class="ai-status-drawer">
+          <summary>
+            <span class="status-grip"></span>
+            <strong>AI 进程</strong>
+            <span>审核导出模式</span>
+          </summary>
+          <div class="status-drawer-body">
+            <div>diff 分析完成</div>
+          </div>
+        </details>
+      </main>
+    </div>
+
+    <script type="module">
+      import { api } from './assets/api.js';
+
+      const params    = new URLSearchParams(location.search);
+      const projectId = params.get('projectId');
+      if (!projectId) { location.href = '/projects'; }
+
+      const btnAccept = document.getElementById('btn-accept-mapping');
+      const btnExport = document.getElementById('btn-export-word');
+
+      let diffData = null;
+
+      async function loadDiff() {
+        diffData = await api.export.diff(projectId);
+        const changed = diffData.changed || [];
+        const added   = diffData.added   || [];
+        const removed = diffData.removed || [];
+
+        const metricChanged  = document.querySelector('.metric-changed');
+        const metricAffected = document.querySelector('.metric-affected');
+        if (metricChanged)  metricChanged.textContent  = changed.length;
+        if (metricAffected) metricAffected.textContent = changed.reduce((n, c) => n + (c.affected_blocks?.length || 0), 0);
+
+        const leftPane  = document.getElementById('diff-left');
+        const rightPane = document.getElementById('diff-right');
+
+        if (leftPane) {
+          leftPane.innerHTML = [
+            ...changed.map(c => `<div class="diff-block changed"><strong>${c.block_id}</strong><p>旧：${c.old_content?.slice(0, 80) ?? ''}…</p></div>`),
+            ...removed.map(r => `<div class="diff-block removed"><strong>${r.block_id}</strong><p>已删除：${r.title}</p></div>`),
+          ].join('') || '<p class="muted">无差异</p>';
+        }
+
+        if (rightPane) {
+          rightPane.innerHTML = [
+            ...changed.map(c => `<div class="diff-block changed"><strong>${c.block_id}</strong><p>新：${c.new_content?.slice(0, 80) ?? ''}…</p></div>`),
+            ...added.map(a => `<div class="diff-block added"><strong>${a.block_id}</strong><p>新增：${a.title}</p></div>`),
+          ].join('') || '<p class="muted">无差异</p>';
+        }
+      }
+
+      btnAccept?.addEventListener('click', async () => {
+        if (!diffData) return;
+        btnAccept.disabled = true;
+        const accept = [...(diffData.changed?.map(c => c.block_id) || []), ...(diffData.added?.map(a => a.block_id) || [])];
+        await api.export.applyDiff(projectId, { accept, reject: [] });
+        btnAccept.textContent = '已接受';
+      });
+
+      btnExport?.addEventListener('click', () => {
+        api.export.word(projectId);
+      });
+
+      loadDiff();
+    </script>
+  </body>
+</html>

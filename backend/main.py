@@ -95,7 +95,11 @@ app.include_router(export_router,   prefix="/api")
 _this_dir    = os.path.dirname(os.path.abspath(__file__))
 frontend_dir = os.path.join(_this_dir, "..", "frontend")
 frontend_dir = os.path.normpath(frontend_dir)
-_index_path  = os.path.join(frontend_dir, "index.html")
+_index_path        = os.path.join(frontend_dir, "index.html")
+_projects_path     = os.path.join(frontend_dir, "projects.html")
+_project_init_path = os.path.join(frontend_dir, "project-init.html")
+_workbench_path    = os.path.join(frontend_dir, "workbench.html")
+_diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 
 if os.path.isdir(frontend_dir):
     app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
@@ -106,14 +110,37 @@ else:
 
 @app.get("/", include_in_schema=False)
 async def serve_frontend():
-    """根路径：返回前端 index.html"""
-    if os.path.isfile(_index_path):
-        return FileResponse(_index_path)
-    return JSONResponse(content={
-        "message": "技术方案生成助手 API 运行中",
-        "docs": "/docs",
-        "hint": "前端文件不存在，请确认 frontend/index.html 已创建",
-    })
+    if os.path.isfile(_projects_path):
+        return FileResponse(_projects_path)
+    return JSONResponse(content={"message": "技术方案生成助手 API 运行中", "docs": "/docs"})
+
+
+@app.get("/projects", include_in_schema=False)
+async def serve_projects():
+    if os.path.isfile(_projects_path):
+        return FileResponse(_projects_path)
+    return JSONResponse(status_code=404, content={"detail": "projects.html 不存在"})
+
+
+@app.get("/project-init", include_in_schema=False)
+async def serve_project_init():
+    if os.path.isfile(_project_init_path):
+        return FileResponse(_project_init_path)
+    return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
+
+
+@app.get("/workbench", include_in_schema=False)
+async def serve_workbench():
+    if os.path.isfile(_workbench_path):
+        return FileResponse(_workbench_path)
+    return JSONResponse(status_code=404, content={"detail": "workbench.html 不存在"})
+
+
+@app.get("/diff-review", include_in_schema=False)
+async def serve_diff_review():
+    if os.path.isfile(_diff_review_path):
+        return FileResponse(_diff_review_path)
+    return JSONResponse(status_code=404, content={"detail": "diff-review.html 不存在"})
 
 
 @app.get("/api/readme", include_in_schema=False)

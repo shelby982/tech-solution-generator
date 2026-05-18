@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBidding · Workbench Init State</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="workspace-shell">
+      <main class="workspace-main-shell">
+        <header class="project-header">
+          <a class="project-name" href="/projects">项目画廊</a>
+          <nav class="process-tabs" aria-label="项目流程">
+            <a class="process-tab active" href="/project-init">项目信息</a>
+            <a class="process-tab" href="/workbench">材料撰写</a>
+            <a class="process-tab" href="/diff-review">审核导出</a>
+          </nav>
+          <div class="project-actions">
+            <button class="icon-button" type="button" aria-label="切换主题">◐</button>
+            <button class="icon-button" type="button" aria-label="项目设置">⚙</button>
+          </div>
+        </header>
+
+        <section class="workspace-layout init-workspace-layout">
+          <aside class="compact-card nav-pane init-materials-pane">
+            <div class="materials-actions">
+              <button id="btn-add-material" class="button primary" type="button">添加材料</button>
+              <button class="button" type="button">批量拖入</button>
+            </div>
+
+            <div class="compact-header">
+              <div>
+                <h3>导入材料</h3>
+                <p>从原文提取项目事实、应标要求和评分依据。</p>
+              </div>
+            </div>
+
+            <div class="material-stack">
+            </div>
+          </aside>
+
+          <section class="compact-card init-outline-pane">
+            <div class="init-project-info">
+              <div class="info-block main-info">
+                <h2 id="project-name-title">项目初始化</h2>
+                <p>上传材料后将自动生成大纲。</p>
+              </div>
+            </div>
+
+            <div class="outline-text-module">
+              <div class="section-title-row">
+                <h3>初始化大纲</h3>
+                <span class="muted">由导入材料生成，可通过下方对话继续修改</span>
+              </div>
+              <div class="outline-scroll-container" tabindex="0" aria-label="初始化大纲内容">
+                <pre class="outline-text" data-outline></pre>
+                <div class="outline-chat-panel floating-outline-input">
+                  <div class="chat-input-row">
+                    <input type="text" placeholder="输入对大纲的修改要求，例如：把应急响应提前、补充安全服务章节、弱化商务内容" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="compact-card init-check-pane">
+            <div class="init-decision-panel">
+              <div>
+                <strong>进入撰写前检查</strong>
+                <p>确认大纲后可锁定并进入材料撰写。</p>
+              </div>
+              <button id="btn-lock" class="button primary" type="button">锁定大纲，进入材料撰写</button>
+              <button class="button" type="button">保存初始化结果</button>
+            </div>
+          </aside>
+        </section>
+
+        <details class="ai-status-drawer">
+          <summary>
+            <span class="status-grip"></span>
+            <strong>AI 进程</strong>
+            <span>初始化中</span>
+          </summary>
+          <div class="status-drawer-body">
+            <div>等待材料上传</div>
+          </div>
+        </details>
+      </main>
+    </div>
+
+    <input type="file" id="file-input" accept=".pdf,.docx,.doc" style="display:none">
+
+    <script type="module">
+      import { api } from './assets/api.js';
+
+      const params    = new URLSearchParams(location.search);
+      const projectId = params.get('projectId');
+      if (!projectId) { location.href = '/projects'; }
+
+      const btnAdd     = document.getElementById('btn-add-material');
+      const fileInput  = document.getElementById('file-input');
+      const btnLock    = document.getElementById('btn-lock');
+      const matStack   = document.querySelector('.material-stack');
+      const outlineEl  = document.querySelector('.outline-text, [data-outline]');
+
+      async function loadMaterials() {
+        const list = await api.materials.list(projectId);
+        if (!list.length) {
+          matStack.innerHTML = '<p class="muted" style="padding:12px;">尚未上传材料</p>';
+          return;
+        }
+        matStack.innerHTML = list.map(m => `
+          <div class="material-row">
+            <div><strong>${m.filename}</strong></div>
+            <span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span>
+          </div>`).join('');
+      }
+
+      function startOutline() {
+        if (outlineEl) outlineEl.textContent = '正在生成大纲...';
+        api.materials.outline(projectId, {
+          onBlock: (data) => {
+            if (outlineEl) outlineEl.textContent += `\n${data.title || data.block_id}`;
+          },
+          onDone: () => {
+            if (outlineEl) outlineEl.textContent += '\n\n✓ 大纲生成完成';
+          },
+          onError: (err) => {
+            if (outlineEl) outlineEl.textContent += `\n错误：${err.message}`;
+          },
+        });
+      }
+
+      btnAdd?.addEventListener('click', () => fileInput.click());
+      fileInput?.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        btnAdd.disabled = true;
+        await api.materials.upload(projectId, file);
+        await loadMaterials();
+        startOutline();
+        btnAdd.disabled = false;
+      });
+
+      btnLock?.addEventListener('click', async () => {
+        btnLock.disabled = true;
+        await api.projects.lock(projectId);
+        location.href = `/workbench?projectId=${projectId}`;
+      });
+
+      loadMaterials();
+    </script>
+  </body>
+</html>
