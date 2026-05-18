@@ -19,6 +19,7 @@ from routes.generate import router as generate_router
 from routes.download import router as download_router
 from routes.changelog import router as changelog_router
 from routes.projects import router as projects_router
+from routes.materials import router as materials_router
 
 # ── 日志配置 ──────────────────────────────────
 logging.basicConfig(
@@ -81,6 +82,7 @@ app.include_router(generate_router,  prefix="/api")
 app.include_router(download_router,  prefix="/api")
 app.include_router(changelog_router, prefix="/api")
 app.include_router(projects_router,  prefix="/api")
+app.include_router(materials_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
