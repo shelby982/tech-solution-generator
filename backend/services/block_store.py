@@ -91,6 +91,8 @@ async def create_material(
         "SELECT * FROM materials WHERE id = ?", (cursor.lastrowid,)
     )
     row = await row_cursor.fetchone()
+    if row is None:
+        raise RuntimeError(f"材料记录插入失败，lastrowid={cursor.lastrowid}")
     return dict(row)
 
 
@@ -217,21 +219,28 @@ async def add_revision(
     summary: str,
     source: str,
 ) -> dict:
-    cursor = await db.execute(
-        "SELECT COALESCE(MAX(revision_no), 0) FROM block_revisions WHERE block_id = ?",
-        (block_id_int,),
-    )
-    row = await cursor.fetchone()
-    next_no = row[0] + 1
-    cursor = await db.execute(
-        "INSERT INTO block_revisions (block_id, revision_no, content, summary, source) VALUES (?, ?, ?, ?, ?)",
-        (block_id_int, next_no, content, summary, source),
-    )
-    await db.commit()
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        cursor = await db.execute(
+            "SELECT COALESCE(MAX(revision_no), 0) FROM block_revisions WHERE block_id = ?",
+            (block_id_int,),
+        )
+        row = await cursor.fetchone()
+        next_no = row[0] + 1
+        cursor = await db.execute(
+            "INSERT INTO block_revisions (block_id, revision_no, content, summary, source) VALUES (?, ?, ?, ?, ?)",
+            (block_id_int, next_no, content, summary, source),
+        )
+        new_id = cursor.lastrowid
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     row_cursor = await db.execute(
-        "SELECT * FROM block_revisions WHERE id = ?", (cursor.lastrowid,)
+        "SELECT * FROM block_revisions WHERE id = ?", (new_id,)
     )
-    return dict(await row_cursor.fetchone())
+    result = await row_cursor.fetchone()
+    return dict(result)
 
 
 async def list_revisions(
