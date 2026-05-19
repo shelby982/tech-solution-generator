@@ -10,7 +10,7 @@
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
-          <a class="project-name" href="/projects">项目画廊</a>
+          <a class="project-name" id="header-project-name" href="/projects">项目画廊</a>
           <nav class="process-tabs" aria-label="项目流程">
             <a class="process-tab active" href="/project-init">项目信息</a>
             <a class="process-tab" href="/workbench">材料撰写</a>
@@ -24,33 +24,32 @@
 
         <section class="workspace-layout init-workspace-layout">
           <aside class="compact-card nav-pane init-materials-pane">
-            <div class="materials-actions">
-              <button id="btn-add-material" class="button primary" type="button">添加材料</button>
-              <button class="button" type="button">批量拖入</button>
-            </div>
-
-            <div class="compact-header">
-              <div>
-                <h3>导入材料</h3>
-                <p>从原文提取项目事实、应标要求和评分依据。</p>
+            <div class="materials-section">
+              <div class="compact-header">
+                <div>
+                  <h3>应标文件</h3>
+                  <p>应答文件技术部分 + 技术规范书</p>
+                </div>
               </div>
+              <div class="material-stack" id="req-stack"></div>
+              <button id="btn-add-req" class="button primary" type="button">+ 添加应标文件</button>
             </div>
-
-            <div class="material-stack">
+            <div class="materials-section" style="margin-top:16px;">
+              <div class="compact-header">
+                <div>
+                  <h3>原始素材</h3>
+                  <p>PPT / PDF / DOCX</p>
+                </div>
+              </div>
+              <div class="material-stack" id="src-stack"></div>
+              <button id="btn-add-src" class="button" type="button">+ 添加原始素材</button>
             </div>
           </aside>
 
           <section class="compact-card init-outline-pane">
-            <div class="init-project-info">
-              <div class="info-block main-info">
-                <h2 id="project-name-title">项目初始化</h2>
-                <p>上传材料后将自动生成大纲。</p>
-              </div>
-            </div>
-
             <div class="outline-text-module">
               <div class="section-title-row">
-                <h3>初始化大纲</h3>
+                <h3>大纲</h3>
                 <span class="muted">由导入材料生成，可通过下方对话继续修改</span>
               </div>
               <div class="outline-scroll-container" tabindex="0" aria-label="初始化大纲内容">
@@ -89,58 +88,109 @@
       </main>
     </div>
 
-    <input type="file" id="file-input" accept=".pdf,.docx,.doc" style="display:none">
+    <input type="file" id="file-input-req" accept=".pdf,.docx,.doc" style="display:none">
+    <input type="file" id="file-input-src" accept=".pdf,.docx,.doc,.ppt,.pptx" style="display:none">
 
     <script type="module">
       import { api } from './assets/api.js';
 
-      const params    = new URLSearchParams(location.search);
+      const params = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
       if (!projectId) { location.href = '/projects'; }
 
-      const btnAdd     = document.getElementById('btn-add-material');
-      const fileInput  = document.getElementById('file-input');
-      const btnLock    = document.getElementById('btn-lock');
-      const matStack   = document.querySelector('.material-stack');
-      const outlineEl  = document.querySelector('.outline-text, [data-outline]');
+      const fileInputReq = document.getElementById('file-input-req');
+      const fileInputSrc = document.getElementById('file-input-src');
+      const btnAddReq = document.getElementById('btn-add-req');
+      const btnAddSrc = document.getElementById('btn-add-src');
+      const reqStack = document.getElementById('req-stack');
+      const srcStack = document.getElementById('src-stack');
+      const outlineContainer = document.querySelector('.outline-scroll-container');
+      const btnLock = document.getElementById('btn-lock');
 
+      // 加载项目名称
+      api.projects.get(projectId).then(p => {
+        if (!p?.name) return;
+        document.getElementById('header-project-name').textContent = p.name;
+        document.title = `AiBidding · ${p.name}`;
+      });
+
+      // 渲染材料列表
       async function loadMaterials() {
         const list = await api.materials.list(projectId);
-        if (!list.length) {
-          matStack.innerHTML = '<p class="muted" style="padding:12px;">尚未上传材料</p>';
-          return;
-        }
-        matStack.innerHTML = list.map(m => `
-          <div class="material-row">
-            <div><strong>${m.filename}</strong></div>
-            <span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span>
-          </div>`).join('');
+        const reqs = list.filter(m => m.role === 'requirement');
+        const srcs = list.filter(m => m.role === 'source');
+
+        reqStack.innerHTML = reqs.length
+          ? reqs.map(m => `<div class="material-row"><div><strong>${m.filename}</strong></div><span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span></div>`).join('')
+          : '<p class="muted" style="padding:8px 12px;">尚未上传应标文件</p>';
+
+        srcStack.innerHTML = srcs.length
+          ? srcs.map(m => `<div class="material-row"><div><strong>${m.filename}</strong></div><span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span></div>`).join('')
+          : '<p class="muted" style="padding:8px 12px;">尚未上传原始素材</p>';
       }
 
+      // 渲染大纲节
+      function renderOutlineBlock(block) {
+        const el = document.createElement('div');
+        el.className = 'outline-block-item';
+        el.dataset.blockId = block.block_id;
+        el.innerHTML = `
+          <div class="outline-block-title">${block.title || ''}</div>
+          <div class="outline-block-req">
+            <label>要求</label>
+            <textarea data-block-id="${block.block_id}" rows="3">${block.requirement || ''}</textarea>
+          </div>`;
+        el.querySelector('textarea').addEventListener('blur', async (e) => {
+          const bid = e.target.dataset.blockId;
+          await api.blocks.updateRequirement(bid, e.target.value);
+        });
+        outlineContainer.appendChild(el);
+      }
+
+      // 启动大纲生成 SSE
       function startOutline() {
-        if (outlineEl) outlineEl.textContent = '正在生成大纲...';
+        // 清空旧大纲
+        outlineContainer.innerHTML = '<p class="muted" style="padding:12px;">正在生成大纲...</p>';
         api.materials.outline(projectId, {
           onBlock: (data) => {
-            if (outlineEl) outlineEl.textContent += `\n${data.title || data.block_id}`;
+            // 移除 loading 提示（首次）
+            const loading = outlineContainer.querySelector('.muted');
+            if (loading) loading.remove();
+            renderOutlineBlock(data);
           },
-          onDone: () => {
-            if (outlineEl) outlineEl.textContent += '\n\n✓ 大纲生成完成';
+          onDone: async () => {
+            // 大纲完成后自动触发素材映射
+            await api.materials.mapSources(projectId);
           },
           onError: (err) => {
-            if (outlineEl) outlineEl.textContent += `\n错误：${err.message}`;
+            outlineContainer.innerHTML = `<p class="muted" style="padding:12px;color:red;">生成失败：${err.message}</p>`;
           },
         });
       }
 
-      btnAdd?.addEventListener('click', () => fileInput.click());
-      fileInput?.addEventListener('change', async () => {
-        const file = fileInput.files[0];
-        if (!file) return;
-        btnAdd.disabled = true;
-        await api.materials.upload(projectId, file);
+      // 上传文件（通用）
+      async function uploadFile(file, role, btn) {
+        btn.disabled = true;
+        await api.materials.upload(projectId, file, role);
         await loadMaterials();
-        startOutline();
-        btnAdd.disabled = false;
+        if (role === 'requirement') {
+          startOutline();
+        }
+        btn.disabled = false;
+      }
+
+      // 按钮事件
+      btnAddReq.addEventListener('click', () => fileInputReq.click());
+      btnAddSrc.addEventListener('click', () => fileInputSrc.click());
+
+      fileInputReq.addEventListener('change', () => {
+        const file = fileInputReq.files[0];
+        if (file) uploadFile(file, 'requirement', btnAddReq);
+      });
+
+      fileInputSrc.addEventListener('change', () => {
+        const file = fileInputSrc.files[0];
+        if (file) uploadFile(file, 'source', btnAddSrc);
       });
 
       btnLock?.addEventListener('click', async () => {
