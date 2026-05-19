@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from db import get_db
 from services.block_store import (
     get_block, update_block_content, update_block_status,
-    list_blocks, add_revision,
+    list_blocks, add_revision, update_block_requirement,
 )
 from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
 from services.llm import dispatch_stream_generate, _generate_oneshot_openai, _generate_oneshot_claude
@@ -40,7 +40,8 @@ async def get_project_blocks(project_id: int):
 # ── PUT /api/blocks/{id} ─────────────────────────────────
 
 class BlockUpdateRequest(BaseModel):
-    content: str = Field(..., max_length=500_000)
+    content: str | None = Field(default=None, max_length=500_000)
+    requirement: str | None = Field(default=None, max_length=5000)
 
 
 @router.put("/blocks/{block_id}")
@@ -49,9 +50,13 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
         existing = await get_block(db, block_id)
         if existing is None:
             raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
-        updated = await update_block_content(db, block_id, body.content)
-        await add_revision(db, block_id_int=block_id, content=body.content,
-                           source="edit", summary="手动编辑")
+        updated = existing
+        if body.content is not None:
+            updated = await update_block_content(db, block_id, body.content)
+            await add_revision(db, block_id_int=block_id, content=body.content,
+                               source="edit", summary="手动编辑")
+        if body.requirement is not None:
+            updated = await update_block_requirement(db, block_id, body.requirement)
     return JSONResponse(content=updated)
 
 
