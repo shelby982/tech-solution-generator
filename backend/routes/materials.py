@@ -10,7 +10,7 @@ backend/routes/materials.py — 材料上传、列表、SSE 大纲生成
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from db import get_db
@@ -36,6 +36,7 @@ UPLOAD_ROOT = Path(__file__).parent.parent / "data" / "uploads"
 async def upload_material(
     project_id: int,
     file: UploadFile = File(...),
+    material_role: str = Form(default="requirement"),
 ):
     """上传材料文件（multipart/form-data），写入 materials 表"""
     async with get_db() as db:
@@ -66,7 +67,7 @@ async def upload_material(
             filename=file.filename,
             type_=suffix.lstrip("."),
             file_path=relative_path,
-            role="main",
+            role=material_role,
         )
 
     return JSONResponse(content=mat)
@@ -86,7 +87,7 @@ async def list_project_materials(project_id: int):
 @router.post("/projects/{project_id}/outline")
 async def generate_outline(project_id: int):
     """
-    SSE：解析 role=main 材料，逐节写入 heading+content block。
+    SSE：读取 role=requirement 材料，调用 AI 生成结构化大纲，逐条写入 blocks 表。
 
     事件：outline_start / outline_block / outline_done / error
     """
@@ -94,75 +95,51 @@ async def generate_outline(project_id: int):
         project = await get_project(db, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-        materials = await list_materials(db, project_id)
-        main_material = next((m for m in materials if m.get("role") == "main"), None)
-        if main_material is None:
-            raise HTTPException(status_code=404, detail="该项目没有主材料，请先上传文件")
-        material_id = main_material["id"]
-        file_path = main_material["file_path"]
-        filename = main_material["filename"]
-
-    abs_path = UPLOAD_ROOT / str(project_id) / filename
-    suffix = Path(filename).suffix.lower()
 
     async def event_generator():
-        yield format_sse_event("outline_start", {
-            "project_id": project_id,
-            "material_id": material_id,
-        })
+        yield format_sse_event("outline_start", {"project_id": project_id})
         try:
-            parsed = parse_document(str(abs_path), suffix=suffix, filename=filename)
+            async with get_db() as db:
+                materials = await list_materials(db, project_id)
+            req_materials = [m for m in materials if m.get("role") == "requirement"]
+            if not req_materials:
+                yield format_sse_event("error", {"message": "请先上传应标文件（应答文件/技术规范书）"})
+                return
+
+            combined_text = ""
+            for mat in req_materials:
+                abs_path = UPLOAD_ROOT / str(project_id) / mat["filename"]
+                suffix = Path(mat["filename"]).suffix.lower()
+                parsed = parse_document(str(abs_path), suffix=suffix, filename=mat["filename"])
+                for sec in parsed.sections:
+                    combined_text += f"\n## {sec.title}\n{sec.content_hint or ''}"
+
+            from services.llm import dispatch_outline_json
+            from services.config_store import config_store
+            configs, rr_index = config_store.get_configs_and_next_index()
+            outline_items = await dispatch_outline_json(configs, rr_index, combined_text)
+
             async with get_db() as db:
                 await delete_blocks_by_project(db, project_id)
-                block_count = 0
-                for idx, section in enumerate(parsed.sections):
-                    # heading block
-                    h_id = f"{section.id}-H"
+                for idx, item in enumerate(outline_items):
+                    block_id_str = f"outline-{idx}"
                     await create_block(
-                        db,
-                        project_id=project_id,
-                        block_id=h_id,
-                        kind="heading",
-                        level=section.level,
-                        title=section.title,
-                        domain=section.title,
-                        parent_title="",
-                        requirement="",
-                        score="",
-                        source="",
-                        order_idx=idx * 2,
+                        db, project_id=project_id, block_id=block_id_str,
+                        kind="content", level=1, title=item["title"],
+                        domain=item["title"], parent_title="",
+                        requirement=item.get("requirement", ""),
+                        score="", source="", order_idx=idx,
                     )
                     yield format_sse_event("outline_block", {
-                        "block_id": h_id, "kind": "heading",
-                        "level": section.level, "title": section.title,
+                        "block_id": block_id_str,
+                        "title": item["title"],
+                        "requirement": item.get("requirement", ""),
                     })
-                    block_count += 1
+                # 标记第一个 requirement 材料为已解析
+                if req_materials:
+                    await update_material_parsed(db, req_materials[0]["id"])
 
-                    # content block
-                    c_id = f"{section.id}-C"
-                    await create_block(
-                        db,
-                        project_id=project_id,
-                        block_id=c_id,
-                        kind="content",
-                        level=section.level,
-                        title=f"{section.title}（正文）",
-                        domain=section.title,
-                        parent_title=section.title,
-                        requirement=section.content_hint[:500] if section.content_hint else "",
-                        score="",
-                        source="",
-                        order_idx=idx * 2 + 1,
-                    )
-                    yield format_sse_event("outline_block", {
-                        "block_id": c_id, "kind": "content",
-                        "level": section.level, "title": None,
-                    })
-                    block_count += 1
-
-                await update_material_parsed(db, material_id)
-
-            yield format_sse_event("outline_done", {"block_count": block_count})
+            yield format_sse_event("outline_done", {"block_count": len(outline_items)})
 
         except Exception as exc:
             logger.exception(f"大纲生成失败 project={project_id}: {exc}")
