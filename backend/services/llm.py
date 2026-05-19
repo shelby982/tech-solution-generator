@@ -406,3 +406,28 @@ async def dispatch_doc_summary(
             )
 
     raise last_error  # type: ignore[misc]
+
+
+async def dispatch_outline_json(configs, rr_index: int, requirement_text: str) -> list[dict]:
+    """
+    输入应标文件全文，返回结构化大纲列表。
+    每项：{"title": str, "requirement": str}
+    """
+    import json, re
+    system = (
+        "你是专业投标方案顾问。根据用户提供的应标文件（应答文件技术部分+技术规范书），"
+        "提炼出方案大纲，以 JSON 数组输出，每项包含 title（章节名）和 requirement（本章核心要求描述）。"
+        "只输出 JSON，不要有任何额外说明。"
+    )
+    user = f"应标文件内容：\n\n{requirement_text[:12000]}"
+
+    config = configs[rr_index % len(configs)]
+    if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+        result = await _generate_oneshot_openai(config, system, user, max_tokens=3000)
+    else:
+        result = await _generate_oneshot_claude(config, system, user, max_tokens=3000)
+
+    match = re.search(r'\[.*\]', result, re.DOTALL)
+    if not match:
+        raise ValueError(f"LLM 未返回有效 JSON 数组：{result[:200]}")
+    return json.loads(match.group())
