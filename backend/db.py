@@ -75,6 +75,14 @@ CREATE TABLE IF NOT EXISTS project_snapshots (
     snapshot    TEXT,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS material_chunks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL REFERENCES materials(id),
+    chunk_index INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
