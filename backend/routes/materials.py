@@ -21,6 +21,7 @@ from services.block_store import (
     create_block,
     delete_blocks_by_project,
     update_material_parsed,
+    create_chunk,
 )
 from services.parser import parse_document
 from utils.sse import format_sse_event
@@ -70,8 +71,20 @@ async def upload_material(
             role=material_role,
         )
 
-    return JSONResponse(content=mat)
+    if material_role == "source":
+        abs_path = UPLOAD_ROOT / str(project_id) / file.filename
+        suffix = Path(file.filename).suffix.lower()
+        try:
+            parsed = parse_document(str(abs_path), suffix=suffix, filename=file.filename)
+            async with get_db() as db2:
+                for idx, sec in enumerate(parsed.sections):
+                    text = f"{sec.title}\n{sec.content_hint or ''}".strip()
+                    if text:
+                        await create_chunk(db2, material_id=mat["id"], chunk_index=idx, content=text)
+        except Exception as e:
+            logger.warning(f"素材切片失败 {file.filename}: {e}")
 
+    return JSONResponse(content=mat)
 
 @router.get("/projects/{project_id}/materials")
 async def list_project_materials(project_id: int):
