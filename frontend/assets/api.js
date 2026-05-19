@@ -24,9 +24,10 @@ export const api = {
   },
 
   materials: {
-    upload: (projectId, file, role = 'main') => {
+    upload: (projectId, file, role = 'requirement') => {
       const fd = new FormData();
       fd.append('file', file);
+      fd.append('material_role', role);
       return fetch(`/api/projects/${projectId}/materials`, {
         method: 'POST', body: fd,
       }).then(r => r.json());
@@ -62,6 +63,8 @@ export const api = {
       }
       if (buf) onDone?.({});
     },
+    mapSources: (projectId) =>
+      fetch(`/api/projects/${projectId}/map-sources`, { method: 'POST' }).then(r => r.json()),
   },
 
   blocks: {
@@ -80,6 +83,12 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
+      }).then(r => r.json()),
+    updateRequirement: (blockId, requirement) =>
+      fetch(`/api/blocks/${blockId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requirement }),
       }).then(r => r.json()),
   },
 
