@@ -150,3 +150,47 @@ async def generate_outline(project_id: int):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+import json as _json
+
+from services.block_store import list_chunks_by_project, list_blocks as _list_blocks
+
+
+@router.post("/projects/{project_id}/map-sources")
+async def map_sources(project_id: int):
+    """为每个 block 匹配 Top-3 相关素材片段，写入 blocks.source"""
+    async with get_db() as db:
+        project = await get_project(db, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
+
+        blocks = await _list_blocks(db, project_id)
+        chunks = await list_chunks_by_project(db, project_id)
+
+        if not chunks:
+            return JSONResponse(content={"mapped": 0, "message": "暂无素材片段"})
+
+        def _score(block_text: str, chunk_text: str) -> int:
+            bw = set(block_text.lower().split())
+            cw = set(chunk_text.lower().split())
+            return len(bw & cw)
+
+        mapped = 0
+        for block in blocks:
+            query = f"{block.get('title', '')} {block.get('requirement', '')}"
+            scored = sorted(chunks, key=lambda c: _score(query, c["content"]), reverse=True)
+            top3 = scored[:3]
+            refs = [
+                {"material_id": c["material_id"], "chunk_index": c["chunk_index"],
+                 "snippet": c["content"][:120]}
+                for c in top3
+            ]
+            await db.execute(
+                "UPDATE blocks SET source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (_json.dumps(refs, ensure_ascii=False), block["id"]),
+            )
+            mapped += 1
+        await db.commit()
+
+    return JSONResponse(content={"mapped": mapped})
