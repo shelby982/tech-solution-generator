@@ -282,3 +282,31 @@ async def get_snapshot(
     )
     row = await cursor.fetchone()
     return dict(row) if row else None
+
+
+async def create_chunk(db, material_id: int, chunk_index: int, content: str) -> dict:
+    cursor = await db.execute(
+        "INSERT INTO material_chunks (material_id, chunk_index, content) VALUES (?, ?, ?)",
+        (material_id, chunk_index, content),
+    )
+    await db.commit()
+    row = await (await db.execute("SELECT * FROM material_chunks WHERE id = ?", (cursor.lastrowid,))).fetchone()
+    return dict(row)
+
+async def list_chunks_by_project(db, project_id: int) -> list[dict]:
+    cursor = await db.execute(
+        """SELECT mc.* FROM material_chunks mc
+           JOIN materials m ON mc.material_id = m.id
+           WHERE m.project_id = ? ORDER BY mc.material_id, mc.chunk_index""",
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+async def update_block_requirement(db, block_id_int: int, requirement: str) -> dict | None:
+    await db.execute(
+        "UPDATE blocks SET requirement = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (requirement, block_id_int),
+    )
+    await db.commit()
+    return await get_block(db, block_id_int)
