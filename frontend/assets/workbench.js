@@ -4,10 +4,29 @@ const params    = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
 if (!projectId) { location.href = '/projects'; }
 
+// 顶部 tab 链接注入 projectId
+document.querySelectorAll('.process-tab').forEach(a => {
+  const url = new URL(a.href, location.origin);
+  url.searchParams.set('projectId', projectId);
+  a.href = url.pathname + '?' + url.searchParams.toString();
+});
+// 加载项目名称
+let projectName = '项目画廊';
+api.projects.get(projectId).then(p => {
+  if (p?.name) {
+    projectName = p.name;
+    document.title = `AiBidding · ${p.name}`;
+    const el = document.getElementById('header-project-name');
+    if (el) el.textContent = p.name;
+  }
+});
+
 async function loadBlocks() {
   const blockList = await api.blocks.list(projectId);
   const shell = document.querySelector('.tiptap-shell');
+  const outlineNav = document.querySelector('.doc-outline');
   shell.innerHTML = '';
+  if (outlineNav) outlineNav.innerHTML = '';
 
   blockList.forEach(b => {
     const isHeading = b.kind === 'heading';
@@ -34,6 +53,18 @@ async function loadBlocks() {
         <button type="button" data-block-action="风格">风格</button>
       </div>`;
     shell.appendChild(section);
+
+    // 渲染左侧大纲条目
+    if (outlineNav) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'doc-outline-item';
+      item.dataset.target = `block-${b.id}`;
+      item.dataset.level = b.level ?? 1;
+      item.style.setProperty('--ol-indent', String((b.level ?? 1) - 1));
+      item.textContent = b.title || '（无标题）';
+      outlineNav.appendChild(item);
+    }
   });
 
   shell.querySelectorAll('[contenteditable]').forEach(el => {
@@ -60,6 +91,39 @@ async function loadBlocks() {
   });
 
   if (typeof initWorkbench === 'function') initWorkbench();
+
+  // 批量生成事件监听
+  window.addEventListener('block:start', e => {
+    const el = document.getElementById(`block-${e.detail.block_id}`);
+    if (!el) return;
+    el.dataset.generating = 'true';
+    const editable = el.querySelector('[contenteditable]');
+    if (editable) { editable.contentEditable = 'false'; editable.textContent = ''; }
+  });
+
+  window.addEventListener('block:token', e => {
+    const el = document.getElementById(`block-${e.detail.block_id}`);
+    if (!el) return;
+    const editable = el.querySelector('[contenteditable]');
+    if (editable) editable.textContent += e.detail.token;
+  });
+
+  window.addEventListener('block:done', e => {
+    const el = document.getElementById(`block-${e.detail.block_id}`);
+    if (!el) return;
+    delete el.dataset.generating;
+    const editable = el.querySelector('[contenteditable]');
+    if (editable) editable.contentEditable = 'true';
+  });
+
+  window.addEventListener('block:error', e => {
+    if (!e.detail.block_id) return;
+    const el = document.getElementById(`block-${e.detail.block_id}`);
+    if (!el) return;
+    el.dataset.error = 'true';
+    const editable = el.querySelector('[contenteditable]');
+    if (editable) editable.contentEditable = 'true';
+  });
 }
 
 loadBlocks();
@@ -124,12 +188,7 @@ function initWorkbench() {
 
   function breadcrumbParts(block) {
     const heading = closestHeading(block);
-    const parts = [{ label: '材料撰写', block: null }];
-    const parent = heading.dataset.parentTitle ? headingForTitle(heading.dataset.parentTitle) : null;
-    if (parent) parts.push({ label: parent.dataset.title, block: parent });
-    parts.push({ label: heading.dataset.title || block.dataset.title, block: heading });
-    if (block.dataset.blockKind !== 'heading') parts.push({ label: block.dataset.title, block });
-    return parts;
+    return [{ label: heading.dataset.title || block.dataset.title, block: heading }];
   }
 
   function updateBreadcrumb(block) {

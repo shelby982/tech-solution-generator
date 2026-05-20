@@ -10,7 +10,7 @@
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
-          <a class="project-name" href="/projects">项目画廊</a>
+          <a class="project-name" id="header-project-name" href="/projects">项目画廊</a>
           <nav class="process-tabs" aria-label="项目流程">
             <a class="process-tab" href="/project-init">项目信息</a>
             <a class="process-tab active" href="/workbench">材料撰写</a>
@@ -35,6 +35,10 @@
           <main class="compact-card editor-pane" aria-label="材料撰写编辑区">
             <div class="editor-toolbar">
               <nav class="breadcrumb" data-breadcrumb aria-label="当前位置"></nav>
+              <div class="generate-controls">
+                <button type="button" id="btn-generate-all" class="btn-generate-all">✦ 批量编写</button>
+                <span class="generate-progress" id="generate-progress" hidden></span>
+              </div>
             </div>
 
             <article class="tiptap-shell" aria-label="Tiptap 编辑器占位壳">
@@ -42,6 +46,14 @@
           </main>
 
           <aside class="compact-card context-pane" aria-label="上下文信息">
+            <section class="context-section" id="panel-requirement-section">
+              <h4>应标要求</h4>
+              <div data-panel-requirement></div>
+            </section>
+            <section class="context-section" id="panel-sources-section">
+              <h4>匹配素材</h4>
+              <div data-panel-sources></div>
+            </section>
             <section class="context-section ai-module-section">
               <div class="context-header inline">
                 <h3>AI 功能</h3>
@@ -118,5 +130,45 @@
       </main>
     </div>
     <script type="module" src="./assets/workbench.js"></script>
+    <script type="module">
+  import { GenerateSession } from './assets/generate-session.js';
+  import { initContextPanel } from './assets/context-panel.js';
+  initContextPanel();
+
+  const params = new URLSearchParams(location.search);
+  const projectId = params.get('projectId');
+  let session = null;
+  let total = 0;
+
+  const btnGen = document.getElementById('btn-generate-all');
+  const progress = document.getElementById('generate-progress');
+
+  window.addEventListener('session:start', e => {
+    total = e.detail.total || 0;
+    btnGen.textContent = '■ 停止';
+    progress.hidden = false;
+    progress.textContent = `正在编写 0 / ${total}`;
+  });
+
+  let doneCount = 0;
+  window.addEventListener('block:done', () => {
+    doneCount++;
+    if (progress) progress.textContent = `正在编写 ${doneCount} / ${total}`;
+  });
+
+  window.addEventListener('session:done', () => {
+    btnGen.textContent = '✦ 批量编写';
+    progress.hidden = true;
+    doneCount = 0;
+    session = null;
+  });
+
+  btnGen.addEventListener('click', () => {
+    if (session?.running) { session.stop(); return; }
+    doneCount = 0;
+    session = new GenerateSession(projectId);
+    session.start();
+  });
+</script>
   </body>
 </html>
