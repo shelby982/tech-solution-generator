@@ -2,6 +2,14 @@
 // 右侧上下文面板：要求文本 + 匹配素材 + 原文溯源
 
 export function initContextPanel() {
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   const reqSection = document.querySelector("[data-panel-requirement]");
   const srcSection = document.querySelector("[data-panel-sources]");
 
@@ -9,7 +17,7 @@ export function initContextPanel() {
     if (!reqSection) return;
     if (!requirement) { reqSection.innerHTML = "<p class='panel-empty'>暂无应标要求</p>"; return; }
     const items = requirement.split(/[；;。\n]/).map(s => s.trim()).filter(Boolean);
-    reqSection.innerHTML = items.map(s => `<p class="req-item">· ${s}</p>`).join("");
+    reqSection.innerHTML = items.map(s => `<p class="req-item">· ${escHtml(s)}</p>`).join("");
   }
 
   function renderSources(sources, materials) {
@@ -18,8 +26,8 @@ export function initContextPanel() {
       srcSection.innerHTML = "<p class='panel-empty'>暂无匹配素材</p>"; return;
     }
     srcSection.innerHTML = sources.map(s => {
-      const matName = materials?.[s.material_id] ?? `素材 #${s.material_id}`;
-      const snippet = s.snippet.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const matName = escHtml(materials?.[s.material_id] ?? `素材 #${s.material_id}`);
+      const snippet = escHtml(s.snippet);
       return `
         <div class="source-card">
           <div class="source-meta">来自：${matName}</div>
