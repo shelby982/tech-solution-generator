@@ -689,3 +689,105 @@ async def patch_section_content(task_id: str, section_id: str, body: PatchSectio
     if section_id in task.results:
         task.results[section_id].content = body.content
     return {"ok": True}
+
+
+# ─────────────────────────────────────────────
+# 批量 block 生成端点
+# ─────────────────────────────────────────────
+
+import json as _json_gen
+from db import get_db as _get_db_gen
+from services.block_store import (
+    list_blocks as _list_blocks_gen,
+    list_chunks_by_project as _list_chunks_gen,
+    get_project as _get_project_gen,
+)
+from services.retrieval import retrieve_chunks
+from services.llm import dispatch_block_write
+from services.config_store import config_store as _config_store_gen
+from utils.sse import format_sse_event as _fmt_sse
+
+
+@router.post("/projects/{project_id}/generate-all")
+async def generate_all_blocks(project_id: int):
+    """SSE：批量为每个 block 检索素材 + 流式生成正文内容"""
+
+    async def _event_gen():
+        async with _get_db_gen() as db:
+            project = await _get_project_gen(db, project_id)
+            if project is None:
+                yield _fmt_sse("error", {"message": f"项目不存在：{project_id}"})
+                return
+            blocks = await _list_blocks_gen(db, project_id)
+            all_chunks = await _list_chunks_gen(db, project_id)
+
+        total = len(blocks)
+        yield _fmt_sse("generate_start", {"total": total})
+
+        if total == 0:
+            yield _fmt_sse("generate_done", {"generated": 0, "skipped": 0})
+            return
+
+        configs, rr_index = _config_store_gen.get_configs_and_next_index()
+        generated = 0
+        skipped = 0
+
+        for idx, block in enumerate(blocks):
+            block_id = block["id"]
+            title = block.get("title", "")
+            requirement = block.get("requirement", "") or ""
+
+            yield _fmt_sse("generate_block_start", {
+                "block_id": block_id, "title": title,
+                "index": idx, "total": total,
+            })
+
+            try:
+                query = f"{title} {requirement}".strip()
+                matched_chunks = retrieve_chunks(all_chunks, query=query, top_k=5)
+                sources = [
+                    {"material_id": c["material_id"], "chunk_index": c["chunk_index"],
+                     "snippet": c["content"][:120]}
+                    for c in matched_chunks
+                ]
+
+                content_parts = []
+                async for token in dispatch_block_write(
+                    configs=configs,
+                    rr_start_index=(rr_index + idx) % max(len(configs), 1),
+                    title=title,
+                    requirement=requirement,
+                    chunks=matched_chunks,
+                ):
+                    content_parts.append(token)
+                    yield _fmt_sse("generate_block_token", {
+                        "block_id": block_id, "token": token,
+                    })
+
+                full_content = "".join(content_parts)
+                async with _get_db_gen() as db:
+                    await db.execute(
+                        "UPDATE blocks SET content=?, source=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (full_content, _json_gen.dumps(sources, ensure_ascii=False), block_id),
+                    )
+                    await db.commit()
+
+                yield _fmt_sse("generate_block_done", {
+                    "block_id": block_id,
+                    "content": full_content,
+                    "sources": sources,
+                })
+                generated += 1
+
+            except Exception as exc:
+                logger.exception(f"block {block_id} 生成失败: {exc}")
+                yield _fmt_sse("error", {"message": str(exc), "block_id": block_id})
+                skipped += 1
+
+        yield _fmt_sse("generate_done", {"generated": generated, "skipped": skipped})
+
+    return StreamingResponse(
+        _event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

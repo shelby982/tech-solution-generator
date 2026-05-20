@@ -51,3 +51,34 @@ async def test_dispatch_block_write_yields_tokens():
             tokens.append(t)
 
     assert tokens == ["技", "术", "方", "案"]
+
+import json as _json
+from fastapi.testclient import TestClient
+from main import app
+
+def _parse_sse_events(text: str) -> list[dict]:
+    events, cur = [], {}
+    for line in text.splitlines():
+        if line.startswith("event:"):
+            cur["event"] = line[6:].strip()
+        elif line.startswith("data:"):
+            cur["data"] = _json.loads(line[5:].strip())
+        elif line == "" and cur:
+            events.append(cur); cur = {}
+    if cur:
+        events.append(cur)
+    return events
+
+def test_generate_all_no_blocks():
+    """项目无 blocks 时返回 generate_done(generated=0)"""
+    client = TestClient(app, raise_server_exceptions=False)
+    r = client.post("/api/projects", json={"name": "gen-test"})
+    pid = r.json()["id"]
+    resp = client.post(f"/api/projects/{pid}/generate-all")
+    assert resp.status_code == 200
+    events = _parse_sse_events(resp.text)
+    names = [e["event"] for e in events]
+    assert "generate_start" in names
+    assert "generate_done" in names
+    done = next(e for e in events if e["event"] == "generate_done")
+    assert done["data"]["generated"] == 0
