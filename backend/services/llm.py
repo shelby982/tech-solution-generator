@@ -408,26 +408,108 @@ async def dispatch_doc_summary(
     raise last_error  # type: ignore[misc]
 
 
-async def dispatch_outline_json(configs, rr_index: int, requirement_text: str) -> list[dict]:
+async def dispatch_section_requirement(
+    configs: list[LLMConfig],
+    rr_index: int,
+    section_title: str,
+    section_content: str,
+    special_marks: list[str] | None = None,
+) -> dict:
     """
-    输入应标文件全文，返回结构化大纲列表。
-    每项：{"title": str, "requirement": str}
+    对单个章节提炼核心要求，返回结构化字典。
+
+    Returns:
+        {
+            "title": str,
+            "requirement": str,          # 本章核心技术要求
+            "key_points": [str],         # 应标重点（3~5条）
+            "hard_constraints": [str],   # 否决项/强制要求
+        }
+    失败时返回 fallback 结构，不上抛异常，由调用方决定是否跳过。
     """
     import json, re
+
     system = (
-        "你是专业投标方案顾问。根据用户提供的应标文件（应答文件技术部分+技术规范书），"
-        "提炼出方案大纲，以 JSON 数组输出，每项包含 title（章节名）和 requirement（本章核心要求描述）。"
-        "只输出 JSON，不要有任何额外说明。"
+        "你是专业投标方案顾问。根据用户提供的技术规范书章节原文，"
+        "提炼本章核心要求。只输出 JSON，不要有任何额外说明。"
     )
-    user = f"应标文件内容：\n\n{requirement_text[:12000]}"
+    marks_hint = ""
+    if special_marks:
+        if "★" in special_marks:
+            marks_hint = "注意：本章包含否决条款（★），请在 hard_constraints 中明确列出。"
+        elif "▲" in special_marks:
+            marks_hint = "注意：本章包含加分项（▲），请在 key_points 中标注。"
 
-    config = configs[rr_index % len(configs)]
-    if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-        result = await _generate_oneshot_openai(config, system, user, max_tokens=3000)
-    else:
-        result = await _generate_oneshot_claude(config, system, user, max_tokens=3000)
+    user = (
+        f"以下是技术规范书中「{section_title}」章节的原文：\n\n"
+        f"{section_content}\n\n"
+        f"{marks_hint}\n"
+        "请提炼并输出 JSON（字段说明：requirement=本章核心技术要求描述，"
+        "key_points=应标方需重点响应的要点列表3~5条，"
+        "hard_constraints=否决项或强制要求列表，无则为空数组）：\n"
+        '{"requirement": "...", "key_points": ["..."], "hard_constraints": ["..."]}'
+    )
 
-    match = re.search(r'\[.*\]', result, re.DOTALL)
-    if not match:
-        raise ValueError(f"LLM 未返回有效 JSON 数组：{result[:200]}")
-    return json.loads(match.group())
+    n = len(configs)
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_index + i) % n]
+        try:
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await _generate_oneshot_openai(config, system, user, max_tokens=800)
+            else:
+                result = await _generate_oneshot_claude(config, system, user, max_tokens=800)
+
+            match = re.search(r'\{.*\}', result, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                return {
+                    "title": section_title,
+                    "requirement": parsed.get("requirement", ""),
+                    "key_points": parsed.get("key_points", []),
+                    "hard_constraints": parsed.get("hard_constraints", []),
+                }
+        except Exception as e:
+            last_error = e
+            logger.warning(f"章节「{section_title}」提炼失败（API {i+1}/{n}）：{e}")
+
+    # 全部 API 失败，返回 fallback（保留原始内容片段）
+    logger.error(f"章节「{section_title}」所有 API 均失败，使用 fallback：{last_error}")
+    return {
+        "title": section_title,
+        "requirement": section_content[:300] if section_content else "",
+        "key_points": [],
+        "hard_constraints": ["★"] if special_marks and "★" in special_marks else [],
+    }
+
+
+async def dispatch_block_write(
+    configs: list,
+    rr_start_index: int,
+    title: str,
+    requirement: str,
+    chunks: list[dict],
+    target_words: int = 600,
+):
+    """
+    为单个 block 流式生成正文内容。
+    将 requirement + chunks 拼入 extra_prompt，复用 dispatch_stream_generate。
+    """
+    snippets = "\n".join(
+        f"- {c['content'][:200]}" for c in chunks
+    )
+    extra_prompt = ""
+    if requirement:
+        extra_prompt += f"【应标要求】\n{requirement}\n\n"
+    if snippets:
+        extra_prompt += f"【参考素材】\n{snippets}"
+
+    async for token in dispatch_stream_generate(
+        configs=configs,
+        rr_start_index=rr_start_index,
+        section_title=title,
+        original_content="",
+        target_words=target_words,
+        extra_prompt=extra_prompt,
+    ):
+        yield token
