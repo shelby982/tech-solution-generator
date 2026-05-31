@@ -1510,7 +1510,7 @@
               try {
                 const data = JSON.parse(line.slice(5).trim());
                 if (data.text) editable.textContent += data.text;
-                if (data.block_id) finishGenerate(stageTimer, null, banner, pbar, pct);
+                if (data.block_id) { finishGenerate(stageTimer, null, banner, pbar, pct); return; }
               } catch {}
             }
           }
