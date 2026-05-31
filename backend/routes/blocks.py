@@ -44,6 +44,20 @@ class BlockUpdateRequest(BaseModel):
     requirement: str | None = Field(default=None, max_length=5000)
 
 
+VALID_TONES = {"official", "tech", "concise"}
+
+class GenerateRequest(BaseModel):
+    target_words: int = Field(default=800, ge=100, le=5000)
+    tone: str = Field(default="official")
+
+    @field_validator("tone")
+    @classmethod
+    def validate_tone(cls, v: str) -> str:
+        if v not in VALID_TONES:
+            raise ValueError(f"tone 必须为 official / tech / concise，收到：{v}")
+        return v
+
+
 @router.put("/blocks/{block_id}")
 async def update_block(block_id: int, body: BlockUpdateRequest):
     async with get_db() as db:
@@ -62,7 +76,7 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
 
 # ── POST /api/blocks/{id}/generate（SSE）────────────────
 
-async def _generate_stream(block_id: int, db) -> AsyncGenerator[str, None]:
+async def _generate_stream(block_id: int, db, target_words: int = 800, tone: str = "official") -> AsyncGenerator[str, None]:
     block = await get_block(db, block_id)
     if block is None:
         yield format_sse_event("error", {"message": f"Block 不存在：{block_id}"}); return
@@ -83,6 +97,8 @@ async def _generate_stream(block_id: int, db) -> AsyncGenerator[str, None]:
         async for token in dispatch_stream_generate(
             configs, rr_index, block["title"], block.get("content", ""),
             doc_summary=doc_summary,
+            target_words=target_words,
+            tone=tone,
         ):
             parts.append(token)
             yield format_sse_event("token", {"text": token})
@@ -104,7 +120,9 @@ async def _generate_stream(block_id: int, db) -> AsyncGenerator[str, None]:
 
 
 @router.post("/blocks/{block_id}/generate")
-async def generate_block(block_id: int):
+async def generate_block(block_id: int, req: GenerateRequest = None):
+    if req is None:
+        req = GenerateRequest()
     async with get_db() as db:
         block = await get_block(db, block_id)
         if block is None:
@@ -114,7 +132,7 @@ async def generate_block(block_id: int):
 
     async def stream():
         async with get_db() as db:
-            async for chunk in _generate_stream(block_id, db):
+            async for chunk in _generate_stream(block_id, db, req.target_words, req.tone):
                 yield chunk
 
     return StreamingResponse(
