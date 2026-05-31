@@ -360,6 +360,7 @@ async def dispatch_stream_generate(
     doc_summary: str = "",
     extra_prompt: str = "",
     doc_template: str = "",
+    tone: str = "official",
 ) -> AsyncGenerator[str, None]:
     """
     从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
@@ -380,7 +381,7 @@ async def dispatch_stream_generate(
         started = False  # 是否已开始 yield token
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
-            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary, extra_prompt, doc_template):
+            async for token in stream_generate(config, section_title, original_content, target_words, doc_summary, extra_prompt, doc_template, tone):
                 started = True
                 yield token
             return  # 成功，退出
