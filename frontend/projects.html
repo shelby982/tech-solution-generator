@@ -55,7 +55,7 @@
       function renderCard(p) {
         const [cls, label] = STATUS_MAP[p.status] || ['', p.status];
         return `
-          <a class="project-card" href="/workbench?projectId=${p.id}">
+          <a class="project-card" href="/project-init?projectId=${p.id}">
             <div class="project-top">
               <div>
                 <span class="badge ${cls}">${label}</span>
@@ -79,8 +79,12 @@
       btnNew.addEventListener('click', async () => {
         const name = prompt('输入项目名称：');
         if (!name?.trim()) return;
-        await api.projects.create({ name: name.trim() });
-        await loadProjects();
+        const project = await api.projects.create({ name: name.trim() });
+        if (project?.id) {
+          location.href = `/project-init?projectId=${project.id}`;
+        } else {
+          await loadProjects();
+        }
       });
 
       loadProjects();
