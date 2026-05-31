@@ -120,9 +120,7 @@ async def _generate_stream(block_id: int, db, target_words: int = 800, tone: str
 
 
 @router.post("/blocks/{block_id}/generate")
-async def generate_block(block_id: int, req: GenerateRequest | None = None):
-    if req is None:
-        req = GenerateRequest()
+async def generate_block(block_id: int, req: GenerateRequest = GenerateRequest()):
     async with get_db() as db:
         block = await get_block(db, block_id)
         if block is None:
