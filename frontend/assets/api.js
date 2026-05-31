@@ -76,8 +76,6 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       }).then(r => r.json()),
-    generate: (id) =>
-      new EventSource(`/api/blocks/${id}/generate`),
     ai: (id, action) =>
       fetch(`/api/blocks/${id}/ai`, {
         method: 'POST',
