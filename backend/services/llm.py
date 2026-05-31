@@ -213,6 +213,7 @@ async def stream_generate(
     doc_summary: str = "",
     extra_prompt: str = "",
     doc_template: str = "",
+    tone: str = "official",
 ) -> AsyncIterator[str]:
     """
     流式生成单个章节的技术方案内容。
@@ -227,12 +228,27 @@ async def stream_generate(
     Yields:
         str — 每次 yield 一个 token 片段
     """
-    system_prompt = (
-        "你是一位专业的政企信息化项目方案撰写专家，擅长对技术规范书原文进行逐段忠实扩写。"
-        "你的核心职责是：完全保留原文核心含义与逻辑框架，在此基础上补充背景释义、功能价值和应用场景，"
-        "采用政企项目方案正式书面文风，不篡改原意，不新增无关内容。"
-        "请使用 Markdown 格式输出。"
-    )
+    _SYSTEM_PROMPTS = {
+        "official": (
+            "你是一位专业的政企信息化项目方案撰写专家，擅长对技术规范书原文进行逐段忠实扩写。"
+            "你的核心职责是：完全保留原文核心含义与逻辑框架，在此基础上补充背景释义、功能价值和应用场景，"
+            "采用政企项目方案正式书面文风，不篡改原意，不新增无关内容。"
+            "请使用 Markdown 格式输出。"
+        ),
+        "tech": (
+            "你是一位资深技术架构师，擅长将技术规范书内容转化为精准的技术方案描述。"
+            "你的核心职责是：保留原文逻辑框架，使用准确的技术术语和架构语言，"
+            "突出系统设计、接口规范、性能指标等技术要素，逻辑严密、表述精准。"
+            "请使用 Markdown 格式输出。"
+        ),
+        "concise": (
+            "你是一位精简表达专家，擅长将技术规范书内容提炼为简洁有力的方案文字。"
+            "你的核心职责是：保留原文核心信息，去除冗余修饰，每句话都有实际信息量，"
+            "句式简短清晰，避免空泛表述和套话。"
+            "请使用 Markdown 格式输出。"
+        ),
+    }
+    system_prompt = _SYSTEM_PROMPTS.get(tone, _SYSTEM_PROMPTS["official"])
 
     # 构建 user_prompt：先注入项目整体摘要，再给出章节内容
     parts = []
@@ -513,3 +529,76 @@ async def dispatch_block_write(
         extra_prompt=extra_prompt,
     ):
         yield token
+
+
+# ─────────────────────────────────────────────
+# 大纲生成（非流式，返回结构化列表）
+# ─────────────────────────────────────────────
+
+async def dispatch_outline_json(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    combined_text: str,
+) -> list[dict]:
+    """
+    根据应标文件合并文本，生成结构化大纲列表。
+
+    Returns:
+        [{"title": str, "requirement": str}, ...]
+    全部 API 失败时上抛最后一个异常。
+    """
+    import json, re
+
+    BUDGET = 12000
+    if len(combined_text) > BUDGET:
+        combined_text = combined_text[:BUDGET] + "\n..."
+
+    system = (
+        "你是专业投标方案顾问，擅长从技术规范书中提炼应标大纲章节结构。"
+        "只输出合法 JSON 数组，不包含任何额外说明或 markdown 代码块。"
+    )
+    user = (
+        "以下是一份应标文件（技术规范书/招标文件）的章节内容：\n\n"
+        f"---\n{combined_text}\n---\n\n"
+        "请根据以上内容，为投标方生成一份应标方案大纲，要求：\n"
+        "1. 提取 8~15 个应标响应章节，覆盖文件的核心应答要点\n"
+        "2. 每个章节包含标题和对应的核心应标要求描述\n"
+        "3. 标题使用规范的方案章节名称（如「项目概述」「技术方案」「实施计划」等）\n"
+        "4. requirement 字段简明描述本章需要响应的具体内容（50字以内）\n\n"
+        "只输出 JSON 数组，格式如下：\n"
+        '[{"title": "项目概述", "requirement": "..."}, ...]'
+    )
+
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先添加模型配置")
+
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_start_index + i) % n]
+        try:
+            logger.info(f"生成大纲，使用 API [{config.provider}/{config.model}]")
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await _generate_oneshot_openai(config, system, user, max_tokens=2000)
+            else:
+                result = await _generate_oneshot_claude(config, system, user, max_tokens=2000)
+
+            # 提取 JSON 数组
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if not match:
+                raise ValueError(f"模型未返回 JSON 数组，原始输出：{result[:200]}")
+            items = json.loads(match.group())
+            if not isinstance(items, list) or len(items) == 0:
+                raise ValueError("JSON 数组为空")
+            # 规范化字段
+            return [
+                {"title": str(item.get("title", f"章节 {idx+1}")),
+                 "requirement": str(item.get("requirement", ""))}
+                for idx, item in enumerate(items)
+                if isinstance(item, dict)
+            ]
+        except Exception as e:
+            last_error = e
+            logger.warning(f"大纲生成失败（API {i+1}/{n}）：{e}")
+
+    raise last_error  # type: ignore[misc]
