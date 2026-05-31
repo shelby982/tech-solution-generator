@@ -102,7 +102,7 @@ _workbench_path    = os.path.join(frontend_dir, "workbench.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 
 if os.path.isdir(frontend_dir):
-    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
     logger.info(f"前端目录已挂载：{frontend_dir}")
 else:
     logger.warning(f"前端目录不存在，跳过静态文件挂载：{frontend_dir}")
