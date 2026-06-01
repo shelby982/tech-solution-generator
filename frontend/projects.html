@@ -489,6 +489,113 @@
         align-items: center;
         gap: 4px;
       }
+
+      /* ── API 配置弹窗 ── */
+      .api-modal-backdrop {
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(15,23,42,0.45);
+        backdrop-filter: blur(4px);
+        z-index: 200;
+        align-items: center;
+        justify-content: center;
+      }
+      .api-modal-backdrop.open { display: flex; }
+      .api-modal-box {
+        background: #fff;
+        border-radius: 20px;
+        box-shadow: 0 30px 60px rgba(15,23,42,0.22);
+        width: 480px;
+        max-width: calc(100vw - 48px);
+        overflow: hidden;
+      }
+      .api-modal-header {
+        padding: 18px 22px 14px;
+        border-bottom: 1px solid var(--line);
+        display: flex; align-items: flex-start; justify-content: space-between;
+      }
+      .api-modal-header h2 { margin: 0; font-size: 16px; font-weight: 700; }
+      .api-modal-header p  { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+      .api-modal-close {
+        all: unset; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+        color: var(--muted-2); font-size: 14px; line-height: 1;
+      }
+      .api-modal-close:hover { background: var(--bg-2); }
+      .api-modal-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+
+      .api-field-label { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+      .api-field-hint  { font-size: 11px; color: var(--muted-2); margin-top: 4px; }
+      .api-input {
+        width: 100%; box-sizing: border-box;
+        padding: 9px 11px;
+        background: var(--panel-soft);
+        border: 1.5px solid var(--line);
+        border-radius: 9px;
+        font: inherit; font-size: 13px; color: var(--text);
+        outline: none; transition: border-color 0.15s;
+      }
+      .api-input:focus { border-color: var(--accent); }
+      .api-input.mono { font-family: 'SF Mono', ui-monospace, monospace; font-size: 12.5px; }
+
+      .provider-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+      .provider-chip {
+        padding: 5px 12px; border-radius: 999px;
+        border: 1.5px solid var(--line);
+        background: #fff; cursor: pointer;
+        font: inherit; font-size: 12.5px; font-weight: 500;
+        color: var(--muted); transition: all 0.12s;
+      }
+      .provider-chip.active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .key-wrap { position: relative; }
+      .key-toggle {
+        all: unset; cursor: pointer;
+        position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+        font-size: 11px; color: var(--muted-2);
+        padding: 3px 6px; border-radius: 4px;
+      }
+      .key-toggle:hover { color: var(--text); background: var(--bg-2); }
+
+      .api-modal-footer {
+        padding: 13px 22px;
+        border-top: 1px solid var(--line);
+        background: var(--panel-soft);
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .btn-test-conn {
+        all: unset; cursor: pointer;
+        padding: 8px 12px; border-radius: 8px;
+        font: inherit; font-size: 12.5px; color: var(--muted);
+        display: flex; align-items: center; gap: 5px;
+        border: 1px solid var(--line); background: #fff;
+        transition: all 0.12s;
+      }
+      .btn-test-conn:hover { border-color: var(--muted); color: var(--text); }
+      .btn-test-conn.testing { opacity: 0.6; pointer-events: none; }
+      .test-status { font-size: 12px; }
+      .test-status.ok   { color: var(--success); }
+      .test-status.fail { color: var(--danger); }
+
+      .api-footer-right { display: flex; gap: 8px; }
+      .btn-api-cancel {
+        padding: 9px 16px; border-radius: 9px;
+        border: 1.5px solid var(--line); background: #fff;
+        font: inherit; font-size: 13px; font-weight: 500;
+        color: var(--muted); cursor: pointer;
+      }
+      .btn-api-save {
+        padding: 9px 16px; border-radius: 9px;
+        border: none; background: var(--text);
+        font: inherit; font-size: 13px; font-weight: 600;
+        color: #fff; cursor: pointer;
+      }
+      .btn-api-save:disabled { opacity: 0.45; cursor: default; }
+      .btn-api-save:not(:disabled):hover { opacity: 0.88; }
     </style>
   </head>
   <body>
@@ -617,6 +724,71 @@
 
     <!-- 隐藏 file input -->
     <input type="file" id="file-input-req" accept=".pdf,.docx,.doc,.pptx,.ppt" multiple style="display:none" />
+
+    <!-- API 配置弹窗 -->
+    <div class="api-modal-backdrop" id="api-modal-backdrop">
+      <div class="api-modal-box">
+        <div class="api-modal-header">
+          <div>
+            <h2>添加模型配置</h2>
+            <p>添加新的 API 配置以在模型菜单中使用</p>
+          </div>
+          <button class="api-modal-close" id="api-modal-close">✕</button>
+        </div>
+        <div class="api-modal-body">
+          <!-- 提供商 -->
+          <div>
+            <div class="api-field-label">API 提供商</div>
+            <div class="provider-chips" id="provider-chips">
+              <button class="provider-chip active" data-provider="claude">Anthropic</button>
+              <button class="provider-chip" data-provider="openai">OpenAI</button>
+              <button class="provider-chip" data-provider="deepseek">DeepSeek</button>
+              <button class="provider-chip" data-provider="kimi">Kimi</button>
+              <button class="provider-chip" data-provider="minimax">MiniMax</button>
+              <button class="provider-chip" data-provider="doubao">豆包</button>
+            </div>
+          </div>
+          <!-- Base URL -->
+          <div>
+            <div class="api-field-label">Base URL</div>
+            <input class="api-input" id="api-base-url" placeholder="留空则使用提供商默认地址" />
+            <div class="api-field-hint">留空则使用提供商默认地址</div>
+          </div>
+          <!-- API Key -->
+          <div>
+            <div class="api-field-label">API Key</div>
+            <div class="key-wrap">
+              <input class="api-input mono" id="api-key" type="password" placeholder="sk-ant-…" />
+              <button class="key-toggle" id="key-toggle">显示</button>
+            </div>
+            <div class="api-field-hint">密钥仅保存在本地，不会上传</div>
+          </div>
+          <!-- 模型标识 -->
+          <div>
+            <div class="api-field-label">模型标识</div>
+            <input class="api-input" id="api-model" placeholder="例如 claude-sonnet-4-6 或 gpt-4o" />
+            <div class="api-field-hint">例如 claude-sonnet-4-6、gpt-4o、deepseek-chat</div>
+          </div>
+        </div>
+        <div class="api-modal-footer">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button class="btn-test-conn" id="btn-test-conn">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/>
+                <path d="M6 7.5V6.5C7 6.5 7.5 6 7.5 5.2C7.5 4.4 6.9 4 6 4C5.2 4 4.6 4.5 4.5 5.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                <circle cx="6" cy="9" r="0.5" fill="currentColor"/>
+              </svg>
+              验证连接
+            </button>
+            <span class="test-status" id="test-status"></span>
+          </div>
+          <div class="api-footer-right">
+            <button class="btn-api-cancel" id="btn-api-cancel">取消</button>
+            <button class="btn-api-save" id="btn-api-save" disabled>添加</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { api } from './assets/api.js';
@@ -787,24 +959,27 @@
       // ── 模型选择 ──
       async function loadModels() {
         try {
-          const configs = await fetch('/api/configs').then(r => r.json());
-          if (!configs?.length) {
-            // 无配置时展示默认选项
+          const resp = await fetch('/api/configs').then(r => r.json());
+          const configs = resp?.configs || [];
+          if (!configs.length) {
             renderDefaultModels();
             return;
           }
-          modelListEl.innerHTML = configs.map(c => `
-            <div class="model-option${c.model === selectedModel ? ' selected' : ''}"
-                 data-model="${escHtml(c.model)}" data-label="${escHtml(c.model)}">
-              <span>${escHtml(c.model)}</span>
-              ${c.model === selectedModel ? '<span class="model-option-check">✓</span>' : ''}
-            </div>`).join('');
-          // 默认选第一条
-          if (configs.length > 0 && !configs.find(c => c.model === selectedModel)) {
+          // 默认选第一条（若当前选中的不在列表中）
+          if (!configs.find(c => c.model === selectedModel)) {
             selectedModel = configs[0].model;
-            selectedModelLabel = configs[0].model;
+            selectedModelLabel = configs[0].name || configs[0].model;
             modelLabel.textContent = selectedModelLabel;
           }
+          modelListEl.innerHTML = configs.map(c => {
+            const label = c.name || c.model;
+            const isSelected = c.model === selectedModel;
+            return `<div class="model-option${isSelected ? ' selected' : ''}"
+                 data-model="${escHtml(c.model)}" data-label="${escHtml(label)}">
+              <span>${escHtml(label)}</span>
+              ${isSelected ? '<span class="model-option-check">✓</span>' : ''}
+            </div>`;
+          }).join('');
         } catch {
           renderDefaultModels();
         }
@@ -851,6 +1026,163 @@
       });
       document.addEventListener('click', () => modelDropdown.classList.remove('open'));
       modelDropdown.addEventListener('click', e => e.stopPropagation());
+
+      // ── API 配置弹窗 ──
+      const apiBackdrop  = document.getElementById('api-modal-backdrop');
+      const apiClose     = document.getElementById('api-modal-close');
+      const apiCancel    = document.getElementById('btn-api-cancel');
+      const apiSave      = document.getElementById('btn-api-save');
+      const btnTestConn  = document.getElementById('btn-test-conn');
+      const testStatus   = document.getElementById('test-status');
+      const providerChips= document.getElementById('provider-chips');
+      const apiBaseUrl   = document.getElementById('api-base-url');
+      const apiKeyInput  = document.getElementById('api-key');
+      const apiModelInput= document.getElementById('api-model');
+      const keyToggle    = document.getElementById('key-toggle');
+
+      const PROVIDER_DEFAULTS = {
+        claude:   { url: 'https://api.anthropic.com', model: 'claude-sonnet-4-6',         placeholder: 'sk-ant-…' },
+        openai:   { url: 'https://api.openai.com/v1', model: 'gpt-4o',                    placeholder: 'sk-…' },
+        deepseek: { url: 'https://api.deepseek.com',  model: 'deepseek-chat',              placeholder: 'sk-…' },
+        kimi:     { url: 'https://api.moonshot.cn/v1',model: 'moonshot-v1-8k',             placeholder: 'sk-…' },
+        minimax:  { url: 'https://api.minimax.chat/v1',model: 'abab6.5s-chat',             placeholder: '' },
+        doubao:   { url: 'https://ark.cn-beijing.volces.com/api/v3', model: '',            placeholder: '' },
+      };
+
+      let currentProvider = 'claude';
+      let verifiedOk = false;
+
+      function openApiModal() {
+        apiBackdrop.classList.add('open');
+        modelDropdown.classList.remove('open');
+        resetApiForm();
+      }
+      function closeApiModal() {
+        apiBackdrop.classList.remove('open');
+      }
+
+      function resetApiForm() {
+        currentProvider = 'claude';
+        verifiedOk = false;
+        providerChips.querySelectorAll('.provider-chip').forEach(c => {
+          c.classList.toggle('active', c.dataset.provider === 'claude');
+        });
+        const d = PROVIDER_DEFAULTS['claude'];
+        apiBaseUrl.value = '';
+        apiBaseUrl.placeholder = d.url;
+        apiKeyInput.value = '';
+        apiKeyInput.placeholder = d.placeholder;
+        apiModelInput.value = d.model;
+        testStatus.textContent = '';
+        testStatus.className = 'test-status';
+        apiSave.disabled = true;
+      }
+
+      providerChips.addEventListener('click', e => {
+        const chip = e.target.closest('.provider-chip');
+        if (!chip) return;
+        currentProvider = chip.dataset.provider;
+        providerChips.querySelectorAll('.provider-chip').forEach(c =>
+          c.classList.toggle('active', c === chip));
+        const d = PROVIDER_DEFAULTS[currentProvider] || {};
+        apiBaseUrl.placeholder = d.url || '';
+        apiKeyInput.placeholder = d.placeholder || '';
+        apiModelInput.value = d.model || '';
+        verifiedOk = false;
+        testStatus.textContent = '';
+        apiSave.disabled = true;
+      });
+
+      // Key 显示/隐藏
+      keyToggle.addEventListener('click', () => {
+        const show = apiKeyInput.type === 'password';
+        apiKeyInput.type = show ? 'text' : 'password';
+        keyToggle.textContent = show ? '隐藏' : '显示';
+      });
+
+      // 验证连接
+      btnTestConn.addEventListener('click', async () => {
+        const key = apiKeyInput.value.trim();
+        const model = apiModelInput.value.trim();
+        if (!key || !model) {
+          testStatus.textContent = '请填写 API Key 和模型标识';
+          testStatus.className = 'test-status fail';
+          return;
+        }
+        btnTestConn.classList.add('testing');
+        btnTestConn.textContent = '验证中…';
+        testStatus.textContent = '';
+        verifiedOk = false;
+        apiSave.disabled = true;
+
+        try {
+          // 先临时保存再验证
+          const body = {
+            provider: currentProvider,
+            api_key: key,
+            base_url: apiBaseUrl.value.trim() || null,
+            model,
+          };
+          const addResp = await fetch('/api/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }).then(r => r.json());
+
+          if (!addResp?.config?.id) throw new Error('保存失败');
+          const configId = addResp.config.id;
+
+          // 验证
+          const checkResp = await fetch(`/api/configs/${configId}/check`).then(r => r.json());
+          if (checkResp?.valid) {
+            verifiedOk = true;
+            testStatus.textContent = '✓ 验证通过';
+            testStatus.className = 'test-status ok';
+            apiSave.disabled = false;
+            // 把 configId 存到 save 按钮，直接添加完成
+            apiSave.dataset.configId = configId;
+          } else {
+            // 验证失败，删除刚添加的配置
+            await fetch(`/api/configs/${configId}`, { method: 'DELETE' });
+            testStatus.textContent = '✗ ' + (checkResp?.message || '验证失败');
+            testStatus.className = 'test-status fail';
+          }
+        } catch (err) {
+          testStatus.textContent = '✗ 请求失败，请检查网络';
+          testStatus.className = 'test-status fail';
+        }
+
+        btnTestConn.classList.remove('testing');
+        btnTestConn.textContent = '验证连接';
+      });
+
+      // 添加（验证已通过，配置已在后端）
+      apiSave.addEventListener('click', async () => {
+        if (!verifiedOk) return;
+        closeApiModal();
+        // 刷新模型列表，自动选中新配置
+        const model = apiModelInput.value.trim();
+        selectedModel = model;
+        selectedModelLabel = model;
+        modelLabel.textContent = model;
+        await loadModels();
+      });
+
+      apiClose.addEventListener('click', async () => {
+        // 如果已验证通过但关闭，保留配置（用户可能想之后用）
+        closeApiModal();
+      });
+      apiCancel.addEventListener('click', async () => {
+        // 取消时如果有已验证的配置，删除它
+        const cid = apiSave.dataset.configId;
+        if (cid && !verifiedOk) {
+          await fetch(`/api/configs/${cid}`, { method: 'DELETE' }).catch(() => {});
+        }
+        closeApiModal();
+      });
+      apiBackdrop.addEventListener('click', e => { if (e.target === apiBackdrop) closeApiModal(); });
+
+      document.getElementById('btn-add-config').addEventListener('click', openApiModal);
 
       // ── 提炼大纲 ──
       btnDistill.addEventListener('click', async () => {
