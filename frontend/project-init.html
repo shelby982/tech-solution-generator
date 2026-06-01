@@ -409,6 +409,9 @@ let doneBlocks  = 0;
 let currentReader = null;
 
 // ── 工具 ──
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 function extBadge(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   if (['docx','doc'].includes(ext)) return `<span class="mat-badge docx">DOCX</span>`;
@@ -436,9 +439,9 @@ function renderMats(container, mats) {
   container.innerHTML = mats.map(m => `
     <div class="mat-row">
       ${extBadge(m.filename)}
-      <span class="mat-name" title="${m.filename}">${m.filename}</span>
+      <span class="mat-name" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename)}</span>
       <span class="mat-size">${fmtSize(m.size)}</span>
-      <button class="mat-del" data-id="${m.id}" title="删除">×</button>
+      <button class="mat-del" data-id="${m.id}" title="删除" style="display:none">×</button>
     </div>`).join('');
 }
 
@@ -447,7 +450,11 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   extractionState = state;
   statusBar.dataset.state = state;
   statusLabel.textContent = label;
-  if (state === 'idle') return;
+  if (state === 'idle') {
+    progressTrack.style.display = 'none';
+    statusActions.innerHTML = '';
+    return;
+  }
   progressTrack.style.display = 'block';
   progressBar.style.width = pct + '%';
   statusPct.textContent = `${doneB}/${totalB} 模块 · ${pct}%`;
@@ -502,7 +509,7 @@ function renderBlockCard(block, status = 'pending') {
   el.dataset.blockId = block.block_id || block.id;
   el.innerHTML = `
     <div class="block-card-header">
-      <span class="block-card-title">${block.title || ''}</span>
+      <span class="block-card-title">${escapeHtml(block.title)}</span>
       <span class="block-status-badge ${status}">${{pending:'待提炼',extracting:'提炼中',done:'已完成 ✓'}[status]}</span>
     </div>
     <div class="block-card-progress ${status==='extracting'?'active':''}">
@@ -522,7 +529,7 @@ function renderField(label, value, cls) {
     <div class="block-field-label ${cls}">${label}</div>
     ${isEmpty
       ? '<div class="block-field-skeleton" style="width:80%"></div><div class="block-field-skeleton" style="width:55%"></div>'
-      : `<div class="block-field-value">${value}</div>`}
+      : `<div class="block-field-value">${escapeHtml(value)}</div>`}
   </div>`;
 }
 
@@ -553,18 +560,18 @@ async function startExtraction() {
   updateSidebarProgress();
   btnExtract.disabled = true;
 
-  const resp = await fetch(`/api/projects/${projectId}/outline`, { method: 'POST' });
-  if (!resp.ok || !resp.body) {
-    setStatusBar('idle', '', 0, 0, 0);
-    btnExtract.disabled = false;
-    return;
-  }
-
-  currentReader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-
   try {
+    const resp = await fetch(`/api/projects/${projectId}/outline`, { method: 'POST' });
+    if (!resp.ok || !resp.body) {
+      setStatusBar('idle', '', 0, 0, 0);
+      btnExtract.disabled = false;
+      return;
+    }
+
+    currentReader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
     while (true) {
       const { done, value } = await currentReader.read();
       if (done) break;
