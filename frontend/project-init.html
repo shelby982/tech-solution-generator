@@ -199,7 +199,18 @@
         location.href = `/workbench?projectId=${projectId}`;
       });
 
+      // 加载已有 blocks 渲染大纲
+      async function loadExistingBlocks() {
+        const blocks = await api.blocks.list(projectId);
+        if (!blocks?.length) return;
+        outlineContainer.innerHTML = '';
+        blocks
+          .filter(b => b.kind === 'content')
+          .forEach(b => renderOutlineBlock({ block_id: b.id, title: b.title, requirement: b.requirement }));
+      }
+
       loadMaterials();
+      loadExistingBlocks();
     </script>
   </body>
 </html>
