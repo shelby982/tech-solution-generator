@@ -540,10 +540,10 @@ async function loadExistingBlocks() {
   if (!content.length) return;
   blocksList.innerHTML = '';
   totalBlocks = content.length;
-  doneBlocks = content.filter(b => b.key_points || b.requirement).length;
-  content.forEach(b => renderBlockCard(b, (b.key_points||b.requirement) ? 'done' : 'pending'));
+  doneBlocks = content.filter(b => b.key_points).length;
+  content.forEach(b => renderBlockCard(b, b.key_points ? 'done' : 'pending'));
   buildToc(content);
-  content.filter(b => b.key_points || b.requirement).forEach(b => markTocDone(b.block_id || b.id));
+  content.filter(b => b.key_points).forEach(b => markTocDone(b.block_id || b.id));
   updateSidebarProgress();
   if (doneBlocks === totalBlocks && totalBlocks > 0) {
     setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);

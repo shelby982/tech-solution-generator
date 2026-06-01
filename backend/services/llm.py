@@ -567,9 +567,12 @@ async def dispatch_outline_json(
         "1. 提取 8~15 个应标响应章节，覆盖文件的核心应答要点\n"
         "2. 每个章节包含标题和对应的核心应标要求描述\n"
         "3. 标题使用规范的方案章节名称（如「项目概述」「技术方案」「实施计划」等）\n"
-        "4. requirement 字段简明描述本章需要响应的具体内容（50字以内）\n\n"
+        "4. requirement 字段简明描述本章需要响应的具体内容（50字以内）\n"
+        "5. key_points 字段总结该章节的核心应对策略（100字以内）\n"
+        "6. veto_items 字段列出可能导致废标的硬性要求，多条用换行分隔，无则留空\n"
+        "7. bonus_items 字段列出能提升评分的加分要素，多条用换行分隔，无则留空\n\n"
         "只输出 JSON 数组，格式如下：\n"
-        '[{"title": "项目概述", "requirement": "..."}, ...]'
+        '[{"title": "项目概述", "requirement": "...", "key_points": "...", "veto_items": "...", "bonus_items": "..."}, ...]'
     )
 
     n = len(configs)
@@ -595,8 +598,13 @@ async def dispatch_outline_json(
                 raise ValueError("JSON 数组为空")
             # 规范化字段
             return [
-                {"title": str(item.get("title", f"章节 {idx+1}")),
-                 "requirement": str(item.get("requirement", ""))}
+                {
+                    "title": str(item.get("title", f"章节 {idx+1}")),
+                    "requirement": str(item.get("requirement", "")),
+                    "key_points": str(item.get("key_points", "")),
+                    "veto_items": str(item.get("veto_items", "")),
+                    "bonus_items": str(item.get("bonus_items", "")),
+                }
                 for idx, item in enumerate(items)
                 if isinstance(item, dict)
             ]
