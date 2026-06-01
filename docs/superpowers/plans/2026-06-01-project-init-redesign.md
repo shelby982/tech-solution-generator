@@ -1,0 +1,787 @@
+# project-init 页面改版 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 将 project-init.html 改版为三栏布局，左侧材料面板、中间模块卡片+状态栏、右侧目录导航。
+
+**Architecture:** 纯前端改版，全量重写 project-init.html 的 HTML/CSS/JS；后端 blocks 表新增三个字段（key_points / veto_items / bonus_items）；提炼进度沿用现有 outline SSE 流，前端解析新字段渲染卡片。
+
+**Tech Stack:** Vanilla JS (ES module)、现有 api.js、SQLite via aiosqlite、FastAPI SSE
+
+---
+
+### Task 1: 后端 blocks 表新增字段
+
+**Files:**
+- Modify: `backend/db.py`
+- Modify: `backend/routes/materials.py`
+- Modify: `backend/services/block_store.py`（如有 list_blocks 序列化）
+
+- [ ] 在 `db.py` 的 `CREATE TABLE blocks` 语句末尾追加三列：
+
+```sql
+    key_points  TEXT,
+    veto_items  TEXT,
+    bonus_items TEXT,
+```
+
+- [ ] 在 `materials.py` 的 `generate_outline` 函数中，`outline_items` 写入 blocks 时同步写入新字段（AI 返回值中若有则写，无则留空）：
+
+```python
+await db.execute(
+    """INSERT INTO blocks
+       (project_id, block_id, kind, level, title, requirement,
+        key_points, veto_items, bonus_items, order_idx)
+       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+    (project_id, block_id_str, item.get('kind','content'),
+     item.get('level',1), item.get('title',''),
+     item.get('requirement',''),
+     item.get('key_points',''), item.get('veto_items',''),
+     item.get('bonus_items',''), idx)
+)
+```
+
+- [ ] 确认 `outline_block` SSE 事件中包含新字段（在 `yield format_sse_event("outline_block", {...})` 中加入）：
+
+```python
+yield format_sse_event("outline_block", {
+    "block_id": block_id_str,
+    "title": item.get("title", ""),
+    "requirement": item.get("requirement", ""),
+    "key_points": item.get("key_points", ""),
+    "veto_items": item.get("veto_items", ""),
+    "bonus_items": item.get("bonus_items", ""),
+    "order_idx": idx,
+})
+```
+
+- [ ] 确认 `/api/projects/{id}/blocks` GET 接口返回新字段（查看 `blocks.py` 路由的 SELECT 语句，补全字段）
+
+- [ ] 重启后端，验证 `/api/projects/1/blocks` 返回中包含 `key_points` 字段（即使为空）
+
+- [ ] Commit:
+```bash
+git add backend/db.py backend/routes/materials.py backend/routes/blocks.py
+git commit -m "feat(blocks): add key_points/veto_items/bonus_items fields"
+```
+
+---
+
+### Task 2: 重写 project-init.html — HTML 结构 + CSS
+
+**Files:**
+- Modify: `frontend/project-init.html`
+
+- [ ] 将 `<section class="workspace-layout init-workspace-layout">` 内部全量替换为三栏结构：
+
+```html
+<section class="init-layout">
+  <!-- 左侧材料面板 -->
+  <aside class="init-materials-panel" id="materials-panel">
+    <div class="materials-panel-header">
+      <div class="app-logo-sm">标</div>
+      <div>
+        <div class="app-title">智能应标</div>
+        <div class="project-name-sm" id="sidebar-project-name">加载中…</div>
+      </div>
+    </div>
+    <div class="materials-scroll">
+      <div class="mat-section">
+        <div class="mat-section-header">
+          <span class="mat-index">01</span>
+          <strong>应标要求</strong>
+          <span class="mat-count" id="req-count">0 项</span>
+        </div>
+        <p class="mat-sub">应答文件技术部分 · 技术规范书</p>
+        <div class="mat-list" id="req-stack"></div>
+        <button class="btn-add-mat" id="btn-add-req" type="button">+ 添加应标文件</button>
+      </div>
+      <div class="mat-section">
+        <div class="mat-section-header">
+          <span class="mat-index">02</span>
+          <strong>原始素材</strong>
+          <span class="mat-count" id="src-count">0 项</span>
+        </div>
+        <p class="mat-sub">支持 PDF · DOCX · PPT · PPTX</p>
+        <div class="mat-list" id="src-stack"></div>
+        <button class="btn-add-mat secondary" id="btn-add-src" type="button">+ 添加原始素材</button>
+      </div>
+    </div>
+    <div class="materials-footer">
+      <button class="btn-extract" id="btn-extract" type="button">✦ 提炼大纲</button>
+      <div class="extract-meta">
+        <span class="extract-hint">依据应标要求生成章节结构，原始素材用于补充各模块内容</span>
+        <select class="model-select" id="model-select">
+          <option value="claude-sonnet-4-6">● Sonnet 4.6</option>
+          <option value="claude-opus-4-8">● Opus 4.8</option>
+        </select>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 中间主区 -->
+  <main class="init-main">
+    <div class="extract-status-bar" id="status-bar" data-state="idle">
+      <div class="status-bar-left" id="status-label"></div>
+      <div class="status-bar-center">
+        <div class="status-progress-track" id="progress-track" style="display:none">
+          <div class="status-progress-bar" id="progress-bar"></div>
+        </div>
+        <span class="status-pct" id="status-pct"></span>
+      </div>
+      <div class="status-bar-right" id="status-actions"></div>
+    </div>
+    <div class="blocks-scroll" id="blocks-scroll">
+      <div class="blocks-empty" id="blocks-empty">
+        <p>上传应标文件后点击「提炼大纲」开始</p>
+      </div>
+      <div class="blocks-list" id="blocks-list"></div>
+    </div>
+  </main>
+
+  <!-- 右侧窄边栏 -->
+  <aside class="init-sidebar">
+    <div class="sidebar-progress">
+      <svg class="ring-svg" viewBox="0 0 44 44" width="44" height="44">
+        <circle class="ring-bg" cx="22" cy="22" r="18" fill="none" stroke-width="4"/>
+        <circle class="ring-fill" id="ring-fill" cx="22" cy="22" r="18" fill="none"
+          stroke-width="4" stroke-dasharray="113" stroke-dashoffset="113"
+          transform="rotate(-90 22 22)"/>
+      </svg>
+      <span class="sidebar-progress-text" id="sidebar-progress-text">0 / 0</span>
+    </div>
+    <nav class="sidebar-toc" id="sidebar-toc"></nav>
+    <div class="sidebar-footer">
+      <button class="btn-save" id="btn-save" type="button">保存初始化结果</button>
+    </div>
+  </aside>
+</section>
+```
+
+- [ ] 在 `<style>` 块中加入样式（替换旧的 init 相关样式）：
+
+```css
+/* ── 三栏布局 ── */
+.init-layout {
+  display: flex;
+  height: calc(100vh - 57px);
+  overflow: hidden;
+}
+
+/* 左侧面板 */
+.init-materials-panel {
+  width: 260px;
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+.materials-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.app-logo-sm {
+  width: 32px; height: 32px;
+  background: var(--text);
+  border-radius: 8px;
+  display: grid; place-items: center;
+  color: #fff; font-size: 13px; font-weight: 700;
+  flex: none;
+}
+.app-title { font-size: 13px; font-weight: 700; }
+.project-name-sm { font-size: 11.5px; color: var(--muted); }
+.materials-scroll { flex: 1; overflow-y: auto; padding: 12px; }
+.mat-section { margin-bottom: 20px; }
+.mat-section-header {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 2px;
+}
+.mat-index { font-size: 10px; color: var(--muted-2); font-weight: 700; }
+.mat-count {
+  margin-left: auto;
+  font-size: 11px; color: var(--muted);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.mat-sub { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+.mat-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.mat-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.mat-badge {
+  font-size: 9.5px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  flex: none;
+}
+.mat-badge.docx { background: #dbeafe; color: #1d4ed8; }
+.mat-badge.pdf  { background: #fee2e2; color: #dc2626; }
+.mat-badge.ppt, .mat-badge.pptx { background: #ffedd5; color: #ea580c; }
+.mat-name { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mat-size { font-size: 11px; color: var(--muted); flex: none; }
+.mat-del { background: none; border: none; cursor: pointer; color: var(--muted); padding: 0 2px; font-size: 14px; }
+.mat-del:hover { color: var(--text); }
+.btn-add-mat {
+  width: 100%;
+  padding: 8px;
+  border: 1.5px dashed var(--line);
+  border-radius: 8px;
+  background: none;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.btn-add-mat:hover { border-color: var(--text); color: var(--text); }
+
+/* 底部操作区 */
+.materials-footer {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+.btn-extract {
+  width: 100%;
+  padding: 11px;
+  background: var(--text);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.btn-extract:disabled { opacity: 0.5; cursor: not-allowed; }
+.extract-meta { display: flex; align-items: flex-start; gap: 8px; }
+.extract-hint { font-size: 11px; color: var(--muted); flex: 1; line-height: 1.4; }
+.model-select {
+  font-size: 11px; border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 6px;
+  background: var(--bg); color: var(--text);
+  flex: none;
+}
+
+/* 中间主区 */
+.init-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.extract-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+  min-height: 48px;
+}
+.extract-status-bar[data-state="idle"] { display: none; }
+.status-bar-left { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.status-bar-center { flex: 1; display: flex; align-items: center; gap: 10px; }
+.status-progress-track {
+  flex: 1; height: 4px;
+  background: var(--line);
+  border-radius: 999px; overflow: hidden;
+}
+.status-progress-bar {
+  height: 100%; background: var(--text);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+.status-pct { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.status-bar-right { display: flex; gap: 8px; flex: none; }
+.btn-status-secondary {
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg); color: var(--text);
+  font-size: 12.5px; cursor: pointer;
+}
+.btn-status-primary {
+  padding: 6px 14px; border-radius: 6px;
+  border: none;
+  background: var(--text); color: #fff;
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.blocks-scroll { flex: 1; overflow-y: auto; padding: 20px; }
+.blocks-empty { text-align: center; color: var(--muted); padding: 60px 0; font-size: 13.5px; }
+.blocks-list { display: flex; flex-direction: column; gap: 12px; }
+
+/* 模块卡片 */
+.block-card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.block-card-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.block-card-title { font-size: 13.5px; font-weight: 600; flex: 1; }
+.block-status-badge {
+  font-size: 11px; padding: 2px 9px;
+  border-radius: 999px; flex: none;
+}
+.block-status-badge.pending { background: var(--bg-2); color: var(--muted); }
+.block-status-badge.extracting { background: #fef9c3; color: #854d0e; }
+.block-status-badge.done { background: #dcfce7; color: #166534; }
+.block-card-progress {
+  height: 2px; background: var(--line);
+  overflow: hidden; display: none;
+}
+.block-card-progress.active { display: block; }
+.block-card-progress-bar {
+  height: 100%; background: #f59e0b;
+  width: 30%; animation: slide 1.2s ease-in-out infinite;
+}
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.block-card-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-top: 0;
+}
+.block-field {
+  padding: 12px 16px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.block-field:nth-child(2n) { border-right: none; }
+.block-field:nth-child(n+3) { border-bottom: none; }
+.block-field-label {
+  font-size: 11px; font-weight: 600;
+  margin-bottom: 6px; display: flex; align-items: center; gap: 4px;
+}
+.block-field-label.veto { color: #dc2626; }
+.block-field-label.bonus { color: #16a34a; }
+.block-field-value { font-size: 12.5px; color: var(--text); line-height: 1.55; white-space: pre-wrap; }
+.block-field-skeleton {
+  height: 12px; background: var(--bg-2);
+  border-radius: 4px; margin-bottom: 6px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* 右侧边栏 */
+.init-sidebar {
+  width: 200px; flex: 0 0 200px;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.sidebar-progress {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ring-bg { stroke: var(--line); }
+.ring-fill { stroke: var(--text); transition: stroke-dashoffset 0.4s; }
+.sidebar-progress-text { font-size: 12px; color: var(--muted); }
+.sidebar-toc { flex: 1; overflow-y: auto; padding: 8px 0; }
+.toc-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px; color: var(--muted);
+  cursor: pointer; border: none; background: none;
+  width: 100%; text-align: left;
+  border-left: 2px solid transparent;
+}
+.toc-item:hover { color: var(--text); background: var(--bg-2); }
+.toc-item.active { color: var(--text); border-left-color: var(--text); font-weight: 600; }
+.toc-item.done { color: var(--text); }
+.toc-check { font-size: 10px; color: #16a34a; flex: none; }
+.toc-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+.btn-save {
+  width: 100%; padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none; font-size: 12.5px;
+  color: var(--muted); cursor: pointer;
+}
+.btn-save:hover { color: var(--text); border-color: var(--text); }
+```
+
+- [ ] 删除 `<details class="ai-status-drawer">` 整块（不再需要）
+
+- [ ] 重启后端，浏览器访问 `/project-init?projectId=1`，确认三栏结构正常渲染（无 JS 错误）
+
+- [ ] Commit:
+```bash
+git add frontend/project-init.html
+git commit -m "feat(project-init): rewrite HTML/CSS — three-column layout"
+```
+
+---
+
+### Task 3: 重写 project-init.html — JS 逻辑
+
+**Files:**
+- Modify: `frontend/project-init.html`（`<script>` 块）
+
+- [ ] 将 `<script type="module">` 块全量替换为以下逻辑：
+
+```js
+import { api } from './assets/api.js';
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get('projectId');
+if (!projectId) { location.href = '/projects'; }
+
+// ── DOM refs ──
+const sidebarProjectName = document.getElementById('sidebar-project-name');
+const reqStack   = document.getElementById('req-stack');
+const srcStack   = document.getElementById('src-stack');
+const reqCount   = document.getElementById('req-count');
+const srcCount   = document.getElementById('src-count');
+const btnAddReq  = document.getElementById('btn-add-req');
+const btnAddSrc  = document.getElementById('btn-add-src');
+const btnExtract = document.getElementById('btn-extract');
+const btnSave    = document.getElementById('btn-save');
+const statusBar  = document.getElementById('status-bar');
+const statusLabel = document.getElementById('status-label');
+const progressTrack = document.getElementById('progress-track');
+const progressBar   = document.getElementById('progress-bar');
+const statusPct     = document.getElementById('status-pct');
+const statusActions = document.getElementById('status-actions');
+const blocksList  = document.getElementById('blocks-list');
+const blocksEmpty = document.getElementById('blocks-empty');
+const sidebarToc  = document.getElementById('sidebar-toc');
+const ringFill    = document.getElementById('ring-fill');
+const sidebarProgressText = document.getElementById('sidebar-progress-text');
+const fileInputReq = document.getElementById('file-input-req');
+const fileInputSrc = document.getElementById('file-input-src');
+
+// ── 状态 ──
+let extractionState = 'idle'; // idle | extracting | done
+let totalBlocks = 0;
+let doneBlocks  = 0;
+let currentReader = null;
+
+// ── 工具 ──
+function extBadge(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (['docx','doc'].includes(ext)) return `<span class="mat-badge docx">DOCX</span>`;
+  if (ext === 'pdf') return `<span class="mat-badge pdf">PDF</span>`;
+  if (['ppt','pptx'].includes(ext)) return `<span class="mat-badge pptx">PPTX</span>`;
+  return `<span class="mat-badge">${ext.toUpperCase()}</span>`;
+}
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  return bytes > 1024*1024 ? (bytes/1024/1024).toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
+}
+
+// ── 材料列表 ──
+async function loadMaterials() {
+  const list = await api.materials.list(projectId);
+  const reqs = list.filter(m => m.role === 'requirement');
+  const srcs = list.filter(m => m.role === 'source');
+  renderMats(reqStack, reqs);
+  renderMats(srcStack, srcs);
+  reqCount.textContent = `${reqs.length} 项`;
+  srcCount.textContent = `${srcs.length} 项`;
+}
+function renderMats(container, mats) {
+  if (!mats.length) { container.innerHTML = ''; return; }
+  container.innerHTML = mats.map(m => `
+    <div class="mat-row">
+      ${extBadge(m.filename)}
+      <span class="mat-name" title="${m.filename}">${m.filename}</span>
+      <span class="mat-size">${fmtSize(m.size)}</span>
+      <button class="mat-del" data-id="${m.id}" title="删除">×</button>
+    </div>`).join('');
+}
+
+// ── 状态栏 ──
+function setStatusBar(state, label, pct, totalB, doneB) {
+  extractionState = state;
+  statusBar.dataset.state = state;
+  statusLabel.textContent = label;
+  if (state === 'idle') return;
+  progressTrack.style.display = 'block';
+  progressBar.style.width = pct + '%';
+  statusPct.textContent = `${doneB}/${totalB} 模块 · ${pct}%`;
+  statusActions.innerHTML = '';
+  if (state === 'extracting') {
+    statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel">取消提炼</button>`;
+    document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+  } else if (state === 'done') {
+    statusActions.innerHTML = `
+      <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
+      <button class="btn-status-primary" id="btn-confirm">确认大纲，进入撰写</button>`;
+    document.getElementById('btn-reextract').addEventListener('click', () => startExtraction());
+    document.getElementById('btn-confirm').addEventListener('click', confirmOutline);
+  }
+}
+
+// ── 右侧进度环 ──
+function updateSidebarProgress() {
+  const pct = totalBlocks ? doneBlocks / totalBlocks : 0;
+  const circumference = 113;
+  ringFill.style.strokeDashoffset = circumference * (1 - pct);
+  sidebarProgressText.textContent = `${doneBlocks} / ${totalBlocks}`;
+}
+
+// ── 目录导航 ──
+function buildToc(blocks) {
+  sidebarToc.innerHTML = blocks.map(b => `
+    <button class="toc-item" data-block-id="${b.block_id || b.id}" id="toc-${b.block_id || b.id}">
+      <span class="toc-label" title="${b.title}">${b.title}</span>
+    </button>`).join('');
+  sidebarToc.querySelectorAll('.toc-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = document.querySelector(`[data-block-id="${btn.dataset.blockId}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+function markTocDone(blockId) {
+  const btn = document.getElementById(`toc-${blockId}`);
+  if (!btn) return;
+  btn.classList.add('done');
+  if (!btn.querySelector('.toc-check')) {
+    btn.insertAdjacentHTML('afterbegin', '<span class="toc-check">✓</span>');
+  }
+}
+
+// ── 模块卡片 ──
+function renderBlockCard(block, status = 'pending') {
+  blocksEmpty.style.display = 'none';
+  const el = document.createElement('div');
+  el.className = 'block-card';
+  el.dataset.blockId = block.block_id || block.id;
+  el.innerHTML = `
+    <div class="block-card-header">
+      <span class="block-card-title">${block.title || ''}</span>
+      <span class="block-status-badge ${status}">${{pending:'待提炼',extracting:'提炼中',done:'已完成 ✓'}[status]}</span>
+    </div>
+    <div class="block-card-progress ${status==='extracting'?'active':''}">
+      <div class="block-card-progress-bar"></div>
+    </div>
+    <div class="block-card-grid">
+      ${renderField('应标要求', block.requirement, '')}
+      ${renderField('应标重点', block.key_points, '')}
+      ${renderField('● 否决项', block.veto_items, 'veto')}
+      ${renderField('★ 加分项', block.bonus_items, 'bonus')}
+    </div>`;
+  blocksList.appendChild(el);
+}
+function renderField(label, value, cls) {
+  const isEmpty = !value;
+  return `<div class="block-field">
+    <div class="block-field-label ${cls}">${label}</div>
+    ${isEmpty
+      ? '<div class="block-field-skeleton" style="width:80%"></div><div class="block-field-skeleton" style="width:55%"></div>'
+      : `<div class="block-field-value">${value}</div>`}
+  </div>`;
+}
+function updateBlockCard(blockId, data) {
+  const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+  if (!card) return;
+  card.querySelector('.block-status-badge').className = 'block-status-badge done';
+  card.querySelector('.block-status-badge').textContent = '已完成 ✓';
+  card.querySelector('.block-card-progress').classList.remove('active');
+  const fields = card.querySelectorAll('.block-field');
+  const vals = [data.requirement||'', data.key_points||'', data.veto_items||'', data.bonus_items||''];
+  const labels = ['应标要求','应标重点','● 否决项','★ 加分项'];
+  const clss = ['','','veto','bonus'];
+  fields.forEach((f, i) => {
+    f.innerHTML = `<div class="block-field-label ${clss[i]}">${labels[i]}</div>
+      <div class="block-field-value">${vals[i] || '<span style="color:var(--muted)">—</span>'}</div>`;
+  });
+}
+
+// ── 加载已有 blocks ──
+async function loadExistingBlocks() {
+  const blocks = await api.blocks.list(projectId);
+  const content = blocks.filter(b => b.kind === 'content');
+  if (!content.length) return;
+  blocksList.innerHTML = '';
+  totalBlocks = content.length;
+  doneBlocks = content.filter(b => b.key_points || b.requirement).length;
+  content.forEach(b => renderBlockCard(b, (b.key_points||b.requirement) ? 'done' : 'pending'));
+  buildToc(content);
+  content.filter(b => b.key_points || b.requirement).forEach(b => markTocDone(b.block_id || b.id));
+  updateSidebarProgress();
+  if (doneBlocks === totalBlocks && totalBlocks > 0) {
+    setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);
+  }
+}
+
+// ── 提炼流程 ──
+async function startExtraction() {
+  blocksList.innerHTML = '';
+  blocksEmpty.style.display = 'block';
+  sidebarToc.innerHTML = '';
+  totalBlocks = 0; doneBlocks = 0;
+  setStatusBar('extracting', '准备提炼…', 0, 0, 0);
+  updateSidebarProgress();
+  btnExtract.disabled = true;
+
+  const resp = await fetch(`/api/projects/${projectId}/outline`, { method: 'POST' });
+  if (!resp.ok || !resp.body) {
+    setStatusBar('idle', '', 0, 0, 0);
+    btnExtract.disabled = false;
+    return;
+  }
+
+  currentReader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  try {
+    while (true) {
+      const { done, value } = await currentReader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        try {
+          const ev = JSON.parse(raw);
+          if (ev.block_id && ev.title) {
+            // 新 block 到达
+            totalBlocks++;
+            renderBlockCard({ ...ev, block_id: ev.block_id }, 'done');
+            markTocDone(ev.block_id);
+            doneBlocks++;
+            const pct = Math.round(doneBlocks / Math.max(totalBlocks, 1) * 100);
+            setStatusBar('extracting', `正在提炼：${ev.title}`, pct, totalBlocks, doneBlocks);
+            buildToc(Array.from(blocksList.querySelectorAll('.block-card')).map(c => ({
+              block_id: c.dataset.blockId,
+              title: c.querySelector('.block-card-title').textContent
+            })));
+            updateSidebarProgress();
+          }
+          if ('block_count' in ev) {
+            // 提炼完成
+            setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);
+            updateSidebarProgress();
+            btnExtract.disabled = false;
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      setStatusBar('idle', '', 0, 0, 0);
+      btnExtract.disabled = false;
+    }
+  }
+}
+
+function cancelExtraction() {
+  currentReader?.cancel();
+  currentReader = null;
+  setStatusBar('idle', '', 0, 0, 0);
+  btnExtract.disabled = false;
+}
+
+async function confirmOutline() {
+  const btn = document.getElementById('btn-confirm');
+  if (btn) btn.disabled = true;
+  await api.projects.lock(projectId);
+  location.href = `/workbench?projectId=${projectId}`;
+}
+
+// ── 上传 ──
+async function uploadFile(file, role, btn) {
+  btn.disabled = true;
+  await api.materials.upload(projectId, file, role);
+  await loadMaterials();
+  btn.disabled = false;
+}
+
+// ── 事件绑定 ──
+btnAddReq.addEventListener('click', () => fileInputReq.click());
+btnAddSrc.addEventListener('click', () => fileInputSrc.click());
+fileInputReq.addEventListener('change', () => {
+  const f = fileInputReq.files[0];
+  if (f) uploadFile(f, 'requirement', btnAddReq);
+});
+fileInputSrc.addEventListener('change', () => {
+  const f = fileInputSrc.files[0];
+  if (f) uploadFile(f, 'source', btnAddSrc);
+});
+btnExtract.addEventListener('click', startExtraction);
+btnSave.addEventListener('click', async () => {
+  btnSave.disabled = true;
+  btnSave.textContent = '已保存';
+  setTimeout(() => { btnSave.disabled = false; btnSave.textContent = '保存初始化结果'; }, 2000);
+});
+
+// ── 初始化 ──
+api.projects.get(projectId).then(p => {
+  if (!p?.name) return;
+  sidebarProjectName.textContent = p.name;
+  document.getElementById('header-project-name').textContent = p.name;
+  document.title = `AiBidding · ${p.name}`;
+});
+loadMaterials();
+loadExistingBlocks();
+```
+
+- [ ] 浏览器访问，上传一个应标文件，点击「提炼大纲」，确认状态栏出现进度、卡片逐个渲染
+
+- [ ] 提炼完成后确认「重新提炼」和「确认大纲，进入撰写」两个按钮出现
+
+- [ ] 点击「确认大纲，进入撰写」，确认跳转到 workbench
+
+- [ ] Commit:
+```bash
+git add frontend/project-init.html
+git commit -m "feat(project-init): rewrite JS — extraction flow, block cards, toc nav"
+```
+
+---
+
+### Task 4: 修复右侧目录导航实时更新
+
+**Files:**
+- Modify: `frontend/project-init.html`（`buildToc` 调用时机）
+
+当前 `startExtraction` 中每次新 block 到达都重建整个 toc，性能差。改为增量追加。
+
+- [ ] 在 `startExtraction` 的 `ev.block_id && ev.title` 分支中，将 `buildToc(...)` 整体调用替换为增量追加：
+
+```js
+// 替换掉 buildToc(...) 整体调用，改为：
+const tocBtn = document.createElement('button');
+tocBtn.className = 'toc-item done';
+tocBtn.id = `toc-${ev.block_id}`;
+tocBtn.dataset.blockId = ev.block_id;
+tocBtn.innerHTML = `<span class="toc-check">✓</span><span class="toc-label" title="${ev.title}">${ev.title}</span>`;
+tocBtn.addEventListener('click', () => {
+  const card = document.querySelector(`[data-block-id="${ev.block_id}"]`);
+  card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+sidebarToc.appendChild(tocBtn);
+```
+
+- [ ] 刷新页面，重新提炼，确认目录条目随卡片同步出现
+
+- [ ] Commit:
+```bash
+git add frontend/project-init.html
+git commit -m "fix(project-init): incremental toc append during extraction"
+```
