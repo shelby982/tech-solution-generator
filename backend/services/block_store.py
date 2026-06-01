@@ -137,14 +137,19 @@ async def create_block(
     order_idx: int,
     content: str = "",
     status: str = "empty",
+    key_points: str = "",
+    veto_items: str = "",
+    bonus_items: str = "",
 ) -> dict:
     cursor = await db.execute(
         """INSERT INTO blocks
            (project_id, block_id, kind, level, title, domain, parent_title,
-            requirement, score, source, order_idx, content, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            requirement, key_points, veto_items, bonus_items,
+            score, source, order_idx, content, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (project_id, block_id, kind, level, title, domain, parent_title,
-         requirement, score, source, order_idx, content, status),
+         requirement, key_points, veto_items, bonus_items,
+         score, source, order_idx, content, status),
     )
     await db.commit()
     return await get_block(db, cursor.lastrowid)

@@ -141,12 +141,19 @@ async def generate_outline(project_id: int):
                         kind="content", level=1, title=item["title"],
                         domain=item["title"], parent_title="",
                         requirement=item.get("requirement", ""),
+                        key_points=item.get("key_points", ""),
+                        veto_items=item.get("veto_items", ""),
+                        bonus_items=item.get("bonus_items", ""),
                         score="", source="", order_idx=idx,
                     )
                     yield format_sse_event("outline_block", {
                         "block_id": block_id_str,
                         "title": item["title"],
                         "requirement": item.get("requirement", ""),
+                        "key_points": item.get("key_points", ""),
+                        "veto_items": item.get("veto_items", ""),
+                        "bonus_items": item.get("bonus_items", ""),
+                        "order_idx": idx,
                     })
                 # 标记第一个 requirement 材料为已解析
                 if req_materials:

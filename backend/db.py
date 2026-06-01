@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS blocks (
     domain      TEXT,
     parent_title TEXT,
     requirement TEXT,
+    key_points  TEXT,
+    veto_items  TEXT,
+    bonus_items TEXT,
     score       TEXT,
     source      TEXT,
     order_idx   INTEGER,
@@ -89,6 +92,13 @@ CREATE TABLE IF NOT EXISTS material_chunks (
 async def init_db(conn: aiosqlite.Connection) -> None:
     """执行建表 DDL（CREATE TABLE IF NOT EXISTS，幂等）。"""
     await conn.executescript(_DDL)
+    await conn.commit()
+    # 迁移已有数据库：添加新列（如果不存在）
+    cursor = await conn.execute("PRAGMA table_info(blocks)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    for col in ("key_points", "veto_items", "bonus_items"):
+        if col not in existing_cols:
+            await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     await conn.commit()
 
 
