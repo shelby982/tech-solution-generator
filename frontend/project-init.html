@@ -587,15 +587,19 @@ async function startExtraction() {
           if (ev.block_id && ev.title) {
             totalBlocks++;
             renderBlockCard({ ...ev, block_id: ev.block_id }, 'done');
-            markTocDone(ev.block_id);
             doneBlocks++;
             const pct = Math.round(doneBlocks / Math.max(totalBlocks, 1) * 100);
             setStatusBar('extracting', `正在提炼：${ev.title}`, pct, totalBlocks, doneBlocks);
-            // 增量追加 toc（Task 4 会把这里改为增量追加，此处先用 buildToc 占位）
-            buildToc(Array.from(blocksList.querySelectorAll('.block-card')).map(c => ({
-              block_id: c.dataset.blockId,
-              title: c.querySelector('.block-card-title').textContent
-            })));
+            const tocBtn = document.createElement('button');
+            tocBtn.className = 'toc-item done';
+            tocBtn.id = `toc-${ev.block_id}`;
+            tocBtn.dataset.blockId = ev.block_id;
+            tocBtn.innerHTML = `<span class="toc-check">✓</span><span class="toc-label" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</span>`;
+            tocBtn.addEventListener('click', () => {
+              const card = document.querySelector(`[data-block-id="${ev.block_id}"]`);
+              card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            sidebarToc.appendChild(tocBtn);
             updateSidebarProgress();
           }
           if ('block_count' in ev) {
