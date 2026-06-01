@@ -136,23 +136,26 @@ async def generate_outline(project_id: int):
                 await delete_blocks_by_project(db, project_id)
                 for idx, item in enumerate(outline_items):
                     block_id_str = f"outline-{idx}"
+                    key_points  = item.get("key_points", "")
+                    veto_items  = item.get("veto_items", "")
+                    bonus_items = item.get("bonus_items", "")
                     await create_block(
                         db, project_id=project_id, block_id=block_id_str,
                         kind="content", level=1, title=item["title"],
                         domain=item["title"], parent_title="",
                         requirement=item.get("requirement", ""),
-                        key_points=item.get("key_points", ""),
-                        veto_items=item.get("veto_items", ""),
-                        bonus_items=item.get("bonus_items", ""),
+                        key_points=key_points,
+                        veto_items=veto_items,
+                        bonus_items=bonus_items,
                         score="", source="", order_idx=idx,
                     )
                     yield format_sse_event("outline_block", {
                         "block_id": block_id_str,
                         "title": item["title"],
                         "requirement": item.get("requirement", ""),
-                        "key_points": item.get("key_points", ""),
-                        "veto_items": item.get("veto_items", ""),
-                        "bonus_items": item.get("bonus_items", ""),
+                        "key_points": key_points,
+                        "veto_items": veto_items,
+                        "bonus_items": bonus_items,
                         "order_idx": idx,
                     })
                 # 标记第一个 requirement 材料为已解析
