@@ -372,125 +372,290 @@
     <input type="file" id="file-input-src" accept=".pdf,.docx,.doc,.ppt,.pptx" style="display:none">
 
     <script type="module">
-      import { api } from './assets/api.js';
+import { api } from './assets/api.js';
 
-      const params = new URLSearchParams(location.search);
-      const projectId = params.get('projectId');
-      if (!projectId) { location.href = '/projects'; }
+const params = new URLSearchParams(location.search);
+const projectId = params.get('projectId');
+if (!projectId) { location.href = '/projects'; }
 
-      const fileInputReq = document.getElementById('file-input-req');
-      const fileInputSrc = document.getElementById('file-input-src');
-      const btnAddReq = document.getElementById('btn-add-req');
-      const btnAddSrc = document.getElementById('btn-add-src');
-      const reqStack = document.getElementById('req-stack');
-      const srcStack = document.getElementById('src-stack');
-      const outlineContainer = document.querySelector('.outline-scroll-container');
-      const btnLock = document.getElementById('btn-lock');
+// ── DOM refs ──
+const sidebarProjectName = document.getElementById('sidebar-project-name');
+const reqStack   = document.getElementById('req-stack');
+const srcStack   = document.getElementById('src-stack');
+const reqCount   = document.getElementById('req-count');
+const srcCount   = document.getElementById('src-count');
+const btnAddReq  = document.getElementById('btn-add-req');
+const btnAddSrc  = document.getElementById('btn-add-src');
+const btnExtract = document.getElementById('btn-extract');
+const btnSave    = document.getElementById('btn-save');
+const statusBar  = document.getElementById('status-bar');
+const statusLabel = document.getElementById('status-label');
+const progressTrack = document.getElementById('progress-track');
+const progressBar   = document.getElementById('progress-bar');
+const statusPct     = document.getElementById('status-pct');
+const statusActions = document.getElementById('status-actions');
+const blocksList  = document.getElementById('blocks-list');
+const blocksEmpty = document.getElementById('blocks-empty');
+const sidebarToc  = document.getElementById('sidebar-toc');
+const ringFill    = document.getElementById('ring-fill');
+const sidebarProgressText = document.getElementById('sidebar-progress-text');
+const fileInputReq = document.getElementById('file-input-req');
+const fileInputSrc = document.getElementById('file-input-src');
 
-      // 加载项目名称
-      api.projects.get(projectId).then(p => {
-        if (!p?.name) return;
-        document.getElementById('header-project-name').textContent = p.name;
-        document.title = `AiBidding · ${p.name}`;
-      });
+// ── 状态 ──
+let extractionState = 'idle'; // idle | extracting | done
+let totalBlocks = 0;
+let doneBlocks  = 0;
+let currentReader = null;
 
-      // 渲染材料列表
-      async function loadMaterials() {
-        const list = await api.materials.list(projectId);
-        const reqs = list.filter(m => m.role === 'requirement');
-        const srcs = list.filter(m => m.role === 'source');
+// ── 工具 ──
+function extBadge(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (['docx','doc'].includes(ext)) return `<span class="mat-badge docx">DOCX</span>`;
+  if (ext === 'pdf') return `<span class="mat-badge pdf">PDF</span>`;
+  if (['ppt','pptx'].includes(ext)) return `<span class="mat-badge pptx">PPTX</span>`;
+  return `<span class="mat-badge">${ext.toUpperCase()}</span>`;
+}
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  return bytes > 1024*1024 ? (bytes/1024/1024).toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
+}
 
-        reqStack.innerHTML = reqs.length
-          ? reqs.map(m => `<div class="material-row"><div><strong>${m.filename}</strong></div><span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span></div>`).join('')
-          : '<p class="muted" style="padding:8px 12px;">尚未上传应标文件</p>';
+// ── 材料列表 ──
+async function loadMaterials() {
+  const list = await api.materials.list(projectId);
+  const reqs = list.filter(m => m.role === 'requirement');
+  const srcs = list.filter(m => m.role === 'source');
+  renderMats(reqStack, reqs);
+  renderMats(srcStack, srcs);
+  reqCount.textContent = `${reqs.length} 项`;
+  srcCount.textContent = `${srcs.length} 项`;
+}
+function renderMats(container, mats) {
+  if (!mats.length) { container.innerHTML = ''; return; }
+  container.innerHTML = mats.map(m => `
+    <div class="mat-row">
+      ${extBadge(m.filename)}
+      <span class="mat-name" title="${m.filename}">${m.filename}</span>
+      <span class="mat-size">${fmtSize(m.size)}</span>
+      <button class="mat-del" data-id="${m.id}" title="删除">×</button>
+    </div>`).join('');
+}
 
-        srcStack.innerHTML = srcs.length
-          ? srcs.map(m => `<div class="material-row"><div><strong>${m.filename}</strong></div><span class="badge ${m.parsed_at ? 'success' : 'warn'}">${m.parsed_at ? '已解析' : '待解析'}</span></div>`).join('')
-          : '<p class="muted" style="padding:8px 12px;">尚未上传原始素材</p>';
+// ── 状态栏 ──
+function setStatusBar(state, label, pct, totalB, doneB) {
+  extractionState = state;
+  statusBar.dataset.state = state;
+  statusLabel.textContent = label;
+  if (state === 'idle') return;
+  progressTrack.style.display = 'block';
+  progressBar.style.width = pct + '%';
+  statusPct.textContent = `${doneB}/${totalB} 模块 · ${pct}%`;
+  statusActions.innerHTML = '';
+  if (state === 'extracting') {
+    statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel">取消提炼</button>`;
+    document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+  } else if (state === 'done') {
+    statusActions.innerHTML = `
+      <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
+      <button class="btn-status-primary" id="btn-confirm">确认大纲，进入撰写</button>`;
+    document.getElementById('btn-reextract').addEventListener('click', () => startExtraction());
+    document.getElementById('btn-confirm').addEventListener('click', confirmOutline);
+  }
+}
+
+// ── 右侧进度环 ──
+function updateSidebarProgress() {
+  const pct = totalBlocks ? doneBlocks / totalBlocks : 0;
+  const circumference = 113;
+  ringFill.style.strokeDashoffset = circumference * (1 - pct);
+  sidebarProgressText.textContent = `${doneBlocks} / ${totalBlocks}`;
+}
+
+// ── 目录导航（初始全量构建） ──
+function buildToc(blocks) {
+  sidebarToc.innerHTML = blocks.map(b => `
+    <button class="toc-item" data-block-id="${b.block_id || b.id}" id="toc-${b.block_id || b.id}">
+      <span class="toc-label" title="${b.title}">${b.title}</span>
+    </button>`).join('');
+  sidebarToc.querySelectorAll('.toc-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = document.querySelector(`[data-block-id="${btn.dataset.blockId}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+function markTocDone(blockId) {
+  const btn = document.getElementById(`toc-${blockId}`);
+  if (!btn) return;
+  btn.classList.add('done');
+  if (!btn.querySelector('.toc-check')) {
+    btn.insertAdjacentHTML('afterbegin', '<span class="toc-check">✓</span>');
+  }
+}
+
+// ── 模块卡片 ──
+function renderBlockCard(block, status = 'pending') {
+  blocksEmpty.style.display = 'none';
+  const el = document.createElement('div');
+  el.className = 'block-card';
+  el.dataset.blockId = block.block_id || block.id;
+  el.innerHTML = `
+    <div class="block-card-header">
+      <span class="block-card-title">${block.title || ''}</span>
+      <span class="block-status-badge ${status}">${{pending:'待提炼',extracting:'提炼中',done:'已完成 ✓'}[status]}</span>
+    </div>
+    <div class="block-card-progress ${status==='extracting'?'active':''}">
+      <div class="block-card-progress-bar"></div>
+    </div>
+    <div class="block-card-grid">
+      ${renderField('应标要求', block.requirement, '')}
+      ${renderField('应标重点', block.key_points, '')}
+      ${renderField('● 否决项', block.veto_items, 'veto')}
+      ${renderField('★ 加分项', block.bonus_items, 'bonus')}
+    </div>`;
+  blocksList.appendChild(el);
+}
+function renderField(label, value, cls) {
+  const isEmpty = !value;
+  return `<div class="block-field">
+    <div class="block-field-label ${cls}">${label}</div>
+    ${isEmpty
+      ? '<div class="block-field-skeleton" style="width:80%"></div><div class="block-field-skeleton" style="width:55%"></div>'
+      : `<div class="block-field-value">${value}</div>`}
+  </div>`;
+}
+
+// ── 加载已有 blocks ──
+async function loadExistingBlocks() {
+  const blocks = await api.blocks.list(projectId);
+  const content = blocks.filter(b => b.kind === 'content');
+  if (!content.length) return;
+  blocksList.innerHTML = '';
+  totalBlocks = content.length;
+  doneBlocks = content.filter(b => b.key_points || b.requirement).length;
+  content.forEach(b => renderBlockCard(b, (b.key_points||b.requirement) ? 'done' : 'pending'));
+  buildToc(content);
+  content.filter(b => b.key_points || b.requirement).forEach(b => markTocDone(b.block_id || b.id));
+  updateSidebarProgress();
+  if (doneBlocks === totalBlocks && totalBlocks > 0) {
+    setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);
+  }
+}
+
+// ── 提炼流程 ──
+async function startExtraction() {
+  blocksList.innerHTML = '';
+  blocksEmpty.style.display = 'block';
+  sidebarToc.innerHTML = '';
+  totalBlocks = 0; doneBlocks = 0;
+  setStatusBar('extracting', '准备提炼…', 0, 0, 0);
+  updateSidebarProgress();
+  btnExtract.disabled = true;
+
+  const resp = await fetch(`/api/projects/${projectId}/outline`, { method: 'POST' });
+  if (!resp.ok || !resp.body) {
+    setStatusBar('idle', '', 0, 0, 0);
+    btnExtract.disabled = false;
+    return;
+  }
+
+  currentReader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  try {
+    while (true) {
+      const { done, value } = await currentReader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        try {
+          const ev = JSON.parse(raw);
+          if (ev.block_id && ev.title) {
+            totalBlocks++;
+            renderBlockCard({ ...ev, block_id: ev.block_id }, 'done');
+            markTocDone(ev.block_id);
+            doneBlocks++;
+            const pct = Math.round(doneBlocks / Math.max(totalBlocks, 1) * 100);
+            setStatusBar('extracting', `正在提炼：${ev.title}`, pct, totalBlocks, doneBlocks);
+            // 增量追加 toc（Task 4 会把这里改为增量追加，此处先用 buildToc 占位）
+            buildToc(Array.from(blocksList.querySelectorAll('.block-card')).map(c => ({
+              block_id: c.dataset.blockId,
+              title: c.querySelector('.block-card-title').textContent
+            })));
+            updateSidebarProgress();
+          }
+          if ('block_count' in ev) {
+            setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);
+            updateSidebarProgress();
+            btnExtract.disabled = false;
+          }
+        } catch {}
       }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      setStatusBar('idle', '', 0, 0, 0);
+      btnExtract.disabled = false;
+    }
+  }
+}
 
-      // 渲染大纲节
-      function renderOutlineBlock(block) {
-        const el = document.createElement('div');
-        el.className = 'outline-block-item';
-        el.dataset.blockId = block.block_id;
-        el.innerHTML = `
-          <div class="outline-block-title">${block.title || ''}</div>
-          <div class="outline-block-req">
-            <label>要求</label>
-            <textarea data-block-id="${block.block_id}" rows="3">${block.requirement || ''}</textarea>
-          </div>`;
-        el.querySelector('textarea').addEventListener('blur', async (e) => {
-          const bid = e.target.dataset.blockId;
-          await api.blocks.updateRequirement(bid, e.target.value);
-        });
-        outlineContainer.appendChild(el);
-      }
+function cancelExtraction() {
+  currentReader?.cancel();
+  currentReader = null;
+  setStatusBar('idle', '', 0, 0, 0);
+  btnExtract.disabled = false;
+}
 
-      // 启动大纲生成 SSE
-      function startOutline() {
-        // 清空旧大纲
-        outlineContainer.innerHTML = '<p class="muted" style="padding:12px;">正在生成大纲...</p>';
-        api.materials.outline(projectId, {
-          onBlock: (data) => {
-            // 移除 loading 提示（首次）
-            const loading = outlineContainer.querySelector('.muted');
-            if (loading) loading.remove();
-            renderOutlineBlock(data);
-          },
-          onDone: async () => {
-            // 大纲完成后自动触发素材映射
-            await api.materials.mapSources(projectId);
-          },
-          onError: (err) => {
-            outlineContainer.innerHTML = `<p class="muted" style="padding:12px;color:red;">生成失败：${err.message}</p>`;
-          },
-        });
-      }
+async function confirmOutline() {
+  const btn = document.getElementById('btn-confirm');
+  if (btn) btn.disabled = true;
+  await api.projects.lock(projectId);
+  location.href = `/workbench?projectId=${projectId}`;
+}
 
-      // 上传文件（通用）
-      async function uploadFile(file, role, btn) {
-        btn.disabled = true;
-        await api.materials.upload(projectId, file, role);
-        await loadMaterials();
-        if (role === 'requirement') {
-          startOutline();
-        }
-        btn.disabled = false;
-      }
+// ── 上传 ──
+async function uploadFile(file, role, btn) {
+  btn.disabled = true;
+  await api.materials.upload(projectId, file, role);
+  await loadMaterials();
+  btn.disabled = false;
+}
 
-      // 按钮事件
-      btnAddReq.addEventListener('click', () => fileInputReq.click());
-      btnAddSrc.addEventListener('click', () => fileInputSrc.click());
+// ── 事件绑定 ──
+btnAddReq.addEventListener('click', () => fileInputReq.click());
+btnAddSrc.addEventListener('click', () => fileInputSrc.click());
+fileInputReq.addEventListener('change', () => {
+  const f = fileInputReq.files[0];
+  if (f) uploadFile(f, 'requirement', btnAddReq);
+});
+fileInputSrc.addEventListener('change', () => {
+  const f = fileInputSrc.files[0];
+  if (f) uploadFile(f, 'source', btnAddSrc);
+});
+btnExtract.addEventListener('click', startExtraction);
+btnSave.addEventListener('click', async () => {
+  btnSave.disabled = true;
+  btnSave.textContent = '已保存';
+  setTimeout(() => { btnSave.disabled = false; btnSave.textContent = '保存初始化结果'; }, 2000);
+});
 
-      fileInputReq.addEventListener('change', () => {
-        const file = fileInputReq.files[0];
-        if (file) uploadFile(file, 'requirement', btnAddReq);
-      });
-
-      fileInputSrc.addEventListener('change', () => {
-        const file = fileInputSrc.files[0];
-        if (file) uploadFile(file, 'source', btnAddSrc);
-      });
-
-      btnLock?.addEventListener('click', async () => {
-        btnLock.disabled = true;
-        await api.projects.lock(projectId);
-        location.href = `/workbench?projectId=${projectId}`;
-      });
-
-      // 加载已有 blocks 渲染大纲
-      async function loadExistingBlocks() {
-        const blocks = await api.blocks.list(projectId);
-        if (!blocks?.length) return;
-        outlineContainer.innerHTML = '';
-        blocks
-          .filter(b => b.kind === 'content')
-          .forEach(b => renderOutlineBlock({ block_id: b.id, title: b.title, requirement: b.requirement }));
-      }
-
-      loadMaterials();
-      loadExistingBlocks();
+// ── 初始化 ──
+api.projects.get(projectId).then(p => {
+  if (!p?.name) return;
+  sidebarProjectName.textContent = p.name;
+  document.getElementById('header-project-name').textContent = p.name;
+  document.title = `AiBidding · ${p.name}`;
+});
+loadMaterials();
+loadExistingBlocks();
     </script>
   </body>
 </html>
