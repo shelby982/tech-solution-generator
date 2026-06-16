@@ -1,7 +1,7 @@
 """infra/retrieval/keyword.py — BM25 + jieba 关键词检索。
 
 移自 backend/services/retrieval.py 的 retrieve_chunks，重命名为 keyword_search 以与
-infra/retrieval/rerank.py 区分。services/retrieval.py 暂保留，Phase 7 删除。
+infra/retrieval/rerank.py 区分。
 """
 import jieba
 from rank_bm25 import BM25Okapi
@@ -10,6 +10,37 @@ from rank_bm25 import BM25Okapi
 def _tokenize(text: str) -> list[str]:
     """jieba 中文分词，过滤单字符停用词和纯空白。"""
     return [w for w in jieba.cut(text) if len(w.strip()) > 1]
+
+
+def assign_chunks_to_sections(
+    chunks: list[dict],
+    section_texts: list[str],
+) -> dict[int, list[dict]]:
+    """
+    反向分配：以章节为 corpus，为每条 chunk 找出最匹配的 section_idx。
+    返回 {section_idx: [chunks...]}，未命中任何章节的归到 key=-1。
+    保证传入的每条 chunk 都会被分配到结果中的某个桶，不丢失。
+    """
+    if not chunks:
+        return {}
+    tokenized_sections = [_tokenize(t) for t in section_texts]
+    if not tokenized_sections or not any(tokenized_sections):
+        return {-1: list(chunks)}
+    section_bm25 = BM25Okapi(tokenized_sections)
+
+    assignment: dict[int, list[dict]] = {}
+    for chunk in chunks:
+        q = _tokenize(chunk["content"])
+        if not q:
+            assignment.setdefault(-1, []).append(chunk)
+            continue
+        scores = section_bm25.get_scores(q)
+        best_idx = max(range(len(scores)), key=lambda i: scores[i])
+        if scores[best_idx] > 0:
+            assignment.setdefault(best_idx, []).append(chunk)
+        else:
+            assignment.setdefault(-1, []).append(chunk)
+    return assignment
 
 
 def build_bm25_index(chunks: list[dict]) -> tuple[BM25Okapi, list[list[str]]]:

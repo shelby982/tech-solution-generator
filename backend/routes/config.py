@@ -35,7 +35,7 @@ from services.config_store import (
     OPENAI_COMPATIBLE_PROVIDERS,
     config_store,
 )
-from services.llm import verify_api_key
+from infra.llm import verify_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["config"])

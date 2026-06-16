@@ -24,7 +24,7 @@ from services.block_store import (
     add_revision,
     update_block_status,
 )
-from services.docx_generator import sections_to_docx
+from infra.docx import sections_to_docx
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])

@@ -15,13 +15,9 @@ import uvicorn
 
 from routes.upload import router as upload_router
 from routes.config import router as config_router
-from routes.generate import router as generate_router
-from routes.download import router as download_router
 from routes.changelog import router as changelog_router
 from routes.projects import router as projects_router
 from routes.materials import router as materials_router
-from routes.blocks import router as blocks_router
-from routes.revisions import router as revisions_router
 from routes.export import router as export_router
 from routes.workflow import router as workflow_router, set_runner as set_workflow_runner
 from routes.review import router as review_router
@@ -150,13 +146,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # ── 路由注册 ──────────────────────────────────
 app.include_router(upload_router,    prefix="/api")
 app.include_router(config_router,    prefix="/api")
-app.include_router(generate_router,  prefix="/api")
-app.include_router(download_router,  prefix="/api")
 app.include_router(changelog_router, prefix="/api")
 app.include_router(projects_router,  prefix="/api")
 app.include_router(materials_router, prefix="/api")
-app.include_router(blocks_router,   prefix="/api")
-app.include_router(revisions_router, prefix="/api")
 app.include_router(export_router,   prefix="/api")
 app.include_router(workflow_router,  prefix="/api")
 app.include_router(review_router,    prefix="/api")

@@ -21,7 +21,7 @@ from enum import Enum
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from services.parser import parse_document
+from infra.parser import parse_document
 from utils.validators import validate_uuid
 from utils.sse import (
     sse_parse_start, sse_parse_progress, sse_parse_section,
