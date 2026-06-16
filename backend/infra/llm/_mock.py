@@ -58,7 +58,7 @@ def _select_fixture(system_prompt: str, user_prompt: str) -> str:
     if "提炼以下八项内容" in haystack:
         return json.dumps(_OUTLINE_FIXTURE, ensure_ascii=False)
 
-    if "撰写投标承诺书" in haystack or "投标承诺" in haystack or "承诺书" in haystack:
+    if "承诺书" in haystack:
         return _LETTER_FIXTURE
 
     if "评审" in haystack:

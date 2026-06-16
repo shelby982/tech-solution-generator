@@ -323,7 +323,7 @@ async def dispatch_doc_summary(
 
 
 async def dispatch_block_write(
-    configs: list,
+    configs: list[LLMConfig],
     rr_start_index: int,
     title: str,
     requirement: str,
