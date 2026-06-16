@@ -280,11 +280,11 @@ def build_tech_review_user(block: dict, matrix_row: dict) -> str:
 
     返回字符串必须包含关键短语 '评审'，以便 mock 路由。
     """
-    title = block.get("title", "")
-    content = (block.get("content", "") or "")[:8000]
-    requirement = matrix_row.get("requirement", "")
-    key_points = matrix_row.get("key_points", "")
-    indicators = matrix_row.get("indicators", "")
+    title = block.get("title") or ""
+    content = (block.get("content") or "")[:8000]
+    requirement = matrix_row.get("requirement") or ""
+    key_points = matrix_row.get("key_points") or ""
+    indicators = matrix_row.get("indicators") or ""
 
     return (
         f"以下是投标方案中「{title}」章节的内容：\n\n"
@@ -319,13 +319,13 @@ COMPLIANCE_REVIEW_SYSTEM = (
 
 def build_compliance_review_user(block: dict, matrix_row: dict) -> str:
     """构造包拯合规评审 user prompt。"""
-    title = block.get("title", "")
-    content = (block.get("content", "") or "")[:8000]
-    requirement = matrix_row.get("requirement", "")
-    veto_items = matrix_row.get("veto_items", "")
-    bonus_items = matrix_row.get("bonus_items", "")
-    evidence_required = matrix_row.get("evidence_required", "")
-    indicators = matrix_row.get("indicators", "")
+    title = block.get("title") or ""
+    content = (block.get("content") or "")[:8000]
+    requirement = matrix_row.get("requirement") or ""
+    veto_items = matrix_row.get("veto_items") or ""
+    bonus_items = matrix_row.get("bonus_items") or ""
+    evidence_required = matrix_row.get("evidence_required") or ""
+    indicators = matrix_row.get("indicators") or ""
 
     return (
         f"以下是投标方案中「{title}」章节的内容：\n\n"

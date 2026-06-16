@@ -109,3 +109,17 @@ def test_rerank_user_contains_chunks_and_query():
     assert "微服务" in user
     assert "架构" in user
     assert "高可用" in user
+    # 锁定 mock 路由用的稳定关键词，避免后续 prompt 调优时无意丢失
+    assert "应标要求" in user
+    assert "matches" in user
+
+
+def test_review_users_handle_none_block_fields():
+    """title / content 显式为 None 时不应渲染 'None' 字面量。"""
+    block = {"block_id": "s1", "title": None, "content": None}
+    matrix = {"requirement": None, "key_points": None, "veto_items": None,
+              "bonus_items": None, "evidence_required": None, "indicators": None}
+    tech_user = build_tech_review_user(block, matrix)
+    comp_user = build_compliance_review_user(block, matrix)
+    assert "None" not in tech_user
+    assert "None" not in comp_user
