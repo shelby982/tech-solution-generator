@@ -171,6 +171,7 @@ _projects_path     = os.path.join(frontend_dir, "projects.html")
 _workbench_path    = os.path.join(frontend_dir, "workbench.html")
 _project_init_path = os.path.join(frontend_dir, "project-init.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
+_review_path       = os.path.join(frontend_dir, "review.html")
 
 if os.path.isdir(frontend_dir):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
@@ -212,6 +213,13 @@ async def serve_project_init():
     if os.path.isfile(_project_init_path):
         return FileResponse(_project_init_path)
     return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
+
+
+@app.get("/review", include_in_schema=False)
+async def serve_review():
+    if os.path.isfile(_review_path):
+        return FileResponse(_review_path)
+    return JSONResponse(status_code=404, content={"detail": "review.html 不存在"})
 
 
 @app.get("/api/readme", include_in_schema=False)

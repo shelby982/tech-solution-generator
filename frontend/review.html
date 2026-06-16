@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBidding · 评审报告</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <link rel="stylesheet" href="./assets/review.css" />
+  </head>
+  <body>
+    <div class="workspace-shell">
+      <main class="workspace-main-shell">
+        <header class="project-header">
+          <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
+          <nav class="process-tabs" aria-label="项目流程">
+            <a class="process-tab" href="/project-init" id="tab-init">项目信息</a>
+            <a class="process-tab" href="/workbench" id="tab-workbench">材料撰写</a>
+            <a class="process-tab active" href="/review">评审报告</a>
+          </nav>
+          <div class="project-actions">
+            <span id="thread-id-display" class="thread-id-display"></span>
+          </div>
+        </header>
+
+        <section class="review-banner" id="review-banner" hidden>
+          <div class="banner-cell">
+            <div class="banner-label">总分</div>
+            <div class="banner-value" id="banner-score">—</div>
+          </div>
+          <div class="banner-cell">
+            <div class="banner-label">主要风险</div>
+            <ul class="banner-list" id="banner-risks"><li class="muted">等待评审完成…</li></ul>
+          </div>
+          <div class="banner-cell">
+            <div class="banner-label">缺失证明</div>
+            <ul class="banner-list" id="banner-missing-evidence"><li class="muted">—</li></ul>
+          </div>
+          <div class="banner-cell">
+            <div class="banner-label">缺失加分项</div>
+            <ul class="banner-list" id="banner-missing-bonus"><li class="muted">—</li></ul>
+          </div>
+        </section>
+
+        <section class="review-recover" id="review-recover" hidden>
+          <span id="recover-msg">检测到未完成工作流。</span>
+          <button type="button" class="btn-primary" id="btn-recover">恢复</button>
+        </section>
+
+        <section class="review-actions">
+          <div class="actions-status" id="actions-status">已选 0 个 block</div>
+          <div class="actions-buttons">
+            <button type="button" class="btn-primary" id="btn-download">批准下载</button>
+            <button type="button" class="btn-secondary" id="btn-regen" disabled>重新生成 0 个</button>
+            <button type="button" class="btn-danger" id="btn-abort">整体作废</button>
+          </div>
+        </section>
+
+        <section class="review-stage" id="review-stage">
+          <span class="stage-label">当前阶段</span>
+          <span class="stage-value" id="stage-value">—</span>
+        </section>
+
+        <section class="review-grid" id="review-grid">
+          <p class="muted">加载评审快照中…</p>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./assets/review.js"></script>
+  </body>
+</html>
