@@ -33,6 +33,7 @@ from orchestrator.graph import (
     NODE_AGGREGATE,
     NODE_COMP_REVIEW,
     NODE_GENERATE,
+    NODE_MATCH,
     NODE_TECH_REVIEW,
     GraphDeps,
     build_graph,
@@ -137,14 +138,15 @@ async def test_graph_pauses_at_outline_gate(tmp_path):
         await graph.ainvoke({"project_id": 1}, config=config)
 
         snap = await graph.aget_state(config)
-        # interrupt_before 配置在 GATE_OUTLINE，next 应包含该节点
-        assert GATE_OUTLINE in snap.next
-        assert snap.values.get("spec", ).get("doc_title") == "规范书"
+        # interrupt_after 配置在 GATE_OUTLINE，闸门已跑完，next 是下一个节点
+        assert snap.next == (NODE_MATCH,)
+        assert snap.values.get("stage") == "outline_review"
+        assert snap.values.get("spec", {}).get("doc_title") == "规范书"
         assert "outline_matrix" in snap.values.get("spec", {})
 
 
 async def test_graph_pauses_at_each_gate_in_sequence(tmp_path):
-    """gate1 → gate2 → gate3，每次 resume 走到下一个闸门。"""
+    """gate1 → gate2 → gate3，每次 resume 走到下一个闸门后的节点暂停。"""
     db = str(tmp_path / "wf.db")
     config = {"configurable": {"thread_id": "tid"}}
 
@@ -153,15 +155,19 @@ async def test_graph_pauses_at_each_gate_in_sequence(tmp_path):
 
         await graph.ainvoke({"project_id": 1}, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (GATE_OUTLINE,)
+        assert snap.next == (NODE_MATCH,)
+        assert snap.values["stage"] == "outline_review"
 
         await graph.ainvoke(None, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (GATE_MATERIALS,)
+        assert snap.next == (NODE_GENERATE,)
+        assert snap.values["stage"] == "materials_review"
 
         await graph.ainvoke(None, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (GATE_REPORT,)
+        # gate3 后是条件路由，next 为空（等待 user_choice 后再 invoke）
+        assert snap.next == ()
+        assert snap.values["stage"] == "report_review"
 
 
 # ─────────────────────────────────────────────
@@ -205,7 +211,7 @@ async def test_resume_after_close_continues_from_checkpoint(tmp_path):
         graph1 = build_graph(_build_deps(), checkpointer=saver1)
         await graph1.ainvoke({"project_id": 1}, config=config)
         snap = await graph1.aget_state(config)
-        assert snap.next == (GATE_OUTLINE,)
+        assert snap.next == (NODE_MATCH,)
         # 记录 outline_matrix 以便比对
         matrix_before = snap.values["spec"]["outline_matrix"]
 
@@ -213,12 +219,12 @@ async def test_resume_after_close_continues_from_checkpoint(tmp_path):
     async with checkpointer_from_path(db) as saver2:
         graph2 = build_graph(_build_deps(), checkpointer=saver2)
         snap = await graph2.aget_state(config)
-        assert snap.next == (GATE_OUTLINE,)
+        assert snap.next == (NODE_MATCH,)
         assert snap.values["spec"]["outline_matrix"] == matrix_before
-        # 续跑：过 gate1 后落在 gate2
+        # 续跑：经 match 节点后落在 gate2 之后等 generate
         await graph2.ainvoke(None, config=config)
         snap = await graph2.aget_state(config)
-        assert snap.next == (GATE_MATERIALS,)
+        assert snap.next == (NODE_GENERATE,)
 
 
 # ─────────────────────────────────────────────
@@ -245,7 +251,8 @@ async def test_regen_blocks_loop(tmp_path):
         await graph.ainvoke(None, config=config)               # gate3
 
         snap = await graph.aget_state(config)
-        assert snap.next == (GATE_REPORT,)
+        assert snap.next == ()
+        assert snap.values["stage"] == "report_review"
         assert zhuge.calls == [["s1", "s2"]]  # 第一次跑全部
         assert wang.entered_at is not None    # 第一次评审跑过
 
@@ -260,7 +267,8 @@ async def test_regen_blocks_loop(tmp_path):
         # 续跑：经过条件路由 → generate（targets=[s1]）→ fan-out 评审 → gate3
         await graph.ainvoke(None, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (GATE_REPORT,)
+        # interrupt_after 在 GATE_REPORT 触发后停下；stage 已写回 report_review
+        assert snap.values["stage"] == "report_review"
 
         # 第二次 generate 只跑 s1
         assert len(zhuge.calls) == 2

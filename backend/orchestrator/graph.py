@@ -269,7 +269,9 @@ def build_graph(
 
     return builder.compile(
         checkpointer=checkpointer,
-        interrupt_before=[GATE_OUTLINE, GATE_MATERIALS, GATE_REPORT],
+        # interrupt_after：闸门节点先跑（写入正确 stage、发 gate_open 事件），
+        # 跑完后再暂停 —— 这样 state.stage 已经反映了"正等待人工"的状态
+        interrupt_after=[GATE_OUTLINE, GATE_MATERIALS, GATE_REPORT],
     )
 
 
