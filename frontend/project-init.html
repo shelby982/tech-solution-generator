@@ -1307,6 +1307,8 @@ function closeStream() {
   }
 }
 
+window.addEventListener('pagehide', closeStream);
+
 function attachStream(threadId) {
   closeStream();
   currentEventSource = api.workflow.stream(threadId, {
