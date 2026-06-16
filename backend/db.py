@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS projects (
     deadline    TEXT,
     summary     TEXT,
     base_snapshot_id INTEGER,
+    target_pages INTEGER,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -36,7 +37,9 @@ CREATE TABLE IF NOT EXISTS materials (
     type        TEXT,
     file_path   TEXT,
     role        TEXT,
-    parsed_at   DATETIME
+    file_size   INTEGER,
+    parsed_at   DATETIME,
+    parse_status TEXT DEFAULT 'pending'
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -53,6 +56,10 @@ CREATE TABLE IF NOT EXISTS blocks (
     key_points  TEXT,
     veto_items  TEXT,
     bonus_items TEXT,
+    score_items TEXT,
+    evidence_required TEXT,
+    constraint_level TEXT,
+    indicators  TEXT,
     score       TEXT,
     source      TEXT,
     order_idx   INTEGER,
@@ -86,6 +93,31 @@ CREATE TABLE IF NOT EXISTS material_chunks (
     content     TEXT NOT NULL,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    thread_id   TEXT PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES projects(id),
+    stage       TEXT NOT NULL DEFAULT 'idle',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS reviews (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id       TEXT NOT NULL REFERENCES workflow_runs(thread_id),
+    block_id        TEXT NOT NULL,
+    agent           TEXT NOT NULL,
+    score           INTEGER,
+    issues          TEXT,
+    strengths       TEXT,
+    error           TEXT DEFAULT '',
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_thread ON reviews(thread_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_thread_block ON reviews(thread_id, block_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_project ON workflow_runs(project_id);
 """
 
 
@@ -96,9 +128,20 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # 迁移已有数据库：添加新列（如果不存在）
     cursor = await conn.execute("PRAGMA table_info(blocks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
-    for col in ("key_points", "veto_items", "bonus_items"):
+    for col in ("key_points", "veto_items", "bonus_items",
+                "score_items", "evidence_required", "constraint_level", "indicators"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
+    cursor = await conn.execute("PRAGMA table_info(materials)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    if "file_size" not in existing_cols:
+        await conn.execute("ALTER TABLE materials ADD COLUMN file_size INTEGER")
+    if "parse_status" not in existing_cols:
+        await conn.execute("ALTER TABLE materials ADD COLUMN parse_status TEXT DEFAULT 'pending'")
+    cursor = await conn.execute("PRAGMA table_info(projects)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    if "target_pages" not in existing_cols:
+        await conn.execute("ALTER TABLE projects ADD COLUMN target_pages INTEGER")
     await conn.commit()
 
 
