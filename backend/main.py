@@ -23,6 +23,16 @@ from routes.materials import router as materials_router
 from routes.blocks import router as blocks_router
 from routes.revisions import router as revisions_router
 from routes.export import router as export_router
+from routes.workflow import router as workflow_router, set_runner as set_workflow_runner
+from routes.review import router as review_router
+
+from orchestrator.runner import WorkflowRunner
+from orchestrator.graph import GraphDeps
+from agents.zhang_heng import ZhangHengAgent
+from agents.shen_kuo import ShenKuoAgent
+from agents.zhuge_liang import ZhugeLiangAgent
+from agents.wang_anshi import WangAnshiAgent
+from agents.bao_zheng import BaoZhengAgent
 
 # ── 日志配置 ──────────────────────────────────
 logging.basicConfig(
@@ -34,6 +44,58 @@ logger = logging.getLogger(__name__)
 
 
 # ── 生命周期 ──────────────────────────────────
+async def _load_spec_for_project(project_id: int):
+    """spec_loader：从 materials 表取最新一条 role='spec' 记录，
+    打开文件返回 (BytesIO, suffix, filename)。
+
+    materials.file_path 形如 ``uploads/{pid}/{filename}``，相对于 backend/data/。
+    """
+    from io import BytesIO
+    from pathlib import Path
+    from db import get_db
+
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            "SELECT filename, file_path FROM materials "
+            "WHERE project_id = ? AND role = 'spec' "
+            "ORDER BY id DESC LIMIT 1",
+            (project_id,),
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        raise FileNotFoundError(f"项目 {project_id} 未上传规范书")
+    filename = row["filename"]
+    rel_path = row["file_path"]
+    backend_dir = Path(__file__).resolve().parent
+    abs_path = backend_dir / "data" / rel_path
+    if not abs_path.exists():
+        # 兜底：相对工程根
+        candidate = backend_dir.parent / rel_path
+        if candidate.exists():
+            abs_path = candidate
+        else:
+            raise FileNotFoundError(f"规范书文件不存在：{abs_path}")
+    suffix = Path(filename).suffix.lower()
+    with open(abs_path, "rb") as f:
+        data = f.read()
+    return BytesIO(data), suffix, filename
+
+
+def _build_deps() -> GraphDeps:
+    """每次 start/resume 时构造一份新的 GraphDeps。
+
+    各 agent 默认从 ``services.config_store`` 读 LLM 配置；构造无参即可。
+    """
+    return GraphDeps(
+        zhang_heng=ZhangHengAgent(),
+        shen_kuo=ShenKuoAgent(),
+        zhuge_liang=ZhugeLiangAgent(),
+        wang_anshi=WangAnshiAgent(),
+        bao_zheng=BaoZhengAgent(),
+        spec_loader=_load_spec_for_project,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("════════════════════════════════════")
@@ -41,11 +103,18 @@ async def lifespan(app: FastAPI):
     logger.info("  访问地址：http://localhost:8000")
     logger.info("  API 文档：http://localhost:8000/docs")
     logger.info("════════════════════════════════════")
-    # 初始化 SQLite 数据库（幂等，CREATE TABLE IF NOT EXISTS）
+    # 初始化 SQLite 数据库（幂等，CREATE TABLE IF NOT EXISTS；
+    # workflow_runs / reviews 表也在 db._DDL 内一并创建）
     from db import get_db, init_db
     async with get_db() as conn:
         await init_db(conn)
     logger.info("SQLite 数据库已初始化")
+
+    # 构造 WorkflowRunner 并注入到 routes.workflow
+    runner = WorkflowRunner(deps_factory=_build_deps)
+    set_workflow_runner(runner)
+    logger.info("WorkflowRunner 已注入")
+
     yield
     logger.info("服务已关闭")
 
@@ -89,6 +158,8 @@ app.include_router(materials_router, prefix="/api")
 app.include_router(blocks_router,   prefix="/api")
 app.include_router(revisions_router, prefix="/api")
 app.include_router(export_router,   prefix="/api")
+app.include_router(workflow_router,  prefix="/api")
+app.include_router(review_router,    prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -97,7 +168,6 @@ frontend_dir = os.path.join(_this_dir, "..", "frontend")
 frontend_dir = os.path.normpath(frontend_dir)
 _index_path        = os.path.join(frontend_dir, "index.html")
 _projects_path     = os.path.join(frontend_dir, "projects.html")
-_project_init_path = os.path.join(frontend_dir, "project-init.html")
 _workbench_path    = os.path.join(frontend_dir, "workbench.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 
@@ -120,13 +190,6 @@ async def serve_projects():
     if os.path.isfile(_projects_path):
         return FileResponse(_projects_path)
     return JSONResponse(status_code=404, content={"detail": "projects.html 不存在"})
-
-
-@app.get("/project-init", include_in_schema=False)
-async def serve_project_init():
-    if os.path.isfile(_project_init_path):
-        return FileResponse(_project_init_path)
-    return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
 
 
 @app.get("/workbench", include_in_schema=False)
