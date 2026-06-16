@@ -177,8 +177,8 @@ async def test_match_isolates_block_failure(monkeypatch):
         {"id": 2, "content": "TLS 1.3 安全加密"},
     ]
     result = await agent.match(toc=toc, outline_matrix={}, chunks=chunks)
-    # llm_rerank 内部已对所有 config fallback 后返 []，所以 s1 应为 []
-    # s2 应正常匹配
+    # 隔离性验证：s1 重排失败不影响 s2 调用，最低门槛是两个 key 都存在且类型正确。
+    # （强断言 s1==[] / len(s2)>=1 对 BM25+jieba 分词命中率敏感，留 Task 3.7 重写。）
     assert isinstance(result["s1"], list)
     assert isinstance(result["s2"], list)
 
