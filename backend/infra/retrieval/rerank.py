@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+from agents.prompts import RERANK_SYSTEM, build_rerank_user
 from infra.llm import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 from infra.llm.clients import generate_oneshot_openai, generate_oneshot_claude
 
@@ -25,36 +26,6 @@ class Match:
     score: float
     reason: str
     hit_points: list[str] = field(default_factory=list)
-
-
-# ─────────────────────────────────────────────
-# Prompt
-# ─────────────────────────────────────────────
-
-_RERANK_SYSTEM_PROMPT = (
-    "你是技术应标素材匹配专家。给定一条应标要求与若干候选素材片段，"
-    "你需要为每个素材打 0-10 分（10=高度相关，0=完全无关），"
-    "并给出简短理由与命中的需求要点。\n"
-    "只输出合法 JSON 对象，不要任何额外说明或 markdown 围栏。"
-)
-
-
-def _build_user_prompt(chunks: list[dict], query: str, requirement: str) -> str:
-    lines = []
-    for i, c in enumerate(chunks, start=1):
-        cid = c.get("chunk_id", c.get("id", i))
-        content = (c.get("content") or "")[:600]
-        lines.append(f"[{i}] chunk_id={cid}\n{content}")
-    chunks_block = "\n\n".join(lines)
-
-    return (
-        f"【应标要求】\n{requirement}\n\n"
-        f"【检索查询】\n{query}\n\n"
-        f"【候选素材片段】\n{chunks_block}\n\n"
-        '请输出形如 {"matches":[{"chunk_id":...,"score":0-10,"reason":"...","hit_points":["..."]}]} 的 JSON。'
-        "score 越高越相关，hit_points 列出该素材命中的应标要点；"
-        "无关素材也要列出（score 设低分）。"
-    )
 
 
 # ─────────────────────────────────────────────
@@ -129,7 +100,7 @@ async def llm_rerank(
         logger.warning("llm_rerank 未配置任何 LLM，返回空列表")
         return []
 
-    user_prompt = _build_user_prompt(chunks, query, requirement)
+    user_prompt = build_rerank_user(chunks, query, requirement)
     last_error: Optional[Exception] = None
 
     for i in range(n):
@@ -137,11 +108,11 @@ async def llm_rerank(
         try:
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 raw = await generate_oneshot_openai(
-                    config, _RERANK_SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                    config, RERANK_SYSTEM, user_prompt, max_tokens=2000,
                 )
             else:
                 raw = await generate_oneshot_claude(
-                    config, _RERANK_SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                    config, RERANK_SYSTEM, user_prompt, max_tokens=2000,
                 )
 
             obj = _extract_json_object(raw)

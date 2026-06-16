@@ -13,6 +13,15 @@ import json
 import logging
 from typing import AsyncGenerator, AsyncIterator
 
+from agents.prompts import (
+    LETTER_SYSTEM,
+    OUTLINE_EXTRACT_SYSTEM,
+    SECTION_OUTLINE_SYSTEM,
+    TONE_SYSTEM_PROMPTS,
+    build_letter_user,
+    build_outline_extract_user,
+    build_section_outline_user,
+)
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 from . import clients
@@ -119,40 +128,6 @@ async def _generate_doc_summary(
 # 流式生成（单章节正文）
 # ─────────────────────────────────────────────
 
-_BIDDER_IDENTITY_RULE = (
-    "【应标者身份强约束】"
-    "你的身份是【投标人本身】，正在撰写投标文件正文。"
-    "必须使用第一人称：主语用「我方」「本公司」「我公司」「我单位」，禁止用第三人称（如「投标方」「投标人」「投标单位」）。"
-    "对每条要求做出明确响应或承诺，使用肯定语气（「我方将…」「我方已…」「本公司承诺…」「我方满足…」「我方完全响应…」）。"
-    "禁止使用咨询/分析口吻（如「应当…」「应该…」「建议…」「可以…」「需要…」「投标方需…」），"
-    "禁止笼统讨论该如何应答，禁止任何元层次描述（如「本节将阐述…」「以下从X方面进行说明…」）。"
-)
-
-
-_TONE_SYSTEM_PROMPTS: dict[str, str] = {
-    "official": (
-        "你是投标人正在撰写投标文件的技术应答正文。"
-        "在原文基础上补充背景释义、功能价值和应用场景，采用政企项目方案正式书面文风，"
-        "不篡改原意，不新增无关内容。"
-        "请使用 Markdown 格式输出。\n"
-        + _BIDDER_IDENTITY_RULE
-    ),
-    "tech": (
-        "你是投标人正在撰写投标文件的技术应答正文。"
-        "保留原文逻辑框架，使用准确的技术术语和架构语言，"
-        "突出系统设计、接口规范、性能指标等技术要素，逻辑严密、表述精准。"
-        "请使用 Markdown 格式输出。\n"
-        + _BIDDER_IDENTITY_RULE
-    ),
-    "concise": (
-        "你是投标人正在撰写投标文件的技术应答正文。"
-        "保留原文核心信息，去除冗余修饰，每句话都有实际信息量，"
-        "句式简短清晰，避免空泛表述和套话。"
-        "请使用 Markdown 格式输出。\n"
-        + _BIDDER_IDENTITY_RULE
-    ),
-}
-
 
 async def _stream_generate(
     config: LLMConfig,
@@ -177,7 +152,7 @@ async def _stream_generate(
     Yields:
         str — 每次 yield 一个 token 片段
     """
-    system_prompt = _TONE_SYSTEM_PROMPTS.get(tone, _TONE_SYSTEM_PROMPTS["official"])
+    system_prompt = TONE_SYSTEM_PROMPTS.get(tone, TONE_SYSTEM_PROMPTS["official"])
 
     # 构建 user_prompt：先注入项目整体摘要，再给出章节内容
     parts = []
@@ -402,21 +377,6 @@ def _extract_json_object(text: str) -> dict:
     raise ValueError(f"JSON 对象未闭合：{text[:120]}")
 
 
-_OUTLINE_SYSTEM_PROMPT = (
-    "你是专业的技术应标顾问，擅长从招标技术规范书中提炼响应矩阵。\n"
-    "分析时重点识别：\n"
-    "1. 强制性要求：含'必须''不得''否则废标''★''资格无效''一票否决''强制'等标志\n"
-    "2. 评分标准：含'▲''加X分''满分条件''评分档位''得分'等标志\n"
-    "3. 证明材料：含'提供''证书''合同''证明''原件''复印件''报告'等标志\n"
-    "4. 量化指标：含具体数值、时限、百分比、性能参数、'不低于''不超过''至少'等\n"
-    "5. 否决项和加分项请尽量引用原文表述，保持准确\n"
-    "6. 如果章节内容较短或属于通用说明，相应字段可留空\n"
-    "7. 当用户提供【评分上下文】或【评审上下文】时，请在 requirement 字段末尾用"
-    "「【评分对应】XXX 评分项 X分」「【评审对应】XXX」格式追加对应条款，便于审阅人定位\n"
-    "只输出合法 JSON 对象，不包含任何额外说明或 markdown 代码块。"
-)
-
-
 async def dispatch_outline_json(
     configs: list[LLMConfig],
     rr_start_index: int,
@@ -465,44 +425,12 @@ async def _extract_one_section(
 ) -> dict:
     """单章节提炼 worker：按 (rr_start_index + idx) 起点轮询全部 API，全失败时返回空占位。"""
     title = sec["title"]
-    content = sec.get("content", "") or ""
-    if len(content) > 16000:
-        content = content[:16000] + "..."
-
-    marks = sec.get("special_marks", "") or ""
-    marks_hint = ""
-    if "★" in marks:
-        marks_hint += "\n【注意】本章节标记有★（否决条款），请重点提取 veto_items 和 constraint_level=mandatory。"
-    if "▲" in marks:
-        marks_hint += "\n【注意】本章节标记有▲（加分项），请重点提取 bonus_items 和 score_items。"
-
-    scoring_ctx = (sec.get("scoring_context") or "").strip()
-    evaluation_ctx = (sec.get("evaluation_context") or "").strip()
-    extra_blocks = ""
-    if scoring_ctx:
-        extra_blocks += f"\n\n【评分上下文（来自评分表）】\n{scoring_ctx[:3000]}"
-    if evaluation_ctx:
-        extra_blocks += f"\n\n【评审上下文（来自评审要素）】\n{evaluation_ctx[:3000]}"
-
-    user = (
-        f"以下是招标文件中「{title}」章节的内容：\n\n"
-        f"---\n{content}\n---\n"
-        f"{marks_hint}"
-        f"{extra_blocks}\n\n"
-        "请针对本章节提炼以下八项内容，输出单个 JSON 对象：\n"
-        "- requirement：本章节对投标方的核心技术要求，要求**全面提炼、覆盖原文所有要点、不遗漏关键信息**，"
-        "采用分点列出（用\\n分隔），不限字数；"
-        "若有【评分上下文】或【评审上下文】，请在末尾用「【评分对应】XXX X分」「【评审对应】XXX」追加对应条款\n"
-        "- key_points：站在投标方角度，针对 requirement 中的**每一条要求**给出具体响应建议，"
-        "说明应提供的内容形式（图、文、表、案例、流程图、参数对照表等不限形式），"
-        "**必须覆盖 requirement 的全部要点、不遗漏**；分点列出（用\\n分隔），不限字数\n"
-        "- veto_items：可能导致废标/投标无效的硬性约束，引用原文，多条用\\n分隔，没有则留空\n"
-        "- bonus_items：能提升评分的加分要素，引用原文，多条用\\n分隔，没有则留空\n"
-        "- score_items：关联的评分项及分值，格式如'评分项名称 X分'，多条用\\n分隔，没有则留空\n"
-        "- evidence_required：投标方需提供的证明材料，多条用\\n分隔，没有则留空\n"
-        "- constraint_level：本章节要求的强制性等级，三选一：mandatory（必须响应）/recommended（应当响应）/optional（可选响应）\n"
-        "- indicators：量化指标和时限要求，引用原文中的具体数值，多条用\\n分隔，没有则留空\n\n"
-        '只输出 JSON 对象，格式：{"requirement":"...","key_points":"...","veto_items":"...","bonus_items":"...","score_items":"...","evidence_required":"...","constraint_level":"...","indicators":"..."}'
+    user = build_outline_extract_user(
+        title=title,
+        content=sec.get("content", "") or "",
+        special_marks=sec.get("special_marks", "") or "",
+        scoring_context=sec.get("scoring_context") or "",
+        evaluation_context=sec.get("evaluation_context") or "",
     )
 
     last_error: Exception | None = None
@@ -512,9 +440,9 @@ async def _extract_one_section(
         try:
             logger.info(f"提炼章节「{title}」，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-                result = await clients.generate_oneshot_openai(config, _OUTLINE_SYSTEM_PROMPT, user, max_tokens=4000)
+                result = await clients.generate_oneshot_openai(config, OUTLINE_EXTRACT_SYSTEM, user, max_tokens=4000)
             else:
-                result = await clients.generate_oneshot_claude(config, _OUTLINE_SYSTEM_PROMPT, user, max_tokens=4000)
+                result = await clients.generate_oneshot_claude(config, OUTLINE_EXTRACT_SYSTEM, user, max_tokens=4000)
 
             obj = _extract_json_object(result)
             return {
@@ -548,51 +476,6 @@ async def _extract_one_section(
 # 模块写作大纲（生成正文前的中间步骤，含表格样例与占位符）
 # ─────────────────────────────────────────────
 
-_SECTION_OUTLINE_SYSTEM_PROMPT = (
-    "你是技术应标专家。在撰写正文前，先为指定模块产出一份"
-    "「写作大纲」，用于指导后续正文撰写、保证内容完整不遗漏。\n"
-    "输出 markdown，使用 ## / - / | 表格语法；不要解释、不要寒暄。"
-)
-
-
-def _build_section_outline_prompt(block: dict, extra_context: str) -> str:
-    title = block.get("title") or ""
-    parts = []
-    if block.get("requirement"):
-        parts.append(f"【应标要求】\n{block['requirement']}")
-    if block.get("key_points"):
-        parts.append(f"【应标重点】\n{block['key_points']}")
-    if block.get("veto_items"):
-        parts.append(f"【否决项（必须满足）】\n{block['veto_items']}")
-    if block.get("bonus_items"):
-        parts.append(f"【加分项（尽量覆盖）】\n{block['bonus_items']}")
-    if block.get("score_items"):
-        parts.append(f"【评分项关联】\n{block['score_items']}")
-    if block.get("evidence_required"):
-        parts.append(f"【需提供证明材料】\n{block['evidence_required']}")
-    if block.get("indicators"):
-        parts.append(f"【量化指标/时限】\n{block['indicators']}")
-    ref_part = "\n\n".join(parts) if parts else "（无提炼字段）"
-    ctx_part = f"\n\n【参考素材】\n{extra_context[:6000]}" if extra_context else ""
-
-    return (
-        f"请为「{title}」模块产出**写作大纲**，要求：\n"
-        "1. 逐条对应【应标要求】中的要点，给出具体响应思路（每点 1-2 句）；"
-        "**必须覆盖应标要求里所有要点，不得遗漏**\n"
-        "2. 涉及对比/规格/参数/资质清单等内容，先用 markdown 表格给出**示例表头 + 1-2 行示例数据**，"
-        "正文阶段会在其上补全实际数据\n"
-        "3. 涉及架构图/拓扑图/流程图/部署图/时序图等图形内容，用占位符表达，格式："
-        "`【架构图：xx 系统部署架构】`、`【流程图：xx 业务流程】`\n"
-        "4. 暂时无法直接生成的具体数据/案例/品牌型号/数值，用占位符："
-        "`【待补充：xx】`，便于用户后续自定义补充\n"
-        "5. 必须覆盖所有【否决项】要求；尽量覆盖【加分项】\n"
-        "6. 大纲采用二级标题（##）+ 项目符号（-）+ 表格 的形式，结构清晰\n"
-        "7. **公文展开标记**：如果应标要求或加分项中提到要附「承诺书 / 保证函 / 声明书 / 授权委托书 / 履约保证 / 廉洁承诺」"
-        "等公文，**在大纲对应位置明确写出「展开完整 XX 公文正文」**，提醒正文阶段直接生成可签署文本（含标题、抬头、分点承诺、落款占位），"
-        "不要只用一句话概括\n\n"
-        f"{ref_part}{ctx_part}"
-    )
-
 
 async def generate_section_outline(
     configs: list[LLMConfig],
@@ -608,7 +491,7 @@ async def generate_section_outline(
     if n == 0:
         return ""
 
-    user_prompt = _build_section_outline_prompt(block, extra_context)
+    user_prompt = build_section_outline_user(block, extra_context)
     last_error: Exception | None = None
     for i in range(n):
         config = configs[(rr_start_index + i) % n]
@@ -616,10 +499,10 @@ async def generate_section_outline(
             logger.info(f"为「{block.get('title')}」生成写作大纲，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 return await clients.generate_oneshot_openai(
-                    config, _SECTION_OUTLINE_SYSTEM_PROMPT, user_prompt, max_tokens=2500,
+                    config, SECTION_OUTLINE_SYSTEM, user_prompt, max_tokens=2500,
                 )
             return await clients.generate_oneshot_claude(
-                config, _SECTION_OUTLINE_SYSTEM_PROMPT, user_prompt, max_tokens=2500,
+                config, SECTION_OUTLINE_SYSTEM, user_prompt, max_tokens=2500,
             )
         except Exception as e:
             last_error = e
@@ -639,46 +522,6 @@ async def generate_section_outline(
 from domain.letter_detector import LETTER_KEYWORDS, is_letter_section  # noqa: F401
 
 
-_LETTER_SYSTEM_PROMPT = (
-    "你是技术应标专家，擅长撰写规范的投标承诺书、保证函、声明书等公文。\n"
-    "输出符合中文公文行文规范，结构完整可直接签署。"
-)
-
-
-def _build_letter_prompt(block: dict) -> str:
-    title = block.get("title") or "承诺书"
-    parts = []
-    if block.get("requirement"):
-        parts.append(f"【应答要求】\n{block['requirement']}")
-    if block.get("key_points"):
-        parts.append(f"【应标重点】\n{block['key_points']}")
-    if block.get("veto_items"):
-        parts.append(f"【硬性约束】\n{block['veto_items']}")
-    if block.get("indicators"):
-        parts.append(f"【量化指标】\n{block['indicators']}")
-    ref = "\n\n".join(parts) if parts else ""
-
-    return (
-        f"请基于以下应标背景，为「{title}」撰写一份**完整可签署的公文正文**。\n\n"
-        "格式要求（严格遵循）：\n"
-        f"1. 标题居中：# {title}\n"
-        "2. 抬头（致函对象）：使用占位符 `致：【招标人/采购人名称】`\n"
-        "3. 正文：站在投标方角度，针对应答要求逐条作出明确承诺；语气庄重、表述肯定，"
-        "每条承诺自成一段或以编号「一、二、三」分点\n"
-        "4. 落款（必须包含且使用占位符）：\n"
-        "   - 投标人名称：【公司全称】\n"
-        "   - 法定代表人/授权代表（签字）：【法定代表人】\n"
-        "   - 公章位置：（盖章处）\n"
-        "   - 日期：【签署日期】\n"
-        "5. 输出 markdown，使用 # 标题、段落、序号；不要其他说明文字\n\n"
-        "内容要求：\n"
-        "- 必须覆盖应答要求中的每一项要点，不得遗漏\n"
-        "- 涉及具体数值/工期/质量标准等，引用应答要求中的原文数据\n"
-        "- 保留所有占位符 `【…】` 原样，便于用户后续替换为实际信息\n\n"
-        f"{ref}"
-    )
-
-
 async def generate_letter_content(
     configs: list[LLMConfig],
     rr_start_index: int,
@@ -689,7 +532,7 @@ async def generate_letter_content(
     if n == 0:
         return ""
 
-    user_prompt = _build_letter_prompt(block)
+    user_prompt = build_letter_user(block)
     last_error: Exception | None = None
     for i in range(n):
         config = configs[(rr_start_index + i) % n]
@@ -697,10 +540,10 @@ async def generate_letter_content(
             logger.info(f"为公文章节「{block.get('title')}」生成内容，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 return await clients.generate_oneshot_openai(
-                    config, _LETTER_SYSTEM_PROMPT, user_prompt, max_tokens=2500,
+                    config, LETTER_SYSTEM, user_prompt, max_tokens=2500,
                 )
             return await clients.generate_oneshot_claude(
-                config, _LETTER_SYSTEM_PROMPT, user_prompt, max_tokens=2500,
+                config, LETTER_SYSTEM, user_prompt, max_tokens=2500,
             )
         except Exception as e:
             last_error = e
