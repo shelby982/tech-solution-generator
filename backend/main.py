@@ -169,6 +169,7 @@ frontend_dir = os.path.normpath(frontend_dir)
 _index_path        = os.path.join(frontend_dir, "index.html")
 _projects_path     = os.path.join(frontend_dir, "projects.html")
 _workbench_path    = os.path.join(frontend_dir, "workbench.html")
+_project_init_path = os.path.join(frontend_dir, "project-init.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 
 if os.path.isdir(frontend_dir):
@@ -204,6 +205,13 @@ async def serve_diff_review():
     if os.path.isfile(_diff_review_path):
         return FileResponse(_diff_review_path)
     return JSONResponse(status_code=404, content={"detail": "diff-review.html 不存在"})
+
+
+@app.get("/project-init", include_in_schema=False)
+async def serve_project_init():
+    if os.path.isfile(_project_init_path):
+        return FileResponse(_project_init_path)
+    return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
 
 
 @app.get("/api/readme", include_in_schema=False)
