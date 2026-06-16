@@ -383,10 +383,7 @@ async def _run_review(
             issues=[i.to_dict() for i in finding.issues],
         ))
 
-    return {
-        "stage": "reviewing",
-        "review": {finding_field: findings_dict},
-    }
+    return {"review": {finding_field: findings_dict}}
 
 
 # ─────────────────────────────────────────────

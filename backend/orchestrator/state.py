@@ -14,7 +14,8 @@ state 是易失中间态（每次工作流跑产出的 outline_matrix/matches/fi
 最终 proposal.blocks 完成后由 routes 写回 blocks 表作为正式数据。
 """
 
-from typing import Literal, TypedDict
+import operator
+from typing import Annotated, Literal, TypedDict
 
 
 # ─────────────────────────────────────────────
@@ -80,15 +81,48 @@ UserChoiceLiteral = Literal[
 
 
 # ─────────────────────────────────────────────
+# Reducer：嵌套 dict 浅合并（fan-out 时多节点同时写同一字段）
+# ─────────────────────────────────────────────
+
+def _merge_dict(base: dict | None, patch: dict | None) -> dict:
+    """LangGraph reducer：把 ``patch`` 浅合并进 ``base``，返回新 dict。
+
+    用法：``Annotated[Sub, _merge_dict]``。
+    None / 空 dict 视作空起点；patch 字段覆盖 base 同名字段。
+    嵌套二级 dict 不递归 —— 由调用节点自行准备好合并后的 patch。
+    """
+    if not base and not patch:
+        return {}
+    if not base:
+        return dict(patch or {})
+    if not patch:
+        return dict(base)
+    out = dict(base)
+    out.update(patch)
+    return out
+
+
+# ─────────────────────────────────────────────
 # 顶层 WorkflowState
 # ─────────────────────────────────────────────
 
 class WorkflowState(TypedDict, total=False):
     """LangGraph 编排的全局 state。
 
-    所有字段均为可选（total=False），LangGraph 节点返回的"切片 dict"会浅 merge 到此。
-    嵌套字段（如 spec.outline_matrix）的合并由 reducer / 节点自身负责，TypedDict 只
-    描述结构，不强制 merge 语义。
+    所有字段均为可选（total=False），LangGraph 节点返回的"切片 dict"会按字段
+    reducer 合并到此。
+
+    Reducer 约定：
+    - ``spec`` / ``materials`` / ``proposal`` / ``review`` / ``config`` 用浅 dict merge
+      （``_merge_dict``）。这意味着 fan-out 时王安石 / 包拯并发写 ``review`` 的不同
+      子键不会互相覆盖。
+    - ``errors`` 用 ``operator.add`` 列表追加。
+    - 标量字段（``stage`` / ``user_choice`` / ``cancel_requested`` 等）默认覆盖。
+
+    嵌套二级 dict（如 ``spec.outline_matrix``）的合并由节点自行处理：
+    生成节点产出 ``patch["spec"] = {"outline_matrix": full_dict}`` 后，
+    上一级 ``_merge_dict`` 会保留 spec 中其它字段（如 ``toc``、``doc_summary``），
+    但不会逐 block 合并 ``outline_matrix`` 内部 —— 节点应一次性给出完整字典。
     """
 
     # ── 元信息 ───────────────────────────────────
@@ -99,14 +133,14 @@ class WorkflowState(TypedDict, total=False):
     cancel_requested: bool
 
     # ── 各 agent 产出 ────────────────────────────
-    spec: SpecState
-    materials: MaterialsState
-    proposal: ProposalState
-    review: ReviewState
+    spec: Annotated[SpecState, _merge_dict]
+    materials: Annotated[MaterialsState, _merge_dict]
+    proposal: Annotated[ProposalState, _merge_dict]
+    review: Annotated[ReviewState, _merge_dict]
 
     # ── 用户配置与错误收集 ───────────────────────
-    config: UserConfig
-    errors: list[ErrorEntry]
+    config: Annotated[UserConfig, _merge_dict]
+    errors: Annotated[list[ErrorEntry], operator.add]
 
 
 # ─────────────────────────────────────────────

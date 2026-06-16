@@ -340,7 +340,6 @@ async def test_wang_anshi_review_node_writes_tech_findings():
         state, agent=_ReviewerStub("wang_anshi"), emitter=emitter,
     )
 
-    assert patch["stage"] == "reviewing"
     findings = patch["review"]["tech_findings"]
     assert findings["s1"]["agent"] == "wang_anshi"
     assert findings["s1"]["score"] == 80
