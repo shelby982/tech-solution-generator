@@ -97,6 +97,8 @@ export const api = {
       fetch(`/api/blocks/${blockId}/revisions/${rn}/restore`, {
         method: 'POST',
       }).then(r => r.json()),
+    listByProject: (projectId) =>
+      fetch(`/api/projects/${projectId}/revisions`).then(r => r.json()),
   },
 
   export: {
@@ -110,5 +112,70 @@ export const api = {
       }).then(r => r.json()),
     word: (projectId) =>
       window.open(`/api/projects/${projectId}/export`, '_blank'),
+  },
+
+  workflow: {
+    start: (projectId, config = {}) =>
+      fetch('/api/workflow/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, config }),
+      }).then(r => r.json()),
+
+    resume: (threadId, userChoice = '', edits = {}) =>
+      fetch(`/api/workflow/${threadId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_choice: userChoice, edits }),
+      }).then(r => r.json()),
+
+    regen: (threadId, blockIds) =>
+      fetch(`/api/workflow/${threadId}/regen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block_ids: blockIds }),
+      }).then(r => r.json()),
+
+    abort: (threadId) =>
+      fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
+
+    recover: (threadId) =>
+      fetch(`/api/workflow/${threadId}/recover`, { method: 'POST' }).then(r => r.json()),
+
+    state: (threadId) =>
+      fetch(`/api/workflow/${threadId}/state`).then(r => r.json()),
+
+    // SSE — 用 EventSource。返回 EventSource，调用方可主动 .close()
+    stream: (threadId, handlers = {}) => {
+      const es = new EventSource(`/api/workflow/${threadId}/stream`);
+      const wire = (eventName, handler) => {
+        if (!handler) return;
+        es.addEventListener(eventName, (ev) => {
+          let data = {};
+          try { data = JSON.parse(ev.data); } catch {}
+          handler(data);
+        });
+      };
+      wire('stage_change',     handlers.onStageChange);
+      wire('parse_progress',   handlers.onParseProgress);
+      wire('outline_extract',  handlers.onOutlineExtract);
+      wire('match_progress',   handlers.onMatchProgress);
+      wire('block_start',      handlers.onBlockStart);
+      wire('block_token',      handlers.onBlockToken);
+      wire('block_done',       handlers.onBlockDone);
+      wire('review_finding',   handlers.onReviewFinding);
+      wire('report_ready',     handlers.onReportReady);
+      wire('gate_open',        handlers.onGateOpen);
+      wire('error',            handlers.onError);
+      wire('checkpoint',       handlers.onCheckpoint);
+      wire('done',             handlers.onDone);
+      wire('aborted',          handlers.onAborted);
+      return es;
+    },
+  },
+
+  review: {
+    get: (threadId) =>
+      fetch(`/api/review/${threadId}`).then(r => r.json()),
   },
 };
