@@ -633,20 +633,10 @@ async def generate_section_outline(
 # 承诺书 / 保证函 / 声明书等公文类章节专用生成
 # ─────────────────────────────────────────────
 
-LETTER_KEYWORDS = (
-    "承诺书", "承诺函", "保证书", "保证函", "声明书", "声明函",
-    "履约保证", "廉洁承诺", "廉政承诺", "诚信承诺", "授权委托书",
-    "投标声明", "无违法承诺", "技术承诺", "服务承诺", "保密承诺",
-    "质量承诺", "进度承诺", "供货承诺", "售后服务承诺",
-)
-
-
-def is_letter_section(title: str) -> bool:
-    """根据章节标题判断是否为承诺书/保证函/声明书等公文类内容。"""
-    if not title:
-        return False
-    t = title.strip()
-    return any(kw in t for kw in LETTER_KEYWORDS)
+# Phase 2.5 起，公文识别的真实定义在 backend/domain/letter_detector.py。
+# 此处保留 re-export 以兼容仍按旧路径 `from infra.llm.dispatcher import is_letter_section`
+# 的调用点；Phase 7 服务层删除时一并清理 re-export。
+from domain.letter_detector import LETTER_KEYWORDS, is_letter_section  # noqa: F401
 
 
 _LETTER_SYSTEM_PROMPT = (
