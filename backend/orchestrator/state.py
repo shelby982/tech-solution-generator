@@ -86,7 +86,7 @@ UserChoiceLiteral = Literal[
 class WorkflowState(TypedDict, total=False):
     """LangGraph 编排的全局 state。
 
-    所有字段均为可选（total=False），LangGraph 节点返回的“切片 dict”会浅 merge 到此。
+    所有字段均为可选（total=False），LangGraph 节点返回的"切片 dict"会浅 merge 到此。
     嵌套字段（如 spec.outline_matrix）的合并由 reducer / 节点自身负责，TypedDict 只
     描述结构，不强制 merge 语义。
     """
@@ -114,7 +114,7 @@ class WorkflowState(TypedDict, total=False):
 # ─────────────────────────────────────────────
 
 def merge_state(base: dict, patch: dict) -> dict:
-    """对两个 state dict 做“顶层 + 一级嵌套字段 dict”的浅 merge。
+    """对两个 state dict 做"顶层 + 一级嵌套字段 dict"的浅 merge。
 
     规则：
     - 顶层 key 在 patch 中存在则覆盖 / 合并
@@ -122,9 +122,17 @@ def merge_state(base: dict, patch: dict) -> dict:
       （以 patch 优先），其它顶层字段（含 list 类）直接以 patch 覆盖
     - errors 列表会做 append（base.errors + patch.errors），避免历史错误丢失
 
+    嵌套不递归：spec.outline_matrix 这种二级 dict 会被 patch 整体替换，不会
+    逐 block_id 合并。如需逐 block 合并，由调用方先准备好合并后的 patch。
+
     本函数不替代 LangGraph 自身的 reducer，仅用于：
     - 测试时拼装 expected state
     - routes 层在 update_state 前合并外部用户输入
+
+    特别提醒：errors append 仅在本 helper 内生效；LangGraph 节点之间的 state
+    merge 默认是覆盖式，节点返回 errors 列表不会自动 append。如需在
+    LangGraph 内做 append 合并，需用 Annotated[list, operator.add] 等
+    reducer 显式声明（Task 4.5 接入 graph 时再处理）。
     """
     result = dict(base)
     nested_keys = {"spec", "materials", "proposal", "review", "config"}
