@@ -4,128 +4,175 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 材料撰写</title>
-    <link rel="stylesheet" href="./assets/styles.css" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260605a" />
     <style>
       /* Outline pane */
-      .outline-pane {
+      .workspace-shell .outline-pane {
         width: 240px;
         flex: 0 0 240px;
         background: var(--bg);
         border-right: 1px solid var(--line);
         display: flex;
         flex-direction: column;
-        height: calc(100vh - 64px);
+        align-self: stretch;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
         overflow: hidden;
+        position: relative !important;
       }
-      .outline-pane-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--line);
-        background: var(--bg);
-        flex: 0 0 auto;
-      }
-      .outline-pane-header h3 {
-        margin: 0;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--ink-4);
-        font-family: "SF Mono", ui-monospace, monospace;
-      }
-      .outline-progress-badge {
-        font-size: 10.5px;
-        font-weight: 600;
-        color: var(--ink-3);
-        background: var(--surface-2);
-        border: 1px solid var(--line);
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-family: "SF Mono", ui-monospace, monospace;
-        font-variant-numeric: tabular-nums;
-      }
-      .outline-progress-footer {
-        flex: 0 0 auto;
-        padding: 10px 14px 14px;
-        border-top: 1px solid var(--line-2);
-        background: var(--surface-2);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .outline-progress-label {
-        display: flex;
-        justify-content: space-between;
-        font-size: 11px;
-        color: var(--ink-3);
-        font-variant-numeric: tabular-nums;
-      }
-      .outline-progress-track {
-        height: 4px;
-        background: var(--line-2);
-        border-radius: 999px;
-        overflow: hidden;
-      }
-      .outline-progress-bar {
-        height: 100%;
-        background: var(--ink);
-        border-radius: 999px;
-        width: 0%;
-        transition: width 0.3s;
-      }
-      .doc-outline {
-        flex: 1;
+      .workspace-shell .doc-outline {
+        flex: 1 1 0;
+        display: block;
+        min-height: 0;
+        max-height: none;
         overflow-y: auto;
-        padding: 6px 0;
+        padding: 10px 0 12px;
       }
-      .doc-outline-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        min-height: 32px;
-        padding: 6px 12px;
-        border: 0;
-        border-left: 2px solid transparent;
-        background: transparent;
-        color: var(--ink-3);
-        font: inherit;
-        font-size: 12.5px;
-        line-height: 1.35;
-        text-align: left;
-        cursor: pointer;
+
+      .outline-group { display: flex; flex-direction: column; }
+      .outline-group.collapsed .outline-chevron { transform: rotate(-90deg); }
+      .outline-group.collapsed .outline-children { display: none; }
+
+      /* heading 行 */
+      .doc-outline-heading {
+        display: flex; align-items: center; gap: 4px;
+        width: 100%; min-height: 36px;
+        padding: 6px 14px 6px 8px;
+        border: 0; border-left: 2px solid transparent;
+        background: transparent; color: var(--ink); font: inherit;
+        font-size: 14px; font-weight: 700;
+        line-height: 1.3; text-align: left; cursor: pointer;
         transition: background 0.1s;
       }
-      .doc-outline-item.sub {
-        font-size: 12px;
-        color: var(--ink-4);
-      }
-      .doc-outline-item:hover {
-        background: var(--bg-2);
-        color: var(--ink-2);
-      }
-      .doc-outline-item.active {
-        background: var(--accent-soft);
-        border-left-color: var(--accent);
-        color: var(--ink);
-        font-weight: 700;
-      }
-      .outline-tree-node { display: flex; flex-direction: column; }
-      .outline-children { overflow: hidden; }
-      .outline-children[hidden] { display: none; }
-      .outline-chevron, .outline-dot {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 14px;
-        color: var(--ink-4);
+      .doc-outline-heading:hover { background: var(--bg-2); }
+
+      .outline-chevron {
+        flex: 0 0 16px; height: 16px;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: var(--ink-4); font-size: 11px;
         transition: transform 0.15s;
       }
-      .doc-outline-item.collapsed .outline-chevron { transform: rotate(-90deg); }
+
+      /* content 行 */
+      .doc-outline-item {
+        display: flex; align-items: center;
+        width: 100%; min-height: 34px;
+        padding: 5px 12px 5px 28px;
+        border: 0; border-left: 2px solid transparent;
+        background: transparent; color: var(--ink-3); font: inherit;
+        font-size: 13px; line-height: 1.35;
+        text-align: left; cursor: pointer; transition: background 0.1s;
+      }
+      .doc-outline-item.level-2 { padding-left: 28px; }
+      .doc-outline-item.level-3 { padding-left: 44px; }
+      .doc-outline-item.level-4 { padding-left: 60px; font-size: 12.5px; color: var(--muted); }
+      .doc-outline-item:hover { background: var(--bg-2); color: var(--ink-2); }
+      .doc-outline-item.active {
+        background: #eff6ff;
+        border-left-color: #2563eb;
+        color: var(--ink); font-weight: 600;
+      }
+
+      .outline-item-bullet {
+        flex: 0 0 5px; height: 5px; width: 5px;
+        border-radius: 50%; background: #9ca3af;
+        margin-right: 9px; flex-shrink: 0;
+      }
       .outline-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .outline-item-dot {
+        flex: 0 0 9px; height: 9px; width: 9px;
+        border-radius: 50%; background: #d1d5db; margin-left: 8px;
+      }
+      .outline-item-dot.done    { background: #16a34a; }
+      .outline-item-dot.writing { background: #d97706; }
+
+      /* 顶部 header */
+      .outline-pane-header {
+        display: flex; align-items: center; gap: 8px;
+        padding: 0 14px; height: 48px;
+        border-bottom: 1px solid var(--line); flex: 0 0 auto;
+      }
+      .outline-pane-header h3 {
+        margin: 0; font-size: 13px; font-weight: 700; color: var(--ink); flex: none;
+      }
+      .outline-progress-badge {
+        font-size: 11.5px; font-weight: 600; color: var(--ink-3);
+        background: var(--bg-2); border: 1px solid var(--line);
+        padding: 2px 9px; border-radius: 999px;
+        font-variant-numeric: tabular-nums; flex: none;
+      }
+      .outline-search-btn {
+        margin-left: auto; background: none; border: none; cursor: pointer;
+        color: var(--ink-4); padding: 4px; border-radius: 6px;
+        display: flex; align-items: center; flex: none;
+      }
+      .outline-search-btn:hover { color: var(--ink); background: var(--bg-2); }
+
+      /* 底部进度（固定在大纲面板底部） */
+      .outline-progress-wrap {
+        flex: 0 0 auto;
+        background: var(--bg);
+        border-top: 1px solid var(--line);
+        z-index: 2;
+      }
+      .outline-progress-footer {
+        padding: 10px 14px 4px;
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      .outline-progress-label { font-size: 11.5px; color: var(--ink-4); }
+      .outline-progress-count { font-size: 11.5px; color: var(--ink-3); font-weight: 600; font-variant-numeric: tabular-nums; }
+      .outline-progress-track {
+        height: 3px; background: var(--line); margin: 4px 14px 12px;
+        border-radius: 999px; overflow: hidden; flex: 0 0 auto;
+      }
+      .outline-progress-bar {
+        height: 100%; background: #16a34a;
+        border-radius: 999px; width: 0%; transition: width 0.3s;
+      }
+      .outline-batch-gen-btn {
+        display: block;
+        width: calc(100% - 28px);
+        margin: 0 14px 10px;
+        padding: 6px 0;
+        border: 1px solid var(--accent, #2563eb);
+        border-radius: 6px;
+        background: var(--accent, #2563eb);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        text-align: center;
+      }
+      .outline-batch-gen-btn:hover { opacity: 0.88; }
+      .outline-batch-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .outline-batch-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 14px 10px;
+        font-size: 11px;
+        color: var(--ink-3);
+      }
+      .outline-batch-status.hidden { display: none; }
+      .outline-batch-current {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .outline-batch-cancel {
+        flex: none;
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--ink-3);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .outline-batch-cancel:hover { color: var(--ink); border-color: var(--ink-3); }
+
 
       /* Editor pane */
       .editor-pane {
@@ -192,6 +239,11 @@
         grid-template-columns: repeat(4, 1fr);
         gap: 8px;
       }
+      .ref-cards-col {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
       .ref-card {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -242,16 +294,19 @@
       .ref-card.open .ref-card-chevron { transform: rotate(0deg); }
       .ref-card-chevron { transform: rotate(-90deg); }
       .ref-card-body {
-        padding: 8px 10px;
+        padding: 6px 10px;
         font-size: 12px;
         color: var(--ink-2);
-        line-height: 1.6;
-        max-height: 160px;
-        overflow-y: auto;
-        display: none;
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        cursor: pointer;
         border-top: 1px solid var(--ref-card-border, var(--line-2));
       }
-      .ref-card.open .ref-card-body { display: block; }
+      .ref-card-body:hover { color: var(--ink); }
+      .ref-card-body:empty { display: none; }
       .ref-bullet-list {
         margin: 0; padding: 0; list-style: none;
         display: flex; flex-direction: column; gap: 6px;
@@ -530,6 +585,15 @@
         font-weight: 700;
         color: var(--ink);
       }
+      .ced-page-hint {
+        font-size: 11.5px;
+        color: var(--ink-3);
+        font-weight: 500;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: oklch(0.96 0.025 250);
+        border: 1px solid oklch(0.88 0.05 250);
+      }
       .ced-auto-badge {
         font-size: 11px;
         color: var(--ink-3);
@@ -554,6 +618,7 @@
         gap: 10px;
       }
       .ced-gen-banner.visible { display: flex; }
+      .ced-gen-banner.visible + #ced-gen-idle { display: none !important; }
       .ced-gen-spinner {
         width: 11px; height: 11px;
         border-radius: 50%;
@@ -632,6 +697,66 @@
       }
       .ced-fmt-label-btn:hover { background: var(--line-2); }
       .ced-divider { width: 1px; height: 18px; background: var(--line); flex: none; }
+      .ced-mode-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 0 10px; height: 26px;
+        border-radius: 5px;
+        display: inline-flex; align-items: center;
+        font-size: 11.5px; font-weight: 600;
+        color: var(--ink-3);
+      }
+      .ced-mode-btn:hover { background: var(--line-2); color: var(--ink-2); }
+      .ced-mode-btn.active { background: var(--surface); color: oklch(0.55 0.16 250); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+      .ced-preview {
+        flex: 1; overflow-y: auto;
+        padding: 18px 22px;
+        font-size: 14px; line-height: 1.7; color: var(--ink);
+      }
+      .ced-preview h1, .ced-preview h2, .ced-preview h3 { margin: 18px 0 10px; line-height: 1.4; }
+      .ced-preview h1 { font-size: 20px; }
+      .ced-preview h2 { font-size: 17px; }
+      .ced-preview h3 { font-size: 15px; }
+      .ced-preview p { margin: 8px 0; }
+      .ced-preview ul, .ced-preview ol { padding-left: 22px; margin: 8px 0; }
+      .ced-preview li { margin: 4px 0; }
+      .ced-preview table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+      .ced-preview th, .ced-preview td { border: 1px solid var(--line); padding: 6px 10px; }
+      .ced-preview th { background: var(--surface-2); font-weight: 600; }
+      .ced-preview blockquote { border-left: 3px solid var(--line-2); padding: 4px 12px; color: var(--ink-3); margin: 10px 0; }
+      .ced-preview code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
+      .ced-ph-img {
+        display: block; margin: 14px auto;
+        width: 360px; height: 220px;
+        border: 1.5px dashed oklch(0.7 0.05 250);
+        border-radius: 6px;
+        background: oklch(0.96 0.01 250);
+        display: grid; place-items: center;
+        color: oklch(0.5 0.1 250);
+        font-size: 13px; font-weight: 500;
+        text-align: center; padding: 12px;
+      }
+      .ced-ph-img-caption { display: block; text-align: center; font-size: 12px; color: var(--ink-3); margin-top: -6px; margin-bottom: 14px; }
+      .ced-ph-todo {
+        display: inline-block;
+        background: oklch(0.97 0.05 90);
+        border: 1px solid oklch(0.85 0.1 90);
+        color: oklch(0.45 0.12 70);
+        padding: 1px 8px;
+        border-radius: 4px;
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+      .ced-ph-var {
+        display: inline-block;
+        background: oklch(0.96 0.04 250);
+        border: 1px solid oklch(0.85 0.08 250);
+        color: oklch(0.45 0.16 250);
+        padding: 1px 8px;
+        border-radius: 4px;
+        font-size: 12.5px;
+        font-weight: 500;
+      }
       .ced-wordlimit-wrap {
         display: inline-flex;
         align-items: center;
@@ -783,9 +908,7 @@
         flex: 0 0 300px;
         background: var(--panel-soft);
         border-left: 1px solid var(--line);
-        display: flex;
-        flex-direction: column;
-        height: calc(100vh - 64px);
+        min-height: 0;
         overflow-y: auto;
         overflow-x: hidden;
       }
@@ -967,7 +1090,722 @@
         background: var(--line);
         flex: none;
       }
+
+      /* ── 匹配素材面板 Tab ── */
+      .mat-pane-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        flex: 0 0 auto;
+      }
+      .mat-tab {
+        all: unset;
+        flex: 1;
+        cursor: pointer;
+        padding: 11px 8px;
+        text-align: center;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--ink-3);
+        border-bottom: 2px solid transparent;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: color 0.12s, border-color 0.12s;
+      }
+      .mat-tab:hover { color: var(--ink-2); }
+      .mat-tab.active {
+        color: var(--ink);
+        border-bottom-color: var(--ink);
+      }
+      .mat-tab-badge {
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--ink-3);
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-family: 'SF Mono', ui-monospace, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      .mat-tab.active .mat-tab-badge {
+        color: var(--ink);
+        background: var(--bg-2);
+      }
+      .mat-tab-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .mat-tab-panel[hidden] { display: none; }
+      .mat-panel-hint {
+        padding: 7px 12px;
+        font-size: 11px;
+        color: var(--ink-4);
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--line-2);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+      .mat-panel-hint > span:first-child { flex: 1; }
+      .mat-refresh-btn {
+        all: unset;
+        cursor: pointer;
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        display: grid;
+        place-items: center;
+        color: var(--ink-3);
+        flex: none;
+      }
+      .mat-refresh-btn:hover { color: var(--ink); background: var(--surface); }
+      .mat-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+
+      /* ── 右侧两大模块 ── */
+      .context-module {
+        display: flex;
+        flex-direction: column;
+        border-bottom: 1px solid var(--line);
+      }
+      .context-module-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 14px 9px;
+        border-bottom: 1px solid var(--line-2);
+        background: var(--surface);
+        flex: 0 0 auto;
+      }
+      .context-module-title {
+        margin: 0;
+        font-size: 12.5px;
+        font-weight: 700;
+        color: var(--ink);
+        letter-spacing: 0.3px;
+      }
+
+      /* ── 匹配素材列表 ── */
+      .matched-list {
+        flex: 1;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .matched-empty {
+        padding: 28px 14px;
+        text-align: center;
+        color: var(--ink-4);
+        font-size: 12.5px;
+        line-height: 1.6;
+      }
+      .matched-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        overflow: hidden;
+        transition: border-color 0.12s;
+      }
+      .matched-card:hover { border-color: var(--ink-4); }
+      .matched-card-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 11px 6px;
+      }
+      .matched-card-ext {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: .5px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        flex: none;
+      }
+      .matched-card-name {
+        flex: 1;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .matched-card-chunk {
+        font-size: 10px;
+        font-family: 'SF Mono', ui-monospace, monospace;
+        color: var(--ink-4);
+        flex: none;
+      }
+      .matched-card-body {
+        padding: 0 11px 9px;
+        font-size: 12px;
+        color: var(--ink-2);
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .matched-card-body.collapsed {
+        max-height: 56px;
+        overflow: hidden;
+        position: relative;
+      }
+      .matched-card-body.collapsed::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 22px;
+        background: linear-gradient(180deg, transparent, var(--surface));
+        pointer-events: none;
+      }
+      .matched-card-toggle {
+        all: unset;
+        cursor: pointer;
+        padding: 5px 11px 9px;
+        font-size: 11px;
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .matched-card-score {
+        font-size: 9.5px;
+        font-weight: 700;
+        font-family: 'SF Mono', ui-monospace, monospace;
+        color: var(--ink-4);
+        margin-left: auto;
+        flex: none;
+      }
+
+      /* ── 卡片操作按钮 ── */
+      .matched-card-actions {
+        display: flex;
+        gap: 4px;
+        padding: 0 11px 9px;
+        flex-wrap: wrap;
+      }
+      .matched-card-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 4px 9px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink-3);
+        background: var(--bg-2);
+        border: 1px solid var(--line);
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        transition: background 0.1s, color 0.1s;
+      }
+      .matched-card-btn:hover { color: var(--ink); background: var(--surface-2); }
+      .matched-card-btn.cite { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
+      .matched-card-btn.cite:hover { background: #dbeafe; }
+      .matched-card-btn.cite.active {
+        background: #2563eb; color: #fff; border-color: #2563eb;
+      }
+      .matched-card-btn.save { color: #fff; background: var(--accent); border-color: var(--accent); }
+      .matched-card.editing { border-color: var(--accent); }
+      .matched-card-body[contenteditable="true"] {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+        background: #fafafa;
+        max-height: none !important;
+        cursor: text;
+      }
+      .matched-card-body[contenteditable="true"]::after { display: none !important; }
+
+      /* ── 已引用状态条 ── */
+      .cite-bar {
+        flex: 0 0 auto;
+        margin: 8px 10px 0;
+        padding: 8px 11px;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        display: none;
+      }
+      .cite-bar.visible { display: block; }
+      .cite-bar-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .cite-bar-icon {
+        width: 14px; height: 14px;
+        border-radius: 4px;
+        background: #2563eb;
+        color: #fff;
+        display: grid; place-items: center;
+        font-size: 10px;
+        flex: none;
+      }
+      .cite-bar-label {
+        flex: 1;
+        font-size: 12px;
+        font-weight: 600;
+        color: #1e3a8a;
+      }
+      .cite-bar-chevron {
+        color: #2563eb;
+        transition: transform 0.15s;
+        font-size: 11px;
+      }
+      .cite-bar.expanded .cite-bar-chevron { transform: rotate(180deg); }
+      .cite-bar-list {
+        display: none;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #bfdbfe;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .cite-bar.expanded .cite-bar-list { display: flex; }
+      .cite-bar-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--ink-2);
+        line-height: 1.5;
+      }
+      .cite-bar-item-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .cite-bar-item-remove {
+        all: unset;
+        cursor: pointer;
+        color: #dc2626;
+        font-size: 14px;
+        flex: none;
+        line-height: 1;
+        padding: 0 2px;
+      }
+
+      /* ── 编辑弹窗 ── */
+      .edit-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.35);
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+      }
+      .edit-modal {
+        width: min(800px, 92vw);
+        max-height: 80vh;
+        background: var(--surface, #fff);
+        border-radius: 14px;
+        box-shadow: 0 20px 60px -20px rgba(0,0,0,0.35);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .edit-modal-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2, #f9f9f7);
+      }
+      .edit-modal-title {
+        flex: 1;
+        font-size: 13.5px;
+        font-weight: 700;
+        color: var(--ink);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .edit-modal-close {
+        all: unset;
+        cursor: pointer;
+        width: 26px; height: 26px;
+        border-radius: 6px;
+        display: grid; place-items: center;
+        font-size: 18px;
+        color: var(--ink-3);
+        flex: none;
+      }
+      .edit-modal-close:hover { background: var(--bg-2); color: var(--ink); }
+      .edit-modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 18px 20px;
+        font-size: 14px;
+        color: var(--ink);
+        line-height: 1.8;
+        white-space: pre-wrap;
+        word-break: break-word;
+        outline: none;
+        min-height: 160px;
+      }
+      .edit-modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 18px;
+        border-top: 1px solid var(--line);
+        background: var(--surface-2, #f9f9f7);
+      }
+      .edit-modal-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 7px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background 0.1s;
+      }
+      .edit-modal-btn.cancel {
+        color: var(--ink-2);
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .edit-modal-btn.cancel:hover { background: var(--bg-2); }
+      .edit-modal-btn.save {
+        color: #fff;
+        background: var(--accent, #2563eb);
+      }
+      .edit-modal-btn.save:hover { opacity: 0.88; }
+      .edit-modal-btn.save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      /* ── 顶部提炼进度条 ── */
+      .extract-action-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 7px 18px;
+        background: var(--surface-2, #f8fafc);
+        border-bottom: 1px solid var(--line);
+        font-size: 12.5px;
+      }
+      .extract-action-bar.hidden { display: none; }
+      .extract-action-label { color: var(--ink-3); font-weight: 600; }
+      .extract-action-btn {
+        padding: 4px 14px;
+        border: 1px solid var(--accent, #2563eb);
+        border-radius: 6px;
+        background: var(--accent, #2563eb);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .extract-action-btn:hover { opacity: 0.88; }
+      .extract-progress-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        background: linear-gradient(90deg, oklch(0.97 0.02 256), oklch(0.98 0.01 256));
+        border-bottom: 1px solid oklch(0.88 0.05 256);
+        font-size: 12px;
+        color: oklch(0.38 0.13 256);
+      }
+      .extract-progress-bar.hidden { display: none; }
+      .extract-progress-spinner {
+        width: 12px; height: 12px;
+        border: 2px solid oklch(0.88 0.05 256);
+        border-top-color: var(--accent, #2563eb);
+        border-radius: 50%;
+        animation: spin 0.85s linear infinite;
+        flex: none;
+      }
+      .extract-progress-label {
+        font-weight: 600;
+        flex: none;
+      }
+      .extract-progress-track {
+        flex: 1;
+        min-width: 80px;
+        height: 4px;
+        background: oklch(0.88 0.05 256);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .extract-progress-fill {
+        height: 100%;
+        background: var(--accent, #2563eb);
+        border-radius: 999px;
+        width: 0%;
+        transition: width 0.3s;
+      }
+      .extract-progress-pct {
+        flex: none;
+        font-variant-numeric: tabular-nums;
+        color: oklch(0.45 0.1 256);
+      }
+      .extract-progress-stage {
+        flex: none;
+        color: oklch(0.45 0.1 256);
+        font-variant-numeric: tabular-nums;
+      }
+        font-family: 'SF Mono', ui-monospace, monospace;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        flex: none;
+      }
+      .extract-cancel-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--ink-2);
+        border: 1px solid var(--line);
+        background: var(--surface);
+        flex: none;
+        transition: background 0.1s;
+      }
+      .extract-cancel-btn:hover { background: var(--bg-2); color: var(--ink); }
+      .extract-cancel-btn.hidden { display: none; }
+      .extract-retry-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent, #2563eb);
+        flex: none;
+        transition: opacity 0.1s;
+      }
+      .extract-retry-btn:hover { opacity: 0.88; }
+      .extract-retry-btn.hidden { display: none; }
+      .extract-progress-bar.error {
+        background: #fff8f7;
+        border-bottom-color: #ffd5d0;
+        color: #7a2020;
+      }
+      .extract-progress-bar.cancelled .extract-progress-spinner { display: none; }
+
+      /* 模型选择器 */
+      .model-selector-wrap { position: relative; }
+      .model-selector-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 5px 11px;
+        border: 1.5px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        font: inherit; font-size: 12.5px; font-weight: 600;
+        cursor: pointer; white-space: nowrap;
+      }
+      .model-selector-btn:hover { border-color: var(--muted); }
+      .model-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text); flex: none; }
+      .model-dropdown {
+        display: none; position: fixed;
+        min-width: 200px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: 0 4px 16px rgba(0,0,0,.1);
+        overflow: hidden; z-index: 300;
+      }
+      .model-dropdown.open { display: block; }
+      .model-dropdown-header { padding: 10px 14px 6px; font-size: 11.5px; font-weight: 700; color: var(--muted); border-bottom: 1px solid var(--line); }
+      .model-list { padding: 6px; }
+      .model-option { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+      .model-option:hover { background: var(--bg-2); }
+      .model-option.selected { background: var(--accent-soft, #eff6ff); }
+      .model-option-check { color: var(--accent, #2563eb); font-size: 13px; }
+      .model-dropdown-footer { border-top: 1px solid var(--line); padding: 6px; }
+      .btn-add-config { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--muted); background: none; border: none; width: 100%; font: inherit; }
+      .btn-add-config:hover { background: var(--bg-2); }
+      .btn-add-config-left { display: flex; align-items: center; gap: 6px; }
+      .btn-add-config-plus { font-size: 16px; line-height: 1; }
+      /* API 配置弹窗 */
+      .api-modal-backdrop {
+        display: none; position: fixed; inset: 0;
+        background: rgba(15,23,42,0.45); backdrop-filter: blur(4px);
+        z-index: 200; align-items: center; justify-content: center;
+      }
+      .api-modal-backdrop.open { display: flex; }
+      .api-modal-box {
+        background: var(--panel); border-radius: 20px;
+        box-shadow: 0 30px 60px rgba(15,23,42,.22);
+        width: 480px; max-width: calc(100vw - 48px); overflow: hidden;
+      }
+      .api-modal-header {
+        padding: 18px 22px 14px; border-bottom: 1px solid var(--line);
+        display: flex; align-items: flex-start; justify-content: space-between;
+      }
+      .api-modal-header h2 { margin: 0; font-size: 16px; font-weight: 700; }
+      .api-modal-header p  { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+      .api-modal-close { all: unset; cursor: pointer; padding: 4px 6px; border-radius: 6px; color: var(--muted-2); font-size: 14px; }
+      .api-modal-close:hover { background: var(--bg-2); }
+      .api-modal-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+      .api-field-label { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+      .api-field-hint  { font-size: 11px; color: var(--muted-2); margin-top: 4px; }
+      .api-input {
+        width: 100%; box-sizing: border-box; padding: 9px 11px;
+        background: var(--panel-soft, #f8fafc); border: 1.5px solid var(--line);
+        border-radius: 9px; font: inherit; font-size: 13px; color: var(--text); outline: none;
+      }
+      .api-input:focus { border-color: var(--accent, #2563eb); }
+      .api-input.mono { font-family: 'SF Mono', ui-monospace, monospace; font-size: 12.5px; }
+      .provider-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+      .provider-chip {
+        padding: 5px 12px; border-radius: 999px; border: 1.5px solid var(--line);
+        background: var(--panel); cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted);
+      }
+      .provider-chip.active { border-color: var(--accent, #2563eb); background: var(--accent-soft, #eff6ff); color: var(--accent, #2563eb); font-weight: 600; }
+      .key-wrap { position: relative; }
+      .key-toggle { all: unset; cursor: pointer; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted-2); padding: 3px 6px; border-radius: 4px; }
+      .key-toggle:hover { color: var(--text); background: var(--bg-2); }
+      .api-modal-footer {
+        padding: 13px 22px; border-top: 1px solid var(--line);
+        background: var(--panel-soft, #f8fafc);
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .btn-test-conn {
+        all: unset; cursor: pointer; padding: 8px 12px; border-radius: 8px;
+        font: inherit; font-size: 12.5px; color: var(--muted);
+        display: flex; align-items: center; gap: 5px;
+        border: 1px solid var(--line); background: var(--panel);
+      }
+      .btn-test-conn:hover { border-color: var(--muted); color: var(--text); }
+      .btn-test-conn.testing { opacity: 0.6; pointer-events: none; }
+      .test-status { font-size: 12px; }
+      .test-status.ok   { color: #16a34a; }
+      .test-status.fail { color: #dc2626; }
+      .api-footer-right { display: flex; gap: 8px; }
+      .btn-api-cancel { padding: 9px 16px; border-radius: 9px; border: 1.5px solid var(--line); background: var(--panel); font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+      .btn-api-save { padding: 9px 16px; border-radius: 9px; border: none; background: var(--text); font: inherit; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; }
+      .btn-api-save:disabled { opacity: 0.45; cursor: default; }
+
+      /* 内联模型指示器 */
+      .inline-model-tag {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 2px 8px; border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft, #f8fafc);
+        font-size: 11px; color: var(--muted);
+        cursor: pointer; white-space: nowrap;
+        transition: border-color .15s;
+      }
+      .inline-model-tag:hover { border-color: var(--accent, #2563eb); color: var(--accent, #2563eb); }
+      .inline-model-tag .model-dot-sm { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+
+      /* 素材列表弹窗 */
+      .mat-modal-backdrop {
+        display: none; position: fixed; inset: 0;
+        background: rgba(15,23,42,0.35); backdrop-filter: blur(2px);
+        z-index: 250; align-items: center; justify-content: center;
+      }
+      .mat-modal-backdrop.open { display: flex; }
+      .mat-modal-box {
+        background: var(--panel); border-radius: 16px;
+        box-shadow: 0 20px 40px rgba(15,23,42,.18);
+        width: 420px; max-width: calc(100vw - 48px); max-height: 70vh;
+        display: flex; flex-direction: column; overflow: hidden;
+      }
+      .mat-modal-header {
+        padding: 16px 20px 12px; border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      .mat-modal-header h3 { margin: 0; font-size: 15px; font-weight: 700; }
+      .mat-modal-body { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+      .mat-modal-footer { padding: 12px 16px; border-top: 1px solid var(--line); }
+      .mat-modal-item {
+        padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .mat-modal-item-ext {
+        font-size: 9px; font-weight: 700; letter-spacing: .5px;
+        padding: 2px 6px; border-radius: 4px; flex: none;
+      }
+      .mat-modal-item-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mat-modal-item-size { font-size: 11px; color: var(--muted); flex: none; }
+
+      /* Prompt 预览弹窗 */
+      .prompt-modal-backdrop {
+        display: none; position: fixed; inset: 0;
+        background: rgba(15,23,42,0.4); backdrop-filter: blur(3px);
+        z-index: 260; align-items: center; justify-content: center;
+      }
+      .prompt-modal-backdrop.open { display: flex; }
+      .prompt-modal-box {
+        background: var(--panel); border-radius: 18px;
+        box-shadow: 0 24px 48px rgba(15,23,42,.2);
+        width: 860px; max-width: calc(100vw - 40px); height: 75vh;
+        display: flex; flex-direction: column; overflow: hidden;
+      }
+      .prompt-modal-header {
+        padding: 16px 22px 12px; border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; justify-content: space-between;
+        flex: 0 0 auto;
+      }
+      .prompt-modal-header h3 { margin: 0; font-size: 15px; font-weight: 700; }
+      .prompt-modal-content {
+        flex: 1; display: flex; min-height: 0; overflow: hidden;
+      }
+      .prompt-modal-nav {
+        width: 180px; flex: 0 0 180px; border-right: 1px solid var(--line);
+        overflow-y: auto; padding: 10px 0;
+        background: var(--bg-2, #f8fafc);
+      }
+      .prompt-nav-item {
+        display: flex; align-items: center; gap: 6px;
+        padding: 9px 16px; cursor: pointer; font-size: 13px;
+        color: var(--ink-2); border-left: 3px solid transparent;
+        transition: all .1s;
+      }
+      .prompt-nav-item:hover { background: var(--surface-2, #f1f5f9); }
+      .prompt-nav-item.active {
+        background: var(--accent-soft, #eff6ff);
+        color: var(--accent, #2563eb);
+        border-left-color: var(--accent, #2563eb);
+        font-weight: 600;
+      }
+      .prompt-nav-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+      .prompt-modal-editor {
+        flex: 1; overflow-y: auto; padding: 20px 24px;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .prompt-editor-title {
+        font-size: 13px; font-weight: 700; color: var(--ink);
+        margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;
+      }
+      .prompt-editor-tag {
+        font-size: 10px; padding: 2px 7px; border-radius: 4px;
+        background: var(--accent-soft, #eff6ff); color: var(--accent, #2563eb);
+        font-weight: 600;
+      }
+      .prompt-editor-textarea {
+        width: 100%; flex: 1; min-height: 120px; border: 1px solid var(--line);
+        border-radius: 10px; padding: 12px 14px; font: inherit; font-size: 13px;
+        line-height: 1.8; resize: none; outline: none; box-sizing: border-box;
+        background: var(--panel); color: var(--ink);
+      }
+      .prompt-editor-textarea:focus { border-color: var(--accent); }
+      .prompt-modal-footer { padding: 12px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 10px; flex: 0 0 auto; }
+
+      /* 溯源标注样式 — 内联文字背景色（加深） */
+      .src-guide { background: #bfdbfe; border-radius: 2px; padding: 0 2px; }
+      .src-material { background: #a7f3d0; border-radius: 2px; padding: 0 2px; }
+      .src-extended { background: #fde68a; border-radius: 2px; padding: 0 2px; }
     </style>
+    <!-- Markdown 渲染（用于预览模式） -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
   </head>
   <body>
     <div class="workspace-shell">
@@ -975,30 +1813,86 @@
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
           <nav class="process-tabs" aria-label="项目流程">
-            <a class="process-tab" href="#" id="tab-init">项目信息</a>
             <a class="process-tab active" href="#">材料撰写</a>
             <a class="process-tab" href="#" id="tab-review">审核导出</a>
           </nav>
           <div class="project-actions">
-            <button class="icon-button" type="button" aria-label="项目设置">⚙</button>
+            <div class="model-selector-wrap">
+              <button class="model-selector-btn" id="model-selector-btn">
+                <span class="model-dot"></span>
+                <span id="model-selector-label">Sonnet 4.6</span>
+                <span style="font-size:10px;color:var(--muted)">▾</span>
+              </button>
+              <div class="model-dropdown" id="model-dropdown">
+                <div class="model-dropdown-header">提炼模型</div>
+                <div class="model-list" id="model-list"></div>
+                <div class="model-dropdown-footer">
+                  <button class="btn-add-config" id="btn-add-config" type="button">
+                    <span class="btn-add-config-left">
+                      <span class="btn-add-config-plus">＋</span>
+                      <span>添加 API 配置</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </header>
 
-        <div style="display:flex; flex:1; min-height:0;">
+        <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
+        <div class="extract-action-bar hidden" id="extract-action-bar">
+          <span class="extract-action-label">大纲提炼</span>
+          <button type="button" class="extract-action-btn" id="btn-start-extract">提炼</button>
+        </div>
+
+        <!-- 提炼进度条（autoExtract 模式显示） -->
+        <div class="extract-progress-bar hidden" id="extract-progress-bar">
+          <span class="extract-progress-spinner" id="extract-spinner"></span>
+          <span class="extract-progress-label">提炼大纲</span>
+          <div class="extract-progress-track">
+            <div class="extract-progress-fill" id="extract-progress-fill"></div>
+          </div>
+          <span class="extract-progress-pct" id="extract-progress-pct">0%</span>
+          <span class="extract-progress-stage" id="extract-progress-stage">0/0</span>
+          <button type="button" class="extract-cancel-btn" id="extract-cancel-btn">取消</button>
+        </div>
+
+        <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
           <!-- Left: outline nav -->
           <aside class="outline-pane" aria-label="文档大纲">
             <div class="outline-pane-header">
               <h3>文档大纲</h3>
               <span class="outline-progress-badge" id="outline-progress-badge">—</span>
+              <button class="outline-search-btn" type="button" aria-label="搜索">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M9.5 9.5L12 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                </svg>
+              </button>
             </div>
             <nav class="doc-outline" aria-label="章节导航"></nav>
-            <div class="outline-progress-footer">
-              <div class="outline-progress-label">
-                <span>撰写进度</span>
-                <span id="outline-progress-text">—</span>
+            <div class="outline-progress-wrap">
+              <div class="outline-progress-footer">
+                <span class="outline-progress-label">撰写进度</span>
+                <span class="outline-progress-count" id="outline-progress-text">—</span>
               </div>
-              <div class="outline-progress-track">
-                <div class="outline-progress-bar" id="outline-progress-bar"></div>
+              <div class="outline-progress-track"><div class="outline-progress-bar" id="outline-progress-bar"></div></div>
+              <button type="button" class="outline-batch-gen-btn" id="btn-batch-generate">批量生成</button>
+              <div style="position:relative;">
+                <span class="inline-model-tag" id="batch-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="batch-model-label">Sonnet 4.6</span></span>
+                <div class="model-dropdown" id="batch-model-dropdown">
+                  <div class="model-dropdown-header">生成模型</div>
+                  <div class="model-list" id="batch-model-list"></div>
+                  <div class="model-dropdown-footer">
+                    <button class="btn-add-config" type="button" data-open-api-modal>
+                      <span class="btn-add-config-left"><span class="btn-add-config-plus">＋</span><span>添加 API 配置</span></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="outline-batch-status hidden" id="outline-batch-status">
+                <span class="outline-batch-current" id="outline-batch-current">—</span>
+                <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">取消</button>
               </div>
             </div>
           </aside>
@@ -1006,97 +1900,15 @@
           <!-- Center: editor -->
           <main class="editor-pane" aria-label="材料撰写编辑区">
 
-            <!-- ① 章节标题头（单行） -->
-            <div class="section-header" id="section-header" style="display:none;">
-              <h2 class="section-title" id="section-title" style="flex:1;margin:0;font-size:18px;font-weight:700;color:var(--ink);letter-spacing:-0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></h2>
-              <div class="section-header-actions">
-                <button type="button" class="btn-mark-done" id="btn-mark-done">
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  标记完成
-                </button>
-                <div class="generate-controls" style="display:flex;align-items:center;gap:8px;">
-                  <span class="generate-progress" id="generate-progress" hidden></span>
-                  <button type="button" id="btn-generate-all" class="btn-generate-all">
-                    ✦ 批量编写
-                  </button>
-                </div>
-              </div>
-            </div>
+            <!-- ① 章节标题头（已移除） -->
 
             <!-- 空状态提示（未选章节时显示） -->
             <div id="editor-empty-hint" style="flex:1;display:flex;align-items:center;justify-content:center;">
               <p style="color:var(--ink-4);font-size:13px;">选择章节开始撰写</p>
             </div>
 
-            <!-- ② 提炼参考折叠区 + ③ 编辑器（选中章节后显示） -->
+            <!-- ② 编辑器（选中章节后显示） -->
             <div id="editor-workspace" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
-
-              <!-- 提炼参考 -->
-              <div class="ref-section">
-                <div class="ref-section-label">
-                  提炼参考
-                  <span class="ref-divider"></span>
-                  点击展开详情
-                </div>
-                <div class="ref-cards-row">
-
-                  <!-- 应标要求 -->
-                  <div class="ref-card" id="ref-req"
-                    style="--ref-card-soft:oklch(0.97 0.018 250);--ref-card-border:oklch(0.9 0.04 250);">
-                    <div class="ref-card-header" onclick="toggleRefCard('ref-req')">
-                      <span class="ref-card-icon" style="background:oklch(0.55 0.14 250);">
-                        <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 3H8M2 5H8M2 7H6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-                      </span>
-                      <span class="ref-card-label">应标要求</span>
-                      <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                    </div>
-                    <div class="ref-card-body" id="ref-req-body"></div>
-                  </div>
-
-                  <!-- 应标重点 -->
-                  <div class="ref-card" id="ref-focus"
-                    style="--ref-card-soft:oklch(0.97 0.04 80);--ref-card-border:oklch(0.88 0.08 80);">
-                    <div class="ref-card-header" onclick="toggleRefCard('ref-focus')">
-                      <span class="ref-card-icon" style="background:oklch(0.62 0.16 75);">
-                        <svg width="9" height="9" viewBox="0 0 10 10"><path d="M5 1L6.2 3.8L9 4L7 6L7.5 9L5 7.5L2.5 9L3 6L1 4L3.8 3.8L5 1Z" fill="currentColor"/></svg>
-                      </span>
-                      <span class="ref-card-label">应标重点</span>
-                      <span class="ref-card-count" id="ref-focus-count" style="color:oklch(0.62 0.16 75);"></span>
-                      <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                    </div>
-                    <div class="ref-card-body" id="ref-focus-body"></div>
-                  </div>
-
-                  <!-- 否决项 -->
-                  <div class="ref-card" id="ref-veto"
-                    style="--ref-card-soft:oklch(0.97 0.025 25);--ref-card-border:oklch(0.88 0.07 25);">
-                    <div class="ref-card-header" onclick="toggleRefCard('ref-veto')">
-                      <span class="ref-card-icon" style="background:oklch(0.6 0.2 25);">
-                        <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                      </span>
-                      <span class="ref-card-label">否决项</span>
-                      <span class="ref-card-count" id="ref-veto-count" style="color:oklch(0.6 0.2 25);"></span>
-                      <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                    </div>
-                    <div class="ref-card-body" id="ref-veto-body"></div>
-                  </div>
-
-                  <!-- 加分项 -->
-                  <div class="ref-card" id="ref-bonus"
-                    style="--ref-card-soft:oklch(0.96 0.03 150);--ref-card-border:oklch(0.86 0.07 150);">
-                    <div class="ref-card-header" onclick="toggleRefCard('ref-bonus')">
-                      <span class="ref-card-icon" style="background:oklch(0.6 0.15 150);">
-                        <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 5.5L4 7.5L8 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-                      </span>
-                      <span class="ref-card-label">加分项</span>
-                      <span class="ref-card-count" id="ref-bonus-count" style="color:oklch(0.6 0.15 150);"></span>
-                      <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                    </div>
-                    <div class="ref-card-body" id="ref-bonus-body"></div>
-                  </div>
-
-                </div>
-              </div>
 
               <!-- ③ 正文编辑器卡 -->
               <div id="content-editor-wrap" style="flex:1;overflow:auto;padding:16px 20px 24px;background:var(--surface-2);min-height:0;display:flex;flex-direction:column;">
@@ -1107,12 +1919,13 @@
                   <div class="ced-header">
                     <span class="ced-step-badge">04</span>
                     <h3 class="ced-title">撰写正文</h3>
+                    <span class="ced-page-hint" id="ced-page-hint" hidden></span>
                     <span class="ced-auto-badge">基于四项提炼自动生成</span>
                     <span style="flex:1;"></span>
                     <span class="ced-save-time" id="ced-save-time">—</span>
                   </div>
 
-                  <!-- AI 生成 Banner -->
+                  <!-- AI 生成 Banner / 入口 -->
                   <div class="ced-gen-banner" id="ced-gen-banner">
                     <span class="ced-gen-spinner"></span>
                     <span class="ced-gen-label">AI 正在撰写</span>
@@ -1122,6 +1935,31 @@
                     </div>
                     <span class="ced-gen-pct" id="ced-gen-pct">0%</span>
                     <button type="button" class="ced-gen-stop" id="ced-gen-stop">停止</button>
+                  </div>
+                  <div id="ced-gen-idle" style="display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid var(--line-2); background:var(--surface);">
+                    <button type="button" class="btn-ai-gen" id="btn-ai-gen">
+                      <svg width="12" height="12" viewBox="0 0 14 14" style="flex:none;"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
+                      AI 生成
+                    </button>
+                    <div style="position:relative;">
+                      <span class="inline-model-tag" id="single-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="single-model-label">Sonnet 4.6</span></span>
+                      <div class="model-dropdown" id="single-model-dropdown">
+                        <div class="model-dropdown-header">生成模型</div>
+                        <div class="model-list" id="single-model-list"></div>
+                        <div class="model-dropdown-footer">
+                          <button class="btn-add-config" type="button" data-open-api-modal>
+                            <span class="btn-add-config-left"><span class="btn-add-config-plus">＋</span><span>添加 API 配置</span></span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <span style="flex:1;"></span>
+                    <!-- 来源图例 -->
+                    <div class="ced-tone-group" id="source-legend">
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼指导</span>
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#a7f3d0;color:#065f46;font-weight:600;">引用素材</span>
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#fde68a;color:#92400e;font-weight:600;">AI 补充</span>
+                    </div>
                   </div>
 
                   <!-- 工具栏 -->
@@ -1140,6 +1978,12 @@
                       </button>
                     </div>
                     <span class="ced-divider"></span>
+                    <!-- 预览/编辑切换 -->
+                    <div class="ced-toolbar-group ced-mode-switch" id="ced-mode-switch">
+                      <button type="button" class="ced-mode-btn active" data-mode="edit">编辑</button>
+                      <button type="button" class="ced-mode-btn" data-mode="preview">预览</button>
+                    </div>
+                    <span class="ced-divider"></span>
                     <!-- 目标字数 -->
                     <div class="ced-wordlimit-wrap">
                       <span style="color:var(--ink-3);">目标字数</span>
@@ -1148,39 +1992,18 @@
                       <span class="ced-divider" style="margin:0 2px;"></span>
                       <span class="ced-wordlimit-cur" id="ced-wordlimit-cur">当前 0</span>
                     </div>
-                    <span style="flex:1;"></span>
-                    <!-- 文风 -->
-                    <div class="ced-tone-group">
-                      <button type="button" class="ced-tone-btn active" data-tone="official">公文</button>
-                      <button type="button" class="ced-tone-btn" data-tone="tech">技术</button>
-                      <button type="button" class="ced-tone-btn" data-tone="concise">精简</button>
-                    </div>
-                    <!-- AI 生成 -->
-                    <button type="button" class="btn-ai-gen" id="btn-ai-gen">
-                      <svg width="12" height="12" viewBox="0 0 14 14" style="flex:none;"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
-                      AI 生成
-                    </button>
                   </div>
 
                   <!-- 编辑区 -->
                   <div class="ced-body" id="ced-body">
-                    <!-- 空白状态：placeholder + AI 提示卡 -->
+                    <!-- 空白状态：placeholder -->
                     <div class="ced-placeholder" id="ced-placeholder">
                       在此撰写本节正文，或点击上方「AI 生成」让模型基于四项提炼自动起草…
                     </div>
-                    <div class="ced-ai-hint" id="ced-ai-hint">
-                      <div class="ced-ai-hint-title">
-                        <svg width="13" height="13" viewBox="0 0 14 14" style="color:var(--accent);flex:none;"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
-                        AI 自动撰写
-                      </div>
-                      <p class="ced-ai-hint-desc">基于上方 4 项提炼内容生成本节正文，可设置字数与文风。</p>
-                      <button type="button" class="ced-ai-hint-btn" id="btn-ai-hint-gen">
-                        <svg width="11" height="11" viewBox="0 0 14 14"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
-                        一键生成
-                      </button>
-                    </div>
                     <!-- 可编辑内容区 -->
                     <div class="ced-editable" id="ced-editable" contenteditable="true" style="display:none;"></div>
+                    <!-- 预览容器（markdown 渲染） -->
+                    <div class="ced-preview" id="ced-preview" style="display:none;"></div>
                   </div>
 
                   <!-- 底栏 -->
@@ -1210,7 +2033,7 @@
           </main>
 
           <!-- Right: matched materials panel -->
-          <aside class="context-pane" aria-label="匹配素材" style="width:280px;flex:0 0 280px;">
+          <aside class="context-pane" aria-label="参考与素材" style="width:320px;flex:0 0 320px;overflow-y:auto;min-height:0;">
 
             <!-- Generate status card (visible only while generating) -->
             <div class="gen-status-card" id="gen-status-card" hidden>
@@ -1224,22 +2047,137 @@
               </div>
             </div>
 
-            <!-- 匹配素材面板头 -->
-            <div style="padding:13px 14px 10px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:8px;">
-              <h2 style="margin:0;font-size:12.5px;font-weight:700;color:var(--ink);letter-spacing:0.3px;">匹配素材</h2>
-              <span id="mat-count-badge" style="font-size:10.5px;font-weight:600;color:var(--ink-3);background:var(--surface-2);border:1px solid var(--line);padding:1px 7px;border-radius:999px;font-family:'SF Mono',ui-monospace,monospace;">4</span>
-              <span style="flex:1;"></span>
-              <button type="button" title="刷新" style="all:unset;cursor:pointer;width:22px;height:22px;border-radius:5px;display:grid;place-items:center;color:var(--ink-3);">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 2.5V5H7.5M2 9.5V7H4.5M9.5 7C8.8 8.8 7 10 5 10C3 10 1.4 8.7 1 7M2.5 5C3.2 3.2 5 2 7 2C9 2 10.6 3.3 11 5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-            <div style="padding:7px 12px;font-size:11px;color:var(--ink-4);background:var(--surface-2);border-bottom:1px solid var(--line-2);">
-              按当前章节的要求 / 重点自动匹配
+            <!-- 提炼参考（从中间编辑区移入） -->
+            <div class="ref-section" id="ref-section-pane">
+              <div class="ref-section-label">
+                提炼参考
+                <span class="ref-divider"></span>
+              </div>
+              <div class="ref-cards-col">
+
+                <!-- 应标要求 -->
+                <div class="ref-card" id="ref-req"
+                  style="--ref-card-soft:oklch(0.97 0.018 250);--ref-card-border:oklch(0.9 0.04 250);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.55 0.14 250);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 3H8M2 5H8M2 7H6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="ref-card-label">应标要求</span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-req-body"></div>
+                </div>
+
+                <!-- 应标重点 -->
+                <div class="ref-card" id="ref-focus"
+                  style="--ref-card-soft:oklch(0.97 0.04 80);--ref-card-border:oklch(0.88 0.08 80);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.62 0.16 75);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M5 1L6.2 3.8L9 4L7 6L7.5 9L5 7.5L2.5 9L3 6L1 4L3.8 3.8L5 1Z" fill="currentColor"/></svg>
+                    </span>
+                    <span class="ref-card-label">应标重点</span>
+                    <span class="ref-card-count" id="ref-focus-count" style="color:oklch(0.62 0.16 75);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-focus-body"></div>
+                </div>
+
+                <!-- 否决项 -->
+                <div class="ref-card" id="ref-veto"
+                  style="--ref-card-soft:oklch(0.97 0.025 25);--ref-card-border:oklch(0.88 0.07 25);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.6 0.2 25);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="ref-card-label">否决项</span>
+                    <span class="ref-card-count" id="ref-veto-count" style="color:oklch(0.6 0.2 25);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-veto-body"></div>
+                </div>
+
+                <!-- 加分项 -->
+                <div class="ref-card" id="ref-bonus"
+                  style="--ref-card-soft:oklch(0.96 0.03 150);--ref-card-border:oklch(0.86 0.07 150);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.6 0.15 150);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 5.5L4 7.5L8 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                    </span>
+                    <span class="ref-card-label">加分项</span>
+                    <span class="ref-card-count" id="ref-bonus-count" style="color:oklch(0.6 0.15 150);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-bonus-body"></div>
+                </div>
+
+                <!-- 评分项 -->
+                <div class="ref-card" id="ref-score"
+                  style="--ref-card-soft:oklch(0.97 0.025 240);--ref-card-border:oklch(0.88 0.07 240);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.55 0.16 240);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M5 1L6 4H9L6.5 6L7.5 9L5 7L2.5 9L3.5 6L1 4H4L5 1Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" fill="none"/></svg>
+                    </span>
+                    <span class="ref-card-label">评分项</span>
+                    <span class="ref-card-count" id="ref-score-count" style="color:oklch(0.55 0.16 240);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-score-body"></div>
+                </div>
+
+                <!-- 证明材料 -->
+                <div class="ref-card" id="ref-evidence"
+                  style="--ref-card-soft:oklch(0.97 0.02 200);--ref-card-border:oklch(0.88 0.06 200);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.55 0.12 200);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M3 1H7L8.5 2.5V9H1.5V1H3Z M3 1V3H6.5V1" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/></svg>
+                    </span>
+                    <span class="ref-card-label">证明材料</span>
+                    <span class="ref-card-count" id="ref-evidence-count" style="color:oklch(0.55 0.12 200);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-evidence-body"></div>
+                </div>
+
+                <!-- 量化指标 -->
+                <div class="ref-card" id="ref-indicators"
+                  style="--ref-card-soft:oklch(0.97 0.025 320);--ref-card-border:oklch(0.88 0.07 320);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.55 0.15 320);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 9V5M4 9V2M7 9V6M9 9H1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="ref-card-label">量化指标</span>
+                    <span class="ref-card-count" id="ref-indicators-count" style="color:oklch(0.55 0.15 320);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-indicators-body"></div>
+                </div>
+
+              </div>
             </div>
 
-            <!-- 素材卡列表 -->
-            <div id="mat-list" style="flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;">
-              <!-- 由 JS 渲染 mock 数据 -->
+            <!-- 匹配素材模块 -->
+            <div class="context-module">
+              <div class="context-module-header">
+                <h3 class="context-module-title">匹配素材</h3>
+                <span id="matched-count-badge" class="mat-tab-badge">0</span>
+                <span style="flex:1;"></span>
+                <button type="button" id="btn-mat-list" class="mat-refresh-btn" title="素材列表" style="font-size:11px; padding:3px 8px; border-radius:6px;">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M2 6h8M2 9h5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+                </button>
+                <button type="button" id="btn-refresh-matched" class="mat-refresh-btn" title="刷新匹配">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 2.5V5H7.5M2 9.5V7H4.5M9.5 7C8.8 8.8 7 10 5 10C3 10 1.4 8.7 1 7M2.5 5C3.2 3.2 5 2 7 2C9 2 10.6 3.3 11 5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+              <!-- 已引用状态条 -->
+              <div class="cite-bar" id="cite-bar">
+                <div class="cite-bar-head" id="cite-bar-head">
+                  <span class="cite-bar-icon">✓</span>
+                  <span class="cite-bar-label">已引用 <span id="cite-bar-count">0</span> 条</span>
+                  <span class="cite-bar-chevron">▾</span>
+                </div>
+                <div class="cite-bar-list" id="cite-bar-list"></div>
+              </div>
+              <div id="matched-list" class="matched-list"></div>
             </div>
 
           </aside>
@@ -1248,22 +2186,24 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/workbench.js?v=4"></script>
+    <script type="module" src="./assets/workbench.js?v=20260602e"></script>
     <script type="module">
       import { GenerateSession } from './assets/generate-session.js';
       import { initContextPanel } from './assets/context-panel.js';
+      import { api } from './assets/api.js';
       initContextPanel();
 
       const params = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
+      const threadId = params.get('threadId');
 
       // Tab links
-      document.getElementById('tab-init').href = `/project-init?projectId=${projectId}`;
       document.getElementById('tab-review').href = `/diff-review?projectId=${projectId}`;
 
       let session = null;
       let total = 0;
       let doneCount = 0;
+      let workflowStream = null;
 
       const btnGen = document.getElementById('btn-generate-all');
       const progress = document.getElementById('generate-progress');
@@ -1275,19 +2215,18 @@
 
       function updateGenCard(title, index, total) {
         const pct = total > 0 ? Math.round((index / total) * 100) : 0;
-        genTitle.textContent = title || '—';
-        genBar.style.width = pct + '%';
-        genPct.textContent = pct + '%';
+        if (genTitle) genTitle.textContent = title || '—';
+        if (genBar) genBar.style.width = pct + '%';
+        if (genPct) genPct.textContent = pct + '%';
       }
 
-      genCancel.addEventListener('click', () => { if (session?.running) session.stop(); });
+      genCancel?.addEventListener('click', () => { if (session?.running) session.stop(); });
 
       window.addEventListener('session:start', e => {
         total = e.detail.total || 0;
-        btnGen.textContent = '■ 停止';
-        progress.hidden = false;
-        progress.textContent = `0 / ${total}`;
-        genCard.hidden = false;
+        if (btnGen) btnGen.textContent = '■ 停止';
+        if (progress) { progress.hidden = false; progress.textContent = `0 / ${total}`; }
+        if (genCard) genCard.hidden = false;
         updateGenCard('', 0, total);
       });
 
@@ -1300,23 +2239,120 @@
       window.addEventListener('block:done', () => {
         doneCount++;
         if (progress) progress.textContent = `${doneCount} / ${total}`;
-        updateGenCard(genTitle.textContent, doneCount, total);
+        if (genTitle) updateGenCard(genTitle.textContent, doneCount, total);
       });
 
       window.addEventListener('session:done', () => {
-        btnGen.innerHTML = '✦ 批量编写';
-        progress.hidden = true;
+        if (btnGen) btnGen.innerHTML = '✦ 批量编写';
+        if (progress) progress.hidden = true;
         doneCount = 0;
         session = null;
-        genCard.hidden = true;
+        if (genCard) genCard.hidden = true;
       });
 
-      btnGen.addEventListener('click', () => {
+      btnGen?.addEventListener('click', async () => {
+        if (workflowStream) {
+          // 正在跑 workflow → 取消
+          if (threadId) await api.workflow.abort(threadId).catch(() => {});
+          onWorkflowAborted();
+          return;
+        }
+        if (threadId) {
+          const ok = await startWorkflowGeneration();
+          if (ok) return;
+        }
         if (session?.running) { session.stop(); return; }
         doneCount = 0;
         session = new GenerateSession(projectId);
         session.start();
       });
+
+      // ── 新工作流流式接入（threadId 模式）───────────────────────
+      function findEditableForBlock(blockIdStr) {
+        // 优先用 outline 项的 data-block-id-str（extract 流程下的 DOM 结构）
+        const item = document.querySelector(`.doc-outline-item[data-block-id-str="${blockIdStr}"]`);
+        if (!item) return null;
+        // 选中该 outline 项以让右侧编辑器跟随当前 block
+        if (!item.classList.contains('active')) item.click();
+        return document.getElementById('ced-editable');
+      }
+
+      async function startWorkflowGeneration() {
+        if (!threadId) return false;
+        closeWorkflowStream();
+        if (btnGen) btnGen.textContent = '■ 停止';
+        if (genCard) { genCard.hidden = false; genCard.style.display = ''; }
+        doneCount = 0;
+        // total 在 block_start 累计；进度条按已知 total 推进
+        total = 0;
+        const seen = new Set();
+        workflowStream = api.workflow.stream(threadId, {
+          onBlockStart: (data) => {
+            const bid = data.block_id;
+            if (bid && !seen.has(bid)) { seen.add(bid); total++; }
+            const editable = findEditableForBlock(bid);
+            if (editable) {
+              editable.textContent = '';
+              editable.style.display = '';
+            }
+            if (genTitle) genTitle.textContent = data.title || bid || '';
+          },
+          onBlockToken: (data) => {
+            const editable = findEditableForBlock(data.block_id);
+            if (editable) editable.appendChild(document.createTextNode(data.token || ''));
+          },
+          onBlockDone: (data) => {
+            const editable = findEditableForBlock(data.block_id);
+            if (editable) {
+              if (typeof renderSourceMarked === 'function') {
+                renderSourceMarked(data.content || '', editable);
+              } else {
+                editable.textContent = data.content || '';
+              }
+            }
+            if (typeof markOutlineDone === 'function' && data.block_id) {
+              try { markOutlineDone(data.block_id, data); } catch {}
+            }
+            doneCount++;
+            if (genBar && total > 0) {
+              const pct = Math.round(doneCount / total * 100);
+              genBar.style.width = pct + '%';
+              if (genPct) genPct.textContent = pct + '%';
+            }
+          },
+          onError: (data) => {
+            console.error('workflow error', data);
+            if (data && data.block_id) {
+              const item = document.querySelector(`.doc-outline-item[data-block-id-str="${data.block_id}"]`);
+              if (item) item.classList.add('block-error');
+            }
+          },
+          onAborted: () => onWorkflowAborted(),
+          onDone: () => onWorkflowDone(),
+        });
+        return true;
+      }
+
+      function closeWorkflowStream() {
+        if (workflowStream) {
+          try { workflowStream.close(); } catch {}
+          workflowStream = null;
+        }
+      }
+
+      function onWorkflowAborted() {
+        if (btnGen) btnGen.innerHTML = '✦ 批量编写';
+        if (genCard) { genCard.hidden = true; genCard.style.display = 'none'; }
+        closeWorkflowStream();
+      }
+
+      function onWorkflowDone() {
+        closeWorkflowStream();
+        if (btnGen) btnGen.innerHTML = '✦ 批量编写';
+        if (threadId) location.href = `/review?threadId=${threadId}`;
+      }
+
+      window.addEventListener('pagehide', closeWorkflowStream);
 
       // ── 编辑器数据绑定 ──────────────────────────────────────────────
       let currentBlock = null;
@@ -1328,15 +2364,92 @@
       window.__onBlockSelected = function(b) {
         currentBlock = b;
         showEditorWorkspace(b);
+        renderPageHint(b);
+        // 切回编辑模式（避免新 block 还显示上一份预览）
+        setEditorMode('edit');
       };
+
+      // 编辑/预览模式切换：编辑态用 contenteditable，预览态用 marked 渲染 markdown
+      function setEditorMode(mode) {
+        const editable = document.getElementById('ced-editable');
+        const preview  = document.getElementById('ced-preview');
+        const ph       = document.getElementById('ced-placeholder');
+        if (!editable || !preview) return;
+        if (mode === 'preview') {
+          const md = (editable.innerText || editable.textContent || '').trim();
+          if (!md) {
+            preview.innerHTML = '<div style="color:var(--ink-3);font-size:13px;">（暂无正文，请先在编辑模式下撰写或调用 AI 生成）</div>';
+          } else if (typeof window.marked !== 'undefined') {
+            const rawHtml = window.marked.parse(md, { breaks: true, gfm: true });
+            preview.innerHTML = decoratePlaceholders(rawHtml);
+          } else {
+            preview.innerText = md;
+          }
+          editable.style.display = 'none';
+          if (ph) ph.style.display = 'none';
+          preview.style.display = '';
+        } else {
+          preview.style.display = 'none';
+          editable.style.display = (editable.innerText || '').trim() ? '' : 'none';
+          if (ph) ph.style.display = (editable.innerText || '').trim() ? 'none' : '';
+        }
+        document.querySelectorAll('#ced-mode-switch .ced-mode-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.mode === mode);
+        });
+      }
+
+      // 占位符美化：架构图/流程图/拓扑图/部署图/时序图 → 灰底虚线占位图；待补充 → 黄高亮；公司全称等变量 → 蓝高亮
+      function decoratePlaceholders(html) {
+        // 图形占位：【架构图：xx】【流程图：xx】【拓扑图：xx】【部署图：xx】【时序图：xx】
+        html = html.replace(/【(架构图|流程图|拓扑图|部署图|时序图|网络图|示意图)[：:]\s*([^】]+)】/g,
+          (_, type, desc) => `<div class="ced-ph-img">${escHtml(type)}<br/>${escHtml(desc)}</div><div class="ced-ph-img-caption">图：${escHtml(desc)}</div>`);
+        // 待补充：【待补充：xx】
+        html = html.replace(/【待补充[：:]\s*([^】]+)】/g,
+          (_, desc) => `<span class="ced-ph-todo">待补充：${escHtml(desc)}</span>`);
+        // 变量占位：【公司全称】【签署日期】【签字人】【法定代表人】等
+        html = html.replace(/【(公司全称|公司名称|投标人名称|签署日期|签字日期|签字人|法定代表人|授权代表|联系电话|联系地址|项目名称|项目编号)】/g,
+          (_, name) => `<span class="ced-ph-var">${escHtml(name)}</span>`);
+        return html;
+      }
+
+      document.querySelectorAll('#ced-mode-switch .ced-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => setEditorMode(btn.dataset.mode));
+      });
+
+      // 预估页数：requirement+key_points 字数占比 × target_pages
+      function renderPageHint(b) {
+        const hint = document.getElementById('ced-page-hint');
+        if (!hint) return;
+        const target = Number(window.__projectTargetPages || 0);
+        const all = Array.isArray(window.__allBlocks) ? window.__allBlocks : [];
+        if (!target) {
+          hint.hidden = true; hint.textContent = ''; return;
+        }
+        if (!b || b.kind !== 'content') {
+          hint.hidden = true; hint.textContent = ''; return;
+        }
+        const leaves = all.filter(x => x && x.kind === 'content');
+        const charsOf = (x) => ((x.requirement || '') + (x.key_points || '')).length;
+        const total = leaves.reduce((s, x) => s + charsOf(x), 0);
+        if (total <= 0) {
+          const each = Math.max(1, Math.round(target / Math.max(leaves.length, 1)));
+          hint.textContent = `约 ${each} 页 / 共 ${target} 页`;
+        } else {
+          const ratio = charsOf(b) / total;
+          const pages = Math.max(1, Math.round(target * ratio));
+          hint.textContent = `约 ${pages} 页 / 共 ${target} 页`;
+        }
+        hint.hidden = false;
+      }
 
       function escHtml(s) {
         return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       }
 
       function showEditorWorkspace(b) {
-        // 显示标题头 + 工作区
-        document.getElementById('section-header').style.display = 'flex';
+        // 显示工作区
+        const sh = document.getElementById('section-header');
+        if (sh) sh.style.display = 'flex';
         document.getElementById('editor-empty-hint').style.display = 'none';
         const ws = document.getElementById('editor-workspace');
         ws.style.display = 'flex';
@@ -1363,7 +2476,9 @@
         placeholder.style.display = '';
         if (hint) hint.style.display = 'flex';
         if (content) {
-          editable.textContent = content;
+          if (!renderAnnotatedContent(content, editable)) {
+            editable.textContent = content;
+          }
           editable.style.display = '';
           placeholder.style.display = 'none';
           if (hint) hint.style.display = 'none';
@@ -1376,43 +2491,152 @@
       }
 
       function renderRefCards(b) {
-        let score = {};
-        try { score = JSON.parse(b.score || '{}'); } catch {}
-        const keyPoints = score.key_points || [];
-        const hardConstraints = score.hard_constraints || [];
-        const specialMarks = (score.special_marks || []).filter(t =>
-          t.includes('加分') || t.includes('▲') || (!t.includes('否') && !t.includes('✕'))
-        );
-
         // 应标要求
         const reqBody = document.getElementById('ref-req-body');
-        if (reqBody) reqBody.innerHTML = b.requirement
-          ? `<p style="margin:0;">${escHtml(b.requirement)}</p>`
-          : `<p style="margin:0;color:var(--ink-4);font-style:italic;">暂无应标要求</p>`;
+        if (reqBody) {
+          reqBody.textContent = b.requirement || '暂无应标要求';
+          reqBody.dataset.refType = 'requirement';
+        }
 
         // 应标重点
         const focusBody = document.getElementById('ref-focus-body');
         const focusCount = document.getElementById('ref-focus-count');
-        if (focusCount) focusCount.textContent = keyPoints.length || '';
-        if (focusBody) focusBody.innerHTML = keyPoints.length
-          ? `<ul class="ref-bullet-list">${keyPoints.map((t,i)=>`<li><span class="ref-bullet-num" style="color:oklch(0.62 0.16 75);">${String(i+1).padStart(2,'0')}</span><span>${escHtml(t)}</span></li>`).join('')}</ul>`
-          : `<p style="margin:0;color:var(--ink-4);font-style:italic;">暂无应标重点</p>`;
+        const kp = (b.key_points || '').trim();
+        const kpItems = kp ? kp.split('\n').filter(Boolean) : [];
+        if (focusCount) focusCount.textContent = kpItems.length || '';
+        if (focusBody) {
+          focusBody.textContent = kp || '暂无应标重点';
+          focusBody.dataset.refType = 'key_points';
+        }
 
         // 否决项
         const vetoBody = document.getElementById('ref-veto-body');
         const vetoCount = document.getElementById('ref-veto-count');
-        if (vetoCount) vetoCount.textContent = hardConstraints.length || '';
-        if (vetoBody) vetoBody.innerHTML = hardConstraints.length
-          ? `<ul class="ref-bullet-list">${hardConstraints.map((t,i)=>`<li><span class="ref-bullet-num" style="color:oklch(0.6 0.2 25);">${String(i+1).padStart(2,'0')}</span><span>${escHtml(t)}</span></li>`).join('')}</ul>`
-          : `<p style="margin:0;color:var(--ink-4);font-style:italic;">暂无否决项</p>`;
+        const vi = (b.veto_items || '').trim();
+        const viItems = vi ? vi.split('\n').filter(Boolean) : [];
+        if (vetoCount) vetoCount.textContent = viItems.length || '';
+        if (vetoBody) {
+          vetoBody.textContent = vi || '暂无否决项';
+          vetoBody.dataset.refType = 'veto_items';
+        }
 
         // 加分项
         const bonusBody = document.getElementById('ref-bonus-body');
         const bonusCount = document.getElementById('ref-bonus-count');
-        if (bonusCount) bonusCount.textContent = specialMarks.length || '';
-        if (bonusBody) bonusBody.innerHTML = specialMarks.length
-          ? `<ul class="ref-bullet-list">${specialMarks.map((t,i)=>`<li><span class="ref-bullet-num" style="color:oklch(0.6 0.15 150);">${String(i+1).padStart(2,'0')}</span><span>${escHtml(t)}</span></li>`).join('')}</ul>`
-          : `<p style="margin:0;color:var(--ink-4);font-style:italic;">暂无加分项</p>`;
+        const bi = (b.bonus_items || '').trim();
+        const biItems = bi ? bi.split('\n').filter(Boolean) : [];
+        if (bonusCount) bonusCount.textContent = biItems.length || '';
+        if (bonusBody) {
+          bonusBody.textContent = bi || '暂无加分项';
+          bonusBody.dataset.refType = 'bonus_items';
+        }
+
+        // 评分项
+        const scoreBody = document.getElementById('ref-score-body');
+        const scoreCount = document.getElementById('ref-score-count');
+        const si = (b.score_items || '').trim();
+        const siItems = si ? si.split('\n').filter(l => l.trim() && l.trim() !== '---') : [];
+        if (scoreCount) scoreCount.textContent = siItems.length || '';
+        if (scoreBody) {
+          scoreBody.textContent = si || '暂无评分项';
+          scoreBody.dataset.refType = 'score_items';
+        }
+
+        // 证明材料
+        const evidenceBody = document.getElementById('ref-evidence-body');
+        const evidenceCount = document.getElementById('ref-evidence-count');
+        const er = (b.evidence_required || '').trim();
+        const erItems = er ? er.split('\n').filter(Boolean) : [];
+        if (evidenceCount) evidenceCount.textContent = erItems.length || '';
+        if (evidenceBody) {
+          evidenceBody.textContent = er || '暂无证明材料';
+          evidenceBody.dataset.refType = 'evidence_required';
+        }
+
+        // 量化指标
+        const indBody = document.getElementById('ref-indicators-body');
+        const indCount = document.getElementById('ref-indicators-count');
+        const ind = (b.indicators || '').trim();
+        const indItems = ind ? ind.split('\n').filter(Boolean) : [];
+        if (indCount) indCount.textContent = indItems.length || '';
+        if (indBody) {
+          indBody.textContent = ind || '暂无量化指标';
+          indBody.dataset.refType = 'indicators';
+        }
+      }
+
+      // 提炼参考卡片点击 → 弹窗编辑
+      document.querySelectorAll('.ref-card-body').forEach(body => {
+        body.addEventListener('click', () => {
+          if (!currentBlock) return;
+          const refType = body.dataset.refType;
+          if (!refType) return;
+          const titleMap = { requirement:'应标要求', key_points:'应标重点', veto_items:'否决项', bonus_items:'加分项', score_items:'评分项', evidence_required:'证明材料', indicators:'量化指标' };
+          openRefEditModal(refType, titleMap[refType] || '', body.textContent || '');
+        });
+      });
+
+      function openRefEditModal(refType, title, content) {
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-modal-overlay';
+        overlay.innerHTML = `<div class="edit-modal">
+          <div class="edit-modal-header">
+            <span class="edit-modal-title">${escHtml(title)}</span>
+            <button type="button" class="edit-modal-close" title="关闭">×</button>
+          </div>
+          <div class="edit-modal-body" contenteditable="true">${escHtml(content)}</div>
+          <div class="edit-modal-footer">
+            <button type="button" class="edit-modal-btn cancel">取消</button>
+            <button type="button" class="edit-modal-btn save">保存</button>
+          </div>
+        </div>`;
+
+        document.body.appendChild(overlay);
+        const bodyEl = overlay.querySelector('.edit-modal-body');
+        bodyEl.focus();
+
+        overlay.querySelector('.edit-modal-close').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('.edit-modal-btn.cancel').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+        overlay.querySelector('.edit-modal-btn.save').addEventListener('click', async () => {
+          const newContent = bodyEl.innerText.trim();
+          const saveBtn = overlay.querySelector('.edit-modal-btn.save');
+          saveBtn.disabled = true;
+          saveBtn.textContent = '保存中…';
+          try {
+            const payload = {};
+            if (refType === 'requirement') {
+              payload.requirement = newContent;
+            } else {
+              payload.content = newContent;
+            }
+            // 保存到后端 block
+            if (refType === 'requirement') {
+              await fetch(`/api/blocks/${currentBlock.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requirement: newContent }),
+              });
+              currentBlock.requirement = newContent;
+            } else {
+              // key_points/veto_items/bonus_items 存在 block 字段里
+              await fetch(`/api/blocks/${currentBlock.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [refType]: newContent }),
+              });
+              currentBlock[refType] = newContent;
+            }
+            overlay.remove();
+            renderRefCards(currentBlock);
+          } catch (err) {
+            console.error('提炼内容保存失败', err);
+            alert('保存失败');
+            saveBtn.disabled = false;
+            saveBtn.textContent = '保存';
+          }
+        });
       }
 
       // ── 字数统计 ──
@@ -1433,6 +2657,26 @@
       document.getElementById('ced-editable')?.addEventListener('input', updateWordCount);
       document.getElementById('ced-wordlimit')?.addEventListener('input', updateWordCount);
 
+      // ── 溯源标注：双击切换为纯文本编辑 ──
+      (function() {
+        const editable = document.getElementById('ced-editable');
+        if (!editable) return;
+
+        editable.addEventListener('dblclick', () => {
+          // 双击进入编辑模式：去掉标记，显示纯文本
+          if (!currentBlock) return;
+          const cached = blockContentCache.get(currentBlock.id) || currentBlock.content || '';
+          if (/\[G\]|\[M\]|\[E\]/.test(cached)) {
+            editable.textContent = getAnnotatedPlainText(cached);
+          }
+        });
+
+        editable.addEventListener('blur', () => {
+          // 失焦后如果有原始 JSON 且用户未修改，恢复标注视图
+          // 如果用户修改了内容，保持纯文本（他们的编辑优先）
+        });
+      })();
+
       // ── 文风切换 ──
       document.querySelectorAll('.ced-tone-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1449,7 +2693,7 @@
         if (!currentBlock || editorGenerating) return;
         editorGenerating = true;
 
-        const tone = document.querySelector('.ced-tone-btn.active')?.dataset.tone || 'official';
+        const tone = 'official';
         const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
 
         const editable = document.getElementById('ced-editable');
@@ -1465,17 +2709,10 @@
         editable.style.display = '';
         editable.textContent = '';
         banner.classList.add('visible');
-        let progress = 0;
-
-        const stages = ['· 分析应标要求', '· 匹配原始素材', '· 生成正文内容', '· 整理输出'];
-        let stageIdx = 0;
-        const stageTimer = setInterval(() => {
-          stageIdx = (stageIdx + 1) % stages.length;
-          if (stage) stage.textContent = stages[stageIdx];
-          progress = Math.min(95, progress + Math.random() * 8 + 2);
-          if (pbar) pbar.style.width = progress + '%';
-          if (pct) pct.textContent = Math.round(progress) + '%';
-        }, 600);
+        if (stage) stage.textContent = '· 整理应标要求与素材中';
+        if (pbar) pbar.style.width = '0%';
+        if (pct) pct.textContent = '0%';
+        let receivedFirstToken = false;
 
         const abortCtrl = new AbortController();
         document.getElementById('ced-gen-stop')?.addEventListener('click', () => {
@@ -1483,34 +2720,69 @@
         }, { once: true });
 
         try {
+          const cited = blockCiteMap.get(currentBlock.id);
+          let extra_context = cited && cited.size
+            ? [...cited.values()]
+                .map(s => `[${s.filename || '素材'} #${s.chunk_index}]\n${s.content || ''}`)
+                .join('\n\n')
+            : '';
+
+          // 追加用户自定义要求
+          const customReq = window.__promptCustomRequirement || '';
+          if (customReq) {
+            extra_context = (extra_context ? extra_context + '\n\n' : '') + `【用户额外要求】\n${customReq}`;
+          }
+          window.__promptCustomRequirement = '';
+
           const resp = await fetch(`/api/blocks/${currentBlock.id}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tone, target_words: targetWords }),
+            body: JSON.stringify({ tone, target_words: targetWords, extra_context, model: window.__generateModel || null }),
             signal: abortCtrl.signal,
           });
 
           if (!resp.ok || !resp.body) {
-            finishGenerate(stageTimer, null, banner, pbar, pct);
+            finishGenerate(banner, pbar, pct, stage);
             return;
           }
 
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
           let buf = '';
+          let streamBuf = '';
 
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-            for (const line of lines) {
-              if (!line.startsWith('data:')) continue;
+            // 按双换行分割完整 SSE 事件
+            const events = buf.split('\n\n');
+            buf = events.pop(); // 保留不完整部分
+            for (const evt of events) {
+              if (!evt.trim()) continue;
+              // 从事件中提取 data: 行
+              const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
+              if (!dataLine) continue;
               try {
-                const data = JSON.parse(line.slice(5).trim());
-                if (data.text) editable.textContent += data.text;
-                if (data.block_id) { finishGenerate(stageTimer, null, banner, pbar, pct); return; }
+                const data = JSON.parse(dataLine.slice(5).trim());
+                if (data.text) {
+                  if (!receivedFirstToken) {
+                    receivedFirstToken = true;
+                    if (stage) stage.textContent = '· 正在撰写';
+                    editable.style.display = '';
+                    placeholder.style.display = 'none';
+                    initStreamRenderer(editable);
+                  }
+                  streamBuf += data.text;
+                  appendStreamToken(data.text);
+                }
+                if (data.block_id) {
+                  flushStreamRenderer();
+                  const fullContent = data.content || streamBuf || '';
+                  renderSourceMarked(fullContent, editable);
+                  finishGenerate(banner, pbar, pct, stage);
+                  return;
+                }
               } catch {}
             }
           }
@@ -1518,23 +2790,295 @@
           if (err.name !== 'AbortError') console.error('生成失败', err);
         }
 
-        finishGenerate(stageTimer, null, banner, pbar, pct);
+        finishGenerate(banner, pbar, pct, stage);
       }
 
-      function finishGenerate(stageTimer, _unused, banner, pbar, pct) {
-        clearInterval(stageTimer);
+      // ── 溯源标注渲染（流式 Markdown + 内联标记） ──
+      // 全量渲染（用于加载已有内容和 block_done）
+      function renderSourceMarked(content, editable) {
+        if (!content || !editable) return;
+        let html = escHtml(content);
+        html = html.replace(/\[G\]([\s\S]*?)\[\/G\]/g, '<span class="src-guide">$1</span>');
+        html = html.replace(/\[M\]([\s\S]*?)\[\/M\]/g, '<span class="src-material">$1</span>');
+        html = html.replace(/\[E\]([\s\S]*?)\[\/E\]/g, '<span class="src-extended">$1</span>');
+        html = html.replace(/\[G\]([\s\S]*)$/, '<span class="src-guide">$1</span>');
+        html = html.replace(/\[M\]([\s\S]*)$/, '<span class="src-material">$1</span>');
+        html = html.replace(/\[E\]([\s\S]*)$/, '<span class="src-extended">$1</span>');
+        html = html.replace(/\[G\]|\[\/G\]|\[M\]|\[\/M\]|\[E\]|\[\/E\]/g, '');
+        editable.innerHTML = html;
+      }
+
+      // ── 增量流式追加器 ──
+      const TAG_CLASS = { G: 'src-guide', M: 'src-material', E: 'src-extended' };
+      let _streamState = null;
+
+      function initStreamRenderer(editable) {
+        editable.innerHTML = '';
+        _streamState = { editable, currentSpan: null, currentClass: '', pending: '' };
+      }
+
+      function appendStreamToken(token) {
+        if (!_streamState) return;
+        const { editable } = _streamState;
+        _streamState.pending += token;
+
+        // 处理 pending 中的标记
+        let text = _streamState.pending;
+        _streamState.pending = '';
+
+        while (text.length > 0) {
+          // 检查是否以标记开头
+          const openMatch = text.match(/^\[(G|M|E)\]/);
+          if (openMatch) {
+            const cls = TAG_CLASS[openMatch[1]];
+            const span = document.createElement('span');
+            span.className = cls;
+            editable.appendChild(span);
+            _streamState.currentSpan = span;
+            _streamState.currentClass = cls;
+            text = text.slice(openMatch[0].length);
+            continue;
+          }
+
+          const closeMatch = text.match(/^\[\/(G|M|E)\]/);
+          if (closeMatch) {
+            _streamState.currentSpan = null;
+            _streamState.currentClass = '';
+            text = text.slice(closeMatch[0].length);
+            continue;
+          }
+
+          // 检查是否有不完整的标记在末尾（可能下一个 token 补齐）
+          const partialMatch = text.match(/\[\/?(G|M|E)?]?$/);
+          if (partialMatch && partialMatch.index > 0 && text.slice(partialMatch.index).length < 4) {
+            // 先输出标记之前的文本
+            const before = text.slice(0, partialMatch.index);
+            if (before) appendTextNode(before);
+            _streamState.pending = text.slice(partialMatch.index);
+            break;
+          }
+          // 也许开头就是半个标记
+          if (text.startsWith('[') && text.length < 4) {
+            _streamState.pending = text;
+            break;
+          }
+
+          // 找到下一个标记位置
+          const nextTag = text.indexOf('[', 1);
+          if (nextTag === -1) {
+            // 检查末尾是否可能是半个标记
+            if (text.endsWith('[')) {
+              appendTextNode(text.slice(0, -1));
+              _streamState.pending = '[';
+            } else {
+              appendTextNode(text);
+            }
+            break;
+          } else {
+            appendTextNode(text.slice(0, nextTag));
+            text = text.slice(nextTag);
+          }
+        }
+
+        // 自动滚动到底
+        editable.scrollTop = editable.scrollHeight;
+      }
+
+      function appendTextNode(str) {
+        if (!str || !_streamState) return;
+        const target = _streamState.currentSpan || _streamState.editable;
+        // 直接追加文本节点
+        target.appendChild(document.createTextNode(str));
+      }
+
+      function flushStreamRenderer() {
+        if (!_streamState) return;
+        if (_streamState.pending) {
+          appendTextNode(_streamState.pending);
+          _streamState.pending = '';
+        }
+        _streamState = null;
+      }
+
+      // 加载已有 block 内容时的渲染
+      function renderAnnotatedContent(content, editable) {
+        if (!content || !editable) return false;
+        // 检测是否包含来源标记
+        if (!/\[G\]|\[M\]|\[E\]/.test(content)) return false;
+        renderSourceMarked(content, editable);
+        return true;
+      }
+
+      // 获取去掉标记的纯文本
+      function getAnnotatedPlainText(content) {
+        return (content || '').replace(/\[G\]|\[\/G\]|\[M\]|\[\/M\]|\[E\]|\[\/E\]/g, '');
+      }
+
+      function finishGenerate(banner, pbar, pct, stageEl) {
         editorGenerating = false;
         banner.classList.remove('visible');
         if (pbar) pbar.style.width = '100%';
         if (pct) pct.textContent = '100%';
+        if (stageEl) stageEl.textContent = '· 撰写完成';
         updateWordCount();
-        // 更新保存时间
         document.getElementById('ced-save-time').textContent =
           `已保存 · ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
       }
 
-      document.getElementById('btn-ai-gen')?.addEventListener('click', startSingleGenerate);
-      document.getElementById('btn-ai-hint-gen')?.addEventListener('click', startSingleGenerate);
+      document.getElementById('btn-ai-gen')?.addEventListener('click', openPromptPreview);
+      document.getElementById('btn-ai-hint-gen')?.addEventListener('click', openPromptPreview);
+
+      // ── Prompt 预览弹窗逻辑 ──
+      const TONE_LABELS = { official: '公文', tech: '技术', concise: '精简' };
+      const TONE_DESCRIPTIONS = {
+        official: '你是一个技术应标高级专家，专门针对技术规范书去输出对应的技术应答内容',
+        tech: '你是一个技术应标高级专家，专门针对技术规范书去输出对应的技术应答内容',
+        concise: '你是一个技术应标高级专家，专门针对技术规范书去输出对应的技术应答内容',
+      };
+
+      function openPromptPreview() {
+        if (!currentBlock) return;
+        window.__isBatchPrompt = false;
+
+        const tone = 'official';
+        const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
+
+        // 组装各部分数据
+        const block = currentBlock;
+        const cited = blockCiteMap.get(block.id);
+        const extraContext = cited && cited.size
+          ? [...cited.values()].map(s => `[${s.filename || '素材'} #${s.chunk_index}]\n${s.content || ''}`).join('\n\n')
+          : '';
+
+        const sections = [
+          {
+            key: 'role',
+            title: '角色设定',
+            tag: '文风: ' + TONE_LABELS[tone],
+            content: TONE_DESCRIPTIONS[tone] || '',
+            collapsed: true,
+          },
+          {
+            key: 'guidance',
+            title: '提炼要求（应标指导）',
+            tag: '来自提炼',
+            content: [
+              block.requirement ? `核心要求：${block.requirement}` : '',
+              block.key_points ? `策略要点：${block.key_points}` : '',
+              block.veto_items ? `否决项：${block.veto_items}` : '',
+              block.bonus_items ? `加分项：${block.bonus_items}` : '',
+              block.score_items ? `评分项：${block.score_items}` : '',
+              block.evidence_required ? `证明材料：${block.evidence_required}` : '',
+              block.constraint_level ? `强制性：${block.constraint_level}` : '',
+              block.indicators ? `量化指标：${block.indicators}` : '',
+            ].filter(Boolean).join('\n') || '（暂无提炼内容）',
+            collapsed: false,
+          },
+          {
+            key: 'section',
+            title: '章节内容',
+            tag: '来自大纲',
+            content: `「${block.title || ''}」\n${block.content || '（空）'}`,
+            collapsed: true,
+          },
+          {
+            key: 'sources',
+            title: '参考素材',
+            tag: `已引用 ${cited?.size || 0} 条`,
+            content: extraContext || '（未引用素材）',
+            collapsed: true,
+          },
+          {
+            key: 'custom',
+            title: '自定义要求',
+            tag: '用户编辑',
+            content: '',
+            placeholder: '可填写额外要求，如：重点突出安全性、不要写背景介绍...',
+            collapsed: false,
+          },
+          {
+            key: 'output',
+            title: '输出规范',
+            tag: `目标 ${targetWords} 字`,
+            content: `目标字数：${targetWords} 字\n核心规则：忠于原意、保持段落结构、补充背景释义与应用场景`,
+            collapsed: true,
+          },
+        ];
+
+        // 渲染弹窗 — 左侧导航 + 右侧编辑区
+        const nav = document.getElementById('prompt-modal-nav');
+        const editor = document.getElementById('prompt-modal-editor');
+
+        nav.innerHTML = sections.map((sec, i) => `
+          <div class="prompt-nav-item${i === 1 ? ' active' : ''}" data-idx="${i}">
+            <span class="prompt-nav-dot"></span>
+            <span>${sec.title}</span>
+          </div>
+        `).join('');
+
+        // 存储数据用于切换
+        window.__promptSections = sections;
+        window.__promptTextareas = {};
+
+        function showSection(idx) {
+          const sec = sections[idx];
+          editor.innerHTML = `
+            <div class="prompt-editor-title">
+              <span>${sec.title}</span>
+              <span class="prompt-editor-tag">${sec.tag}</span>
+            </div>
+            <textarea class="prompt-editor-textarea" data-section-key="${sec.key}" placeholder="${sec.placeholder || ''}">${escHtml(window.__promptTextareas[sec.key] ?? sec.content)}</textarea>
+          `;
+          // 自动聚焦
+          const ta = editor.querySelector('textarea');
+          if (sec.key === 'custom') ta?.focus();
+          // 保存编辑内容
+          ta?.addEventListener('input', () => {
+            window.__promptTextareas[sec.key] = ta.value;
+          });
+          // 更新导航 active
+          nav.querySelectorAll('.prompt-nav-item').forEach((item, i) => {
+            item.classList.toggle('active', i === idx);
+          });
+        }
+
+        // 默认显示"提炼要求"
+        showSection(1);
+
+        // 导航点击切换
+        nav.querySelectorAll('.prompt-nav-item').forEach(item => {
+          item.addEventListener('click', () => {
+            showSection(parseInt(item.dataset.idx));
+          });
+        });
+
+        document.getElementById('prompt-modal-backdrop').classList.add('open');
+      }
+
+      // 关闭 prompt 弹窗
+      document.getElementById('prompt-modal-close')?.addEventListener('click', () => {
+        document.getElementById('prompt-modal-backdrop').classList.remove('open');
+        window.__isBatchPrompt = false;
+      });
+      document.getElementById('btn-prompt-cancel')?.addEventListener('click', () => {
+        document.getElementById('prompt-modal-backdrop').classList.remove('open');
+        window.__isBatchPrompt = false;
+      });
+      document.getElementById('prompt-modal-backdrop')?.addEventListener('click', e => {
+        if (e.target === e.currentTarget) { e.currentTarget.classList.remove('open'); window.__isBatchPrompt = false; }
+      });
+
+      // 确认生成
+      document.getElementById('btn-prompt-confirm')?.addEventListener('click', () => {
+        window.__promptCustomRequirement = (window.__promptTextareas?.custom || '').trim();
+        document.getElementById('prompt-modal-backdrop').classList.remove('open');
+        if (window.__isBatchPrompt) {
+          window.__isBatchPrompt = false;
+          executeBatchGenerate();
+        } else {
+          startSingleGenerate();
+        }
+      });
 
       // ── block:token 事件（批量生成流式写入编辑器） ──
       window.addEventListener('block:token', e => {
@@ -1547,7 +3091,9 @@
         if (editable) {
           editable.style.display = '';
           document.getElementById('ced-placeholder').style.display = 'none';
-          editable.textContent += e.detail.token;
+          const hint = document.getElementById('ced-ai-hint');
+          if (hint) hint.style.display = 'none';
+          renderSourceMarked(blockContentCache.get(blockId), editable);
           updateWordCount();
         }
       });
@@ -1573,50 +3119,1303 @@
           `已保存 · ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
       });
 
-      // ── Mock 匹配素材 ──
-      const MOCK_MATERIALS = [
-        { kind:'DOCX', name:'用户画像调研报告 V2.docx', match:92, snippet:'三类核心用户群体的画像与需求矩阵分析…' },
-        { kind:'PDF',  name:'AI 产业链分层白皮书.pdf',   match:84, snippet:'AI 终端企业、芯片/OS 厂商、软件开发商分层…' },
-        { kind:'PPTX', name:'运营方协同管理方案.pptx',   match:71, snippet:'内容发布 → 审核 → 上架的协同流程设计…' },
-        { kind:'DOCX', name:'统一账号体系设计.docx',     match:68, snippet:'跨平台 SSO 与权限模型设计规范…' },
-      ];
+      // ── 右侧面板（无 Tab，两个上下模块） ──
+
+      // ── 匹配素材渲染 ──
       const FILE_BADGE_PALETTE = {
         PDF:  { bg:'#fdecec', fg:'#b3261e' },
         DOCX: { bg:'#e8efff', fg:'#1f4ed8' },
+        DOC:  { bg:'#e8efff', fg:'#1f4ed8' },
         PPTX: { bg:'#fff1e0', fg:'#a35b00' },
+        PPT:  { bg:'#fff1e0', fg:'#a35b00' },
       };
-      function renderMockMaterials() {
-        const list = document.getElementById('mat-list');
-        if (!list) return;
-        list.innerHTML = MOCK_MATERIALS.map(m => {
-          const pal = FILE_BADGE_PALETTE[m.kind] || { bg:'#eee', fg:'#444' };
-          const matchColor = m.match >= 85 ? 'var(--success)' : m.match >= 70 ? 'var(--warn)' : 'var(--ink-4)';
-          return `<div style="padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--surface);display:flex;flex-direction:column;gap:5px;cursor:pointer;" onmouseenter="this.style.background='var(--surface-2)'" onmouseleave="this.style.background='var(--surface)'">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 5px;border-radius:3px;background:${pal.bg};color:${pal.fg};font-family:'SF Mono',ui-monospace,monospace;flex:none;">${m.kind}</span>
-              <span style="flex:1;font-size:12.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(m.name)}">${escHtml(m.name)}</span>
-              <span style="display:inline-flex;align-items:center;gap:4px;flex:none;">
-                <span style="width:34px;height:4px;background:var(--line-2);border-radius:999px;overflow:hidden;display:inline-block;"><span style="display:block;width:${m.match}%;height:100%;background:${matchColor};border-radius:999px;"></span></span>
-                <span style="font-size:10.5px;font-weight:700;color:${matchColor};font-family:'SF Mono',ui-monospace,monospace;">${m.match}</span>
-              </span>
+
+      const matchedList = document.getElementById('matched-list');
+      const matchedCountBadge = document.getElementById('matched-count-badge');
+
+      // blockId → Map<citeKey, citeItem>
+      const blockCiteMap = new Map();
+      const blockMatchedCache = new Map();
+      function citeKey(s) { return `${s.material_id}-${s.chunk_index}`; }
+      function getCiteSet() {
+        if (!currentBlock) return new Map();
+        let m = blockCiteMap.get(currentBlock.id);
+        if (!m) { m = new Map(); blockCiteMap.set(currentBlock.id, m); }
+        return m;
+      }
+
+      function parseMatchedFromBlock(block) {
+        if (!block) return [];
+        try {
+          const arr = JSON.parse(block.source || '[]');
+          return Array.isArray(arr) ? arr : [];
+        } catch { return []; }
+      }
+
+      function renderMatchedSources(sources) {
+        if (matchedCountBadge) matchedCountBadge.textContent = sources.length || 0;
+        renderCiteBar();
+
+        if (!sources.length) {
+          matchedList.innerHTML = `<div class="matched-empty">暂无匹配素材<br><span style="font-size:11px;">请在「全部素材」中上传原始素材后刷新</span></div>`;
+          return;
+        }
+
+        const allZero = sources.every(s => !s.score);
+        const weakHint = allZero
+          ? `<div class="matched-empty" style="padding:10px 12px;text-align:left;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;margin-bottom:4px;">未找到强相关素材，以下为弱关联结果，仅供参考。</div>`
+          : '';
+
+        const cited = getCiteSet();
+
+        matchedList.innerHTML = weakHint + sources.map((s, i) => {
+          const filename = s.filename || `素材 #${s.material_id}`;
+          const ext = (filename.split('.').pop() || '').toUpperCase();
+          const pal = FILE_BADGE_PALETTE[ext] || { bg:'#eee', fg:'#444' };
+          const content = (s.content || s.snippet || '').trim();
+          const collapsed = content.length > 90;
+          const score = typeof s.score === 'number' ? s.score : 0;
+          const isCited = cited.has(citeKey(s));
+
+          return `<div class="matched-card" data-idx="${i}">
+            <div class="matched-card-head">
+              <span class="matched-card-ext" style="background:${pal.bg};color:${pal.fg};">${escHtml(ext)}</span>
+              <span class="matched-card-name" title="${escHtml(filename)}">${escHtml(filename)}</span>
+              <span class="matched-card-chunk">#${s.chunk_index}</span>
+              ${score > 0 ? `<span class="matched-card-score">×${score}</span>` : ''}
             </div>
-            <div style="font-size:11.5px;color:var(--ink-3);line-height:1.55;">${escHtml(m.snippet)}</div>
-            <div style="display:flex;gap:4px;margin-top:2px;">
-              <button style="all:unset;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:11px;color:var(--ink-3);background:var(--surface-2);">查看</button>
-              <button style="all:unset;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:11px;color:var(--accent-ink);background:var(--accent-soft);font-weight:600;">+ 引用</button>
+            <div class="matched-card-body${collapsed ? ' collapsed' : ''}" data-content>${escHtml(content)}</div>
+            ${collapsed ? `<button type="button" class="matched-card-toggle">展开全文</button>` : ''}
+            <div class="matched-card-actions">
+              <button type="button" class="matched-card-btn" data-act="edit">编辑</button>
+              <button type="button" class="matched-card-btn" data-act="view">查看</button>
+              <button type="button" class="matched-card-btn cite${isCited ? ' active' : ''}" data-act="cite">${isCited ? '✓ 已引用' : '+ 引用'}</button>
             </div>
           </div>`;
         }).join('');
+
+        matchedList.querySelectorAll('.matched-card-toggle').forEach(btn => {
+          btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const body = btn.parentElement.querySelector('[data-content]');
+            const isCollapsed = body.classList.toggle('collapsed');
+            btn.textContent = isCollapsed ? '展开全文' : '收起';
+          });
+        });
+
+        matchedList.querySelectorAll('.matched-card-btn').forEach(btn => {
+          btn.addEventListener('click', e => {
+            e.stopPropagation();
+            onCardAction(btn);
+          });
+        });
+
+        matchedList.querySelectorAll('.matched-card').forEach(card => {
+          card.style.cursor = 'pointer';
+          card.addEventListener('click', () => {
+            const idx = parseInt(card.dataset.idx);
+            const sources = blockMatchedCache.get(currentBlock?.id) || [];
+            const s = sources[idx];
+            if (s) openEditModal(s, card);
+          });
+        });
       }
-      renderMockMaterials();
+
+      async function onCardAction(btn) {
+        const card = btn.closest('.matched-card');
+        const idx = parseInt(card.dataset.idx);
+        const sources = blockMatchedCache.get(currentBlock?.id) || [];
+        const s = sources[idx];
+        if (!s) return;
+        const act = btn.dataset.act;
+
+        if (act === 'view') {
+          if (!s.material_id) return;
+          window.open(`/api/materials/${s.material_id}/file`, '_blank');
+          return;
+        }
+
+        if (act === 'cite') {
+          const cited = getCiteSet();
+          const key = citeKey(s);
+          if (cited.has(key)) {
+            cited.delete(key);
+            btn.classList.remove('active');
+            btn.textContent = '+ 引用';
+          } else {
+            cited.set(key, { ...s });
+            btn.classList.add('active');
+            btn.textContent = '✓ 已引用';
+          }
+          renderCiteBar();
+          return;
+        }
+
+        if (act === 'edit') {
+          openEditModal(s, card);
+        }
+
+        if (act === 'cancel' || act === 'save') { return; }
+      }
+
+      // ── 编辑弹窗 ──
+      function openEditModal(source, card) {
+        const content = (source.content || source.snippet || '').trim();
+        const filename = source.filename || `素材 #${source.material_id}`;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-modal-overlay';
+        overlay.innerHTML = `<div class="edit-modal">
+          <div class="edit-modal-header">
+            <span class="edit-modal-title">${escHtml(filename)} · #${source.chunk_index}</span>
+            <button type="button" class="edit-modal-close" title="关闭">×</button>
+          </div>
+          <div class="edit-modal-body" contenteditable="true">${escHtml(content)}</div>
+          <div class="edit-modal-footer">
+            <button type="button" class="edit-modal-btn cancel">取消</button>
+            <button type="button" class="edit-modal-btn save">保存</button>
+          </div>
+        </div>`;
+
+        document.body.appendChild(overlay);
+        const body = overlay.querySelector('.edit-modal-body');
+        body.focus();
+
+        overlay.querySelector('.edit-modal-close').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('.edit-modal-btn.cancel').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+        overlay.querySelector('.edit-modal-btn.save').addEventListener('click', async () => {
+          const newContent = body.innerText.trim();
+          if (!newContent) { alert('内容不能为空'); return; }
+          const saveBtn = overlay.querySelector('.edit-modal-btn.save');
+          saveBtn.disabled = true;
+          saveBtn.textContent = '保存中…';
+          try {
+            await fetch(`/api/material-chunks/${source.material_id}/${source.chunk_index}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: newContent }),
+            });
+            source.content = newContent;
+            const cited = getCiteSet();
+            const k = citeKey(source);
+            if (cited.has(k)) cited.set(k, { ...source });
+            overlay.remove();
+            const sources = blockMatchedCache.get(currentBlock?.id) || [];
+            renderMatchedSources(sources);
+          } catch (err) {
+            console.error('chunk 保存失败', err);
+            alert('保存失败');
+            saveBtn.disabled = false;
+            saveBtn.textContent = '保存';
+          }
+        });
+      }
+
+      function renderCiteBar() {
+        const bar = document.getElementById('cite-bar');
+        const cnt = document.getElementById('cite-bar-count');
+        const list = document.getElementById('cite-bar-list');
+        const cited = getCiteSet();
+        const items = [...cited.values()];
+        if (cnt) cnt.textContent = items.length;
+        if (!items.length) {
+          bar.classList.remove('visible', 'expanded');
+          return;
+        }
+        bar.classList.add('visible');
+        if (list) {
+          list.innerHTML = items.map(s => {
+            const k = citeKey(s);
+            const filename = s.filename || `素材 #${s.material_id}`;
+            const preview = (s.content || '').slice(0, 60);
+            return `<div class="cite-bar-item">
+              <span class="cite-bar-item-text"><b>${escHtml(filename)}#${s.chunk_index}</b> · ${escHtml(preview)}</span>
+              <button type="button" class="cite-bar-item-remove" data-cite-key="${escHtml(k)}" title="移除">×</button>
+            </div>`;
+          }).join('');
+          list.querySelectorAll('.cite-bar-item-remove').forEach(btn => {
+            btn.addEventListener('click', e => {
+              e.stopPropagation();
+              const k = btn.dataset.citeKey;
+              cited.delete(k);
+              renderCiteBar();
+              const sources = blockMatchedCache.get(currentBlock?.id) || [];
+              renderMatchedSources(sources);
+            });
+          });
+        }
+      }
+
+      document.getElementById('cite-bar-head')?.addEventListener('click', () => {
+        document.getElementById('cite-bar').classList.toggle('expanded');
+      });
+
+      function refreshMatchedForCurrent() {
+        if (!currentBlock) {
+          renderMatchedSources([]);
+          return;
+        }
+        const cached = blockMatchedCache.get(currentBlock.id);
+        if (cached) { autoCiteMatched(cached); renderMatchedSources(cached); return; }
+        const fromBlock = parseMatchedFromBlock(currentBlock);
+        blockMatchedCache.set(currentBlock.id, fromBlock);
+        autoCiteMatched(fromBlock);
+        renderMatchedSources(fromBlock);
+      }
+
+      // 将匹配的素材自动添加到引用集合
+      function autoCiteMatched(sources) {
+        if (!currentBlock || !sources || !sources.length) return;
+        let m = blockCiteMap.get(currentBlock.id);
+        if (!m) { m = new Map(); blockCiteMap.set(currentBlock.id, m); }
+        for (const s of sources) {
+          const key = citeKey(s);
+          if (!m.has(key)) m.set(key, { ...s });
+        }
+      }
+
+      // 章节切换时刷新匹配面板
+      const _origOnSelected = window.__onBlockSelected;
+      window.__onBlockSelected = function(b) {
+        if (typeof _origOnSelected === 'function') _origOnSelected(b);
+        currentBlock = b;
+        refreshMatchedForCurrent();
+      };
+
+      // 刷新按钮：请求最新匹配
+      document.getElementById('btn-refresh-matched')?.addEventListener('click', async () => {
+        if (!currentBlock) return;
+        const btn = document.getElementById('btn-refresh-matched');
+        btn.classList.add('spinning');
+        try {
+          const res = await fetch(`/api/blocks/${currentBlock.id}/matched-sources`).then(r => r.json());
+          const sources = res.matched_sources || [];
+          blockMatchedCache.set(currentBlock.id, sources);
+          autoCiteMatched(sources);
+          renderMatchedSources(sources);
+        } catch (err) {
+          console.error('[matched] refresh failed', err);
+        } finally {
+          btn.classList.remove('spinning');
+        }
+      });
+
+      // 初始渲染（无章节时）
+      renderMatchedSources([]);
+
+      // ── 全部素材面板 ──
+      const matList  = document.getElementById('mat-list');
+      const matEmpty = document.getElementById('mat-empty');
+      const matCountBadge = document.getElementById('mat-count-badge');
+
+      async function loadSourceMaterials() {
+        try {
+          const list = await fetch(`/api/projects/${projectId}/materials`).then(r => r.json());
+          const sources = list.filter(m => m.role === 'source');
+          if (!sources.length) {
+            matList.style.display = 'none';
+            matEmpty.style.display = 'block';
+            if (matCountBadge) matCountBadge.textContent = '0';
+            return;
+          }
+          matList.style.display = 'flex';
+          matEmpty.style.display = 'none';
+          if (matCountBadge) matCountBadge.textContent = sources.length;
+          matList.innerHTML = sources.map(m => {
+            const ext = (m.filename || '').split('.').pop().toUpperCase();
+            const pal = FILE_BADGE_PALETTE[ext] || { bg:'#eee', fg:'#444' };
+            const name = m.filename || '';
+            const size = m.file_size ? (m.file_size > 1024*1024 ? (m.file_size/1024/1024).toFixed(1)+' MB' : Math.round(m.file_size/1024)+' KB') : '';
+            return `<div style="padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:6px;">
+              <div style="display:flex;align-items:center;gap:7px;">
+                <span style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:4px;background:${pal.bg};color:${pal.fg};flex:none;">${ext}</span>
+                <span style="flex:1;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(name)}">${escHtml(name)}</span>
+                ${size ? `<span style="font-size:11px;color:var(--muted);flex:none;">${size}</span>` : ''}
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button style="all:unset;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11.5px;color:var(--muted);background:var(--bg-2);border:1px solid var(--line);">查看</button>
+                <button style="all:unset;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11.5px;color:#2563eb;background:#eff6ff;font-weight:600;">+ 引用</button>
+              </div>
+            </div>`;
+          }).join('') + `<button id="btn-upload-source" type="button" style="width:100%;padding:10px;border:1.5px dashed var(--line);border-radius:10px;background:none;font-size:13px;color:var(--muted);cursor:pointer;margin-top:2px;">+ 添加原始素材</button>`;
+        } catch {
+          matList.style.display = 'none';
+          matEmpty.style.display = 'block';
+        }
+      }
+
+      if (projectId) loadSourceMaterials();
+
+      // 添加原始素材：直接选文件上传（事件委托，支持动态渲染的按钮）
+      const srcFileInput = document.createElement('input');
+      srcFileInput.type = 'file';
+      srcFileInput.accept = '.pdf,.docx,.doc,.ppt,.pptx';
+      srcFileInput.multiple = true;
+      srcFileInput.style.display = 'none';
+      document.body.appendChild(srcFileInput);
+
+      document.addEventListener('click', e => {
+        if (e.target.closest('#btn-upload-source')) srcFileInput.click();
+      });
+
+      srcFileInput.addEventListener('change', async () => {
+        const files = Array.from(srcFileInput.files || []);
+        if (!files.length) return;
+        const btn = document.getElementById('btn-upload-source');
+        if (btn) { btn.disabled = true; btn.textContent = '上传中…'; }
+        for (const file of files) {
+          await fetch(`/api/projects/${projectId}/materials`, {
+            method: 'POST',
+            body: (() => { const fd = new FormData(); fd.append('file', file); fd.append('material_role', 'source'); return fd; })(),
+          }).catch(console.error);
+        }
+        srcFileInput.value = '';
+        if (btn) { btn.disabled = false; btn.textContent = '+ 添加原始素材'; }
+        loadSourceMaterials();
+        loadMatModal();
+      });
+
+      // ── 素材列表弹窗 ──
+      const matModalBackdrop = document.getElementById('mat-modal-backdrop');
+      const matModalBody = document.getElementById('mat-modal-body');
+      const matModalClose = document.getElementById('mat-modal-close');
+      const btnMatList = document.getElementById('btn-mat-list');
+      const btnMatModalUpload = document.getElementById('btn-mat-modal-upload');
+
+      async function loadMatModal() {
+        matModalBody.innerHTML = '<p class="muted" style="text-align:center;padding:20px;">加载中...</p>';
+        try {
+          const list = await fetch(`/api/projects/${projectId}/materials`).then(r => r.json());
+          const sources = list.filter(m => m.role === 'source');
+          if (!sources.length) {
+            matModalBody.innerHTML = '<p class="muted" style="text-align:center;padding:20px;">暂无素材</p>';
+            return;
+          }
+          matModalBody.innerHTML = sources.map(m => {
+            const ext = (m.filename || '').split('.').pop().toUpperCase();
+            const pal = FILE_BADGE_PALETTE[ext] || { bg:'#eee', fg:'#444' };
+            const name = m.filename || '';
+            const size = m.file_size ? (m.file_size > 1024*1024 ? (m.file_size/1024/1024).toFixed(1)+' MB' : Math.round(m.file_size/1024)+' KB') : '';
+            return `<div class="mat-modal-item">
+              <span class="mat-modal-item-ext" style="background:${pal.bg};color:${pal.fg};">${ext}</span>
+              <span class="mat-modal-item-name" title="${escHtml(name)}">${escHtml(name)}</span>
+              ${size ? `<span class="mat-modal-item-size">${size}</span>` : ''}
+            </div>`;
+          }).join('');
+        } catch {
+          matModalBody.innerHTML = '<p class="muted" style="text-align:center;padding:20px;">加载失败</p>';
+        }
+      }
+
+      btnMatList?.addEventListener('click', () => {
+        matModalBackdrop.classList.add('open');
+        loadMatModal();
+      });
+      matModalClose?.addEventListener('click', () => matModalBackdrop.classList.remove('open'));
+      matModalBackdrop?.addEventListener('click', e => { if (e.target === matModalBackdrop) matModalBackdrop.classList.remove('open'); });
+      btnMatModalUpload?.addEventListener('click', () => srcFileInput.click());
+
+      // ── autoExtract: 边提炼边在 workbench 渲染 ──
+      const autoExtract = params.get('autoExtract') === '1';
+      if (autoExtract) {
+        startWorkbenchExtraction();
+      }
+
+      // ── 提炼按钮逻辑 ──
+      const extractActionBar = document.getElementById('extract-action-bar');
+      const btnStartExtract = document.getElementById('btn-start-extract');
+      if (!autoExtract) {
+        fetch(`/api/projects/${projectId}/materials`).then(r => r.json()).then(mats => {
+          const hasReq = Array.isArray(mats) && mats.some(m => m.role === 'requirement');
+          if (hasReq && extractActionBar) {
+            extractActionBar.classList.remove('hidden');
+            const outline = document.querySelector('.doc-outline');
+            const hasBlocks = outline && outline.children.length > 0;
+            btnStartExtract.textContent = hasBlocks ? '重新提炼' : '提炼';
+          }
+        });
+      }
+      if (btnStartExtract) {
+        btnStartExtract.addEventListener('click', () => {
+          extractActionBar.classList.add('hidden');
+          startWorkbenchExtraction();
+        });
+      }
+
+      // ── 批量生成正文按钮 ──
+      const btnBatchGen = document.getElementById('btn-batch-generate');
+      const batchStatus = document.getElementById('outline-batch-status');
+      const batchCurrent = document.getElementById('outline-batch-current');
+      const btnBatchCancel = document.getElementById('btn-batch-cancel');
+      let batchGenerating = false;
+      let batchAbort = null;
+
+      if (btnBatchCancel) {
+        btnBatchCancel.addEventListener('click', () => {
+          if (batchAbort) batchAbort.abort();
+        });
+      }
+
+      if (btnBatchGen) {
+        btnBatchGen.addEventListener('click', () => {
+          openBatchPromptPreview();
+        });
+      }
+
+      // ── 批量生成 Prompt 预览弹窗 ──
+      function openBatchPromptPreview() {
+        const tone = 'official';
+        const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
+
+        const sections = [
+          {
+            key: 'role',
+            title: '角色设定',
+            tag: '统一设置',
+            content: TONE_DESCRIPTIONS[tone] || '',
+            placeholder: '',
+          },
+          {
+            key: 'guidance',
+            title: '提炼要求（应标指导）',
+            tag: '各模块独立',
+            content: '各模块自动使用对应的提炼内容（核心要求、策略要点、否决项、加分项）',
+            placeholder: '',
+          },
+          {
+            key: 'sources',
+            title: '参考素材',
+            tag: '自动引用',
+            content: '各模块自动引用对应的匹配素材',
+            placeholder: '',
+          },
+          {
+            key: 'custom',
+            title: '自定义要求',
+            tag: '统一设置',
+            content: '',
+            placeholder: '可填写统一的额外要求，所有模块共用。如：重点突出技术创新、篇幅控制在500字...',
+          },
+          {
+            key: 'output',
+            title: '输出规范',
+            tag: `统一 ${targetWords} 字`,
+            content: `目标字数：${targetWords} 字\n核心规则：忠于原意、保持段落结构、补充背景释义与应用场景`,
+            placeholder: '',
+          },
+        ];
+
+        const nav = document.getElementById('prompt-modal-nav');
+        const editor = document.getElementById('prompt-modal-editor');
+
+        nav.innerHTML = sections.map((sec, i) => `
+          <div class="prompt-nav-item${i === 0 ? ' active' : ''}" data-idx="${i}">
+            <span class="prompt-nav-dot"></span>
+            <span>${sec.title}</span>
+          </div>
+        `).join('');
+
+        window.__promptSections = sections;
+        window.__promptTextareas = {};
+        window.__isBatchPrompt = true;
+
+        function showSection(idx) {
+          const sec = sections[idx];
+          editor.innerHTML = `
+            <div class="prompt-editor-title">
+              <span>${sec.title}</span>
+              <span class="prompt-editor-tag">${sec.tag}</span>
+            </div>
+            <textarea class="prompt-editor-textarea" data-section-key="${sec.key}" placeholder="${sec.placeholder || ''}">${escHtml(window.__promptTextareas[sec.key] ?? sec.content)}</textarea>
+          `;
+          const ta = editor.querySelector('textarea');
+          if (sec.key === 'custom') ta?.focus();
+          ta?.addEventListener('input', () => {
+            window.__promptTextareas[sec.key] = ta.value;
+          });
+          nav.querySelectorAll('.prompt-nav-item').forEach((item, i) => {
+            item.classList.toggle('active', i === idx);
+          });
+        }
+
+        showSection(0);
+
+        nav.querySelectorAll('.prompt-nav-item').forEach(item => {
+          item.addEventListener('click', () => {
+            showSection(parseInt(item.dataset.idx));
+          });
+        });
+
+        document.getElementById('prompt-modal-backdrop').classList.add('open');
+      }
+
+      async function executeBatchGenerate() {
+        if (batchGenerating) return;
+        batchGenerating = true;
+        batchAbort = new AbortController();
+        btnBatchGen.style.display = 'none';
+        batchStatus.classList.remove('hidden');
+        batchCurrent.textContent = '准备中…';
+
+        const batchCustomReq = (window.__promptTextareas?.custom || '').trim();
+        const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
+
+        const blocks = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+        const contentBlocks = blocks.filter(b => !(b.content && b.content.trim()));
+        let done = 0;
+
+        const progressText = document.getElementById('outline-progress-text');
+        const progressBar = document.getElementById('outline-progress-bar');
+        const banner = document.getElementById('ced-gen-banner');
+        const genStage = document.getElementById('ced-gen-stage');
+        const genPbar = document.getElementById('ced-gen-pbar');
+        const genPct = document.getElementById('ced-gen-pct');
+        const editable = document.getElementById('ced-editable');
+        const placeholder = document.getElementById('ced-placeholder');
+
+        for (const block of contentBlocks) {
+          if (batchAbort.signal.aborted) break;
+          batchCurrent.textContent = block.title || '（无标题）';
+
+          const outlineItem = document.querySelector(`.doc-outline-item[data-block-id="${block.id}"]`);
+          if (outlineItem) outlineItem.click();
+
+          // 确保该 block 的匹配素材已加载并自动引用
+          await new Promise(r => setTimeout(r, 50));
+          const cited = blockCiteMap.get(block.id);
+          let extra_context = cited && cited.size
+            ? [...cited.values()].map(s => `[${s.filename || '素材'} #${s.chunk_index}]\n${s.content || ''}`).join('\n\n')
+            : '';
+          if (batchCustomReq) {
+            extra_context = (extra_context ? extra_context + '\n\n' : '') + `【用户额外要求】\n${batchCustomReq}`;
+          }
+
+          if (banner) banner.classList.add('visible');
+          if (genStage) genStage.textContent = '· 整理应标要求与素材中';
+          if (genPbar) genPbar.style.width = '0%';
+          if (genPct) genPct.textContent = '0%';
+          if (placeholder) placeholder.style.display = 'none';
+          if (editable) { editable.style.display = ''; editable.textContent = ''; initStreamRenderer(editable); }
+
+          let receivedFirst = false;
+          let streamBuf = '';
+          try {
+            const resp = await fetch(`/api/blocks/${block.id}/generate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tone: 'official', target_words: targetWords, extra_context, model: window.__generateModel || null }),
+              signal: batchAbort.signal,
+            });
+            if (resp.ok && resp.body) {
+              const reader = resp.body.getReader();
+              const decoder = new TextDecoder();
+              let buf = '';
+              while (true) {
+                const { done: rdDone, value } = await reader.read();
+                if (rdDone) break;
+                buf += decoder.decode(value, { stream: true });
+                const events = buf.split('\n\n');
+                buf = events.pop();
+                for (const evt of events) {
+                  if (!evt.trim()) continue;
+                  const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
+                  if (!dataLine) continue;
+                  try {
+                    const data = JSON.parse(dataLine.slice(5).trim());
+                    if (data.text) {
+                      if (!receivedFirst) {
+                        receivedFirst = true;
+                        if (genStage) genStage.textContent = '· 正在撰写';
+                      }
+                      streamBuf += data.text;
+                      appendStreamToken(data.text);
+                    }
+                    if (data.block_id) {
+                      flushStreamRenderer();
+                      const fullContent = data.content || streamBuf || '';
+                      if (editable) renderSourceMarked(fullContent, editable);
+                      blockContentCache.set(block.id, fullContent);
+                    }
+                  } catch {}
+                }
+              }
+            }
+          } catch (e) {
+            if (e.name === 'AbortError') break;
+          }
+
+          flushStreamRenderer();
+          if (banner) banner.classList.remove('visible');
+          if (genPbar) genPbar.style.width = '100%';
+          if (genPct) genPct.textContent = '100%';
+          done++;
+          const writtenTotal = blocks.filter(b => b.content && b.content.trim()).length + done;
+          if (progressText) progressText.textContent = `${writtenTotal} / ${blocks.length}`;
+          if (progressBar) progressBar.style.width = blocks.length ? `${Math.round(writtenTotal / blocks.length * 100)}%` : '0%';
+          const dot = document.querySelector(`.doc-outline-item[data-block-id="${block.id}"] .outline-item-dot`);
+          if (dot) dot.classList.add('done');
+        }
+
+        batchGenerating = false;
+        batchAbort = null;
+        batchStatus.classList.add('hidden');
+        btnBatchGen.style.display = '';
+        if (banner) banner.classList.remove('visible');
+        if (typeof window.__loadBlocks === 'function') window.__loadBlocks();
+      }
+
+      function inferOutlineLevel(s) {
+        // 优先用后端解析的真实 level
+        if (typeof s === 'object' && s && Number.isFinite(s.level)) {
+          return Math.max(1, Math.min(4, s.level));
+        }
+        const title = typeof s === 'string' ? s : (s?.title || '');
+        if (/^[一二三四五六七八九十百]+[、．\.]/.test(title)) return 1;
+        if (/^第[一二三四五六七八九十百\d]+[章节篇]/.test(title)) return 1;
+        if (/^\d+\.\d+/.test(title)) return 3;
+        return 2;
+      }
+
+      function escapeHtml(s) {
+        return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+
+      // 用 SSE 数据增量构建左侧大纲
+      function renderExtractOutline(sections) {
+        const outlineNav = document.querySelector('.doc-outline');
+        const progressBadge = document.getElementById('outline-progress-badge');
+        const progressText = document.getElementById('outline-progress-text');
+        const progressBar = document.getElementById('outline-progress-bar');
+        if (!outlineNav) return;
+        outlineNav.innerHTML = '';
+
+        // 隐藏空状态、显示工作区
+        document.getElementById('editor-empty-hint').style.display = 'none';
+        document.getElementById('editor-workspace').style.display = 'flex';
+
+        let currentChildren = null;
+        // 缓存 block 占位（按 block_id 索引）
+        window.__extractBlockMap = new Map();
+
+        // 规整化 level：找到全局最小值，平移成 1（处理"文档没有标题1，从标题2/3 起步"的情况）
+        const rawLevels = sections.map(s => inferOutlineLevel(s));
+        const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
+        const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
+
+        sections.forEach((s, idx) => {
+          const blockIdStr = `outline-${idx}`;
+          const title = s.title || '（无标题）';
+          const level = normalize(rawLevels[idx]);
+
+          if (level === 1) {
+            const group = document.createElement('div');
+            group.className = 'outline-group';
+            const headingBtn = document.createElement('button');
+            headingBtn.type = 'button';
+            headingBtn.className = 'doc-outline-heading';
+            headingBtn.innerHTML = `<span class="outline-chevron">›</span><span class="outline-item-label">${escapeHtml(title)}</span>`;
+            headingBtn.addEventListener('click', () => group.classList.toggle('collapsed'));
+            group.appendChild(headingBtn);
+            currentChildren = document.createElement('div');
+            currentChildren.className = 'outline-children';
+            group.appendChild(currentChildren);
+            outlineNav.appendChild(group);
+          } else {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = `doc-outline-item level-${level}`;
+            item.dataset.blockIdStr = blockIdStr;
+            item.dataset.idx = idx;
+            item.innerHTML = `<span class="outline-item-bullet"></span><span class="outline-item-label">${escapeHtml(title)}</span><span class="outline-item-dot"></span>`;
+            item.addEventListener('click', () => {
+              const block = window.__extractBlockMap.get(blockIdStr);
+              if (!block) return;
+              outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
+              item.classList.add('active');
+              if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
+            });
+            (currentChildren || outlineNav).appendChild(item);
+            window.__extractBlockMap.set(blockIdStr, { id: 0, block_id: blockIdStr, title, kind: 'content', level: 1, requirement:'', key_points:'', veto_items:'', bonus_items:'', source:'[]', content:'', _pending: true });
+          }
+        });
+
+        // 进度统计：总数只计 content 级章节（规整后 level >= 2）
+        const contentSections = sections.filter((s, i) => normalize(rawLevels[i]) >= 2);
+        window.__extractTotalSections = contentSections.length;
+        if (progressBadge) progressBadge.textContent = contentSections.length;
+        if (progressText) progressText.textContent = `0 / ${contentSections.length}`;
+        if (progressBar) progressBar.style.width = '0%';
+      }
+
+      function markOutlineDone(blockIdStr, blockData) {
+        const item = document.querySelector(`.doc-outline-item[data-block-id-str="${blockIdStr}"]`);
+        if (item) {
+          const dot = item.querySelector('.outline-item-dot');
+          if (dot) dot.classList.add('done');
+        }
+        // 缓存完整 block 数据
+        if (window.__extractBlockMap) {
+          const cached = window.__extractBlockMap.get(blockIdStr) || {};
+          // matched_sources 数组转为 source 字符串以兼容 parseMatchedFromBlock
+          const matched = blockData.matched_sources || [];
+          window.__extractBlockMap.set(blockIdStr, {
+            ...cached,
+            ...blockData,
+            block_id: blockIdStr,
+            source: JSON.stringify(matched),
+            _pending: false,
+          });
+        }
+        // 更新撰写进度（只统计有实际 content 的 block）
+        const allItems = document.querySelectorAll('.doc-outline-item');
+        const totalSections = window.__extractTotalSections || allItems.length;
+        let writtenCount = 0;
+        if (window.__extractBlockMap) {
+          for (const [, b] of window.__extractBlockMap) {
+            if (b.content && b.content.trim()) writtenCount++;
+          }
+        }
+        const progressBadge = document.getElementById('outline-progress-badge');
+        const progressText = document.getElementById('outline-progress-text');
+        const progressBar = document.getElementById('outline-progress-bar');
+        if (progressBadge) progressBadge.textContent = totalSections;
+        if (progressText) progressText.textContent = `${writtenCount} / ${totalSections}`;
+        if (progressBar) progressBar.style.width = totalSections ? `${Math.round(writtenCount/totalSections*100)}%` : '0%';
+
+        // 如果当前选中的就是这个 block，刷新右侧
+        if (currentBlock && currentBlock.block_id === blockIdStr) {
+          const block = window.__extractBlockMap.get(blockIdStr);
+          if (block && typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
+        }
+      }
+
+      async function startWorkbenchExtraction() {
+        const bar = document.getElementById('extract-progress-bar');
+        const stage = document.getElementById('extract-progress-stage');
+        const fill = document.getElementById('extract-progress-fill');
+        const pct = document.getElementById('extract-progress-pct');
+        const cancelBtn = document.getElementById('extract-cancel-btn');
+        const spinner = document.getElementById('extract-spinner');
+        bar.classList.remove('hidden', 'error', 'cancelled');
+        cancelBtn.classList.remove('hidden');
+        if (spinner) spinner.style.display = '';
+
+        let totalSec = 0;
+        let doneSec = 0;
+        let extractReader = null;
+        let cancelled = false;
+        const genAbort = new AbortController();
+        let genDoneCount = 0;
+
+        const updateProgress = (done, total) => {
+          const p = total ? Math.round(done / total * 100) : 0;
+          if (stage) stage.textContent = `${done}/${total}`;
+          if (fill) fill.style.width = p + '%';
+          if (pct) pct.textContent = p + '%';
+        };
+
+        // 并行生成单个 block（fire-and-forget）
+        function generateBlockInBackground(dbId, blockIdStr) {
+          fetch(`/api/blocks/${dbId}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tone: 'official', target_words: 800, model: window.__generateModel || null }),
+            signal: genAbort.signal,
+          }).then(async resp => {
+            if (!resp.ok || !resp.body) return;
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            let content = '';
+            while (true) {
+              const { done: rdDone, value } = await reader.read();
+              if (rdDone) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop();
+              for (const line of lines) {
+                if (!line.startsWith('data:')) continue;
+                const raw = line.slice(5).trim();
+                if (!raw) continue;
+                let ev;
+                try { ev = JSON.parse(raw); } catch { continue; }
+                if (ev.text) {
+                  content += ev.text;
+                  // 更新 block 缓存
+                  if (window.__extractBlockMap) {
+                    const cached = window.__extractBlockMap.get(blockIdStr);
+                    if (cached) {
+                      cached.content = content;
+                      window.__extractBlockMap.set(blockIdStr, cached);
+                    }
+                  }
+                  // 如果当前选中的就是这个 block，实时更新编辑区
+                  if (currentBlock && currentBlock.block_id === blockIdStr) {
+                    const editable = document.getElementById('ced-editable');
+                    if (editable) editable.textContent = content;
+                  }
+                }
+                if (ev.block_id && ev.content) {
+                  content = ev.content;
+                }
+              }
+            }
+            // 生成完成，更新撰写进度
+            genDoneCount++;
+            const progressBadge = document.getElementById('outline-progress-badge');
+            const progressText = document.getElementById('outline-progress-text');
+            const progressBar = document.getElementById('outline-progress-bar');
+            const totalSections = window.__extractTotalSections || 1;
+            if (progressText) progressText.textContent = `${genDoneCount} / ${totalSections}`;
+            if (progressBar) progressBar.style.width = totalSections ? `${Math.round(genDoneCount/totalSections*100)}%` : '0%';
+          }).catch(() => {});
+        }
+
+        // 取消按钮
+        cancelBtn.onclick = () => {
+          cancelled = true;
+          genAbort.abort();
+          if (extractReader) extractReader.cancel();
+          bar.classList.add('cancelled');
+          cancelBtn.classList.add('hidden');
+          if (spinner) spinner.style.display = 'none';
+          if (stage) stage.textContent = `已取消（已完成 ${doneSec}/${totalSec}）`;
+          if (typeof window.__loadBlocks === 'function') window.__loadBlocks();
+        };
+
+        try {
+          const extractModelParam = window.__selectedModel || '';
+          const outlineUrl = `/api/projects/${projectId}/outline` + (extractModelParam ? `?model=${encodeURIComponent(extractModelParam)}` : '');
+          const resp = await fetch(outlineUrl, { method: 'POST' });
+          if (!resp.ok || !resp.body) throw new Error('提炼请求失败');
+          extractReader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          let firstSelected = false;
+
+          while (true) {
+            const { done, value } = await extractReader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+              if (!line.startsWith('data:')) continue;
+              const raw = line.slice(5).trim();
+              if (!raw) continue;
+              let ev;
+              try { ev = JSON.parse(raw); } catch { continue; }
+
+              if (ev.sections) {
+                totalSec = ev.total || ev.sections.length;
+                renderExtractOutline(ev.sections);
+                updateProgress(0, totalSec);
+              }
+
+              if (ev.block_id && ev.title) {
+                markOutlineDone(ev.block_id, ev);
+                doneSec++;
+                updateProgress(doneSec, totalSec);
+
+                // 暂停"边提炼边生成"：提炼完成后由用户手动点"批量生成"
+                // if (ev.id) {
+                //   generateBlockInBackground(ev.id, ev.block_id);
+                // }
+
+                if (!firstSelected) {
+                  const item = document.querySelector(`.doc-outline-item[data-block-id-str="${ev.block_id}"]`);
+                  if (item) { item.click(); firstSelected = true; }
+                }
+              }
+
+              if ('block_count' in ev) {
+                updateProgress(doneSec, totalSec);
+                if (fill) fill.style.width = '100%';
+                if (pct) pct.textContent = '100%';
+                cancelBtn.classList.add('hidden');
+                setTimeout(() => bar.classList.add('hidden'), 800);
+                if (typeof window.__loadBlocks === 'function') {
+                  await window.__loadBlocks();
+                }
+                // 提炼成功完成 → 清除 URL 上 autoExtract，防止刷新重跑
+                const url = new URL(location.href);
+                url.searchParams.delete('autoExtract');
+                history.replaceState({}, '', url);
+              }
+
+              if (ev.message && !ev.title) {
+                bar.classList.add('error');
+                cancelBtn.classList.add('hidden');
+                if (spinner) spinner.style.display = 'none';
+                if (stage) stage.textContent = '提炼失败：' + ev.message;
+              }
+            }
+          }
+        } catch (err) {
+          if (cancelled) return;
+          console.error('[autoExtract]', err);
+          bar.classList.add('error');
+          cancelBtn.classList.add('hidden');
+          retryBtn.classList.remove('hidden');
+          if (spinner) spinner.style.display = 'none';
+          if (stage) stage.textContent = '提炼失败：' + (err.message || '网络错误');
+        }
+      }
     </script>
 
     <script>
-      // 全局辅助：折叠卡切换（inline onclick 调用）
-      function toggleRefCard(id) {
-        const card = document.getElementById(id);
-        if (card) card.classList.toggle('open');
+      // 全局辅助（保留空壳避免旧代码报错）
+      function toggleRefCard(id) {}
+    </script>
+
+    <!-- 素材列表弹窗 -->
+    <div class="mat-modal-backdrop" id="mat-modal-backdrop">
+      <div class="mat-modal-box">
+        <div class="mat-modal-header">
+          <h3>素材列表</h3>
+          <button style="all:unset;cursor:pointer;padding:4px 6px;border-radius:6px;color:var(--muted);font-size:14px;" id="mat-modal-close">✕</button>
+        </div>
+        <div class="mat-modal-body" id="mat-modal-body">
+          <p class="muted" style="text-align:center;padding:20px;">加载中...</p>
+        </div>
+        <div class="mat-modal-footer">
+          <button id="btn-mat-modal-upload" type="button" style="width:100%;padding:10px;border:1.5px dashed var(--line);border-radius:10px;background:none;font-size:13px;color:var(--muted);cursor:pointer;">+ 上传素材</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompt 预览弹窗 -->
+    <div class="prompt-modal-backdrop" id="prompt-modal-backdrop">
+      <div class="prompt-modal-box">
+        <div class="prompt-modal-header">
+          <h3>Prompt 预览</h3>
+          <button style="all:unset;cursor:pointer;padding:4px 6px;border-radius:6px;color:var(--muted);font-size:14px;" id="prompt-modal-close">✕</button>
+        </div>
+        <div class="prompt-modal-content">
+          <div class="prompt-modal-nav" id="prompt-modal-nav"></div>
+          <div class="prompt-modal-editor" id="prompt-modal-editor"></div>
+        </div>
+        <div class="prompt-modal-footer">
+          <button id="btn-prompt-cancel" style="padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);font-size:13px;cursor:pointer;">取消</button>
+          <button id="btn-prompt-confirm" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent,#2563eb);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">确认生成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- API 配置弹窗 -->
+    <div class="api-modal-backdrop" id="api-modal-backdrop">
+      <div class="api-modal-box">
+        <div class="api-modal-header">
+          <div>
+            <h2>添加模型配置</h2>
+            <p>添加新的 API 配置以在模型菜单中使用</p>
+          </div>
+          <button class="api-modal-close" id="api-modal-close">✕</button>
+        </div>
+        <div class="api-modal-body">
+          <div>
+            <div class="api-field-label">API 提供商</div>
+            <div class="provider-chips" id="provider-chips">
+              <button class="provider-chip active" data-provider="claude">Anthropic</button>
+              <button class="provider-chip" data-provider="openai">OpenAI</button>
+              <button class="provider-chip" data-provider="deepseek">DeepSeek</button>
+              <button class="provider-chip" data-provider="kimi">Kimi</button>
+              <button class="provider-chip" data-provider="minimax">MiniMax</button>
+              <button class="provider-chip" data-provider="doubao">豆包</button>
+            </div>
+          </div>
+          <div>
+            <div class="api-field-label">Base URL</div>
+            <input class="api-input" id="api-base-url" placeholder="留空则使用提供商默认地址" />
+            <div class="api-field-hint">留空则使用提供商默认地址</div>
+          </div>
+          <div>
+            <div class="api-field-label">API Key</div>
+            <div class="key-wrap">
+              <input class="api-input mono" id="api-key" type="password" placeholder="sk-ant-…" />
+              <button class="key-toggle" id="key-toggle">显示</button>
+            </div>
+            <div class="api-field-hint">密钥仅保存在本地，不会上传</div>
+          </div>
+          <div>
+            <div class="api-field-label">模型标识</div>
+            <input class="api-input" id="api-model" placeholder="例如 claude-sonnet-4-6 或 gpt-4o" />
+            <div class="api-field-hint">例如 claude-sonnet-4-6、gpt-4o、deepseek-chat</div>
+          </div>
+        </div>
+        <div class="api-modal-footer">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button class="btn-test-conn" id="btn-test-conn">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/>
+                <path d="M6 7.5V6.5C7 6.5 7.5 6 7.5 5.2C7.5 4.4 6.9 4 6 4C5.2 4 4.6 4.5 4.5 5.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                <circle cx="6" cy="9" r="0.5" fill="currentColor"/>
+              </svg>
+              验证连接
+            </button>
+            <span class="test-status" id="test-status"></span>
+          </div>
+          <div class="api-footer-right">
+            <button class="btn-api-cancel" id="btn-api-cancel">取消</button>
+            <button class="btn-api-save" id="btn-api-save" disabled>添加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    // ── 模型选择器逻辑（提炼模型 / 生成模型 分离） ──
+    (function() {
+      let extractModel = 'claude-sonnet-4-6';
+      let extractModelLabel = 'Sonnet 4.6';
+      let generateModel = 'claude-sonnet-4-6';
+      let generateModelLabel = 'Sonnet 4.6';
+
+      function escModelHtml(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+      const DEFAULTS = [
+        { model: 'claude-opus-4-8', label: 'Opus 4.8' },
+        { model: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+        { model: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+      ];
+
+      // 提炼组（右上角）
+      const extractInst = {
+        tagEl: document.getElementById('model-selector-btn'),
+        labelEl: document.getElementById('model-selector-label'),
+        dropdownEl: document.getElementById('model-dropdown'),
+        listEl: document.getElementById('model-list'),
+      };
+
+      // 生成组（batch + single 联动）
+      const genInstances = [
+        { tagEl: document.getElementById('batch-model-tag'), labelEl: document.getElementById('batch-model-label'), dropdownEl: document.getElementById('batch-model-dropdown'), listEl: document.getElementById('batch-model-list') },
+        { tagEl: document.getElementById('single-model-tag'), labelEl: document.getElementById('single-model-label'), dropdownEl: document.getElementById('single-model-dropdown'), listEl: document.getElementById('single-model-list') },
+      ];
+
+      const allDropdowns = [extractInst, ...genInstances];
+
+      function closeAllDropdowns() {
+        allDropdowns.forEach(inst => { if (inst.dropdownEl) inst.dropdownEl.classList.remove('open'); });
       }
+
+      function syncExtractLabels() {
+        if (extractInst.labelEl) extractInst.labelEl.textContent = extractModelLabel;
+        window.__selectedModel = extractModel;
+      }
+
+      function syncGenLabels() {
+        genInstances.forEach(inst => { if (inst.labelEl) inst.labelEl.textContent = generateModelLabel; });
+        window.__generateModel = generateModel;
+      }
+
+      function renderList(listEl, configs, currentModel, onSelect) {
+        const seen = new Set();
+        const items = (configs && configs.length) ? configs.filter(c => { if (seen.has(c.model)) return false; seen.add(c.model); return true; }) : DEFAULTS;
+        listEl.innerHTML = items.map(c => {
+          const lbl = c.name || c.label || c.model;
+          const model = c.model;
+          return `<div class="model-option${model === currentModel ? ' selected' : ''}" data-model="${escModelHtml(model)}" data-label="${escModelHtml(lbl)}">
+            <span>${escModelHtml(lbl)}</span>
+            ${model === currentModel ? '<span class="model-option-check">✓</span>' : ''}
+          </div>`;
+        }).join('');
+        listEl.querySelectorAll('.model-option').forEach(el => {
+          el.addEventListener('click', () => {
+            onSelect(el.dataset.model, el.dataset.label);
+            closeAllDropdowns();
+          });
+        });
+      }
+
+      async function loadAndRender(listEl, currentModel, onSelect) {
+        try {
+          const resp = await fetch('/api/configs').then(r => r.json());
+          const configs = resp?.configs || [];
+          renderList(listEl, configs, currentModel, onSelect);
+        } catch { renderList(listEl, null, currentModel, onSelect); }
+      }
+
+      function positionDropdown(tagEl, dropdownEl) {
+        const rect = tagEl.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if (spaceBelow < 220) {
+          dropdownEl.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+          dropdownEl.style.top = 'auto';
+        } else {
+          dropdownEl.style.top = (rect.bottom + 6) + 'px';
+          dropdownEl.style.bottom = 'auto';
+        }
+        dropdownEl.style.left = Math.max(8, rect.left) + 'px';
+      }
+
+      // 提炼模型选择器
+      if (extractInst.tagEl && extractInst.dropdownEl) {
+        extractInst.tagEl.addEventListener('click', e => {
+          e.stopPropagation();
+          const wasOpen = extractInst.dropdownEl.classList.contains('open');
+          closeAllDropdowns();
+          if (!wasOpen) {
+            positionDropdown(extractInst.tagEl, extractInst.dropdownEl);
+            extractInst.dropdownEl.classList.add('open');
+            loadAndRender(extractInst.listEl, extractModel, (m, l) => {
+              extractModel = m; extractModelLabel = l; syncExtractLabels();
+            });
+          }
+        });
+        extractInst.dropdownEl.addEventListener('click', e => e.stopPropagation());
+      }
+
+      // 生成模型选择器（两处联动）
+      genInstances.forEach(inst => {
+        if (!inst.tagEl || !inst.dropdownEl) return;
+        inst.tagEl.addEventListener('click', e => {
+          e.stopPropagation();
+          const wasOpen = inst.dropdownEl.classList.contains('open');
+          closeAllDropdowns();
+          if (!wasOpen) {
+            positionDropdown(inst.tagEl, inst.dropdownEl);
+            inst.dropdownEl.classList.add('open');
+            loadAndRender(inst.listEl, generateModel, (m, l) => {
+              generateModel = m; generateModelLabel = l; syncGenLabels();
+            });
+          }
+        });
+        inst.dropdownEl.addEventListener('click', e => e.stopPropagation());
+      });
+
+      document.addEventListener('click', closeAllDropdowns);
+
+      // "添加 API 配置"按钮
+      document.querySelectorAll('[data-open-api-modal]').forEach(btn => {
+        btn.addEventListener('click', () => { closeAllDropdowns(); openApiModal(); });
+      });
+      document.getElementById('btn-add-config')?.addEventListener('click', () => { closeAllDropdowns(); openApiModal(); });
+
+      // ── API 配置弹窗 ──
+      const apiBackdrop   = document.getElementById('api-modal-backdrop');
+      const apiClose      = document.getElementById('api-modal-close');
+      const apiCancel     = document.getElementById('btn-api-cancel');
+      const apiSave       = document.getElementById('btn-api-save');
+      const btnTestConn   = document.getElementById('btn-test-conn');
+      const testStatus    = document.getElementById('test-status');
+      const providerChips = document.getElementById('provider-chips');
+      const apiBaseUrl    = document.getElementById('api-base-url');
+      const apiKeyInput   = document.getElementById('api-key');
+      const apiModelInput = document.getElementById('api-model');
+      const keyToggle     = document.getElementById('key-toggle');
+
+      const PROVIDER_DEFAULTS = {
+        claude:   { url: 'https://api.anthropic.com',              model: 'claude-sonnet-4-6', placeholder: 'sk-ant-…' },
+        openai:   { url: 'https://api.openai.com/v1',              model: 'gpt-4o',            placeholder: 'sk-…' },
+        deepseek: { url: 'https://api.deepseek.com',               model: 'deepseek-v4-pro',   placeholder: 'sk-…' },
+        kimi:     { url: 'https://api.moonshot.cn/v1',             model: 'moonshot-v1-8k',    placeholder: 'sk-…' },
+        minimax:  { url: 'https://api.minimax.chat/v1',            model: 'abab6.5s-chat',     placeholder: '' },
+        doubao:   { url: 'https://ark.cn-beijing.volces.com/api/v3', model: '',                placeholder: '' },
+      };
+      let currentProvider = 'claude';
+      let verifiedOk = false;
+
+      function openApiModal() {
+        apiBackdrop.classList.add('open');
+        resetApiForm();
+      }
+      function closeApiModal() { apiBackdrop.classList.remove('open'); }
+      function resetApiForm() {
+        currentProvider = 'claude'; verifiedOk = false;
+        providerChips.querySelectorAll('.provider-chip').forEach(c =>
+          c.classList.toggle('active', c.dataset.provider === 'claude'));
+        const d = PROVIDER_DEFAULTS['claude'];
+        apiBaseUrl.value = ''; apiBaseUrl.placeholder = d.url;
+        apiKeyInput.value = ''; apiKeyInput.placeholder = d.placeholder;
+        apiModelInput.value = d.model;
+        testStatus.textContent = ''; testStatus.className = 'test-status';
+        apiSave.disabled = true;
+      }
+
+      providerChips.addEventListener('click', e => {
+        const chip = e.target.closest('.provider-chip');
+        if (!chip) return;
+        currentProvider = chip.dataset.provider;
+        providerChips.querySelectorAll('.provider-chip').forEach(c =>
+          c.classList.toggle('active', c === chip));
+        const d = PROVIDER_DEFAULTS[currentProvider] || {};
+        apiBaseUrl.placeholder = d.url || '';
+        apiKeyInput.placeholder = d.placeholder || '';
+        apiModelInput.value = d.model || '';
+        verifiedOk = false; testStatus.textContent = ''; apiSave.disabled = true;
+      });
+
+      keyToggle.addEventListener('click', () => {
+        const show = apiKeyInput.type === 'password';
+        apiKeyInput.type = show ? 'text' : 'password';
+        keyToggle.textContent = show ? '隐藏' : '显示';
+      });
+
+      btnTestConn.addEventListener('click', async () => {
+        const key = apiKeyInput.value.trim();
+        const model = apiModelInput.value.trim();
+        if (!key || !model) {
+          testStatus.textContent = '请填写 API Key 和模型标识';
+          testStatus.className = 'test-status fail'; return;
+        }
+        btnTestConn.classList.add('testing'); btnTestConn.textContent = '验证中…';
+        testStatus.textContent = ''; verifiedOk = false; apiSave.disabled = true;
+        try {
+          const body = { provider: currentProvider, api_key: key, base_url: apiBaseUrl.value.trim() || null, model };
+          const addResp = await fetch('/api/configs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+          if (!addResp?.config?.id) throw new Error('保存失败');
+          const configId = addResp.config.id;
+          const checkResp = await fetch(`/api/configs/${configId}/check`).then(r => r.json());
+          if (checkResp?.valid) {
+            verifiedOk = true;
+            testStatus.textContent = '✓ 验证通过'; testStatus.className = 'test-status ok';
+            apiSave.disabled = false; apiSave.dataset.configId = configId;
+          } else {
+            await fetch(`/api/configs/${configId}`, { method: 'DELETE' });
+            testStatus.textContent = '✗ ' + (checkResp?.message || '验证失败');
+            testStatus.className = 'test-status fail';
+          }
+        } catch { testStatus.textContent = '✗ 请求失败，请检查网络'; testStatus.className = 'test-status fail'; }
+        btnTestConn.classList.remove('testing'); btnTestConn.textContent = '验证连接';
+      });
+
+      apiSave.addEventListener('click', async () => {
+        if (!verifiedOk) return;
+        closeApiModal();
+        const model = apiModelInput.value.trim();
+        extractModel = model; extractModelLabel = model;
+        generateModel = model; generateModelLabel = model;
+        syncExtractLabels();
+        syncGenLabels();
+      });
+
+      apiClose.addEventListener('click', closeApiModal);
+      apiCancel.addEventListener('click', async () => {
+        const cid = apiSave.dataset.configId;
+        if (cid && !verifiedOk) await fetch(`/api/configs/${cid}`, { method: 'DELETE' }).catch(() => {});
+        closeApiModal();
+      });
+      apiBackdrop.addEventListener('click', e => { if (e.target === apiBackdrop) closeApiModal(); });
+
+      // 页面加载时获取已配置模型并同步显示
+      (async function initModel() {
+        try {
+          const resp = await fetch('/api/configs').then(r => r.json());
+          const configs = resp?.configs || [];
+          if (configs.length) {
+            extractModel = configs[0].model;
+            extractModelLabel = configs[0].name || configs[0].model;
+            generateModel = configs[0].model;
+            generateModelLabel = configs[0].name || configs[0].model;
+            syncExtractLabels();
+            syncGenLabels();
+          }
+        } catch {}
+      })();
+    })();
     </script>
   </body>
 </html>
