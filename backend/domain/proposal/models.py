@@ -161,7 +161,7 @@ class Block:
                         for s in arr
                         if isinstance(s, dict)
                     ]
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError, KeyError):
                 sources = []
 
         return cls(

@@ -229,6 +229,10 @@ def test_block_from_row_handles_missing_source_column():
     # 缺失 source key
     b = Block.from_row(base)
     assert b.sources == []
+    # source 列里某条 dict 缺关键字段（material_id 缺失）
+    row = {**base, "source": '[{"chunk_index": 0, "snippet": "x"}]'}
+    b = Block.from_row(row)
+    assert b.sources == []
 
 
 def test_block_from_row_parses_valid_source_json():
