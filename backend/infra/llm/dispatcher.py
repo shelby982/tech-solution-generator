@@ -25,6 +25,7 @@ from agents.prompts import (
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 from . import clients
+from .json_utils import extract_json_object as _extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -333,48 +334,7 @@ async def dispatch_block_write(
 # 大纲生成（非流式，返回结构化列表）
 # ─────────────────────────────────────────────
 
-def _extract_json_object(text: str) -> dict:
-    """
-    从模型返回里抽出第一个完整 JSON 对象。先剥 ``` / ```json 围栏，
-    再用栈匹配第一对 {...}（跳过字符串内的 { 和 }）。
-    抛 ValueError 表示找不到合法 JSON。
-    """
-    s = text.strip()
-    # 剥围栏
-    if s.startswith("```"):
-        first_nl = s.find("\n")
-        if first_nl != -1:
-            s = s[first_nl + 1:]
-        if s.endswith("```"):
-            s = s[:-3]
-        s = s.strip()
 
-    start = s.find("{")
-    if start == -1:
-        raise ValueError(f"未找到 JSON 起始 {{：{text[:120]}")
-
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(s)):
-        ch = s[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return json.loads(s[start:i + 1])
-    raise ValueError(f"JSON 对象未闭合：{text[:120]}")
 
 
 async def dispatch_outline_json(

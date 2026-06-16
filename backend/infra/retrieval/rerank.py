@@ -11,6 +11,7 @@ from typing import Optional
 from agents.prompts import RERANK_SYSTEM, build_rerank_user
 from infra.llm import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 from infra.llm.clients import generate_oneshot_openai, generate_oneshot_claude
+from infra.llm.json_utils import extract_json_object as _extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -26,49 +27,6 @@ class Match:
     score: float
     reason: str
     hit_points: list[str] = field(default_factory=list)
-
-
-# ─────────────────────────────────────────────
-# JSON 抽取（最小版本，避免依赖 dispatcher 内部 helper）
-# ─────────────────────────────────────────────
-
-def _extract_json_object(text: str) -> dict:
-    """从模型返回里抽出第一个完整 JSON 对象，剥代码围栏。"""
-    s = text.strip()
-    if s.startswith("```"):
-        first_nl = s.find("\n")
-        if first_nl != -1:
-            s = s[first_nl + 1:]
-        if s.endswith("```"):
-            s = s[:-3]
-        s = s.strip()
-
-    start = s.find("{")
-    if start == -1:
-        raise ValueError(f"未找到 JSON 起始 {{：{text[:120]}")
-
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(s)):
-        ch = s[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return json.loads(s[start:i + 1])
-    raise ValueError(f"JSON 对象未闭合：{text[:120]}")
 
 
 # ─────────────────────────────────────────────
