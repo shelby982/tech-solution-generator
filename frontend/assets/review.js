@@ -13,7 +13,10 @@ import { api } from './api.js';
 // ── URL 参数 ───────────────────────────────────────
 const params = new URLSearchParams(location.search);
 const threadId = params.get('threadId');
-if (!threadId) { location.href = '/projects'; }
+if (!threadId) {
+  location.href = '/projects';
+  throw new Error('threadId 缺失，已跳转到 /projects');
+}
 
 // ── 常量 ──────────────────────────────────────────
 const AGENT_LABEL = { wang_anshi: '王安石', bao_zheng: '包拯' };
@@ -65,11 +68,19 @@ const selected = new Set();
 let downloadUrl = null;
 let stream = null;
 
+// 页面卸载时关闭 SSE，避免后端连接泄漏
+window.addEventListener('beforeunload', () => {
+  try { stream?.close(); } catch {}
+});
+
 // ── 工具 ──────────────────────────────────────────
 function escHtml(s) {
-  const el = document.createElement('div');
-  el.textContent = s == null ? '' : String(s);
-  return el.innerHTML;
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function scoreClass(score) {
