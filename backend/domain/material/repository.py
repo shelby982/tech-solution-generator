@@ -82,7 +82,7 @@ class MaterialRepository:
         return Chunk.from_dict(row)
 
     async def list_chunks_by_project(self, project_id: int) -> list[Chunk]:
-        """返回所有 chunk（不带 filename，沈括 retrieval 用）。"""
+        """返回所有 chunk（不带 filename，供沈括 agent 检索用）。"""
         rows = await _list_chunks_by_project(self.db, project_id)
         return [Chunk.from_dict(r) for r in rows]
 
