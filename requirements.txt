@@ -19,3 +19,7 @@ aiosqlite==0.20.0
 # openai 1.51.0 向 httpx.AsyncClient 传递 proxies 参数，
 # 该参数在 httpx 0.28+ 被移除，需锁定低版本。
 httpx>=0.23.0,<0.28.0
+
+# ── LangGraph 编排（Phase 4）──────────────────
+langgraph>=0.2.0,<0.5.0
+langgraph-checkpoint-sqlite>=2.0.0,<3.0.0
