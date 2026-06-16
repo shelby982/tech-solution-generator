@@ -115,7 +115,6 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_reviews_thread ON reviews(thread_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_thread_block ON reviews(thread_id, block_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_project ON workflow_runs(project_id);
 """

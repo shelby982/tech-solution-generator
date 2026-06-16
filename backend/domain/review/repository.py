@@ -140,7 +140,8 @@ class WorkflowRunRepository:
         )
         await self.db.commit()
         row = await self.get(thread_id)
-        assert row is not None  # 刚插入，不会为空
+        if row is None:
+            raise RuntimeError(f"workflow_runs 插入后未读到记录：thread_id={thread_id}")
         return row
 
     async def get(self, thread_id: str) -> Optional[dict]:
