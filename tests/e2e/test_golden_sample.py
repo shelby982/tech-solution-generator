@@ -131,6 +131,13 @@ async def test_golden_sample_e2e(tmp_path):
     runner = WorkflowRunner(deps_factory=deps_factory)
 
     async def _drive_workflow() -> dict:
+        # 模拟 lifespan 启动期 verify，让 verified=True 的 config 才进 round-robin 池
+        # 注意这是 e2e 唯一不走 lifespan 的地方
+        from services.config_store import config_store
+        verify_results = await config_store.verify_all()
+        ok_count = sum(1 for ok in verify_results.values() if ok)
+        _log(f"verify_all: {ok_count}/{len(verify_results)} configs ok")
+
         _log("runner.start")
         thread_id = await runner.start(project_id=1, config={})
         _log(f"runner.start done, thread_id={thread_id}")
