@@ -106,6 +106,17 @@ async def lifespan(app: FastAPI):
         await init_db(conn)
     logger.info("SQLite 数据库已初始化")
 
+    # 启动期验证所有 LLM 配置；不通过的会被标 verified=False，
+    # round-robin 池会自动跳过，避免死配置 hang 流式生成。
+    # 0 个通过时不阻止启动——用户可启动后再到 /api/configs 配置新 key。
+    from services.config_store import config_store
+    verify_results = await config_store.verify_all()
+    if verify_results:
+        ok_count = sum(1 for ok in verify_results.values() if ok)
+        logger.info(f"LLM 配置验证：{ok_count}/{len(verify_results)} 通过")
+    else:
+        logger.info("无 LLM 配置，跳过启动验证")
+
     # 构造 WorkflowRunner 并注入到 routes.workflow
     runner = WorkflowRunner(deps_factory=_build_deps)
     set_workflow_runner(runner)

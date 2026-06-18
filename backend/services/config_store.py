@@ -169,14 +169,50 @@ class ConfigStore:
             return idx
 
     def get_configs_and_next_index(self) -> tuple[list["LLMConfig"], int]:
-        """在同一锁内原子地返回配置列表副本和当前轮询起始索引，避免两次调用之间的 race condition"""
+        """在同一锁内原子地返回配置列表副本和当前轮询起始索引，避免两次调用之间的 race condition
+
+        优先返回 verified=True 的配置；若无任何 verified 项则 fallback 到全部
+        （避免启动期未跑过 verify 时全部不可用）。
+        """
         with self._lock:
             if not self._configs:
                 return [], 0
-            configs = list(self._configs)
-            idx = self._rr_index % len(self._configs)
-            self._rr_index = (self._rr_index + 1) % len(self._configs)
-            return configs, idx
+            verified = [c for c in self._configs if c.verified]
+            pool = verified if verified else list(self._configs)
+            idx = self._rr_index % len(pool)
+            self._rr_index = (self._rr_index + 1) % len(pool)
+            return pool, idx
+
+    async def verify_all(self) -> dict[str, bool]:
+        """启动期对所有 config 跑一次 verify_api_key；
+        把通过的标 verified=True，不通过的标 False 并打印日志。
+        返回 {config_id: ok} 字典。
+        """
+        from infra.llm import verify_api_key
+
+        results: dict[str, bool] = {}
+        with self._lock:
+            configs_snapshot = list(self._configs)
+        for cfg in configs_snapshot:
+            try:
+                ok, msg = await verify_api_key(cfg)
+            except Exception as e:
+                ok, msg = False, f"verify exception: {e}"
+            with self._lock:
+                for c in self._configs:
+                    if c.id == cfg.id:
+                        c.verified = ok
+                        break
+            results[cfg.id] = ok
+            if ok:
+                logger.info("config verify ok: %s/%s", cfg.provider, cfg.model)
+            else:
+                logger.warning(
+                    "config verify FAIL: %s/%s — %s", cfg.provider, cfg.model, msg
+                )
+        with self._lock:
+            self._persist()
+        return results
 
     def mark_verified(self, config_id: Optional[str] = None) -> None:
         """标记指定 id（或第一个）配置为已验证"""
