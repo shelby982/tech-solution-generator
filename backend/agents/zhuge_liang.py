@@ -150,12 +150,20 @@ class ZhugeLiangAgent:
                 })
                 return (idx, block_id, output)
 
+        # return_exceptions=True 兜底 _run_one 中 try/except 之外（如 _emit）
+        # 抛出的异常，避免单 block 失败 cancel 同 gather 的其他 task。
         triples = await asyncio.gather(
-            *[_run_one(i, bid) for i, bid in enumerate(target_ids)]
+            *[_run_one(i, bid) for i, bid in enumerate(target_ids)],
+            return_exceptions=True,
         )
-        # 按原 target_ids 顺序回填，保证 results dict 插入序与串行版一致
-        triples.sort(key=lambda t: t[0])
-        results: dict[str, BlockOutput] = {bid: out for _, bid, out in triples}
+        # gather 按提交顺序返回（与 enumerate(target_ids) 一致），无需再 sort。
+        results: dict[str, BlockOutput] = {}
+        for entry in triples:
+            if isinstance(entry, BaseException):
+                logger.warning("诸葛亮：_run_one 异常逃出兜底：%s", entry)
+                continue
+            _, bid, out = entry
+            results[bid] = out
 
         consumed_targets = list(regenerate_targets or [])
         return results, consumed_targets

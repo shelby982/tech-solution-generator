@@ -220,3 +220,67 @@ async def test_needs_diagram_false_when_outline_has_no_placeholder(monkeypatch):
     )
     # mock 默认 outline fixture 不含 【架构图：】
     assert results["s1"].needs_diagram is False
+
+
+# ─────────────────────────────────────────────
+# 并发：>5 block 走 semaphore 队列 + 单 block 失败隔离
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generate_concurrent_blocks_isolated_on_single_failure(monkeypatch):
+    """7 个 tech block 并发跑，s3 的 outline 调用抛异常其他不受影响。
+
+    覆盖：
+    - >BLOCK_CONCURRENCY (5) 个 block，验证 semaphore 队列能跑完
+    - 单 block 内 LLM 调用抛异常被 _run_one 内 try/except 兜底
+    - results 顺序与 target_ids 顺序一致
+    - failed block 仍出现在 results 中，content/outline 为空
+    """
+    monkeypatch.setenv("LLM_MODE", "mock")
+
+    # 用 title 识别 s3 — agent 把 row.title 作为 dispatch_block_write 的 title 传入,
+    # 把 block_dict（含 title）作为 generate_section_outline 的第三个 arg。
+    async def fake_outline(configs, rr_start, block, extra_context=""):
+        if block.get("title") == "FAIL_BLOCK_TITLE":
+            raise RuntimeError("simulated outline failure")
+        return "outline content for " + str(block.get("title"))
+
+    async def fake_block_write(*, configs, rr_start_index, title, requirement,
+                               chunks, target_words):
+        # 没在 outline 阶段失败的话，正文阶段也不应该失败
+        if title == "FAIL_BLOCK_TITLE":
+            raise RuntimeError("should never reach: outline already failed")
+        for token in ["正文-", title, "-end"]:
+            yield token
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "generate_section_outline", fake_outline)
+    monkeypatch.setattr(infra.llm, "dispatch_block_write", fake_block_write)
+
+    # 7 个 block，s3 故意失败
+    target_ids = [f"s{i}" for i in range(1, 8)]
+    matrix = {
+        bid: OutlineMatrixRow(
+            block_id=bid,
+            title="FAIL_BLOCK_TITLE" if bid == "s3" else f"技术方案-{bid}",
+            requirement="R",
+        )
+        for bid in target_ids
+    }
+
+    agent = ZhugeLiangAgent(configs_provider=_fake_configs)
+    results, _ = await agent.generate(
+        outline_matrix=matrix, materials={}, regenerate_targets=None,
+    )
+
+    # 全部 7 个 block 都返回（含失败的 s3），顺序保持
+    assert list(results.keys()) == target_ids
+    # 失败的 s3：try/except 兜底返回空 BlockOutput
+    assert results["s3"].content == ""
+    assert results["s3"].outline == ""
+    # 其他 block 正常出 content
+    for bid in target_ids:
+        if bid == "s3":
+            continue
+        assert results[bid].content, f"{bid} 的 content 不应为空"
+        assert results[bid].outline, f"{bid} 的 outline 不应为空"
