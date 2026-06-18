@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import sys
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -30,6 +33,20 @@ FIXTURES_DIR = ROOT / "tests" / "fixtures"
 SPEC_FIXTURE = FIXTURES_DIR / "sample_spec.docx"
 MATERIAL_FIXTURE = FIXTURES_DIR / "sample_materials.docx"
 BASELINE_PATH = FIXTURES_DIR / "baseline.json"
+
+# 25 分钟内层超时；外层 timeout 1800 (30min) 用作硬兜底。
+GLOBAL_TIMEOUT_SEC = 1500
+
+
+def _log(stage: str) -> None:
+    """Stage 日志：HH:MM:SS 时间戳 + golden-sample 前缀，便于在 hang 时定位卡点。"""
+    print(f"[{datetime.now():%H:%M:%S}] golden-sample: {stage}", flush=True)
+
+
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:  # noqa: BLE001
+    pass
 
 
 def _fixtures_available() -> bool:
@@ -52,6 +69,8 @@ async def test_golden_sample_e2e(tmp_path):
     本测试设计为基线收集 + 后续回归比对：第一次跑时如 baseline.json 不存在则写入；
     再次跑时如 baseline.json 存在则只断言关键不变量（数量、score 区间、stage 顺序）。
     """
+    _log("test entered")
+
     from db import init_db, get_db
     from orchestrator.runner import WorkflowRunner
     from orchestrator.graph import GraphDeps
@@ -66,6 +85,7 @@ async def test_golden_sample_e2e(tmp_path):
     db_module.DB_PATH = str(tmp_path / "golden.db")
     async with get_db() as conn:
         await init_db(conn)
+    _log("db initialized")
 
     # 准备项目 + spec material 入库
     spec_data = SPEC_FIXTURE.read_bytes()
@@ -93,6 +113,7 @@ async def test_golden_sample_e2e(tmp_path):
             (1, "sample_materials.docx", "uploads/1/sample_materials.docx"),
         )
         await conn.commit()
+    _log("project + materials seeded")
 
     async def spec_loader(project_id):
         return BytesIO(spec_data), ".docx", "sample_spec.docx"
@@ -108,19 +129,45 @@ async def test_golden_sample_e2e(tmp_path):
         )
 
     runner = WorkflowRunner(deps_factory=deps_factory)
-    thread_id = await runner.start(project_id=1, config={})
 
-    # 简化：每个闸门 approve 通过；真实场景前端会在闸门停下做编辑后再续跑
-    run = runner._runs[thread_id]
-    await run.task  # 闸门 1 暂停
-    await runner.resume(thread_id, "approve", {})
-    await runner._runs[thread_id].task  # 闸门 2
-    await runner.resume(thread_id, "approve", {})
-    await runner._runs[thread_id].task  # 闸门 3
-    await runner.resume(thread_id, "approve", {})
-    await runner._runs[thread_id].task  # END
+    async def _drive_workflow() -> dict:
+        _log("runner.start")
+        thread_id = await runner.start(project_id=1, config={})
+        _log(f"runner.start done, thread_id={thread_id}")
 
-    final_state = await runner.state(thread_id)
+        run = runner._runs[thread_id]
+        _log("await gate1 (parse + extract + match)")
+        await run.task
+        _log("gate1 paused; resume approve →")
+        await runner.resume(thread_id, "approve", {})
+
+        _log("await gate2 (zhuge_liang generate)")
+        await runner._runs[thread_id].task
+        _log("gate2 paused; resume approve →")
+        await runner.resume(thread_id, "approve", {})
+
+        _log("await gate3 (wang_anshi + bao_zheng review + aggregate)")
+        await runner._runs[thread_id].task
+        _log("gate3 paused; resume approve →")
+        await runner.resume(thread_id, "approve", {})
+
+        _log("await END")
+        await runner._runs[thread_id].task
+        _log("workflow END reached")
+
+        _log("read final state")
+        final_state = await runner.state(thread_id)
+        _log("final state read")
+        return final_state
+
+    try:
+        final_state = await asyncio.wait_for(
+            _drive_workflow(), timeout=GLOBAL_TIMEOUT_SEC
+        )
+    except asyncio.TimeoutError:
+        pytest.fail(
+            f"golden-sample 超时 ({GLOBAL_TIMEOUT_SEC}s)；查看上面最后一行 stage 日志定位卡点"
+        )
 
     blocks = final_state.get("proposal", {}).get("blocks", {})
     review = final_state.get("review", {})
@@ -141,11 +188,13 @@ async def test_golden_sample_e2e(tmp_path):
         "stage_history": final_state.get("stage", ""),
         "block_ids": sorted(blocks.keys()),
     }
+    _log(f"summary: {summary}")
 
     if not BASELINE_PATH.exists():
         BASELINE_PATH.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2)
         )
+        _log("baseline.json written")
         pytest.skip(
             "基线已写入 tests/fixtures/baseline.json，请人工核对后再运行做回归断言"
         )
