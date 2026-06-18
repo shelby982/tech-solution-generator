@@ -6,6 +6,7 @@ mock 模式：环境变量 `LLM_MODE=mock` 时短路到 `_mock.respond()`，
 不发起真实网络调用。
 """
 
+import asyncio
 import logging
 import os
 from typing import AsyncIterator
@@ -183,7 +184,14 @@ async def stream_openai(
         max_tokens=4096,
         stream=True,
     )
-    async for chunk in stream:
+    chunk_iter = stream.__aiter__()
+    while True:
+        try:
+            chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=30.0)
+        except StopAsyncIteration:
+            break
+        except asyncio.TimeoutError:
+            raise TimeoutError("LLM stream chunk timeout (30s without data)")
         delta = chunk.choices[0].delta.content if chunk.choices else None
         if delta is not None:
             yield delta
@@ -213,5 +221,12 @@ async def stream_claude(
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=4096,
     ) as stream:
-        async for text in stream.text_stream:
+        text_iter = stream.text_stream.__aiter__()
+        while True:
+            try:
+                text = await asyncio.wait_for(text_iter.__anext__(), timeout=30.0)
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                raise TimeoutError("Claude stream chunk timeout (30s without data)")
             yield text
