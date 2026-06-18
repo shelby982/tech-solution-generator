@@ -18,6 +18,7 @@ from services.block_store import (
     list_revisions,
     add_revision,
     update_block_content,
+    list_project_revisions as _list_project_revisions,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,51 +47,13 @@ async def list_project_revisions(project_id: int):
     """
     async with get_db() as db:
         cursor = await db.execute(
-            """
-            SELECT br.id            AS id,
-                   br.block_id      AS block_id,
-                   br.revision_no   AS revision_no,
-                   br.content       AS content,
-                   br.summary       AS summary,
-                   br.source        AS source,
-                   br.created_at    AS created_at,
-                   b.title          AS block_title,
-                   b.order_idx      AS order_idx
-              FROM block_revisions br
-              JOIN blocks b ON b.id = br.block_id
-             WHERE b.project_id = ?
-             ORDER BY br.created_at DESC, br.id DESC
-            """,
-            (project_id,),
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
         )
-        rows = await cursor.fetchall()
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        rows = await _list_project_revisions(db, project_id)
 
-        # 按 block 分组找上一版 content，计算 char_delta + prev_content
-        prev_by_block: dict[int, dict[int, str]] = {}
-        for r in rows:
-            prev_by_block.setdefault(r["block_id"], {})[r["revision_no"]] = r["content"] or ""
-
-    items: list[dict] = []
-    for r in rows:
-        bid = r["block_id"]
-        rn = r["revision_no"]
-        prev_content = prev_by_block.get(bid, {}).get(rn - 1, "")
-        curr_content = r["content"] or ""
-        items.append({
-            "id":           r["id"],
-            "block_id":     bid,
-            "block_title":  r["block_title"] or "",
-            "order_idx":    r["order_idx"],
-            "revision_no":  rn,
-            "content":      curr_content,
-            "prev_content": prev_content,
-            "char_delta":   len(curr_content) - len(prev_content),
-            "summary":      r["summary"] or "",
-            "source":       r["source"] or "",
-            "created_at":   r["created_at"],
-        })
-
-    return JSONResponse(content={"revisions": items})
+    return JSONResponse(content={"revisions": rows})
 
 
 @router.post("/blocks/{block_id}/revisions/{rn}/restore")

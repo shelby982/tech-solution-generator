@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_thread_block ON reviews(thread_id, block_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_project ON workflow_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_blocks_project ON blocks(project_id);
+CREATE INDEX IF NOT EXISTS idx_block_revisions_block ON block_revisions(block_id);
 """
 
 
