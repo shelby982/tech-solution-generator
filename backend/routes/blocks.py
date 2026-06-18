@@ -3,11 +3,13 @@ backend/routes/blocks.py — Block CRUD + SSE 生成 + AI 功能
 
 端点：
   GET  /api/projects/{id}/blocks   — Block 树（含所有元数据）
+  GET  /api/blocks/{id}/matched-sources — Block 关联的素材片段
   PUT  /api/blocks/{id}            — 更新内容，自动写 revision
   POST /api/blocks/{id}/generate   — SSE 单块 AI 生成
   POST /api/blocks/{id}/ai         — AI 功能：polish/expand/check/search/style
 """
 
+import json
 import logging
 from typing import AsyncGenerator
 
@@ -36,6 +38,33 @@ async def get_project_blocks(project_id: int):
     async with get_db() as db:
         blocks = await list_blocks(db, project_id)
     return JSONResponse(content=blocks)
+
+
+# ── GET /api/blocks/{block_id}/matched-sources ───────────
+
+@router.get("/blocks/{block_id}/matched-sources")
+async def get_block_matched_sources(block_id: int):
+    """
+    返回 block.source 中存的素材片段。
+
+    block.source 是 JSON 数组（在素材匹配阶段写入），元素含
+    material_id / chunk_index / filename / content / score。
+    若该列为空、非 JSON 或解析失败，返回空列表（前端容忍）。
+    """
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+        if block is None:
+            raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
+
+        raw = block.get("source") or ""
+        try:
+            sources = json.loads(raw) if raw else []
+            if not isinstance(sources, list):
+                sources = []
+        except (json.JSONDecodeError, TypeError):
+            sources = []
+
+    return JSONResponse(content={"matched_sources": sources})
 
 
 # ── PUT /api/blocks/{id} ─────────────────────────────────
