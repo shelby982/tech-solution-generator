@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 # 验证用的极小 prompt（消耗极少 Token）
 _VERIFY_PROMPT = "Reply with the single word: ok"
 
+# 流式 chunk 级超时（秒），可通过环境变量 LLM_CHUNK_TIMEOUT 覆盖
+CHUNK_TIMEOUT = float(os.getenv("LLM_CHUNK_TIMEOUT", "30"))
+
+
+async def _iter_with_chunk_timeout(aiter, label: str, timeout: float):
+    """流式迭代器加 chunk-level 超时；超时抛 TimeoutError。"""
+    it = aiter.__aiter__()
+    while True:
+        try:
+            yield await asyncio.wait_for(it.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"{label} stream chunk timeout ({timeout:.0f}s without data)"
+            )
+
 
 def _is_mock_mode() -> bool:
     """是否启用 mock：环境变量 LLM_MODE=mock"""
@@ -184,14 +201,7 @@ async def stream_openai(
         max_tokens=4096,
         stream=True,
     )
-    chunk_iter = stream.__aiter__()
-    while True:
-        try:
-            chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=30.0)
-        except StopAsyncIteration:
-            break
-        except asyncio.TimeoutError:
-            raise TimeoutError("LLM stream chunk timeout (30s without data)")
+    async for chunk in _iter_with_chunk_timeout(stream, "OpenAI", CHUNK_TIMEOUT):
         delta = chunk.choices[0].delta.content if chunk.choices else None
         if delta is not None:
             yield delta
@@ -221,12 +231,5 @@ async def stream_claude(
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=4096,
     ) as stream:
-        text_iter = stream.text_stream.__aiter__()
-        while True:
-            try:
-                text = await asyncio.wait_for(text_iter.__anext__(), timeout=30.0)
-            except StopAsyncIteration:
-                break
-            except asyncio.TimeoutError:
-                raise TimeoutError("Claude stream chunk timeout (30s without data)")
+        async for text in _iter_with_chunk_timeout(stream.text_stream, "Claude", CHUNK_TIMEOUT):
             yield text
