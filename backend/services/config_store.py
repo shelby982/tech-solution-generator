@@ -194,10 +194,12 @@ class ConfigStore:
         with self._lock:
             configs_snapshot = list(self._configs)
         for cfg in configs_snapshot:
+            exc_raised = False
             try:
                 ok, msg = await verify_api_key(cfg)
             except Exception as e:
                 ok, msg = False, f"verify exception: {e}"
+                exc_raised = True
             with self._lock:
                 for c in self._configs:
                     if c.id == cfg.id:
@@ -206,12 +208,17 @@ class ConfigStore:
             results[cfg.id] = ok
             if ok:
                 logger.info("config verify ok: %s/%s", cfg.provider, cfg.model)
+            elif exc_raised:
+                # 真异常时加 exc_info；正常 verify 返回 False 仍走普通 warning
+                logger.warning(
+                    "config verify FAIL (exception): %s/%s — %s",
+                    cfg.provider, cfg.model, msg,
+                    exc_info=True,
+                )
             else:
                 logger.warning(
                     "config verify FAIL: %s/%s — %s", cfg.provider, cfg.model, msg
                 )
-        with self._lock:
-            self._persist()
         return results
 
     def mark_verified(self, config_id: Optional[str] = None) -> None:
