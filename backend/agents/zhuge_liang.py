@@ -13,7 +13,9 @@
 consumed_targets，由调用方据此清空 state 中的字段。
 """
 
+import asyncio
 import logging
+import os
 import re
 from typing import Any, Awaitable, Callable, Optional, Union
 
@@ -29,6 +31,11 @@ logger = logging.getLogger(__name__)
 _DIAGRAM_PLACEHOLDER_RE = re.compile(
     r"【(?:架构图|流程图|拓扑图|部署图|时序图|网络图|示意图)[：:]"
 )
+
+
+# per-block 并发上限：N=20 串行 ≈ 60min，concurrency=5 后 ≈ 12min。
+# 支持 env 覆盖，便于单测 / 压测调参。
+BLOCK_CONCURRENCY = int(os.getenv("ZHUGELIANG_BLOCK_CONCURRENCY", "5"))
 
 
 # 事件回调签名：(event_type, payload) -> None | awaitable[None]
@@ -98,49 +105,57 @@ class ZhugeLiangAgent:
         else:
             target_ids = list(outline_matrix.keys())
 
-        results: dict[str, BlockOutput] = {}
+        sem = asyncio.Semaphore(BLOCK_CONCURRENCY)
 
-        for idx, block_id in enumerate(target_ids):
-            row = outline_matrix[block_id]
-            title = row.title
-            kind = "letter" if is_letter_section(title) else "tech"
+        async def _run_one(idx: int, block_id: str) -> tuple[int, str, BlockOutput]:
+            async with sem:
+                row = outline_matrix[block_id]
+                title = row.title
+                kind = "letter" if is_letter_section(title) else "tech"
 
-            await _emit(emitter, "block_start", {
-                "block_id": block_id,
-                "title": title,
-                "kind": kind,
-            })
+                await _emit(emitter, "block_start", {
+                    "block_id": block_id,
+                    "title": title,
+                    "kind": kind,
+                })
 
-            try:
-                if kind == "letter":
-                    output = await self._generate_letter(
-                        block_id, row, configs,
-                        (rr_start + idx) % max(len(configs), 1),
+                try:
+                    if kind == "letter":
+                        output = await self._generate_letter(
+                            block_id, row, configs,
+                            (rr_start + idx) % max(len(configs), 1),
+                        )
+                    else:
+                        matches = materials.get(block_id, []) or []
+                        output = await self._generate_tech(
+                            block_id, row, matches,
+                            configs, (rr_start + idx) % max(len(configs), 1),
+                            emitter,
+                        )
+                except Exception as e:
+                    logger.warning(f"诸葛亮：block {block_id} 生成失败：{e}")
+                    output = BlockOutput(
+                        block_id=block_id,
+                        kind=kind,
+                        content="",
+                        outline="",
+                        sources=[],
                     )
-                else:
-                    matches = materials.get(block_id, []) or []
-                    output = await self._generate_tech(
-                        block_id, row, matches,
-                        configs, (rr_start + idx) % max(len(configs), 1),
-                        emitter,
-                    )
-            except Exception as e:
-                logger.warning(f"诸葛亮：block {block_id} 生成失败：{e}")
-                output = BlockOutput(
-                    block_id=block_id,
-                    kind=kind,
-                    content="",
-                    outline="",
-                    sources=[],
-                )
 
-            results[block_id] = output
-            await _emit(emitter, "block_done", {
-                "block_id": block_id,
-                "kind": output.kind,
-                "content_length": len(output.content),
-                "sources_count": len(output.sources),
-            })
+                await _emit(emitter, "block_done", {
+                    "block_id": block_id,
+                    "kind": output.kind,
+                    "content_length": len(output.content),
+                    "sources_count": len(output.sources),
+                })
+                return (idx, block_id, output)
+
+        triples = await asyncio.gather(
+            *[_run_one(i, bid) for i, bid in enumerate(target_ids)]
+        )
+        # 按原 target_ids 顺序回填，保证 results dict 插入序与串行版一致
+        triples.sort(key=lambda t: t[0])
+        results: dict[str, BlockOutput] = {bid: out for _, bid, out in triples}
 
         consumed_targets = list(regenerate_targets or [])
         return results, consumed_targets
