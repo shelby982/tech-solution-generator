@@ -589,6 +589,24 @@
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.4); }
 }
+
+/* 闸门 1：可编辑大纲字段视觉提示 */
+.block-card [contenteditable="true"] {
+  outline: 1px dashed transparent;
+  cursor: text;
+  transition: outline-color 0.18s, background 0.18s;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+.block-card [contenteditable="true"]:hover {
+  outline-color: var(--line);
+}
+.block-card [contenteditable="true"]:focus {
+  outline: 1.5px solid #2563eb;
+  outline-offset: 2px;
+  background: #eff6ff;
+}
     </style>
   </head>
   <body>
@@ -1145,18 +1163,21 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       <button class="btn-status-primary" id="btn-confirm-outline">确认大纲，继续匹配素材</button>`;
     document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
     document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
+    makeOutlineEditable();
   } else if (state === 'gate_materials') {
     statusActions.innerHTML = `
       <button class="btn-status-secondary" id="btn-cancel">取消</button>
       <button class="btn-status-primary" id="btn-confirm-materials">确认素材，进入撰写</button>`;
     document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
     document.getElementById('btn-confirm-materials').addEventListener('click', confirmMaterialsGate);
+    freezeOutlineEdit();
   } else if (state === 'done') {
     statusActions.innerHTML = `
       <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
       <button class="btn-status-primary" id="btn-confirm">进入撰写</button>`;
     document.getElementById('btn-reextract').addEventListener('click', () => startExtraction(true));
     document.getElementById('btn-confirm').addEventListener('click', confirmOutline);
+    freezeOutlineEdit();
   }
 }
 
@@ -1498,7 +1519,7 @@ function attachStream(threadId) {
       currentGate = gate;
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
       if (gate === 'review_outline') {
-        setStatusBar('gate_outline', '大纲提炼完成，请确认后继续匹配素材', pct, totalBlocks, doneBlocks);
+        setStatusBar('gate_outline', '大纲提炼完成，请检查并编辑后继续匹配素材', pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_materials') {
         setStatusBar('gate_materials', '素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_report') {
@@ -1593,14 +1614,80 @@ async function confirmOutlineGate() {
   if (!currentThreadId) return;
   const btn = document.getElementById('btn-confirm-outline');
   if (btn) btn.disabled = true;
-  // 沿用现有只读卡片，edits 为空
   try {
-    await api.workflow.resume(currentThreadId, 'approve', {});
+    const matrix = collectOutlineEdits();
+    freezeOutlineEdit();
+    await api.workflow.resume(currentThreadId, 'approve', {
+      spec: { outline_matrix: matrix },
+    });
     setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
   } catch (e) {
     console.error('[workflow] resume(review_outline) 失败', e);
     if (btn) btn.disabled = false;
   }
+}
+
+// ── 闸门 1：可编辑大纲工具 ──
+// 字段顺序与 renderBlockCard 的 7 个 renderField 调用严格对齐：
+// requirement / key_points / veto_items / bonus_items / score_items / evidence_required / indicators
+// （constraint_level 当前 UI 不渲染，提交时不覆盖后端默认值）
+const OUTLINE_FIELD_KEYS = [
+  'requirement',
+  'key_points',
+  'veto_items',
+  'bonus_items',
+  'score_items',
+  'evidence_required',
+  'indicators',
+];
+
+function makeOutlineEditable() {
+  document.querySelectorAll('.block-card').forEach(card => {
+    card.querySelectorAll('.block-field-value, .block-field-list, .block-field-skeleton').forEach(el => {
+      el.setAttribute('contenteditable', 'true');
+      el.dataset.editable = '1';
+    });
+  });
+}
+
+function freezeOutlineEdit() {
+  document.querySelectorAll('.block-card [data-editable="1"]').forEach(el => {
+    el.removeAttribute('contenteditable');
+    delete el.dataset.editable;
+  });
+}
+
+function collectOutlineEdits() {
+  const matrix = {};
+  document.querySelectorAll('.block-card').forEach(card => {
+    const blockId = card.dataset.blockId;
+    if (!blockId) return;
+    const grid = card.querySelector('.block-card-grid');
+    if (!grid) return;
+    const fields = grid.querySelectorAll('.block-field');
+    const existing = blocksById.get(blockId) || {};
+    const row = {
+      block_id: blockId,
+      title: existing.title || '',
+    };
+    fields.forEach((f, i) => {
+      if (i >= OUTLINE_FIELD_KEYS.length) return;
+      const list = f.querySelector('.block-field-list');
+      const value = f.querySelector('.block-field-value');
+      let text = '';
+      if (list) {
+        text = Array.from(list.querySelectorAll('li'))
+          .map(li => li.innerText.trim())
+          .filter(Boolean)
+          .join('\n');
+      } else if (value) {
+        text = value.innerText.trim();
+      }
+      row[OUTLINE_FIELD_KEYS[i]] = text;
+    });
+    matrix[blockId] = row;
+  });
+  return matrix;
 }
 
 async function confirmMaterialsGate() {
