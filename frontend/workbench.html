@@ -3411,6 +3411,7 @@
       const matCountBadge = document.getElementById('mat-count-badge');
 
       async function loadSourceMaterials() {
+        if (!matList || !matEmpty) return;
         try {
           const list = await fetch(`/api/projects/${projectId}/materials`).then(r => r.json());
           const sources = list.filter(m => m.role === 'source');
