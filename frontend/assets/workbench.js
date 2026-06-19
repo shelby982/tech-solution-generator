@@ -2,7 +2,62 @@ import { api } from './api.js';
 
 const params    = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
+const threadId  = params.get('threadId');
 if (!projectId) { location.href = '/projects'; }
+
+// threadId 模式下从 workflow state 拼一个跟 /api/projects/{pid}/blocks 形态一致的列表，
+// 缺 threadId 或 workflow state 为空时静默退回老路径。
+function buildBlockFromWorkflowState(blockId, section, blocks, matrix) {
+  const output = blocks[blockId] || {};
+  const row    = matrix[blockId] || {};
+  const sec    = section || {};
+  const level  = Number(sec.level) || (output.kind === 'heading' ? 1 : 2);
+  const isHeading = level === 1;
+  const sources = Array.isArray(output.sources) ? output.sources : [];
+  return {
+    id: blockId,                       // 用 block_id 当主键 — B-4 才把 PUT/POST 切到 workflow
+    block_id: blockId,
+    title: sec.title || row.title || blockId,
+    kind: isHeading ? 'heading' : (output.kind || 'tech'),
+    level,
+    content: output.content || '',
+    outline: output.outline || '',
+    source: JSON.stringify(sources),
+    requirement:       row.requirement       || '',
+    key_points:        row.key_points        || '',
+    veto_items:        row.veto_items        || '',
+    bonus_items:       row.bonus_items       || '',
+    score_items:       row.score_items       || '',
+    evidence_required: row.evidence_required || '',
+    constraint_level:  row.constraint_level  || 'recommended',
+    indicators:        row.indicators        || '',
+    domain: '',
+    parent_title: '',
+    score: '',
+  };
+}
+
+async function loadBlocksForOutline(pid, tid) {
+  if (tid) {
+    try {
+      const state  = await api.workflow.state(tid);
+      const blocks = (state && state.proposal && state.proposal.blocks) || {};
+      const matrix = (state && state.spec && state.spec.outline_matrix) || {};
+      const toc    = Array.isArray(state && state.spec && state.spec.toc) ? state.spec.toc : [];
+      if (toc.length > 0) {
+        return toc.map(sec => buildBlockFromWorkflowState(sec.id, sec, blocks, matrix));
+      }
+      const ids = Object.keys(blocks);
+      if (ids.length > 0) {
+        return ids.map(bid => buildBlockFromWorkflowState(bid, null, blocks, matrix));
+      }
+      // workflow state 为空 — 走 fallback
+    } catch (e) {
+      console.warn('[workbench] workflow state failed, falling back', e);
+    }
+  }
+  return await api.blocks.list(pid);
+}
 
 // 顶部 tab 链接注入 projectId
 document.querySelectorAll('.process-tab').forEach(a => {
@@ -22,7 +77,7 @@ api.projects.get(projectId).then(p => {
 });
 
 async function loadBlocks() {
-  const blockList = await api.blocks.list(projectId);
+  const blockList = await loadBlocksForOutline(projectId, threadId);
   const shell = document.querySelector('.tiptap-shell');
   const outlineNav = document.querySelector('.doc-outline');
   shell.innerHTML = '';
