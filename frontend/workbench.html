@@ -2305,14 +2305,67 @@
         });
       }
 
-      // 初始化时还原 stage（仅 threadId 模式）
+      // 初始化时还原 stage + stage routing（仅 threadId 模式）
       (async () => {
-        if (!threadId) return;
+        const tid = threadId;
+        if (!tid) return;
+        let s;
         try {
-          const s = await api.workflow.state(threadId);
-          if (s?.stage) setStage(s.stage);
-        } catch {}
+          s = await api.workflow.state(tid);
+        } catch {
+          return;
+        }
+        const stage = s?.stage;
+        if (!stage) return;
+
+        setStage(stage);
+
+        // stage routing — 根据当前阶段决定页面行为
+        switch (stage) {
+          case 'parsing':
+          case 'outline_review':
+          case 'matching':
+          case 'materials_review':
+            // 前置阶段在 project-init 处理
+            location.href = `/project-init?projectId=${projectId}`;
+            return;
+          case 'generating':
+            // 自动开流，无需用户点"批量编写"
+            autoStartWorkflowStream();
+            return;
+          case 'reviewing':
+          case 'report_review':
+          case 'done':
+            // 已到评审或完成阶段 — 跳 review 看板
+            location.href = `/review?threadId=${tid}`;
+            return;
+          case 'aborted':
+            showAbortedBanner();
+            return;
+          default:
+            // idle / 未知 stage — 保持现有手动模式
+            return;
+        }
       })();
+
+      // stage routing 辅助函数 — 自动开流（复用现有 startWorkflowGeneration）
+      async function autoStartWorkflowStream() {
+        if (workflowStream) return;
+        await startWorkflowGeneration();
+      }
+
+      // stage routing 辅助函数 — aborted 状态横幅
+      function showAbortedBanner() {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'padding:12px 20px;background:#fee2e2;color:#991b1b;border-bottom:1px solid #fca5a5;font-size:13px;text-align:center;';
+        banner.innerHTML = '工作流已作废。<a href="/projects" style="color:#1d4ed8;text-decoration:underline;margin-left:8px;">返回项目列表</a>';
+        const stageBar = document.getElementById('stage-progress');
+        if (stageBar && stageBar.parentNode) {
+          stageBar.insertAdjacentElement('afterend', banner);
+        } else {
+          document.body.prepend(banner);
+        }
+      }
 
       // Tab links
       document.getElementById('tab-review').href = `/diff-review?projectId=${projectId}`;
