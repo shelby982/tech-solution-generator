@@ -2893,6 +2893,22 @@
         }, { once: true });
 
         try {
+          // workflow 模式：单 block 重新生成走 api.workflow.regen，UI 通过 SSE block_token / block_done 事件刷新
+          if (threadId && currentBlock?.block_id) {
+            try {
+              await api.workflow.regen(threadId, [currentBlock.block_id]);
+              // fire-and-forget — SSE handler 已处理 token/done 事件，这里只关闭 banner 由 block:done 触发
+              if (stage) stage.textContent = '· 已提交重新生成';
+              editorGenerating = false;
+              return;
+            } catch (e) {
+              console.error('workflow regen failed', e);
+              finishGenerate(banner, pbar, pct, stage);
+              editorGenerating = false;
+              return;
+            }
+          }
+
           const cited = blockCiteMap.get(currentBlock.id);
           let extra_context = cited && cited.size
             ? [...cited.values()]
