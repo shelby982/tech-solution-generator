@@ -413,7 +413,7 @@
 }
 .bcm-card.removed {
   opacity: 0.45;
-  background: #f3f4f6;
+  background: var(--bg-2);
 }
 .bcm-card.removed .bcm-card-name {
   text-decoration: line-through;
@@ -1297,7 +1297,7 @@ function renderMatchedHtml(sources) {
     const chunkId = s.chunk_id ?? s.id ?? `${s.material_id}-${s.chunk_index}`;
     return `<div class="bcm-card" data-bcm-payload="${payload}" data-chunk-id="${escapeHtml(String(chunkId))}">
       <label class="bcm-keep" title="勾选 = 保留素材，取消勾选 = 在闸门 2 提交时剔除">
-        <input type="checkbox" class="bcm-keep-cb" checked />
+        <input type="checkbox" class="bcm-keep-cb" checked aria-label="保留该素材" />
       </label>
       <div class="bcm-card-head">
         <span class="bcm-card-ext" style="background:${pal.bg};color:${pal.fg};">${escapeHtml(ext)}</span>
@@ -1406,8 +1406,8 @@ function renderField(label, value, cls) {
   </div>`;
 }
 function updateBlockCard(blockId, data) {
-  // 闸门 1（gate_outline）期间避免冲掉用户编辑：后端若重发 outline_extract 直接忽略
-  if (extractionState === 'gate_outline') return;
+  // 闸门 1（gate_outline）/ 闸门 2（gate_materials）期间避免冲掉用户编辑：后端若重发 outline_extract / match_progress 直接忽略
+  if (extractionState === 'gate_outline' || extractionState === 'gate_materials') return;
   const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
   if (!card) return;
   card.querySelector('.block-status-badge').className = 'block-status-badge done';
