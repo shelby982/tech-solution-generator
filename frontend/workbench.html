@@ -1803,6 +1803,67 @@
       .src-guide { background: #bfdbfe; border-radius: 2px; padding: 0 2px; }
       .src-material { background: #a7f3d0; border-radius: 2px; padding: 0 2px; }
       .src-extended { background: #fde68a; border-radius: 2px; padding: 0 2px; }
+
+      /* ── 顶部 stage 进度条 ── */
+      .stage-progress {
+        display: flex;
+        gap: 4px;
+        padding: 12px 20px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+      }
+      .stage-step {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        transition: all 0.18s;
+      }
+      .stage-step .stage-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #d1d5db;
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        font-size: 10px;
+        color: #fff;
+        line-height: 1;
+      }
+      .stage-step.done {
+        color: #166534;
+      }
+      .stage-step.done .stage-dot {
+        background: #16a34a;
+      }
+      .stage-step.done .stage-dot::after {
+        content: '✓';
+      }
+      .stage-step.active {
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-weight: 600;
+      }
+      .stage-step.active .stage-dot {
+        background: #2563eb;
+        animation: stage-pulse 1.6s ease-in-out infinite;
+      }
+      .stage-step.aborted .stage-dot {
+        background: #dc2626;
+      }
+      .stage-step.aborted .stage-dot::after {
+        content: '✗';
+      }
+      @keyframes stage-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.4); }
+      }
     </style>
     <!-- Markdown 渲染（用于预览模式） -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -1838,6 +1899,16 @@
             </div>
           </div>
         </header>
+
+        <nav class="stage-progress" id="stage-progress" aria-label="工作流进度" hidden>
+          <div class="stage-step" data-stage="parsing"><span class="stage-dot"></span><span class="stage-name">解析规范</span></div>
+          <div class="stage-step" data-stage="outline_review"><span class="stage-dot"></span><span class="stage-name">大纲确认</span></div>
+          <div class="stage-step" data-stage="matching"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
+          <div class="stage-step" data-stage="materials_review"><span class="stage-dot"></span><span class="stage-name">素材确认</span></div>
+          <div class="stage-step" data-stage="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
+          <div class="stage-step" data-stage="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
+          <div class="stage-step" data-stage="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
+        </nav>
 
         <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
         <div class="extract-action-bar hidden" id="extract-action-bar">
@@ -2197,6 +2268,52 @@
       const projectId = params.get('projectId');
       const threadId = params.get('threadId');
 
+      // ── 顶部 stage 进度条 ──
+      const STAGE_ORDER = [
+        'parsing', 'outline_review', 'matching', 'materials_review',
+        'generating', 'reviewing', 'report_review',
+      ];
+
+      function setStage(stage) {
+        if (!stage) return;
+        const root = document.getElementById('stage-progress');
+        if (!root) return;
+        if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
+        const steps = root.querySelectorAll('.stage-step');
+        if (stage === 'aborted') {
+          const lastActive = root.querySelector('.stage-step.active');
+          if (lastActive) {
+            lastActive.classList.remove('active');
+            lastActive.classList.add('aborted');
+          }
+          return;
+        }
+        if (stage === 'done') {
+          steps.forEach(el => {
+            el.classList.remove('active', 'aborted');
+            el.classList.add('done');
+          });
+          return;
+        }
+        const idx = STAGE_ORDER.indexOf(stage);
+        steps.forEach(el => {
+          const i = STAGE_ORDER.indexOf(el.dataset.stage);
+          el.classList.remove('active', 'done', 'aborted');
+          if (idx < 0) return;
+          if (i < idx) el.classList.add('done');
+          else if (i === idx) el.classList.add('active');
+        });
+      }
+
+      // 初始化时还原 stage（仅 threadId 模式）
+      (async () => {
+        if (!threadId) return;
+        try {
+          const s = await api.workflow.state(threadId);
+          if (s?.stage) setStage(s.stage);
+        } catch {}
+      })();
+
       // Tab links
       document.getElementById('tab-review').href = `/diff-review?projectId=${projectId}`;
 
@@ -2329,6 +2446,9 @@
           },
           onAborted: () => onWorkflowAborted(),
           onDone: () => onWorkflowDone(),
+          onStageChange: (data) => {
+            if (typeof data?.stage === 'string') setStage(data.stage);
+          },
         });
         return true;
       }
