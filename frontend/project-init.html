@@ -1145,6 +1145,10 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   extractionState = state;
   statusBar.dataset.state = state;
   statusLabel.textContent = label;
+  // 切出 gate_outline（含 idle / extracting / gate_materials / done）统一回到只读，避免在每个分支重复 freeze
+  if (state !== 'gate_outline' && typeof freezeOutlineEdit === 'function') {
+    freezeOutlineEdit();
+  }
   if (state === 'idle') {
     progressTrack.style.display = 'none';
     statusActions.innerHTML = '';
@@ -1363,6 +1367,8 @@ function renderField(label, value, cls) {
   </div>`;
 }
 function updateBlockCard(blockId, data) {
+  // 闸门 1（gate_outline）期间避免冲掉用户编辑：后端若重发 outline_extract 直接忽略
+  if (extractionState === 'gate_outline') return;
   const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
   if (!card) return;
   card.querySelector('.block-status-badge').className = 'block-status-badge done';
@@ -1643,7 +1649,7 @@ const OUTLINE_FIELD_KEYS = [
 
 function makeOutlineEditable() {
   document.querySelectorAll('.block-card').forEach(card => {
-    card.querySelectorAll('.block-field-value, .block-field-list, .block-field-skeleton').forEach(el => {
+    card.querySelectorAll('.block-field-value, .block-field-list').forEach(el => {
       el.setAttribute('contenteditable', 'true');
       el.dataset.editable = '1';
     });
@@ -1686,6 +1692,9 @@ function collectOutlineEdits() {
       row[OUTLINE_FIELD_KEYS[i]] = text;
     });
     matrix[blockId] = row;
+    // 同步回本地副本，避免后续 updateBlockCard / 其它分支用旧数据重渲染
+    const stored = blocksById.get(blockId);
+    if (stored) Object.assign(stored, row);
   });
   return matrix;
 }
