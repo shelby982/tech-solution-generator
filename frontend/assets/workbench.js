@@ -15,8 +15,8 @@ function buildBlockFromWorkflowState(blockId, section, blocks, matrix) {
   const isHeading = level === 1;
   const sources = Array.isArray(output.sources) ? output.sources : [];
   return {
-    id: blockId,                       // 用 block_id 当主键 — B-4 才把 PUT/POST 切到 workflow
-    block_id: blockId,
+    id: blockId.replace(/\./g, '_'),   // DOM-safe id（点会被 querySelector 当 class 选择器解析）
+    block_id: blockId,                 // 业务 id 保留原样含点 — B-4 切 workflow regen 用这个
     title: sec.title || row.title || blockId,
     kind: isHeading ? 'heading' : (output.kind || 'tech'),
     level,
@@ -147,9 +147,10 @@ async function loadBlocks() {
 
   if (typeof initWorkbench === 'function') initWorkbench();
 
-  // 批量生成事件监听
+  // 批量生成事件监听 — block_id 含点的子节（如 1.1）DOM id 已替换成下划线，这里同步转换
+  const domIdFor = bid => `block-${String(bid).replace(/\./g, '_')}`;
   window.addEventListener('block:start', e => {
-    const el = document.getElementById(`block-${e.detail.block_id}`);
+    const el = document.getElementById(domIdFor(e.detail.block_id));
     if (!el) return;
     el.dataset.generating = 'true';
     const editable = el.querySelector('[contenteditable]');
@@ -157,14 +158,14 @@ async function loadBlocks() {
   });
 
   window.addEventListener('block:token', e => {
-    const el = document.getElementById(`block-${e.detail.block_id}`);
+    const el = document.getElementById(domIdFor(e.detail.block_id));
     if (!el) return;
     const editable = el.querySelector('[contenteditable]');
     if (editable) editable.textContent += e.detail.token;
   });
 
   window.addEventListener('block:done', e => {
-    const el = document.getElementById(`block-${e.detail.block_id}`);
+    const el = document.getElementById(domIdFor(e.detail.block_id));
     if (!el) return;
     delete el.dataset.generating;
     const editable = el.querySelector('[contenteditable]');
@@ -173,7 +174,7 @@ async function loadBlocks() {
 
   window.addEventListener('block:error', e => {
     if (!e.detail.block_id) return;
-    const el = document.getElementById(`block-${e.detail.block_id}`);
+    const el = document.getElementById(domIdFor(e.detail.block_id));
     if (!el) return;
     el.dataset.error = 'true';
     const editable = el.querySelector('[contenteditable]');
