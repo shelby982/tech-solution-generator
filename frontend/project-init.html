@@ -528,6 +528,67 @@
 .toc-bullet { width: 5px; height: 5px; border-radius: 50%; background: #9ca3af; flex: none; margin-right: 6px; }
 .toc-dot { width: 8px; height: 8px; border-radius: 50%; background: #d1d5db; flex: none; margin-left: auto; }
 .toc-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 顶部 stage 进度条 ── */
+.stage-progress {
+  display: flex;
+  gap: 4px;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.stage-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: all 0.18s;
+}
+.stage-step .stage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  font-size: 10px;
+  color: #fff;
+  line-height: 1;
+}
+.stage-step.done {
+  color: #166534;
+}
+.stage-step.done .stage-dot {
+  background: #16a34a;
+}
+.stage-step.done .stage-dot::after {
+  content: '✓';
+}
+.stage-step.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.stage-step.active .stage-dot {
+  background: #2563eb;
+  animation: stage-pulse 1.6s ease-in-out infinite;
+}
+.stage-step.aborted .stage-dot {
+  background: #dc2626;
+}
+.stage-step.aborted .stage-dot::after {
+  content: '✗';
+}
+@keyframes stage-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+}
     </style>
   </head>
   <body>
@@ -562,6 +623,16 @@
             </div>
           </div>
         </header>
+
+        <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
+          <div class="stage-step" data-stage="parsing"><span class="stage-dot"></span><span class="stage-name">解析规范</span></div>
+          <div class="stage-step" data-stage="outline_review"><span class="stage-dot"></span><span class="stage-name">大纲确认</span></div>
+          <div class="stage-step" data-stage="matching"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
+          <div class="stage-step" data-stage="materials_review"><span class="stage-dot"></span><span class="stage-name">素材确认</span></div>
+          <div class="stage-step" data-stage="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
+          <div class="stage-step" data-stage="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
+          <div class="stage-step" data-stage="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
+        </nav>
 
         <section class="init-layout">
   <!-- 左侧材料面板 -->
@@ -761,6 +832,42 @@ const THREAD_KEY = (pid) => `workflow:${pid}`;
 function getThread(pid) { try { return sessionStorage.getItem(THREAD_KEY(pid)); } catch { return null; } }
 function setThread(pid, tid) { try { sessionStorage.setItem(THREAD_KEY(pid), tid); } catch {} }
 function clearThread(pid) { try { sessionStorage.removeItem(THREAD_KEY(pid)); } catch {} }
+
+// ── 顶部 stage 进度条 ──
+const STAGE_ORDER = [
+  'parsing', 'outline_review', 'matching', 'materials_review',
+  'generating', 'reviewing', 'report_review',
+];
+
+function setStage(stage) {
+  if (!stage) return;
+  const root = document.getElementById('stage-progress');
+  if (!root) return;
+  const steps = root.querySelectorAll('.stage-step');
+  if (stage === 'aborted') {
+    const lastActive = root.querySelector('.stage-step.active');
+    if (lastActive) {
+      lastActive.classList.remove('active');
+      lastActive.classList.add('aborted');
+    }
+    return;
+  }
+  if (stage === 'done') {
+    steps.forEach(el => {
+      el.classList.remove('active', 'aborted');
+      el.classList.add('done');
+    });
+    return;
+  }
+  const idx = STAGE_ORDER.indexOf(stage);
+  steps.forEach(el => {
+    const i = STAGE_ORDER.indexOf(el.dataset.stage);
+    el.classList.remove('active', 'done', 'aborted');
+    if (idx < 0) return; // 未知 stage（如 idle），全部置灰
+    if (i < idx) el.classList.add('done');
+    else if (i === idx) el.classList.add('active');
+  });
+}
 
 function markBlockError(blockId, message) {
   const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
@@ -1313,9 +1420,8 @@ function attachStream(threadId) {
   closeStream();
   currentEventSource = api.workflow.stream(threadId, {
     onStageChange: (data) => {
-      // 仅做日志/微调状态文案
-      if (data?.stage) {
-        console.debug('[workflow] stage_change', data.stage);
+      if (typeof data?.stage === 'string') {
+        setStage(data.stage);
       }
     },
     onParseProgress: (data) => {
@@ -1586,6 +1692,15 @@ if (params.get('autoExtract') === '1') {
   loadExistingBlocks();
   loadModels();
 }
+
+// 还原 stage 进度（断线续连场景）
+(() => {
+  const tid = getThread(projectId);
+  if (!tid) return;
+  api.workflow.state(tid).then(s => {
+    if (s?.stage) setStage(s.stage);
+  }).catch(() => {});
+})();
     </script>
   </body>
 </html>
