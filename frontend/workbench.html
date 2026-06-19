@@ -2447,14 +2447,10 @@
         return document.getElementById('ced-editable');
       }
 
-      async function startWorkflowGeneration() {
+      // 幂等打开 SSE 流并注册 handler — 不切 btnGen UI，单 block regen 也能调用
+      function ensureWorkflowStream() {
         if (!threadId) return false;
-        closeWorkflowStream();
-        if (btnGen) btnGen.textContent = '■ 停止';
-        if (genCard) { genCard.hidden = false; genCard.style.display = ''; }
-        doneCount = 0;
-        // total 在 block_start 累计；进度条按已知 total 推进
-        total = 0;
+        if (workflowStream) return true;
         const seen = new Set();
         workflowStream = api.workflow.stream(threadId, {
           onBlockStart: (data) => {
@@ -2483,6 +2479,17 @@
             if (typeof markOutlineDone === 'function' && data.block_id) {
               try { markOutlineDone(data.block_id, data); } catch {}
             }
+            // 单 block regen 完成 → 复位编辑器顶部 banner / 进度
+            if (window.__currentSingleRegenBlockId && window.__currentSingleRegenBlockId === data.block_id) {
+              const banner = document.getElementById('ced-gen-banner');
+              const pbar = document.getElementById('ced-gen-pbar');
+              const pct = document.getElementById('ced-gen-pct');
+              const stage = document.getElementById('ced-gen-stage');
+              if (typeof finishGenerate === 'function' && banner) {
+                try { finishGenerate(banner, pbar, pct, stage); } catch {}
+              }
+              window.__currentSingleRegenBlockId = null;
+            }
             doneCount++;
             if (genBar && total > 0) {
               const pct = Math.round(doneCount / total * 100);
@@ -2504,6 +2511,17 @@
           },
         });
         return true;
+      }
+
+      async function startWorkflowGeneration() {
+        if (!threadId) return false;
+        closeWorkflowStream();
+        if (btnGen) btnGen.textContent = '■ 停止';
+        if (genCard) { genCard.hidden = false; genCard.style.display = ''; }
+        doneCount = 0;
+        // total 在 block_start 累计；进度条按已知 total 推进
+        total = 0;
+        return ensureWorkflowStream();
       }
 
       function closeWorkflowStream() {
@@ -2896,13 +2914,18 @@
           // workflow 模式：单 block 重新生成走 api.workflow.regen，UI 通过 SSE block_token / block_done 事件刷新
           if (threadId && currentBlock?.block_id) {
             try {
+              // 确保 SSE 流已打开（review 页或 hard reload 进入时 workflowStream 可能为 null）
+              ensureWorkflowStream();
+              // 标记当前单 block regen，供 onBlockDone 复位 banner
+              window.__currentSingleRegenBlockId = currentBlock.block_id;
               await api.workflow.regen(threadId, [currentBlock.block_id]);
-              // fire-and-forget — SSE handler 已处理 token/done 事件，这里只关闭 banner 由 block:done 触发
+              // fire-and-forget — SSE handler 已处理 token/done 事件，banner 由 onBlockDone 命中匹配后复位
               if (stage) stage.textContent = '· 已提交重新生成';
               editorGenerating = false;
               return;
             } catch (e) {
               console.error('workflow regen failed', e);
+              window.__currentSingleRegenBlockId = null;
               finishGenerate(banner, pbar, pct, stage);
               editorGenerating = false;
               return;

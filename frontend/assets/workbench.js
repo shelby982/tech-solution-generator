@@ -129,8 +129,14 @@ async function loadBlocks() {
       const blockId = blockSection.dataset.blockId;
       if (!blockId) return;
       // workflow 模式不直接 PUT 老路径（block_id 是业务 id，老 API 期望 DB int）
-      // 编辑后用户点重新生成走 api.workflow.regen
-      if (threadId) return;
+      // 编辑后用户点 AI 生成走 api.workflow.regen
+      if (threadId) {
+        if (!sessionStorage.getItem('workflow:edit-warned')) {
+          console.warn('[workflow] manual edits not persisted; use "AI 生成" to regenerate via workflow');
+          sessionStorage.setItem('workflow:edit-warned', '1');
+        }
+        return;
+      }
       await api.blocks.update(blockId, el.innerHTML);
     });
   });
@@ -141,9 +147,9 @@ async function loadBlocks() {
       const blockId = section?.dataset.blockId;
       if (!blockId) return;
       const action  = btn.dataset.blockAction;
-      // workflow 模式下老 ai 路径会 422，提示用户改用页面右下角"重新生成"
+      // workflow 模式下老 ai 路径会 422，提示用户改用编辑器顶部的"AI 生成"
       if (threadId) {
-        alert('请使用页面右下角的“重新生成”按钮（workflow 模式）');
+        alert('请点击编辑器顶部的“AI 生成”按钮（workflow 模式）');
         return;
       }
       const result  = await api.blocks.ai(blockId, action);
