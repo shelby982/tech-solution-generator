@@ -563,6 +563,7 @@
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
 }
+.stage-progress[hidden] { display: none; }
 .stage-step {
   display: inline-flex;
   align-items: center;
@@ -667,7 +668,7 @@
           </div>
         </header>
 
-        <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
+        <nav class="stage-progress" id="stage-progress" aria-label="工作流进度" hidden>
           <div class="stage-step" data-stage="parsing"><span class="stage-dot"></span><span class="stage-name">解析规范</span></div>
           <div class="stage-step" data-stage="outline_review"><span class="stage-dot"></span><span class="stage-name">大纲确认</span></div>
           <div class="stage-step" data-stage="matching"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
@@ -886,6 +887,13 @@ function setStage(stage) {
   if (!stage) return;
   const root = document.getElementById('stage-progress');
   if (!root) return;
+  // 仅在真实工作流阶段才显示进度条
+  const known = STAGE_ORDER.includes(stage) || stage === 'done' || stage === 'aborted';
+  if (!known) {
+    hideStageProgress();
+    return;
+  }
+  if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
   const steps = root.querySelectorAll('.stage-step');
   if (stage === 'aborted') {
     const lastActive = root.querySelector('.stage-step.active');
@@ -910,6 +918,15 @@ function setStage(stage) {
     if (i < idx) el.classList.add('done');
     else if (i === idx) el.classList.add('active');
   });
+}
+
+function hideStageProgress() {
+  const root = document.getElementById('stage-progress');
+  if (!root) return;
+  root.querySelectorAll('.stage-step').forEach(el => {
+    el.classList.remove('active', 'done', 'aborted');
+  });
+  root.setAttribute('hidden', '');
 }
 
 function markBlockError(blockId, message) {
@@ -1859,10 +1876,28 @@ if (params.get('autoExtract') === '1') {
 // 还原 stage 进度（断线续连场景）
 (() => {
   const tid = getThread(projectId);
-  if (!tid) return;
+  if (!tid) {
+    hideStageProgress();
+    return;
+  }
   api.workflow.state(tid).then(s => {
-    if (s?.stage) setStage(s.stage);
-  }).catch(() => {});
+    const stage = s?.stage;
+    // 仅当 stage 是真实进行中的工作流阶段时才显示进度条
+    if (stage && STAGE_ORDER.includes(stage)) {
+      setStage(stage);
+    } else {
+      // idle / done / aborted / 未知 / 空 → 都视为无活跃工作流
+      hideStageProgress();
+      // 终态（done/aborted）或脏数据 → 清掉过期 threadId，避免下次再误显示
+      if (!stage || stage === 'done' || stage === 'aborted' || stage === 'idle') {
+        clearThread(projectId);
+      }
+    }
+  }).catch(() => {
+    // 后端无该 thread / 请求失败 → 清掉过期 threadId 并隐藏
+    hideStageProgress();
+    clearThread(projectId);
+  });
 })();
     </script>
   </body>
