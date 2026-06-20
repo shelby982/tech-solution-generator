@@ -2266,7 +2266,7 @@
 
       const params = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
-      const threadId = params.get('threadId');
+      let threadId = params.get('threadId');
 
       // ── 顶部 stage 进度条 ──
       const STAGE_ORDER = [
@@ -2319,6 +2319,18 @@
           // 强制：没 thread 不能进 workbench，跳回 project-init 让用户启动工作流
           location.replace(`/project-init?projectId=${projectId}`);
           return;
+        }
+
+        // 把解析到的 tid 同步到模块顶层 threadId，下游 startWorkflowGeneration / abort / regen 都依赖它
+        threadId = tid;
+
+        // URL 不带 threadId 但 sessionStorage 命中时，同步 URL 让刷新仍生效
+        if (!params.get('threadId')) {
+          try {
+            const newUrl = new URL(location.href);
+            newUrl.searchParams.set('threadId', tid);
+            history.replaceState(null, '', newUrl);
+          } catch {}
         }
 
         let s;
