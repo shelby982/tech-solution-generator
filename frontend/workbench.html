@@ -2305,18 +2305,39 @@
         });
       }
 
-      // 初始化时还原 stage + stage routing（仅 threadId 模式）
+      // 初始化时还原 stage + stage routing（强制 threadId 模式）
       (async () => {
-        const tid = threadId;
-        if (!tid) return;
+        // 解析 threadId：URL 优先，fallback sessionStorage
+        let tid = threadId;
+        if (!tid && projectId) {
+          try {
+            tid = sessionStorage.getItem(`workflow:${projectId}`);
+          } catch {}
+        }
+
+        if (!tid) {
+          // 强制：没 thread 不能进 workbench，跳回 project-init 让用户启动工作流
+          location.replace(`/project-init?projectId=${projectId}`);
+          return;
+        }
+
         let s;
         try {
           s = await api.workflow.state(tid);
         } catch {
+          // state fetch 失败：清掉过期 sessionStorage，跳回 project-init
+          try { sessionStorage.removeItem(`workflow:${projectId}`); } catch {}
+          location.replace(`/project-init?projectId=${projectId}`);
           return;
         }
+
         const stage = s?.stage;
-        if (!stage) return;
+        if (!stage || stage === 'idle') {
+          // 没有真实推进，跳回 project-init
+          try { sessionStorage.removeItem(`workflow:${projectId}`); } catch {}
+          location.replace(`/project-init?projectId=${projectId}`);
+          return;
+        }
 
         setStage(stage);
 
@@ -2343,7 +2364,7 @@
             showAbortedBanner();
             return;
           default:
-            // idle / 未知 stage — 保持现有手动模式
+            // 未知 stage — 保持现有手动模式
             return;
         }
       })();
