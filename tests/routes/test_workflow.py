@@ -51,6 +51,9 @@ class FakeRunner:
         self.calls.append(("state", (thread_id,)))
         return {"stage": "idle", "thread_id": thread_id}
 
+    def has_run(self, thread_id: str) -> bool:
+        return thread_id != "missing"
+
     def stream(self, thread_id):
         self.calls.append(("stream", (thread_id,)))
         if thread_id == "missing":

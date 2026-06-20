@@ -244,6 +244,10 @@ class WorkflowRunner:
         if run is not None:
             await run.emitter.emit(events.checkpoint(thread_id, stage))
 
+    def has_run(self, thread_id: str) -> bool:
+        """是否存在对应运行时句柄（routes 用于 stream 端点的 404 早判）。"""
+        return thread_id in self._runs
+
     # ── helper ────────────────────────────────
 
     def _get_run(self, thread_id: str) -> _Run:
