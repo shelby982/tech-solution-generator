@@ -2354,12 +2354,22 @@
         setStage(stage);
 
         // stage routing — 根据当前阶段决定页面行为
+        // 注意：闸门 2 用户点确认后到 generate_node 写出 stage='generating' 之间有窗口
+        // （runner 在后台 task 里跑），workbench 进来时 stage 仍可能停在 'materials_review'，
+        // 但 user_choice='approve' 已写盘 — 这种"在途"状态不能 bounce 回 project-init。
         switch (stage) {
           case 'parsing':
           case 'outline_review':
           case 'matching':
-          case 'materials_review':
             // 前置阶段在 project-init 处理
+            location.href = `/project-init?projectId=${projectId}`;
+            return;
+          case 'materials_review':
+            if (s?.user_choice === 'approve') {
+              // 闸门 2 已确认，generate_node 还没写出 'generating'。视作 generating 处理。
+              autoStartWorkflowStream();
+              return;
+            }
             location.href = `/project-init?projectId=${projectId}`;
             return;
           case 'generating':

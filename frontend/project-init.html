@@ -1761,14 +1761,31 @@ async function confirmMaterialsGate() {
   if (btn) btn.disabled = true;
   try {
     const matches = collectMaterialEdits();
+    const tid = currentThreadId;
     await api.workflow.resume(currentThreadId, 'approve', {
       materials: { matches },
     });
-    const tid = currentThreadId;
+    // runner.resume 是 fire-and-forget：HTTP 200 时后端 task 仍未把 user_choice
+    // 落到 checkpoint。这里等 user_choice='approve' 写盘后再跳，否则 workbench
+    // 拿到 stage='materials_review' + user_choice='' 会跳回 project-init（ping-pong）。
+    await waitForGateCommitted(tid, 'approve', 3000);
     location.href = `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`;
   } catch (e) {
     console.error('[workflow] resume(review_materials) 失败', e);
     if (btn) btn.disabled = false;
+  }
+}
+
+// 轮询 workflow state，直到 user_choice 更新为 expected（说明 runner._resume_until_pause
+// 已 aupdate_state 落盘）；超时即 fallthrough，workbench 端有兜底分支。
+async function waitForGateCommitted(tid, expected, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const s = await api.workflow.state(tid);
+      if (s?.user_choice === expected) return;
+    } catch {}
+    await new Promise(r => setTimeout(r, 150));
   }
 }
 
