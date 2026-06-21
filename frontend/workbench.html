@@ -2451,9 +2451,12 @@
 
       // 撰写完成 banner — 进入评审按钮
       document.querySelector('#generation-done-banner .btn-go-review')?.addEventListener('click', () => {
-        if (threadId) {
+        if (!threadId) return;
+        // 主动推进顶部进度条到"双视角评审"，给用户视觉过渡 200ms 看到变化再跳转
+        setStage('reviewing');
+        setTimeout(() => {
           location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
-        }
+        }, 200);
       });
 
       // 初始化时还原 stage + stage routing（强制 threadId 模式）
@@ -2502,7 +2505,11 @@
           return;
         }
 
-        setStage(stage);
+        // 撰写完成后顶部进度条停在"方案撰写" active；reviewing/report_review/done 在下方 case
+        // 内部自行 setStage('generating')，此处先跳过 setStage 避免一次闪烁推进。
+        if (stage !== 'reviewing' && stage !== 'report_review' && stage !== 'done') {
+          setStage(stage);
+        }
 
         // stage routing — 根据当前阶段决定页面行为
         // 注意：闸门 2 用户点确认后到 generate_node 写出 stage='generating' 之间有窗口
@@ -2531,7 +2538,14 @@
           case 'reviewing':
           case 'report_review':
           case 'done': {
-            // 留在 workbench 显示完成 banner，用户点击按钮才跳 review
+            // 留在 workbench：顶部进度条停在"方案撰写" active（不自动推进到 reviewing/done），
+            // 用户点击"进入评审"按钮才主动 setStage('reviewing') + 跳 review。
+            setStage('generating');
+            // 保险：让左侧大纲 + 中间编辑区有数据可用（workbench.js 顶层已 loadBlocks，
+            // 此处兜底覆盖竞争条件 / 重复刷新场景）。
+            if (typeof window.__loadBlocks === 'function') {
+              try { window.__loadBlocks(); } catch {}
+            }
             const banner = document.getElementById('generation-done-banner');
             if (banner) banner.removeAttribute('hidden');
             return;
@@ -2569,6 +2583,9 @@
       let total = 0;
       let doneCount = 0;
       let workflowStream = null;
+      // 批量生成进行中标记 — 仅当批量入口（startWorkflowGeneration / 自动批量）开启时为 true，
+      // 单 block regen 通过同一个 ensureWorkflowStream 路径打开 SSE，但不应触发批量进度条 UI。
+      let batchInFlight = false;
 
       const btnGen = document.getElementById('btn-generate-all');
       const progress = document.getElementById('generate-progress');
@@ -2667,6 +2684,8 @@
               editable.style.display = '';
             }
             if (genTitle) genTitle.textContent = data.title || bid || '';
+            // 批量生成才显示批量进度条；单 block regen 不动 batch UI
+            if (!batchInFlight) return;
             if (batchStatusEl) batchStatusEl.classList.remove('hidden');
             if (batchCurrentEl) batchCurrentEl.textContent = data.title || bid || '撰写中…';
             updateBatchProgress();
@@ -2698,6 +2717,8 @@
               }
               window.__currentSingleRegenBlockId = null;
             }
+            // 批量进度只在批量生成进行中累加并刷新批量 UI
+            if (!batchInFlight) return;
             doneCount++;
             if (genBar && total > 0) {
               const pct = Math.round(doneCount / total * 100);
@@ -2718,12 +2739,14 @@
           onStageChange: (data) => {
             const stage = data?.stage;
             if (typeof stage !== 'string') return;
-            setStage(stage);
-            // 撰写完成 → 显示完成 banner，等用户主动点击进入评审
+            // 撰写完成后顶部进度条停在"方案撰写" active；reviewing/report_review/done 不再 setStage，
+            // 仅显示完成 banner，等用户主动点"进入评审"按钮才推进进度条 + 跳 review。
             if (stage === 'reviewing' || stage === 'report_review' || stage === 'done') {
               const banner = document.getElementById('generation-done-banner');
               if (banner) banner.removeAttribute('hidden');
+              return;
             }
+            setStage(stage);
           },
         });
         return true;
@@ -2737,6 +2760,8 @@
         doneCount = 0;
         // total 在 block_start 累计；进度条按已知 total 推进
         total = 0;
+        // 批量入口：开启批量进度条 UI；ensureWorkflowStream 内的 onBlockStart/onBlockDone 据此判断
+        batchInFlight = true;
         return ensureWorkflowStream();
       }
 
@@ -2752,6 +2777,7 @@
         if (genCard) { genCard.hidden = true; genCard.style.display = 'none'; }
         const batchStatusEl = document.getElementById('outline-batch-status');
         if (batchStatusEl) batchStatusEl.classList.add('hidden');
+        batchInFlight = false;
         closeWorkflowStream();
       }
 
@@ -2761,12 +2787,16 @@
         const batchStatusEl = document.getElementById('outline-batch-status');
         const batchCurrentEl = document.getElementById('outline-batch-current');
         const batchBarEl = document.getElementById('outline-batch-bar');
-        if (batchCurrentEl) batchCurrentEl.textContent = '已完成';
-        if (batchBarEl) batchBarEl.style.width = '100%';
-        if (batchStatusEl) {
-          setTimeout(() => batchStatusEl.classList.add('hidden'), 1500);
+        // 仅当批量生成进行中才动批量进度条文案 / 宽度（避免单 block regen 触发后的 done 事件污染）
+        if (batchInFlight) {
+          if (batchCurrentEl) batchCurrentEl.textContent = '已完成';
+          if (batchBarEl) batchBarEl.style.width = '100%';
+          if (batchStatusEl) {
+            setTimeout(() => batchStatusEl.classList.add('hidden'), 1500);
+          }
         }
-        // 不自动跳转 — 显示完成 banner，让用户主动点击进入评审
+        batchInFlight = false;
+        // 不自动跳转 — 不 setStage，仅显示完成 banner，让用户主动点击"进入评审"
         const banner = document.getElementById('generation-done-banner');
         if (banner) banner.removeAttribute('hidden');
       }
