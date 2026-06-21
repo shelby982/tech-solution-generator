@@ -1892,7 +1892,7 @@
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
-          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度" hidden>
+          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
             <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
             <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
             <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
@@ -2297,7 +2297,13 @@
         const root = document.getElementById('stage-progress');
         if (!root) return;
         const mapped = STAGE_MAP[stage];
-        if (!mapped && stage !== 'done' && stage !== 'aborted') return;
+        if (!mapped && stage !== 'done' && stage !== 'aborted') {
+          // 未知 stage：清掉所有 step 状态但保持 nav 可见（进度条作为整体导航始终显示）
+          root.querySelectorAll('.stage-step').forEach(el => {
+            el.classList.remove('active', 'done', 'aborted');
+          });
+          return;
+        }
         if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
         const steps = root.querySelectorAll('.stage-step');
         if (stage === 'aborted') {
