@@ -5,20 +5,22 @@ const projectId = params.get('projectId');
 const threadId  = params.get('threadId');
 if (!projectId) { location.href = '/projects'; }
 
-// threadId 模式下从 workflow state 拼一个跟 /api/projects/{pid}/blocks 形态一致的列表，
-// 缺 threadId 或 workflow state 为空时静默退回老路径。
-function buildBlockFromWorkflowState(blockId, section, blocks, matrix) {
-  const output = blocks[blockId] || {};
-  const row    = matrix[blockId] || {};
-  const sec    = section || {};
-  const level  = Number(sec.level) || (output.kind === 'heading' ? 1 : 2);
+// threadId 模式下用 spec.toc 主导章节列表（闸门 1 完成即就绪），
+// proposal.blocks 仅注入"已生成内容"（闸门 3 之后才完整）。
+// outline_matrix 提供 8 字段（requirement/key_points/...）。
+function buildBlockFromTocSection(section, blocks, matrix) {
+  const blockId  = section.id;
+  const output   = blocks[blockId] || {};
+  const row      = matrix[blockId] || {};
+  const rawLevel = Number(section.level) || 1;
+  const level    = Math.max(1, Math.min(4, rawLevel));
   const isHeading = level === 1;
-  const sources = Array.isArray(output.sources) ? output.sources : [];
+  const sources  = Array.isArray(output.sources) ? output.sources : [];
   return {
-    id: blockId.replace(/\./g, '_'),   // DOM-safe id（点会被 querySelector 当 class 选择器解析）
-    block_id: blockId,                 // 业务 id 保留原样含点 — B-4 切 workflow regen 用这个
-    title: sec.title || row.title || blockId,
-    kind: isHeading ? 'heading' : (output.kind || 'tech'),
+    id: String(blockId).replace(/\./g, '_'),  // DOM-safe id
+    block_id: blockId,                          // 业务 id（含点的 s1.1 等）
+    title: section.title || row.title || blockId,
+    kind: isHeading ? 'heading' : 'content',
     level,
     content: output.content || '',
     outline: output.outline || '',
@@ -45,13 +47,9 @@ async function loadBlocksForOutline(pid, tid) {
       const matrix = (state && state.spec && state.spec.outline_matrix) || {};
       const toc    = Array.isArray(state && state.spec && state.spec.toc) ? state.spec.toc : [];
       if (toc.length > 0) {
-        return toc.map(sec => buildBlockFromWorkflowState(sec.id, sec, blocks, matrix));
+        return toc.map(sec => buildBlockFromTocSection(sec, blocks, matrix));
       }
-      const ids = Object.keys(blocks);
-      if (ids.length > 0) {
-        return ids.map(bid => buildBlockFromWorkflowState(bid, null, blocks, matrix));
-      }
-      // workflow state 为空 — 走 fallback
+      // toc 空 — workflow 未推进过闸门 1，回退老路径
     } catch (e) {
       console.warn('[workbench] workflow state failed, falling back', e);
     }
@@ -78,124 +76,113 @@ api.projects.get(projectId).then(p => {
 
 async function loadBlocks() {
   const blockList = await loadBlocksForOutline(projectId, threadId);
-  const shell = document.querySelector('.tiptap-shell');
   const outlineNav = document.querySelector('.doc-outline');
-  shell.innerHTML = '';
-  if (outlineNav) outlineNav.innerHTML = '';
+  if (!outlineNav) return;
+  outlineNav.innerHTML = '';
 
-  blockList.forEach(b => {
-    const isHeading = b.kind === 'heading';
-    const section = document.createElement('section');
-    section.className = `editor-block ${isHeading ? 'title-block' : 'content-block'}`;
-    section.id = `block-${b.id}`;
-    Object.assign(section.dataset, {
-      blockId:     b.id,
-      blockKind:   b.kind,
-      title:       b.title || '',
-      domain:      b.domain || '',
-      parentTitle: b.parent_title || '',
-      requirement: b.requirement || '',
-      score:       b.score || '',
-      source:      b.source || '',
-    });
-    const tag  = b.level === 1 ? 'h2' : b.level === 2 ? 'h3' : 'p';
-    section.innerHTML = `
-      <div class="block-handle">⋮⋮</div>
-      <${tag} contenteditable="true">${b.content || ''}</${tag}>
-      <div class="block-side-actions">
-        <button type="button" data-block-action="润色">润色</button>
-        <button type="button" data-block-action="补充">补充</button>
-        <button type="button" data-block-action="风格">风格</button>
-      </div>`;
-    shell.appendChild(section);
+  // 与 workbench.html 内联模块约定：__extractBlockMap 缓存 block 数据，
+  // outline-item 点击调用 __onBlockSelected 让中间编辑器显示该 block。
+  if (!window.__extractBlockMap) window.__extractBlockMap = new Map();
+  const blockMap = window.__extractBlockMap;
+  // 暴露完整列表给 renderPageHint 等使用
+  window.__allBlocks = blockList;
 
-    // 渲染左侧大纲条目
-    if (outlineNav) {
+  // 规整化 level：找到全局最小值，平移成 1（兼容文档没有 level=1 标题的情况）
+  const rawLevels = blockList.map(b => Number(b.level) || 1);
+  const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
+  const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
+
+  let currentChildren = null;
+  let firstContentItem = null;
+
+  blockList.forEach((b, idx) => {
+    const blockIdStr = b.block_id || b.id;
+    const title = b.title || '（无标题）';
+    const level = normalize(rawLevels[idx]);
+    blockMap.set(blockIdStr, b);
+
+    if (level === 1) {
+      const group = document.createElement('div');
+      group.className = 'outline-group';
+      const headingBtn = document.createElement('button');
+      headingBtn.type = 'button';
+      headingBtn.className = 'doc-outline-heading';
+      headingBtn.innerHTML = `<span class="outline-chevron">›</span><span class="outline-item-label"></span>`;
+      headingBtn.querySelector('.outline-item-label').textContent = title;
+      headingBtn.addEventListener('click', () => group.classList.toggle('collapsed'));
+      group.appendChild(headingBtn);
+      currentChildren = document.createElement('div');
+      currentChildren.className = 'outline-children';
+      group.appendChild(currentChildren);
+      outlineNav.appendChild(group);
+    } else {
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'doc-outline-item';
-      item.dataset.target = `block-${b.id}`;
-      item.dataset.level = b.level ?? 1;
-      item.style.setProperty('--ol-indent', String((b.level ?? 1) - 1));
-      item.textContent = b.title || '（无标题）';
-      outlineNav.appendChild(item);
+      item.className = `doc-outline-item level-${level}`;
+      item.dataset.blockIdStr = blockIdStr;
+      item.dataset.blockId = b.id;
+      item.dataset.level = String(level);
+      item.innerHTML = `<span class="outline-item-bullet"></span><span class="outline-item-label"></span><span class="outline-item-dot${b.content ? ' done' : ''}"></span>`;
+      item.querySelector('.outline-item-label').textContent = title;
+      item.addEventListener('click', () => {
+        outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        const block = blockMap.get(blockIdStr) || b;
+        if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
+      });
+      (currentChildren || outlineNav).appendChild(item);
+      if (!firstContentItem) firstContentItem = item;
     }
   });
 
-  shell.querySelectorAll('[contenteditable]').forEach(el => {
-    el.addEventListener('blur', async () => {
-      const blockSection = el.closest('.editor-block');
-      if (!blockSection) return;
-      const blockId = blockSection.dataset.blockId;
-      if (!blockId) return;
-      // workflow 模式不直接 PUT 老路径（block_id 是业务 id，老 API 期望 DB int）
-      // 编辑后用户点 AI 生成走 api.workflow.regen
-      if (threadId) {
-        if (!sessionStorage.getItem('workflow:edit-warned')) {
-          console.warn('[workflow] manual edits not persisted; use "AI 生成" to regenerate via workflow');
-          sessionStorage.setItem('workflow:edit-warned', '1');
-        }
-        return;
-      }
-      await api.blocks.update(blockId, el.innerHTML);
-    });
-  });
+  // 初始化撰写进度展示
+  const contentBlocks = blockList.filter((b, i) => normalize(rawLevels[i]) >= 2);
+  const writtenCount = contentBlocks.filter(b => b.content && b.content.trim()).length;
+  const progressBadge = document.getElementById('outline-progress-badge');
+  const progressText  = document.getElementById('outline-progress-text');
+  const progressBar   = document.getElementById('outline-progress-bar');
+  if (progressBadge) progressBadge.textContent = String(contentBlocks.length);
+  if (progressText)  progressText.textContent  = `${writtenCount} / ${contentBlocks.length}`;
+  if (progressBar)   progressBar.style.width   = contentBlocks.length ? `${Math.round(writtenCount / contentBlocks.length * 100)}%` : '0%';
 
-  shell.querySelectorAll('[data-block-action]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const section = btn.closest('.editor-block');
-      const blockId = section?.dataset.blockId;
-      if (!blockId) return;
-      const action  = btn.dataset.blockAction;
-      // workflow 模式下老 ai 路径会 422，提示用户改用编辑器顶部的"AI 生成"
-      if (threadId) {
-        alert('请点击编辑器顶部的“AI 生成”按钮（workflow 模式）');
-        return;
-      }
-      const result  = await api.blocks.ai(blockId, action);
-      const panelText = document.querySelector('[data-ai-suggestion-text]');
-      if (panelText) panelText.textContent = result.suggestion;
-      else alert(`AI 建议：\n${result.suggestion}`);
-    });
-  });
+  // 自动选中首个内容章节
+  if (firstContentItem) firstContentItem.click();
 
-  if (typeof initWorkbench === 'function') initWorkbench();
-
-  // 批量生成事件监听 — block_id 含点的子节（如 1.1）DOM id 已替换成下划线，这里同步转换
-  const domIdFor = bid => `block-${String(bid).replace(/\./g, '_')}`;
+  // 批量生成事件监听 — block_id 含点的子节（如 1.1）DOM 用 data-block-id-str 索引
+  const findOutlineItem = (bid) => {
+    if (!bid) return null;
+    return outlineNav.querySelector(`.doc-outline-item[data-block-id-str="${CSS.escape(String(bid))}"]`);
+  };
   window.addEventListener('block:start', e => {
-    const el = document.getElementById(domIdFor(e.detail.block_id));
-    if (!el) return;
-    el.dataset.generating = 'true';
-    const editable = el.querySelector('[contenteditable]');
-    if (editable) { editable.contentEditable = 'false'; editable.textContent = ''; }
-  });
-
-  window.addEventListener('block:token', e => {
-    const el = document.getElementById(domIdFor(e.detail.block_id));
-    if (!el) return;
-    const editable = el.querySelector('[contenteditable]');
-    if (editable) editable.textContent += e.detail.token;
+    const item = findOutlineItem(e.detail.block_id);
+    if (!item) return;
+    const dot = item.querySelector('.outline-item-dot');
+    if (dot) { dot.classList.remove('done'); dot.classList.add('writing'); }
   });
 
   window.addEventListener('block:done', e => {
-    const el = document.getElementById(domIdFor(e.detail.block_id));
-    if (!el) return;
-    delete el.dataset.generating;
-    const editable = el.querySelector('[contenteditable]');
-    if (editable) editable.contentEditable = 'true';
+    const item = findOutlineItem(e.detail.block_id);
+    if (!item) return;
+    const dot = item.querySelector('.outline-item-dot');
+    if (dot) { dot.classList.remove('writing'); dot.classList.add('done'); }
+    // 同步缓存内容，便于章节切换时立即看到
+    const cached = blockMap.get(e.detail.block_id);
+    if (cached && e.detail.content) {
+      cached.content = e.detail.content;
+      blockMap.set(e.detail.block_id, cached);
+    }
   });
 
   window.addEventListener('block:error', e => {
-    if (!e.detail.block_id) return;
-    const el = document.getElementById(domIdFor(e.detail.block_id));
-    if (!el) return;
-    el.dataset.error = 'true';
-    const editable = el.querySelector('[contenteditable]');
-    if (editable) editable.contentEditable = 'true';
+    const item = findOutlineItem(e.detail.block_id);
+    if (!item) return;
+    item.classList.add('block-error');
+    const dot = item.querySelector('.outline-item-dot');
+    if (dot) dot.classList.remove('writing');
   });
 }
 
+window.__loadBlocks = loadBlocks;
 loadBlocks();
 window.addEventListener('beforeunload', () => {
   document.querySelectorAll('[data-sse]').forEach(el => el._sse?.close());
