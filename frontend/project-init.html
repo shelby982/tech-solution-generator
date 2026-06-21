@@ -1556,6 +1556,7 @@ async function loadExistingBlocks() {
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
+  blocksEmpty.innerHTML = '<p>上传应标文件后点击「提炼大纲」开始</p>';
   blocksEmpty.style.display = 'block';
   sidebarToc.innerHTML = '';
   totalBlocks = 0; doneBlocks = 0;
@@ -1588,6 +1589,11 @@ function attachStream(threadId) {
       const tot = data?.total ?? 0;
       const pct = tot ? Math.round(cur / tot * 100) : 0;
       setStatusBar('extracting', `张衡解析：${step} ${cur}/${tot}`, pct, tot, cur);
+      // 主区占位反馈：parse 阶段尚无 block 卡片，给用户进度感
+      if (!blocksById.size) {
+        blocksEmpty.innerHTML = `<p>正在解析文档结构…(${escapeHtml(step)} ${cur}/${tot})</p>`;
+        blocksEmpty.style.display = 'block';
+      }
     },
     onOutlineExtract: (data) => {
       const blockId = data?.block_id;
