@@ -1808,15 +1808,19 @@
       .stage-progress {
         display: flex;
         gap: 4px;
-        padding: 12px 20px;
-        background: var(--panel);
-        border-bottom: 1px solid var(--line);
+        padding: 0;
+        background: transparent;
+        border-bottom: none;
         overflow-x: auto;
+        flex: 1;
+        justify-content: center;
       }
+      .stage-progress[hidden] { display: none; }
       .stage-step {
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        cursor: pointer;
         padding: 6px 12px;
         border-radius: 999px;
         font-size: 12px;
@@ -1873,6 +1877,13 @@
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
+          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度" hidden>
+            <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
+            <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
+            <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
+            <div class="stage-step" data-stage="reviewing" data-stages="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
+            <div class="stage-step" data-stage="report_review" data-stages="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
+          </nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
@@ -1895,16 +1906,6 @@
             </div>
           </div>
         </header>
-
-        <nav class="stage-progress" id="stage-progress" aria-label="工作流进度" hidden>
-          <div class="stage-step" data-stage="parsing"><span class="stage-dot"></span><span class="stage-name">解析规范</span></div>
-          <div class="stage-step" data-stage="outline_review"><span class="stage-dot"></span><span class="stage-name">大纲确认</span></div>
-          <div class="stage-step" data-stage="matching"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
-          <div class="stage-step" data-stage="materials_review"><span class="stage-dot"></span><span class="stage-name">素材确认</span></div>
-          <div class="stage-step" data-stage="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-          <div class="stage-step" data-stage="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
-          <div class="stage-step" data-stage="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
-        </nav>
 
         <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
         <div class="extract-action-bar hidden" id="extract-action-bar">
@@ -2266,14 +2267,22 @@
 
       // ── 顶部 stage 进度条 ──
       const STAGE_ORDER = [
-        'parsing', 'outline_review', 'matching', 'materials_review',
-        'generating', 'reviewing', 'report_review',
+        'parsing', 'matching', 'generating', 'reviewing', 'report_review',
       ];
+      const STAGE_MAP = {
+        parsing: 'parsing', outline_review: 'parsing',
+        matching: 'matching', materials_review: 'matching',
+        generating: 'generating',
+        reviewing: 'reviewing',
+        report_review: 'report_review',
+      };
 
       function setStage(stage) {
         if (!stage) return;
         const root = document.getElementById('stage-progress');
         if (!root) return;
+        const mapped = STAGE_MAP[stage];
+        if (!mapped && stage !== 'done' && stage !== 'aborted') return;
         if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
         const steps = root.querySelectorAll('.stage-step');
         if (stage === 'aborted') {
@@ -2291,7 +2300,7 @@
           });
           return;
         }
-        const idx = STAGE_ORDER.indexOf(stage);
+        const idx = STAGE_ORDER.indexOf(mapped);
         steps.forEach(el => {
           const i = STAGE_ORDER.indexOf(el.dataset.stage);
           el.classList.remove('active', 'done', 'aborted');
@@ -2300,6 +2309,22 @@
           else if (i === idx) el.classList.add('active');
         });
       }
+
+      document.getElementById('stage-progress')?.addEventListener('click', (e) => {
+        const step = e.target.closest('.stage-step');
+        if (!step) return;
+        const stage = step.dataset.stage;
+        const tid = threadId || sessionStorage.getItem(`workflow:${projectId}`);
+        if (!tid) return;
+        const routes = {
+          parsing: `/project-init?projectId=${projectId}`,
+          matching: `/project-init?projectId=${projectId}`,
+          generating: `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`,
+          reviewing: `/review?threadId=${encodeURIComponent(tid)}`,
+          report_review: `/review?threadId=${encodeURIComponent(tid)}`,
+        };
+        if (routes[stage]) location.href = routes[stage];
+      });
 
       // 初始化时还原 stage + stage routing（强制 threadId 模式）
       (async () => {
