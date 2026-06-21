@@ -2438,6 +2438,7 @@
           case 'materials_review':
             if (s?.user_choice === 'approve') {
               // 闸门 2 已确认，generate_node 还没写出 'generating'。视作 generating 处理。
+              setStage('generating');  // 在 SSE stage_change 来之前提前推进 UI
               autoStartWorkflowStream();
               return;
             }
