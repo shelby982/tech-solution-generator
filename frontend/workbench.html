@@ -148,18 +148,49 @@
       .outline-batch-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       .outline-batch-status {
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: 6px;
-        margin: 0 14px 10px;
+        margin: 6px 14px 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--line-2, #e5e7eb);
+        border-radius: 6px;
+        background: var(--surface, #fff);
         font-size: 11px;
         color: var(--ink-3);
       }
       .outline-batch-status.hidden { display: none; }
+      .outline-batch-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
       .outline-batch-current {
         flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: var(--ink-2);
+      }
+      .outline-batch-track {
+        position: relative;
+        height: 4px;
+        background: var(--line-2, #e5e7eb);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .outline-batch-bar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 0%;
+        background: var(--accent, #2563eb);
+        transition: width 0.25s ease;
+      }
+      .outline-batch-meta {
+        font-size: 11px;
+        color: var(--ink-4);
+        text-align: right;
       }
       .outline-batch-cancel {
         flex: none;
@@ -1993,6 +2024,14 @@
               </div>
               <div class="outline-progress-track"><div class="outline-progress-bar" id="outline-progress-bar"></div></div>
               <button type="button" class="outline-batch-gen-btn" id="btn-batch-generate">批量生成</button>
+              <div class="outline-batch-status hidden" id="outline-batch-status">
+                <div class="outline-batch-row">
+                  <span class="outline-batch-current" id="outline-batch-current">准备中…</span>
+                  <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">取消</button>
+                </div>
+                <div class="outline-batch-track"><div class="outline-batch-bar" id="outline-batch-bar"></div></div>
+                <div class="outline-batch-meta" id="outline-batch-meta">0 / 0</div>
+              </div>
               <div style="position:relative;">
                 <span class="inline-model-tag" id="batch-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="batch-model-label">Sonnet 4.6</span></span>
                 <div class="model-dropdown" id="batch-model-dropdown">
@@ -2004,10 +2043,6 @@
                     </button>
                   </div>
                 </div>
-              </div>
-              <div class="outline-batch-status hidden" id="outline-batch-status">
-                <span class="outline-batch-current" id="outline-batch-current">—</span>
-                <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">取消</button>
               </div>
             </div>
           </aside>
@@ -2612,6 +2647,16 @@
         if (!threadId) return false;
         if (workflowStream) return true;
         const seen = new Set();
+        const batchStatusEl = document.getElementById('outline-batch-status');
+        const batchCurrentEl = document.getElementById('outline-batch-current');
+        const batchBarEl = document.getElementById('outline-batch-bar');
+        const batchMetaEl = document.getElementById('outline-batch-meta');
+        const updateBatchProgress = () => {
+          if (batchBarEl && total > 0) {
+            batchBarEl.style.width = `${Math.round(doneCount / total * 100)}%`;
+          }
+          if (batchMetaEl) batchMetaEl.textContent = `${doneCount} / ${total || '?'}`;
+        };
         workflowStream = api.workflow.stream(threadId, {
           onBlockStart: (data) => {
             const bid = data.block_id;
@@ -2622,6 +2667,9 @@
               editable.style.display = '';
             }
             if (genTitle) genTitle.textContent = data.title || bid || '';
+            if (batchStatusEl) batchStatusEl.classList.remove('hidden');
+            if (batchCurrentEl) batchCurrentEl.textContent = data.title || bid || '撰写中…';
+            updateBatchProgress();
           },
           onBlockToken: (data) => {
             const editable = findEditableForBlock(data.block_id);
@@ -2656,6 +2704,7 @@
               genBar.style.width = pct + '%';
               if (genPct) genPct.textContent = pct + '%';
             }
+            updateBatchProgress();
           },
           onError: (data) => {
             console.error('workflow error', data);
@@ -2701,12 +2750,22 @@
       function onWorkflowAborted() {
         if (btnGen) btnGen.innerHTML = '✦ 批量编写';
         if (genCard) { genCard.hidden = true; genCard.style.display = 'none'; }
+        const batchStatusEl = document.getElementById('outline-batch-status');
+        if (batchStatusEl) batchStatusEl.classList.add('hidden');
         closeWorkflowStream();
       }
 
       function onWorkflowDone() {
         closeWorkflowStream();
         if (btnGen) btnGen.innerHTML = '✦ 批量编写';
+        const batchStatusEl = document.getElementById('outline-batch-status');
+        const batchCurrentEl = document.getElementById('outline-batch-current');
+        const batchBarEl = document.getElementById('outline-batch-bar');
+        if (batchCurrentEl) batchCurrentEl.textContent = '已完成';
+        if (batchBarEl) batchBarEl.style.width = '100%';
+        if (batchStatusEl) {
+          setTimeout(() => batchStatusEl.classList.add('hidden'), 1500);
+        }
         // 不自动跳转 — 显示完成 banner，让用户主动点击进入评审
         const banner = document.getElementById('generation-done-banner');
         if (banner) banner.removeAttribute('hidden');
@@ -4040,6 +4099,10 @@
         btnBatchGen.style.display = 'none';
         batchStatus.classList.remove('hidden');
         batchCurrent.textContent = '准备中…';
+        const batchBar = document.getElementById('outline-batch-bar');
+        const batchMeta = document.getElementById('outline-batch-meta');
+        if (batchBar) batchBar.style.width = '0%';
+        if (batchMeta) batchMeta.textContent = '0 / 0';
 
         const batchCustomReq = (window.__promptTextareas?.custom || '').trim();
         const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
@@ -4047,6 +4110,7 @@
         const blocks = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
         const contentBlocks = blocks.filter(b => !(b.content && b.content.trim()));
         let done = 0;
+        if (batchMeta) batchMeta.textContent = `0 / ${contentBlocks.length}`;
 
         const progressText = document.getElementById('outline-progress-text');
         const progressBar = document.getElementById('outline-progress-bar');
@@ -4133,6 +4197,10 @@
           if (genPbar) genPbar.style.width = '100%';
           if (genPct) genPct.textContent = '100%';
           done++;
+          if (batchBar && contentBlocks.length) {
+            batchBar.style.width = `${Math.round(done / contentBlocks.length * 100)}%`;
+          }
+          if (batchMeta) batchMeta.textContent = `${done} / ${contentBlocks.length}`;
           const writtenTotal = blocks.filter(b => b.content && b.content.trim()).length + done;
           if (progressText) progressText.textContent = `${writtenTotal} / ${blocks.length}`;
           if (progressBar) progressBar.style.width = blocks.length ? `${Math.round(writtenTotal / blocks.length * 100)}%` : '0%';
