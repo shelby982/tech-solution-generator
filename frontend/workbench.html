@@ -1883,6 +1883,32 @@
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.4); }
       }
+
+      /* ── 撰写完成提示 banner ── */
+      #generation-done-banner {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 12px 20px;
+        background: #dcfce7;
+        border-bottom: 1px solid #86efac;
+        color: #166534;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      #generation-done-banner[hidden] { display: none; }
+      #generation-done-banner .btn-go-review {
+        padding: 6px 14px;
+        border: 1px solid #16a34a;
+        border-radius: 6px;
+        background: #16a34a;
+        color: #fff;
+        font-size: 12.5px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #generation-done-banner .btn-go-review:hover { background: #15803d; }
     </style>
     <!-- Markdown 渲染（用于预览模式） -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -1921,6 +1947,12 @@
             </div>
           </div>
         </header>
+
+        <!-- 撰写完成 banner（stage 切到 reviewing/report_review/done 时显示） -->
+        <div id="generation-done-banner" hidden>
+          <span class="banner-text">材料撰写已完成，可进入双视角评审</span>
+          <button class="btn-go-review" type="button">进入评审 →</button>
+        </div>
 
         <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
         <div class="extract-action-bar hidden" id="extract-action-bar">
@@ -2382,6 +2414,13 @@
         step.click();
       });
 
+      // 撰写完成 banner — 进入评审按钮
+      document.querySelector('#generation-done-banner .btn-go-review')?.addEventListener('click', () => {
+        if (threadId) {
+          location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
+        }
+      });
+
       // 初始化时还原 stage + stage routing（强制 threadId 模式）
       (async () => {
         // 解析 threadId：URL 优先，fallback sessionStorage
@@ -2456,10 +2495,12 @@
             return;
           case 'reviewing':
           case 'report_review':
-          case 'done':
-            // 已到评审或完成阶段 — 跳 review 看板
-            location.href = `/review?threadId=${tid}`;
+          case 'done': {
+            // 留在 workbench 显示完成 banner，用户点击按钮才跳 review
+            const banner = document.getElementById('generation-done-banner');
+            if (banner) banner.removeAttribute('hidden');
             return;
+          }
           case 'aborted':
             showAbortedBanner();
             return;
@@ -2626,7 +2667,14 @@
           onAborted: () => onWorkflowAborted(),
           onDone: () => onWorkflowDone(),
           onStageChange: (data) => {
-            if (typeof data?.stage === 'string') setStage(data.stage);
+            const stage = data?.stage;
+            if (typeof stage !== 'string') return;
+            setStage(stage);
+            // 撰写完成 → 显示完成 banner，等用户主动点击进入评审
+            if (stage === 'reviewing' || stage === 'report_review' || stage === 'done') {
+              const banner = document.getElementById('generation-done-banner');
+              if (banner) banner.removeAttribute('hidden');
+            }
           },
         });
         return true;
@@ -2659,7 +2707,9 @@
       function onWorkflowDone() {
         closeWorkflowStream();
         if (btnGen) btnGen.innerHTML = '✦ 批量编写';
-        if (threadId) location.href = `/review?threadId=${threadId}`;
+        // 不自动跳转 — 显示完成 banner，让用户主动点击进入评审
+        const banner = document.getElementById('generation-done-banner');
+        if (banner) banner.removeAttribute('hidden');
       }
 
       window.addEventListener('pagehide', closeWorkflowStream);
