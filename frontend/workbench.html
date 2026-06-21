@@ -1864,6 +1864,21 @@
       .stage-step.aborted .stage-dot::after {
         content: '✗';
       }
+      .stage-step[aria-disabled="true"] {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .stage-step:not([aria-disabled="true"]):not(.active):hover {
+        background: var(--bg-2, #eef2f7);
+      }
+      .stage-step.active:hover {
+        background: #eff6ff;
+        cursor: default;
+      }
+      .stage-step:not([aria-disabled="true"]):focus-visible {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+      }
       @keyframes stage-pulse {
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.4); }
@@ -2290,6 +2305,9 @@
           if (lastActive) {
             lastActive.classList.remove('active');
             lastActive.classList.add('aborted');
+            lastActive.setAttribute('aria-disabled', 'true');
+            lastActive.setAttribute('tabindex', '-1');
+            lastActive.removeAttribute('aria-current');
           }
           return;
         }
@@ -2297,6 +2315,12 @@
           steps.forEach(el => {
             el.classList.remove('active', 'aborted');
             el.classList.add('done');
+            el.removeAttribute('aria-current');
+            el.removeAttribute('aria-disabled');
+            el.setAttribute('role', 'button');
+            el.setAttribute('tabindex', '0');
+            const name = el.querySelector('.stage-name')?.textContent || '';
+            el.setAttribute('aria-label', `跳转到 ${name}`);
           });
           return;
         }
@@ -2308,11 +2332,29 @@
           if (i < idx) el.classList.add('done');
           else if (i === idx) el.classList.add('active');
         });
+        // 同步 aria + 不可达状态
+        steps.forEach(el => {
+          const i = STAGE_ORDER.indexOf(el.dataset.stage);
+          el.removeAttribute('aria-current');
+          el.removeAttribute('aria-disabled');
+          el.setAttribute('role', 'button');
+          el.setAttribute('tabindex', '0');
+          if (i > idx) {
+            el.setAttribute('aria-disabled', 'true');
+            el.setAttribute('tabindex', '-1');
+          } else if (i === idx) {
+            el.setAttribute('aria-current', 'step');
+          }
+          const name = el.querySelector('.stage-name')?.textContent || '';
+          el.setAttribute('aria-label', `跳转到 ${name}`);
+        });
       }
 
       document.getElementById('stage-progress')?.addEventListener('click', (e) => {
         const step = e.target.closest('.stage-step');
         if (!step) return;
+        if (step.getAttribute('aria-disabled') === 'true') return;
+        if (step.classList.contains('active')) return;
         const stage = step.dataset.stage;
         const tid = threadId || sessionStorage.getItem(`workflow:${projectId}`);
         if (!tid) return;
@@ -2324,6 +2366,14 @@
           report_review: `/review?threadId=${encodeURIComponent(tid)}`,
         };
         if (routes[stage]) location.href = routes[stage];
+      });
+
+      document.getElementById('stage-progress')?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const step = e.target.closest('.stage-step');
+        if (!step) return;
+        e.preventDefault();
+        step.click();
       });
 
       // 初始化时还原 stage + stage routing（强制 threadId 模式）
