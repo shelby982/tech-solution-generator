@@ -1873,10 +1873,6 @@
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
-          <nav class="process-tabs" aria-label="项目流程">
-            <a class="process-tab active" href="#">材料撰写</a>
-            <a class="process-tab" href="#" id="tab-review">审核导出</a>
-          </nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
@@ -2410,8 +2406,6 @@
         }
       }
 
-      // Tab links
-      document.getElementById('tab-review').href = `/diff-review?projectId=${projectId}`;
 
       let session = null;
       let total = 0;

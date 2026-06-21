@@ -640,11 +640,6 @@
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
-          <nav class="process-tabs" aria-label="项目流程">
-            <a class="process-tab active" href="/project-init" id="tab-init">项目信息</a>
-            <a class="process-tab" href="/workbench" id="tab-workbench">材料撰写</a>
-            <a class="process-tab" href="/diff-review" id="tab-review">审核导出</a>
-          </nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
@@ -1864,10 +1859,6 @@ document.getElementById('sidebar-ring-wrap').addEventListener('click', (e) => {
 document.addEventListener('click', () => {
   const toc = document.getElementById('sidebar-toc');
   if (toc) toc.style.display = 'none';
-});
-['tab-init','tab-workbench','tab-review'].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) el.href = el.href.split('?')[0] + `?projectId=${projectId}`;
 });
 
 // 自动提炼：立即显示提炼状态栏，材料加载完后发请求
