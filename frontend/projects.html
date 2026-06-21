@@ -838,7 +838,7 @@
         const [cls, label] = STATUS_MAP[p.status] || ['init', p.status];
         const created = formatDate(p.created_at);
         return `
-          <a class="project-item" href="/project-init?projectId=${p.id}">
+          <a class="project-item" href="javascript:void(0)" data-project-id="${p.id}">
             <div class="project-item-top">
               <div class="project-item-name">${escHtml(p.name)}</div>
               <span class="project-status-badge ${cls}">${label}</span>
@@ -858,6 +858,43 @@
         return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       }
 
+      async function navigateToProject(projectId) {
+        // 根据该项目最新 workflow_run 的 stage 决定跳到哪个页面
+        let thread = null;
+        try {
+          const runs = await fetch(`/api/projects/${projectId}/workflow-runs`).then(r => r.ok ? r.json() : []);
+          thread = Array.isArray(runs) && runs.length ? runs[0] : null;
+        } catch {}
+
+        if (!thread || !thread.thread_id) {
+          location.href = `/project-init?projectId=${projectId}`;
+          return;
+        }
+        const tid = thread.thread_id;
+        const stage = thread.stage;
+        const enc = encodeURIComponent(tid);
+        switch (stage) {
+          case 'idle':
+          case 'parsing':
+          case 'outline_review':
+          case 'matching':
+          case 'materials_review':
+            location.href = `/project-init?projectId=${projectId}&threadId=${enc}`;
+            break;
+          case 'generating':
+            location.href = `/workbench?projectId=${projectId}&threadId=${enc}`;
+            break;
+          case 'reviewing':
+          case 'report_review':
+          case 'done':
+            location.href = `/review?threadId=${enc}`;
+            break;
+          case 'aborted':
+          default:
+            location.href = `/project-init?projectId=${projectId}`;
+        }
+      }
+
       async function loadProjects() {
         const projects = await api.projects.list();
         if (!projects?.length) {
@@ -866,6 +903,12 @@
         } else {
           emptyState.hidden = true;
           projectsGrid.innerHTML = projects.map(renderCard).join('');
+          projectsGrid.querySelectorAll('.project-item[data-project-id]').forEach(el => {
+            el.addEventListener('click', (e) => {
+              e.preventDefault();
+              navigateToProject(parseInt(el.dataset.projectId, 10));
+            });
+          });
         }
       }
 

@@ -1958,7 +1958,13 @@ if (params.get('autoExtract') === '1') {
 
 // 还原 stage 进度（断线续连场景）
 (() => {
-  const tid = getThread(projectId);
+  // URL 含 threadId（从 /projects 路由进来或顶部进度条历史回看）→ 优先写入 sessionStorage
+  const urlTid = params.get('threadId');
+  if (urlTid) {
+    setThread(projectId, urlTid);
+    currentThreadId = urlTid;
+  }
+  const tid = urlTid || getThread(projectId);
   if (!tid) {
     // 无 thread：进度条已默认可见且所有 step 灰显，无需额外处理
     return;
