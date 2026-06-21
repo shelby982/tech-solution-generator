@@ -310,6 +310,11 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
+  animation: cardFadeIn 0.28s ease-out;
+}
+@keyframes cardFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .block-card-header {
   display: flex; align-items: center; gap: 10px;
@@ -1635,7 +1640,7 @@ function attachStream(threadId) {
       }
       updateSidebarProgress();
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
-      setStatusBar('extracting', `张衡提炼 ${doneBlocks} / ${totalBlocks}`, pct, totalBlocks, doneBlocks);
+      setStatusBar('extracting', `张衡提炼 ${doneBlocks}/${totalBlocks} 章节`, pct, totalBlocks, doneBlocks);
     },
     onMatchProgress: (data) => {
       const blockId = data?.block_id;
