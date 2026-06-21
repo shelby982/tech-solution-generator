@@ -964,7 +964,7 @@ function setStage(stage) {
   });
 }
 
-function hideStageProgress() {
+function resetStageProgress() {
   // 进度条作为整体导航始终显示，仅清空 step 内部高亮（不再隐藏 nav）
   const root = document.getElementById('stage-progress');
   if (!root) return;
@@ -1970,7 +1970,7 @@ if (params.get('autoExtract') === '1') {
       setStage(stage);
     } else {
       // idle / done / aborted / 未知 / 空 → 都视为无活跃工作流
-      hideStageProgress();
+      resetStageProgress();
       // 终态（done/aborted）或脏数据 → 清掉过期 threadId，避免下次再误显示
       if (!stage || stage === 'done' || stage === 'aborted' || stage === 'idle') {
         clearThread(projectId);
@@ -1978,7 +1978,7 @@ if (params.get('autoExtract') === '1') {
     }
   }).catch(() => {
     // 后端无该 thread / 请求失败 → 清掉过期 threadId 并隐藏
-    hideStageProgress();
+    resetStageProgress();
     clearThread(projectId);
   });
 })();
