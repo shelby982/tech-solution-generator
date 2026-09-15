@@ -5,16 +5,25 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Issue:
-    """评审发现的单个问题。"""
+    """评审发现的单个问题。
+
+    needs_material / material_query 由评审 agent 在输出 JSON 里自行声明，
+    而不是事后用 LLM 分类——包拯的视角本就包含「证明材料是否齐备」，
+    它与王安石天然知道某条问题是"没写"还是"没料可写"。
+    """
     severity: str            # critical | high | medium | low
     point: str               # 问题描述
     suggestion: str = ""     # 改进建议
+    needs_material: bool = False    # 必须补外部素材才能修复，非重写可解决
+    material_query: str = ""        # 缺什么，直接当检索 query
 
     def to_dict(self) -> dict:
         return {
             "severity": self.severity,
             "point": self.point,
             "suggestion": self.suggestion,
+            "needs_material": bool(self.needs_material),
+            "material_query": self.material_query,
         }
 
     @classmethod
@@ -23,6 +32,8 @@ class Issue:
             severity=d.get("severity", "medium"),
             point=d.get("point", ""),
             suggestion=d.get("suggestion", ""),
+            needs_material=bool(d.get("needs_material", False)),
+            material_query=d.get("material_query", ""),
         )
 
 

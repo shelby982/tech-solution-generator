@@ -256,3 +256,42 @@ def test_global_report_to_dict_from_dict_round_trip():
     assert empty.per_block == {}
     assert empty.total_score == 0.0
     assert empty.top_risks == []
+
+
+def test_issue_new_material_fields_roundtrip():
+    """Issue 的 needs_material / material_query 能完整往返。"""
+    from domain.review import Issue
+
+    issue = Issue(
+        severity="critical",
+        point="未响应否决项『必须提供 3 年内同类项目业绩证明』",
+        suggestion="补充业绩证明材料",
+        needs_material=True,
+        material_query="近三年同类项目业绩证明合同",
+    )
+
+    d = issue.to_dict()
+    assert d["needs_material"] is True
+    assert d["material_query"] == "近三年同类项目业绩证明合同"
+    assert Issue.from_dict(d) == issue
+
+
+def test_issue_from_dict_tolerates_legacy_payload():
+    """老 checkpoint / 老 reviews 表数据没有新字段，反序列化必须不炸。"""
+    from domain.review import Issue
+
+    legacy = {"severity": "high", "point": "p", "suggestion": "s"}
+    issue = Issue.from_dict(legacy)
+
+    assert issue.needs_material is False
+    assert issue.material_query == ""
+
+
+def test_issue_defaults_are_rewrite_problems():
+    """新建 Issue 默认不是补料问题——避免误把重写类问题转成检索请求。"""
+    from domain.review import Issue
+
+    issue = Issue(severity="medium", point="表述冗余")
+    assert issue.needs_material is False
+    assert issue.material_query == ""
+    assert issue.to_dict()["needs_material"] is False
