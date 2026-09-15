@@ -1,11 +1,21 @@
 # ── 核心框架 ──────────────────────────────────
 fastapi==0.115.0
+# starlette 是 fastapi 的传递依赖，但 fastapi 的约束是上界开区间。
+# 不钉会被后续安装升到 1.x，届时 Router.__init__ 已无 on_startup 参数，
+# 任何 APIRouter(...) 构造都会 TypeError，应用连 import 都过不去。
+starlette>=0.37.2,<0.39.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
 # ── 文档解析 ──────────────────────────────────
 pdfplumber==0.11.4
 python-docx==1.1.2
+Pillow>=10.0.0
+
+# ── OCR（扫描件 + DOCX 嵌入图片兜底）────────────
+# RapidOCR：PaddleOCR 同款 PP-OCRv4 模型的 ONNX 移植版，纯 Python + onnxruntime，
+# 无 paddle 段错误风险，跨平台稳定。模型 ~80MB 随包分发。
+rapidocr-onnxruntime==1.2.3
 
 # ── LLM SDK ───────────────────────────────────
 openai==1.51.0
