@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>左侧栏 · 应标流程</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  :root {
+    --bg: #f5f5f3;
+    --ink: #181818;
+    --ink-2: #3d3d3d;
+    --ink-3: #6b6b6b;
+    --ink-4: #9a9a9a;
+    --line: #e6e4df;
+    --line-2: #ececea;
+    --surface: #ffffff;
+    --surface-2: #faf9f6;
+    --accent: oklch(0.55 0.16 256);
+    --accent-soft: oklch(0.95 0.03 256);
+    --accent-ink: oklch(0.35 0.12 256);
+    --danger: oklch(0.6 0.18 25);
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel">
+// Three variations of the bid-flow left sidebar.
+// All three render the same three logical parts:
+//  1) 应标要求  (bid requirements)
+//  2) 原始素材  (raw materials)
+//  3) 提炼大纲  (extract outline) — primary CTA, disabled until part 1 has content
+
+const FILES_REQ = [
+  { name: "应答文件_技术部分.docx", size: "2.4 MB", kind: "DOCX" },
+  { name: "技术规范书_v3.pdf", size: "8.1 MB", kind: "PDF" },
+];
+const FILES_MAT = [
+  { name: "公司资质合集.pdf", size: "12.6 MB", kind: "PDF" },
+  { name: "历史项目案例.pptx", size: "23.4 MB", kind: "PPTX" },
+  { name: "产品白皮书.docx", size: "5.8 MB", kind: "DOCX" },
+];
+
+function FileKindBadge({ kind }) {
+  const palette = {
+    PDF:  { bg: "#fdecec", fg: "#b3261e" },
+    DOCX: { bg: "#e8efff", fg: "#1f4ed8" },
+    PPT:  { bg: "#fff1e0", fg: "#a35b00" },
+    PPTX: { bg: "#fff1e0", fg: "#a35b00" },
+  }[kind] || { bg: "#eee", fg: "#444" };
+  return (
+    <span style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+      padding: "2px 5px", borderRadius: 3,
+      background: palette.bg, color: palette.fg,
+      fontFamily: "SF Mono, ui-monospace, monospace",
+    }}>{kind}</span>
+  );
+}
+
+function FileRow({ file, compact = false }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: compact ? "6px 8px" : "8px 10px",
+      background: "var(--surface)",
+      border: "1px solid var(--line)",
+      borderRadius: 8,
+      fontSize: 12.5,
+    }}>
+      <FileKindBadge kind={file.kind} />
+      <span style={{
+        flex: 1, color: "var(--ink-2)",
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>{file.name}</span>
+      <span style={{ color: "var(--ink-4)", fontSize: 11, fontVariantNumeric: "tabular-nums" }}>{file.size}</span>
+      <button title="移除" style={{
+        all: "unset", cursor: "pointer", color: "var(--ink-4)",
+        width: 16, height: 16, display: "grid", placeItems: "center",
+        borderRadius: 4,
+      }}>
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+      </button>
+    </div>
+  );
+}
+
+function StepNumber({ n, active = false }) {
+  return (
+    <div style={{
+      width: 22, height: 22, borderRadius: 6,
+      display: "grid", placeItems: "center",
+      background: active ? "var(--ink)" : "transparent",
+      color: active ? "#fff" : "var(--ink-3)",
+      border: active ? "none" : "1px solid var(--line)",
+      fontSize: 11, fontWeight: 600,
+      fontFamily: "SF Mono, ui-monospace, monospace",
+      fontVariantNumeric: "tabular-nums",
+    }}>{String(n).padStart(2, "0")}</div>
+  );
+}
+
+function PlusIcon({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" style={{ flex: "none" }}>
+      <path d="M6 1.5V10.5M1.5 6H10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function SparkleIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" style={{ flex: "none" }}>
+      <path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/>
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variant A — Card grouping. Each module is a single bordered card; the add
+// button lives at the bottom of the card. The CTA is a filled black bar
+// separated by an empty gap so the eye reads "module / module / action".
+// ─────────────────────────────────────────────────────────────────────────────
+function SidebarA({ state = "empty" }) {
+  const reqFiles = state === "empty" ? [] : FILES_REQ;
+  const matFiles = state === "full" ? FILES_MAT : [];
+  const canExtract = reqFiles.length > 0;
+
+  const Card = ({ children }) => (
+    <div style={{
+      background: "var(--surface)",
+      border: "1px solid var(--line)",
+      borderRadius: 12,
+      padding: 14,
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>{children}</div>
+  );
+
+  const ModuleHeader = ({ n, title, hint }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <StepNumber n={n} active />
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{title}</div>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--ink-3)", paddingLeft: 30 }}>{hint}</div>
+    </div>
+  );
+
+  const SecondaryBtn = ({ children }) => (
+    <button style={{
+      all: "unset", cursor: "pointer", boxSizing: "border-box",
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      padding: "9px 12px", width: "100%",
+      background: "var(--surface-2)",
+      border: "1px dashed #cfcdc6",
+      borderRadius: 8,
+      fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)",
+    }}><PlusIcon /> {children}</button>
+  );
+
+  return (
+    <div style={{
+      width: 320, height: 720,
+      padding: "20px 16px",
+      background: "var(--bg)",
+      borderRight: "1px solid var(--line)",
+      display: "flex", flexDirection: "column", gap: 12,
+      boxSizing: "border-box",
+      fontFeatureSettings: '"cv11"',
+    }}>
+      <Card>
+        <ModuleHeader n={1} title="应标要求" hint="应答文件技术部分 · 技术规范书" />
+        {reqFiles.length === 0 ? (
+          <div style={{
+            fontSize: 12, color: "var(--ink-4)",
+            padding: "10px 0", textAlign: "center",
+          }}>尚未上传应标要求</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {reqFiles.map(f => <FileRow key={f.name} file={f} />)}
+          </div>
+        )}
+        <SecondaryBtn>添加应标要求</SecondaryBtn>
+      </Card>
+
+      <Card>
+        <ModuleHeader n={2} title="原始素材" hint="支持 PDF · DOCX · PPT · PPTX" />
+        {matFiles.length === 0 ? (
+          <div style={{
+            fontSize: 12, color: "var(--ink-4)",
+            padding: "10px 0", textAlign: "center",
+          }}>尚未上传原始素材</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {matFiles.map(f => <FileRow key={f.name} file={f} />)}
+          </div>
+        )}
+        <SecondaryBtn>添加原始素材</SecondaryBtn>
+      </Card>
+
+      <div style={{ flex: 1 }} />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <button disabled={!canExtract} style={{
+          all: "unset", boxSizing: "border-box",
+          cursor: canExtract ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          padding: "14px 16px", width: "100%",
+          background: canExtract ? "var(--ink)" : "#dcdbd6",
+          color: canExtract ? "#fff" : "#9c9a93",
+          borderRadius: 10,
+          fontSize: 14.5, fontWeight: 600,
+          boxShadow: canExtract ? "0 8px 22px -10px rgba(0,0,0,0.55)" : "none",
+        }}>
+          <SparkleIcon /> 提炼大纲
+        </button>
+        <div style={{ fontSize: 11, color: "var(--ink-4)", lineHeight: 1.55, textAlign: "center" }}>
+          依据应标要求生成章节结构，原始素材用于补充各模块内容
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variant B — Soft-filled containers. Hierarchy is shown by tinting the
+// module body and using an inline dashed drop zone for empty states.
+// CTA is an accent-colored pill that visually owns the whole bottom region.
+// ─────────────────────────────────────────────────────────────────────────────
+function SidebarB({ state = "empty" }) {
+  const reqFiles = state === "empty" ? [] : FILES_REQ;
+  const matFiles = state === "full" ? FILES_MAT : [];
+  const canExtract = reqFiles.length > 0;
+
+  const Module = ({ n, title, hint, children }) => (
+    <section style={{
+      display: "flex", flexDirection: "column",
+      background: "var(--surface)",
+      border: "1px solid var(--line)",
+      borderRadius: 14,
+      overflow: "hidden",
+    }}>
+      <header style={{
+        padding: "12px 14px 10px",
+        borderBottom: "1px solid var(--line-2)",
+        background: "linear-gradient(180deg, #fafaf7, #ffffff)",
+      }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{
+            fontFamily: "SF Mono, ui-monospace, monospace",
+            fontSize: 11, color: "var(--ink-4)", letterSpacing: 1,
+          }}>{String(n).padStart(2, "0")}</span>
+          <h3 style={{
+            margin: 0, fontSize: 15, fontWeight: 700, color: "var(--ink)",
+          }}>{title}</h3>
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3 }}>{hint}</div>
+      </header>
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        {children}
+      </div>
+    </section>
+  );
+
+  const DropZone = ({ label }) => (
+    <button style={{
+      all: "unset", cursor: "pointer", boxSizing: "border-box",
+      width: "100%",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+      padding: "16px 12px",
+      border: "1.5px dashed #d4d2cb",
+      borderRadius: 10,
+      background: "var(--surface-2)",
+      color: "var(--ink-3)",
+    }}>
+      <div style={{
+        width: 26, height: 26, borderRadius: 8,
+        background: "#fff", border: "1px solid var(--line)",
+        display: "grid", placeItems: "center", color: "var(--ink-2)",
+      }}><PlusIcon /></div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>{label}</div>
+      <div style={{ fontSize: 10.5, color: "var(--ink-4)" }}>点击或拖拽文件到此处</div>
+    </button>
+  );
+
+  const AddMoreBtn = ({ children }) => (
+    <button style={{
+      all: "unset", cursor: "pointer", boxSizing: "border-box",
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      padding: "8px 10px", width: "100%",
+      background: "transparent",
+      border: "1px solid var(--line)",
+      borderRadius: 8,
+      fontSize: 12, color: "var(--ink-2)",
+    }}><PlusIcon size={10} /> {children}</button>
+  );
+
+  return (
+    <div style={{
+      width: 320, height: 720,
+      padding: "20px 16px",
+      background: "var(--bg)",
+      borderRight: "1px solid var(--line)",
+      display: "flex", flexDirection: "column", gap: 14,
+      boxSizing: "border-box",
+    }}>
+      <Module n={1} title="应标要求" hint="应答文件技术部分 · 技术规范书">
+        {reqFiles.length === 0 ? (
+          <DropZone label="添加应标要求" />
+        ) : (
+          <>
+            {reqFiles.map(f => <FileRow key={f.name} file={f} />)}
+            <AddMoreBtn>添加应标要求</AddMoreBtn>
+          </>
+        )}
+      </Module>
+
+      <Module n={2} title="原始素材" hint="支持 PDF · DOCX · PPT · PPTX">
+        {matFiles.length === 0 ? (
+          <DropZone label="添加原始素材" />
+        ) : (
+          <>
+            {matFiles.map(f => <FileRow key={f.name} file={f} />)}
+            <AddMoreBtn>添加原始素材</AddMoreBtn>
+          </>
+        )}
+      </Module>
+
+      <div style={{ flex: 1 }} />
+
+      <div style={{
+        padding: 14, borderRadius: 14,
+        background: canExtract ? "var(--accent-soft)" : "#efeeea",
+        border: `1px solid ${canExtract ? "oklch(0.88 0.05 256)" : "var(--line)"}`,
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        <button disabled={!canExtract} style={{
+          all: "unset", boxSizing: "border-box",
+          cursor: canExtract ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          padding: "13px 16px", width: "100%",
+          background: canExtract ? "var(--accent)" : "#cfcdc6",
+          color: "#fff",
+          borderRadius: 10,
+          fontSize: 14.5, fontWeight: 600,
+          boxShadow: canExtract ? "0 10px 24px -10px oklch(0.55 0.16 256 / 0.6)" : "none",
+        }}>
+          <SparkleIcon /> 提炼大纲
+        </button>
+        <div style={{
+          fontSize: 11, color: canExtract ? "var(--accent-ink)" : "var(--ink-4)",
+          lineHeight: 1.55, textAlign: "center",
+        }}>
+          {canExtract
+            ? "依据应标要求生成章节结构，原始素材用于补充各模块内容"
+            : "请先上传应标要求以启用大纲提炼"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variant C — Connector / indented hierarchy. A vertical guide line ties the
+// "add" button visually to its module header. CTA sits in its own elevated
+// footer dock so it always feels like the page's main action.
+// ─────────────────────────────────────────────────────────────────────────────
+function SidebarC({ state = "empty" }) {
+  const reqFiles = state === "empty" ? [] : FILES_REQ;
+  const matFiles = state === "full" ? FILES_MAT : [];
+  const canExtract = reqFiles.length > 0;
+
+  const Module = ({ n, title, hint, children }) => (
+    <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <StepNumber n={n} active />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{title}</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 1 }}>{hint}</div>
+        </div>
+      </div>
+      <div style={{
+        marginLeft: 11,
+        paddingLeft: 18,
+        borderLeft: "1.5px solid var(--line)",
+        display: "flex", flexDirection: "column", gap: 8,
+        paddingTop: 4, paddingBottom: 4,
+      }}>{children}</div>
+    </section>
+  );
+
+  const SecondaryBtn = ({ children }) => (
+    <button style={{
+      all: "unset", cursor: "pointer", boxSizing: "border-box",
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "7px 12px",
+      background: "var(--surface)",
+      border: "1px solid var(--line)",
+      borderRadius: 999,
+      fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)",
+      alignSelf: "flex-start",
+    }}><PlusIcon size={10} /> {children}</button>
+  );
+
+  return (
+    <div style={{
+      width: 320, height: 720,
+      background: "var(--bg)",
+      borderRight: "1px solid var(--line)",
+      display: "flex", flexDirection: "column",
+      boxSizing: "border-box",
+    }}>
+      <div style={{
+        flex: 1, overflow: "auto",
+        padding: "20px 18px 16px",
+        display: "flex", flexDirection: "column", gap: 20,
+      }}>
+        <Module n={1} title="应标要求" hint="应答文件技术部分 · 技术规范书">
+          {reqFiles.length === 0 ? (
+            <div style={{
+              fontSize: 12, color: "var(--ink-4)",
+              fontStyle: "italic",
+            }}>尚未上传应标要求</div>
+          ) : (
+            reqFiles.map(f => <FileRow key={f.name} file={f} compact />)
+          )}
+          <SecondaryBtn>添加应标要求</SecondaryBtn>
+        </Module>
+
+        <Module n={2} title="原始素材" hint="支持 PDF · DOCX · PPT · PPTX">
+          {matFiles.length === 0 ? (
+            <div style={{
+              fontSize: 12, color: "var(--ink-4)",
+              fontStyle: "italic",
+            }}>尚未上传原始素材</div>
+          ) : (
+            matFiles.map(f => <FileRow key={f.name} file={f} compact />)
+          )}
+          <SecondaryBtn>添加原始素材</SecondaryBtn>
+        </Module>
+      </div>
+
+      <footer style={{
+        padding: "14px 16px 18px",
+        background: "var(--surface)",
+        borderTop: "1px solid var(--line)",
+        display: "flex", flexDirection: "column", gap: 8,
+        boxShadow: "0 -10px 30px -20px rgba(0,0,0,0.18)",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          fontSize: 10.5, color: "var(--ink-4)",
+          fontFamily: "SF Mono, ui-monospace, monospace", letterSpacing: 1,
+        }}>
+          <span>STEP 03</span>
+          <span style={{ color: canExtract ? "oklch(0.55 0.14 150)" : "var(--ink-4)" }}>
+            {canExtract ? "● READY" : "○ AWAITING REQUIREMENTS"}
+          </span>
+        </div>
+        <button disabled={!canExtract} style={{
+          all: "unset", boxSizing: "border-box",
+          cursor: canExtract ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          padding: "16px 16px", width: "100%",
+          background: canExtract
+            ? "linear-gradient(180deg, oklch(0.6 0.16 256), oklch(0.5 0.16 256))"
+            : "#dcdbd6",
+          color: canExtract ? "#fff" : "#9c9a93",
+          borderRadius: 12,
+          fontSize: 15, fontWeight: 700,
+          letterSpacing: 0.5,
+          boxShadow: canExtract
+            ? "0 12px 24px -10px oklch(0.55 0.16 256 / 0.55), inset 0 1px 0 oklch(0.7 0.12 256)"
+            : "none",
+        }}>
+          <SparkleIcon size={16} /> 提炼大纲
+        </button>
+        <div style={{
+          fontSize: 11, color: "var(--ink-3)", lineHeight: 1.55, textAlign: "center",
+        }}>
+          依据应标要求生成章节结构，原始素材用于补充各模块内容
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+Object.assign(window, { SidebarA, SidebarB, SidebarC });
+
+</script>
+<script type="text/babel">
+  const { DesignCanvas, DCSection, DCArtboard } = window;
+  const { SidebarA, SidebarB, SidebarC } = window;
+
+  function App() {
+    return (
+      <DesignCanvas>
+        <DCSection id="empty" title="空状态 · 尚未上传任何文件">
+          <DCArtboard id="A-empty" label="A · 卡片分组 + 主操作底栏" width={360} height={760}>
+            <SidebarA state="empty" />
+          </DCArtboard>
+          <DCArtboard id="B-empty" label="B · 描边卡片 + 内嵌上传区" width={360} height={760}>
+            <SidebarB state="empty" />
+          </DCArtboard>
+          <DCArtboard id="C-empty" label="C · 层级缩进 + 强调主按钮" width={360} height={760}>
+            <SidebarC state="empty" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="partial" title="部分填充 · 已上传应标要求">
+          <DCArtboard id="A-partial" label="A · 已激活主按钮" width={360} height={760}>
+            <SidebarA state="partial" />
+          </DCArtboard>
+          <DCArtboard id="B-partial" label="B · 已激活主按钮" width={360} height={760}>
+            <SidebarB state="partial" />
+          </DCArtboard>
+          <DCArtboard id="C-partial" label="C · 已激活主按钮" width={360} height={760}>
+            <SidebarC state="partial" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="full" title="全部填充 · 应标要求 + 原始素材">
+          <DCArtboard id="A-full" label="A · 完整状态" width={360} height={760}>
+            <SidebarA state="full" />
+          </DCArtboard>
+          <DCArtboard id="B-full" label="B · 完整状态" width={360} height={760}>
+            <SidebarB state="full" />
+          </DCArtboard>
+          <DCArtboard id="C-full" label="C · 完整状态" width={360} height={760}>
+            <SidebarC state="full" />
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
