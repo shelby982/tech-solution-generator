@@ -70,6 +70,8 @@ export const api = {
   blocks: {
     list: (projectId) =>
       fetch(`/api/projects/${projectId}/blocks`).then(r => r.json()),
+    clear: (projectId) =>
+      fetch(`/api/projects/${projectId}/blocks`, { method: 'DELETE' }).then(r => r.json()),
     update: (id, content) =>
       fetch(`/api/blocks/${id}`, {
         method: 'PUT',
@@ -139,6 +141,18 @@ export const api = {
     abort: (threadId) =>
       fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
 
+    pause: (threadId) =>
+      fetch(`/api/workflow/${threadId}/pause`, { method: 'POST' }).then(r => r.json()),
+
+    skipToReview: (threadId) =>
+      fetch(`/api/workflow/${threadId}/skip-to-review`, { method: 'POST' }).then(r => r.json()),
+
+    resumeGeneration: (threadId) =>
+      fetch(`/api/workflow/${threadId}/resume-generation`, { method: 'POST' }).then(r => r.json()),
+
+    rerunMatch: (threadId) =>
+      fetch(`/api/workflow/${threadId}/rerun-match`, { method: 'POST' }).then(r => r.json()),
+
     recover: (threadId) =>
       fetch(`/api/workflow/${threadId}/recover`, { method: 'POST' }).then(r => r.json()),
 
@@ -158,11 +172,14 @@ export const api = {
       };
       wire('stage_change',     handlers.onStageChange);
       wire('parse_progress',   handlers.onParseProgress);
+      wire('outline_extract_start', handlers.onOutlineExtractStart);
       wire('outline_extract',  handlers.onOutlineExtract);
+      wire('match_start',      handlers.onMatchStart);
       wire('match_progress',   handlers.onMatchProgress);
       wire('block_start',      handlers.onBlockStart);
       wire('block_token',      handlers.onBlockToken);
       wire('block_done',       handlers.onBlockDone);
+      wire('review_block_start', handlers.onReviewBlockStart);
       wire('review_finding',   handlers.onReviewFinding);
       wire('report_ready',     handlers.onReportReady);
       wire('gate_open',        handlers.onGateOpen);
@@ -170,6 +187,7 @@ export const api = {
       wire('checkpoint',       handlers.onCheckpoint);
       wire('done',             handlers.onDone);
       wire('aborted',          handlers.onAborted);
+      wire('paused',           handlers.onPaused);
       return es;
     },
   },

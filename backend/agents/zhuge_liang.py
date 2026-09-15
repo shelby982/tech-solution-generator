@@ -33,9 +33,10 @@ _DIAGRAM_PLACEHOLDER_RE = re.compile(
 )
 
 
-# per-block 并发上限：N=20 串行 ≈ 60min，concurrency=5 后 ≈ 12min。
-# 支持 env 覆盖，便于单测 / 压测调参。
-BLOCK_CONCURRENCY = int(os.getenv("ZHUGELIANG_BLOCK_CONCURRENCY", "5"))
+# per-block 并发上限：默认 1（按章节顺序逐个生成，让用户能看到一章接一章的流式进度，
+# 同时点击暂停时只需等当前一章 LLM 流完成即可立即停下，不会有 5 个并发还在跑）。
+# 如需提速可通过 env 覆盖到更高并发。
+BLOCK_CONCURRENCY = int(os.getenv("ZHUGELIANG_BLOCK_CONCURRENCY", "1"))
 
 
 # 事件回调签名：(event_type, payload) -> None | awaitable[None]
@@ -83,6 +84,7 @@ class ZhugeLiangAgent:
         materials: dict[str, list[Match]],
         regenerate_targets: Optional[list[str]] = None,
         emitter: Optional[EventCallback] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> tuple[dict[str, BlockOutput], list[str]]:
         """为每个 block 生成 BlockOutput。
 
@@ -93,6 +95,8 @@ class ZhugeLiangAgent:
         materials: 沈括产出的 {block_id: list[Match]}
         emitter:   事件回调，签名 (event_type, payload) → None|awaitable[None]
                    事件类型：block_start, token, block_done
+        should_cancel: 节点级取消信号探测；每个 block 开始前调一次，返回 True 则跳过剩余
+                      block。让用户中途暂停时，已生成 block 内容仍保留，未生成的不再跑。
         """
         configs, rr_start = self._configs_provider()
         if not configs:
@@ -109,6 +113,9 @@ class ZhugeLiangAgent:
 
         async def _run_one(idx: int, block_id: str) -> tuple[int, str, BlockOutput]:
             async with sem:
+                # 用户暂停 / 取消时跳过尚未开始的 block；已经在跑的 block 让其完成。
+                if should_cancel and should_cancel():
+                    return (idx, block_id, None)
                 row = outline_matrix[block_id]
                 title = row.title
                 kind = "letter" if is_letter_section(title) else "tech"
@@ -150,20 +157,39 @@ class ZhugeLiangAgent:
                 })
                 return (idx, block_id, output)
 
-        # return_exceptions=True 兜底 _run_one 中 try/except 之外（如 _emit）
-        # 抛出的异常，避免单 block 失败 cancel 同 gather 的其他 task。
-        triples = await asyncio.gather(
-            *[_run_one(i, bid) for i, bid in enumerate(target_ids)],
-            return_exceptions=True,
-        )
-        # gather 按提交顺序返回（与 enumerate(target_ids) 一致），无需再 sort。
+        # 串行模式（BLOCK_CONCURRENCY=1）下逐 block 执行，让暂停信号能在每个 block
+        # 之间立即生效，不会有"已 schedule 但未启动"的 worker 拖累。
+        # BLOCK_CONCURRENCY > 1 时仍走 gather 并发。
         results: dict[str, BlockOutput] = {}
-        for entry in triples:
-            if isinstance(entry, BaseException):
-                logger.warning("诸葛亮：_run_one 异常逃出兜底：%s", entry)
-                continue
-            _, bid, out = entry
-            results[bid] = out
+        if BLOCK_CONCURRENCY <= 1:
+            for i, bid in enumerate(target_ids):
+                # 串行入口处再检查一次 cancel：避免已排队的 block 在 sem 释放后才发现要跳过
+                if should_cancel and should_cancel():
+                    break
+                try:
+                    triple = await _run_one(i, bid)
+                except BaseException as e:
+                    logger.warning("诸葛亮：_run_one 异常逃出兜底：%s", e)
+                    continue
+                _, b, out = triple
+                if out is None:
+                    continue
+                results[b] = out
+        else:
+            # return_exceptions=True 兜底 _run_one 中 try/except 之外（如 _emit）
+            # 抛出的异常，避免单 block 失败 cancel 同 gather 的其他 task。
+            triples = await asyncio.gather(
+                *[_run_one(i, bid) for i, bid in enumerate(target_ids)],
+                return_exceptions=True,
+            )
+            for entry in triples:
+                if isinstance(entry, BaseException):
+                    logger.warning("诸葛亮：_run_one 异常逃出兜底：%s", entry)
+                    continue
+                _, bid, out = entry
+                if out is None:
+                    continue
+                results[bid] = out
 
         consumed_targets = list(regenerate_targets or [])
         return results, consumed_targets

@@ -15,8 +15,8 @@
 
 /* 左侧面板 */
 .init-materials-panel {
-  width: 260px;
-  flex: 0 0 260px;
+  width: 320px;
+  flex: 0 0 320px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
@@ -106,6 +106,23 @@
 .mat-role-badge.role-spec        { background: #ccfbf1; color: #115e59; }
 .mat-role-badge.role-scoring     { background: #fef3c7; color: #92400e; }
 .mat-role-badge.role-evaluation  { background: #ede9fe; color: #5b21b6; }
+/* 已上传文件 role 下拉：与 mat-role-badge 同款配色，可点击修改 */
+.mat-role-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: none;
+  flex: none;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+.mat-role-select.role-main_rfp,
+.mat-role-select.role-requirement { background: #dbeafe; color: #1e40af; }
+.mat-role-select.role-spec        { background: #ccfbf1; color: #115e59; }
+.mat-role-select.role-scoring     { background: #fef3c7; color: #92400e; }
+.mat-role-select.role-evaluation  { background: #ede9fe; color: #5b21b6; }
+.mat-role-select:hover { filter: brightness(0.95); }
 .mat-parse-badge {
   font-size: 10.5px;
   padding: 2px 7px;
@@ -116,7 +133,7 @@
 .mat-parse-badge.parsing { background: #fef3c7; color: #92400e; animation: pulse 1.4s ease-in-out infinite; }
 .mat-parse-badge.failed  { background: #fee2e2; color: #b91c1c; }
 .role-select {
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -127,15 +144,21 @@
 }
 .btn-add-mat {
   flex: 1;
-  padding: 10px;
+  padding: 8px 12px;
   border: 1.5px dashed var(--line);
   border-radius: 10px;
   background: none;
   font-size: 13px;
   color: var(--muted);
   cursor: pointer;
+  min-height: 38px;
 }
 .btn-add-mat:hover { border-color: var(--text); color: var(--text); }
+
+/* 视图模式：素材匹配阶段隐藏应标要求模块（用户已点击「确认大纲」后） */
+body[data-view="matching"] #mat-section-req { display: none; }
+/* 解析大纲视图：隐藏原始素材模块（仅在素材匹配视图才需要看到素材） */
+body[data-view="outline"] #mat-section-src { display: none; }
 
 /* 底部操作区 */
 .materials-footer {
@@ -282,9 +305,9 @@
   border-radius: 999px; overflow: hidden;
 }
 .status-progress-bar {
-  height: 100%; background: var(--text);
+  height: 100%; background: linear-gradient(90deg, var(--text), #4b5563);
   border-radius: 999px;
-  transition: width 0.3s;
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .status-pct { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .status-bar-right { display: flex; gap: 8px; flex: none; }
@@ -658,7 +681,7 @@
 }
     </style>
   </head>
-  <body>
+  <body data-view="outline">
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
@@ -667,8 +690,7 @@
             <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
             <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
             <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-            <div class="stage-step" data-stage="reviewing" data-stages="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
-            <div class="stage-step" data-stage="report_review" data-stages="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
+            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
           </nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
@@ -697,7 +719,7 @@
   <!-- 左侧材料面板 -->
   <aside class="init-materials-panel" id="materials-panel">
     <div class="materials-scroll">
-      <div class="mat-section">
+      <div class="mat-section" id="mat-section-req">
         <div class="mat-section-top">
           <div class="mat-section-header">
             <span class="mat-index">01</span>
@@ -718,7 +740,7 @@
           <button class="btn-add-mat" id="btn-add-req" type="button">+ 添加</button>
         </div>
       </div>
-      <div class="mat-section">
+      <div class="mat-section" id="mat-section-src">
         <div class="mat-section-top">
           <div class="mat-section-header">
             <span class="mat-index">02</span>
@@ -845,6 +867,29 @@ import { api } from './assets/api.js';
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
 if (!projectId) { location.href = '/projects'; }
+// URL 显式指定的视图模式（顶部进度条点击会带上）；空 / 非法值视为不覆盖
+const _viewParam = params.get('view');
+// URL 显式指定的 backend stage（跨视图跳转 click handler 会带）：作为 sessionStorage
+// 兜底，确保 renderStageBar 第一次绘制就能用真实 backend stage 点亮 active。
+const _backendParam = params.get('backend');
+if (_backendParam && projectId) {
+  try {
+    // 只升不降（单调推进）
+    const k = `furthestStage:${projectId}`;
+    const prev = sessionStorage.getItem(k);
+    const STAGE_ORDER_LITERAL = ['parsing', 'matching', 'generating', 'reviewing'];
+    const STAGE_MAP_LITERAL = {
+      parsing: 'parsing', outline_review: 'parsing',
+      matching: 'matching', materials_review: 'matching',
+      generating: 'generating',
+      reviewing: 'reviewing',
+      report_review: 'reviewing',
+    };
+    const prevIdx = prev ? STAGE_ORDER_LITERAL.indexOf(STAGE_MAP_LITERAL[prev] || '') : -1;
+    const newIdx = STAGE_ORDER_LITERAL.indexOf(STAGE_MAP_LITERAL[_backendParam] || '');
+    if (newIdx >= 0 && newIdx >= prevIdx) sessionStorage.setItem(k, _backendParam);
+  } catch {}
+}
 
 // ── DOM refs ──
 const reqStack   = document.getElementById('req-stack');
@@ -876,6 +921,8 @@ const fileInputSrc = document.getElementById('file-input-src');
 let extractionState = 'idle'; // idle | extracting | done
 let totalBlocks = 0;
 let doneBlocks  = 0;
+let matchedCount = 0; // 已匹配章节数（仅匹配阶段使用）
+const matchedIds = new Set();
 let currentReader = null;
 let selectedModel = 'claude-sonnet-4-6';
 let selectedModelLabel = 'Sonnet 4.6';
@@ -884,8 +931,59 @@ let selectedModelLabel = 'Sonnet 4.6';
 let currentThreadId = null;
 let currentEventSource = null;
 let currentGate = null; // null | 'review_outline' | 'review_materials' | 'review_report'
+// URL backend 参数（来自顶部 stage-progress click）作为 currentStage 初值，
+// 让 renderStageBar 第一次绘制就用上真实 backend stage，不依赖异步 state API。
+// 没 URL backend 时用 sessionStorage furthestStage 兜底。
+let currentStage = (() => {
+  if (_backendParam && _backendParam.trim()) return _backendParam;
+  try {
+    const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+    if (cached) return cached;
+  } catch {}
+  return null;
+})();
 const blocksByOrder = []; // 按 outline_extract 顺序累积，给 confirm 用
 const blocksById = new Map();
+
+// ── 视图模式：outline（提炼大纲） / matching（素材匹配） ──
+// 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
+// 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
+// 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
+let pageViewOverride = (_viewParam === 'outline' || _viewParam === 'matching') ? _viewParam : null;
+function applyPageView() {
+  // 视图判定：单一规则 = 由 backend stage 决定，与项目实际所处步骤严格对齐。
+  //   parsing / outline_review → outline 视图（解析大纲，含闸门 1 等待确认）
+  //   matching / materials_review → matching 视图（素材匹配，含闸门 2 等待确认）
+  // pageViewOverride（URL ?view=...）优先级最高，让用户能从顶部进度条主动回看。
+  let auto;
+  if (currentStage === 'matching' || currentStage === 'materials_review') {
+    auto = 'matching';
+  } else if (currentStage === 'parsing' || currentStage === 'outline_review') {
+    auto = 'outline';
+  } else if (currentStage) {
+    // generating / reviewing / report_review 等：不属于 project-init 视图，但兜底回 outline
+    auto = 'outline';
+  } else {
+    // 没 backend stage（新项目）：用本地大纲完成度决定
+    auto = (totalBlocks > 0 && doneBlocks >= totalBlocks) ? 'matching' : 'outline';
+  }
+  const view = pageViewOverride || auto;
+  document.body.dataset.view = view;
+  // 同步底部按钮文案
+  const btn = document.getElementById('btn-extract');
+  const hint = document.querySelector('.materials-footer .extract-hint');
+  if (btn && hint) {
+    if (view === 'matching') {
+      btn.innerHTML = '✦ 素材匹配';
+      hint.textContent = '为每个章节匹配最相关的原始素材片段';
+    } else {
+      btn.innerHTML = '✦ 提炼大纲';
+      hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
+    }
+  }
+  // view 切换会改变 PAGE_STAGE → 顶部进度条 active 跟着切
+  if (typeof renderStageBar === 'function') renderStageBar();
+}
 
 const THREAD_KEY = (pid) => `workflow:${pid}`;
 function getThread(pid) { try { return sessionStorage.getItem(THREAD_KEY(pid)); } catch { return null; } }
@@ -894,75 +992,134 @@ function clearThread(pid) { try { sessionStorage.removeItem(THREAD_KEY(pid)); } 
 
 // ── 顶部 stage 进度条 ──
 const STAGE_ORDER = [
-  'parsing', 'matching', 'generating', 'reviewing', 'report_review',
+  'parsing', 'matching', 'generating', 'reviewing',
 ];
 const STAGE_MAP = {
-  parsing: 'parsing', outline_review: 'parsing',
-  matching: 'matching', materials_review: 'matching',
+  parsing: 'parsing',
+  // 闸门停留态映射回当前阶段：进度条颜色与"项目实际所处步骤"一致，
+  // 避免"进度条点亮方案撰写但页面还是素材匹配"的认知冲突。
+  outline_review: 'parsing',
+  matching: 'matching',
+  materials_review: 'matching',
   generating: 'generating',
   reviewing: 'reviewing',
-  report_review: 'report_review',
+  // 报告确认与双视角评审合并为同一 step "评审确认"
+  report_review: 'reviewing',
 };
+
+// 当前页面承担的阶段：active step 永远是它，与 backendStage 解耦。
+// project-init 视图分两种：outline 视图固定 'parsing'，matching 视图固定 'matching'。
+function getPageStage() {
+  return document.body.dataset.view === 'matching' ? 'matching' : 'parsing';
+}
 
 function setStage(stage) {
   if (!stage) return;
+  // currentStage 单调推进：避免 SSE / state API 短暂返回更早的 stage（比如 graph
+  // 重启瞬间的 'parsing'）把进度条颜色拉回来导致 active 抖动。
+  // 例外：'aborted' 强制覆盖（终态）。
+  if (currentStage && stage !== 'aborted' && stage !== 'done') {
+    const prevMapped = STAGE_MAP[currentStage];
+    const newMapped = STAGE_MAP[stage];
+    const prevIdx = prevMapped ? STAGE_ORDER.indexOf(prevMapped) : -1;
+    const newIdx = newMapped ? STAGE_ORDER.indexOf(newMapped) : -1;
+    if (newIdx >= 0 && prevIdx >= 0 && newIdx < prevIdx) {
+      // 倒退：忽略，不更新 currentStage 也不重绘
+      return;
+    }
+  }
+  currentStage = stage;
+  // 维护项目级最远到达的 stage：renderStageBar 在 currentStage 暂时为空 / 比缓存更早时
+  // 用它作 backendIdx 兜底，避免用户在 SSE / state 返回前点击进度条 step 被错判为 disabled。
+  try {
+    const mappedNew = STAGE_MAP[stage];
+    if (mappedNew) {
+      const newIdx = STAGE_ORDER.indexOf(mappedNew);
+      const k = `furthestStage:${projectId}`;
+      const prev = sessionStorage.getItem(k);
+      const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
+      if (newIdx > prevIdx) sessionStorage.setItem(k, stage);
+    }
+  } catch {}
+  applyPageView();
+  renderStageBar();
+}
+
+// 重绘进度条：active = 后端当前 stage（蓝色 + 呼吸），
+//              done = 已经过的阶段（绿色，可点击回看），
+//              其余 = 灰色 disabled。
+// 当前视图（PAGE_STAGE）只影响视图内容，不再决定 active 颜色。
+function renderStageBar() {
   const root = document.getElementById('stage-progress');
   if (!root) return;
-  const mapped = STAGE_MAP[stage];
-  const known = mapped || stage === 'done' || stage === 'aborted';
-  if (!known) {
-    // 未知 stage：清掉所有 step 状态但保持 nav 可见（进度条作为整体导航始终显示）
-    root.querySelectorAll('.stage-step').forEach(el => {
-      el.classList.remove('active', 'done', 'aborted');
-    });
-    return;
-  }
   if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
-  const steps = root.querySelectorAll('.stage-step');
-  if (stage === 'aborted') {
-    const lastActive = root.querySelector('.stage-step.active');
-    if (lastActive) {
-      lastActive.classList.remove('active');
-      lastActive.classList.add('aborted');
-      lastActive.setAttribute('aria-disabled', 'true');
-      lastActive.setAttribute('tabindex', '-1');
-      lastActive.removeAttribute('aria-current');
-    }
-    return;
+
+  const pageStage = getPageStage();
+  const pageIdx = STAGE_ORDER.indexOf(pageStage);
+  // 后端实际所处阶段：
+  //   1) currentStage（SSE / state API 拿到）
+  //   2) sessionStorage furthest（同 project 在本会话中曾到达的最远 stage）
+  //   3) PAGE_STAGE 兜底（用户既然在该页面，graph 至少到这）
+  let backend = currentStage;
+  if (!backend) {
+    try {
+      const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+      if (cached) backend = cached;
+    } catch {}
   }
-  if (stage === 'done') {
+  if (!backend && pageStage) backend = pageStage;
+
+  let backendMapped = STAGE_MAP[backend];
+  let backendIdx = backendMapped ? STAGE_ORDER.indexOf(backendMapped) : -1;
+  if (backend === 'done') backendIdx = STAGE_ORDER.length;
+  if (backend === 'aborted') backendIdx = pageIdx;
+  // backend 至少不能比当前页面更早（用户已经在这页，说明 graph 至少到这）
+  if (backendIdx < pageIdx) backendIdx = pageIdx;
+
+  const steps = root.querySelectorAll('.stage-step');
+
+  // aborted 特殊：把 backend 那一步标红，其他按 backendIdx 标 done
+  if (backend === 'aborted') {
     steps.forEach(el => {
-      el.classList.remove('active', 'aborted');
-      el.classList.add('done');
+      const i = STAGE_ORDER.indexOf(el.dataset.stage);
+      el.classList.remove('active', 'done', 'aborted');
       el.removeAttribute('aria-current');
       el.removeAttribute('aria-disabled');
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
-      const name = el.querySelector('.stage-name')?.textContent || '';
-      el.setAttribute('aria-label', `跳转到 ${name}`);
+      if (i === backendIdx) {
+        el.classList.add('aborted');
+        el.setAttribute('aria-disabled', 'true');
+        el.setAttribute('tabindex', '-1');
+      } else if (i < backendIdx) {
+        el.classList.add('done');
+      } else {
+        el.setAttribute('aria-disabled', 'true');
+        el.setAttribute('tabindex', '-1');
+      }
     });
     return;
   }
-  const idx = STAGE_ORDER.indexOf(mapped);
+
   steps.forEach(el => {
     const i = STAGE_ORDER.indexOf(el.dataset.stage);
     el.classList.remove('active', 'done', 'aborted');
-    if (idx < 0) return;
-    if (i < idx) el.classList.add('done');
-    else if (i === idx) el.classList.add('active');
-  });
-  // 同步 aria + 不可达状态
-  steps.forEach(el => {
-    const i = STAGE_ORDER.indexOf(el.dataset.stage);
     el.removeAttribute('aria-current');
     el.removeAttribute('aria-disabled');
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
-    if (i > idx) {
+
+    if (i === backendIdx) {
+      // 后端当前所处 stage：蓝色呼吸（active）
+      el.classList.add('active');
+      el.setAttribute('aria-current', 'step');
+    } else if (i < backendIdx) {
+      // 已完成阶段：绿色，可点击回看
+      el.classList.add('done');
+    } else {
+      // 未到达：灰色 disabled，不允许点击切换视图
       el.setAttribute('aria-disabled', 'true');
       el.setAttribute('tabindex', '-1');
-    } else if (i === idx) {
-      el.setAttribute('aria-current', 'step');
     }
     const name = el.querySelector('.stage-name')?.textContent || '';
     el.setAttribute('aria-label', `跳转到 ${name}`);
@@ -981,17 +1138,38 @@ function resetStageProgress() {
 document.getElementById('stage-progress')?.addEventListener('click', (e) => {
   const step = e.target.closest('.stage-step');
   if (!step) return;
+  if (step.classList.contains('aborted')) return;
+  // 未到达阶段（aria-disabled）不允许点击切换视图
   if (step.getAttribute('aria-disabled') === 'true') return;
-  if (step.classList.contains('active')) return;
   const stage = step.dataset.stage;
-  const tid = currentThreadId || sessionStorage.getItem(`workflow:${projectId}`);
-  if (!tid) return;
+  // tid 优先级：当前内存 > sessionStorage > URL（页面初次加载时三者都可能）
+  let tid = currentThreadId
+    || sessionStorage.getItem(`workflow:${projectId}`)
+    || params.get('threadId');
+  // 跳转前把 backend stage 写 sessionStorage（跨页面继承）+ URL（同步可靠源）。
+  // sessionStorage 写入 + 读取在某些场景下可能与跳转时机错位，URL 是最稳的兜底。
+  let backendForUrl = currentStage;
+  if (!backendForUrl || !STAGE_MAP[backendForUrl]) {
+    backendForUrl = sessionStorage.getItem(`furthestStage:${projectId}`) || '';
+  }
+  try {
+    if (backendForUrl && STAGE_MAP[backendForUrl]) {
+      const k = `furthestStage:${projectId}`;
+      const prev = sessionStorage.getItem(k);
+      const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
+      const newIdx = STAGE_ORDER.indexOf(STAGE_MAP[backendForUrl]);
+      if (newIdx > prevIdx) sessionStorage.setItem(k, backendForUrl);
+    }
+  } catch {}
+  const enc = tid ? encodeURIComponent(tid) : '';
+  const tidQuery = tid ? `&threadId=${enc}` : '';
+  const backendQuery = backendForUrl ? `&backend=${encodeURIComponent(backendForUrl)}` : '';
   const routes = {
-    parsing: `/project-init?projectId=${projectId}`,
-    matching: `/project-init?projectId=${projectId}`,
-    generating: `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`,
-    reviewing: `/review?threadId=${encodeURIComponent(tid)}`,
-    report_review: `/review?threadId=${encodeURIComponent(tid)}`,
+    parsing: `/project-init?projectId=${projectId}${tidQuery}&view=outline${backendQuery}`,
+    matching: `/project-init?projectId=${projectId}${tidQuery}&view=matching${backendQuery}`,
+    generating: tid ? `/workbench?projectId=${projectId}${tidQuery}${backendQuery}` : null,
+    reviewing: tid ? `/review?threadId=${enc}${backendQuery}` : null,
+    report_review: tid ? `/review?threadId=${enc}${backendQuery}` : null,
   };
   if (routes[stage]) location.href = routes[stage];
 });
@@ -1239,20 +1417,49 @@ function parseStatusBadge(status) {
 }
 function renderMats(container, mats, showRole) {
   if (!mats.length) { container.innerHTML = ''; return; }
-  container.innerHTML = mats.map(m => `
-    <div class="mat-row">
+  // showRole 时把 role 渲染为可点击下拉，让用户修改已上传文件类型
+  const roleOptions = [
+    ['spec', '规范书'],
+    ['main_rfp', '主招标'],
+    ['scoring', '评分表'],
+    ['evaluation', '评审要素'],
+  ];
+  container.innerHTML = mats.map(m => {
+    const roleCell = showRole
+      ? `<select class="mat-role-select role-${m.role}" data-id="${m.id}" title="修改文件类型">
+           ${roleOptions.map(([v, l]) => `<option value="${v}" ${m.role === v || (v === 'main_rfp' && m.role === 'requirement') ? 'selected' : ''}>${l}</option>`).join('')}
+         </select>`
+      : '';
+    return `<div class="mat-row">
       ${extBadge(m.filename)}
       <span class="mat-name" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename)}</span>
-      ${showRole ? `<span class="mat-role-badge role-${m.role}">${ROLE_LABEL[m.role] || m.role}</span>` : ''}
+      ${roleCell}
       ${parseStatusBadge(m.parse_status)}
       <span class="mat-size">${fmtSize(m.file_size)}</span>
       <button class="mat-del" data-id="${m.id}" title="删除">×</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   container.querySelectorAll('.mat-del').forEach(btn => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       await fetch(`/api/materials/${btn.dataset.id}`, { method: 'DELETE' });
       await loadMaterials();
+    });
+  });
+  container.querySelectorAll('.mat-role-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const id = sel.dataset.id;
+      const role = sel.value;
+      // 改 select 自身配色（与原 badge 同步色调）
+      sel.className = `mat-role-select role-${role}`;
+      try {
+        await fetch(`/api/materials/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role }),
+        });
+        await loadMaterials();
+      } catch (e) { console.error('[mat] update role failed', e); }
     });
   });
 }
@@ -1287,19 +1494,49 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     makeOutlineEditable();
   } else if (state === 'gate_materials') {
     statusActions.innerHTML = `
-      <button class="btn-status-secondary" id="btn-cancel">取消</button>
+      <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
       <button class="btn-status-primary" id="btn-confirm-materials">确认素材，进入撰写</button>`;
-    document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+    document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
     document.getElementById('btn-confirm-materials').addEventListener('click', confirmMaterialsGate);
     freezeOutlineEdit();
   } else if (state === 'done') {
-    statusActions.innerHTML = `
-      <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
-      <button class="btn-status-primary" id="btn-confirm">进入撰写</button>`;
-    document.getElementById('btn-reextract').addEventListener('click', () => startExtraction(true));
-    document.getElementById('btn-confirm').addEventListener('click', confirmOutline);
+    // 文案随当前视图变：outline 视图下是「重新提炼 / 进入匹配」，
+    // matching 视图下是「重新匹配 / 进入撰写」。
+    const isMatchingView = document.body.dataset.view === 'matching';
+    if (isMatchingView) {
+      statusActions.innerHTML = `
+        <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
+        <button class="btn-status-primary" id="btn-confirm">进入撰写</button>`;
+      document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
+      // 与 gate_materials 状态的「确认素材，进入撰写」按钮逻辑保持一致：
+      // 先 resume('approve') 推 graph 进 generate，再跳 workbench。
+      document.getElementById('btn-confirm').addEventListener('click', confirmMaterialsGate);
+    } else {
+      statusActions.innerHTML = `
+        <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
+        <button class="btn-status-primary" id="btn-to-matching">进入匹配</button>`;
+      document.getElementById('btn-reextract').addEventListener('click', () => startExtraction(true));
+      document.getElementById('btn-to-matching').addEventListener('click', () => startMatching());
+    }
+    freezeOutlineEdit();
+  } else if (state === 'paused') {
+    const isMatchingView = document.body.dataset.view === 'matching';
+    if (isMatchingView) {
+      statusActions.innerHTML = `
+        <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
+        <button class="btn-status-primary" id="btn-resume-match">继续匹配</button>`;
+      document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
+      document.getElementById('btn-resume-match').addEventListener('click', () => startMatching());
+    } else {
+      statusActions.innerHTML = `
+        <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
+        <button class="btn-status-primary" id="btn-resume-extract">继续提炼</button>`;
+      document.getElementById('btn-reextract').addEventListener('click', () => startExtraction(true));
+      document.getElementById('btn-resume-extract').addEventListener('click', () => startExtraction(false));
+    }
     freezeOutlineEdit();
   }
+  applyPageView();
 }
 
 // ── 右侧进度环 ──
@@ -1537,19 +1774,45 @@ function updateBlockCard(blockId, data) {
 }
 
 // ── 加载已有 blocks ──
-async function loadExistingBlocks() {
+async function loadExistingBlocks({ silent = false } = {}) {
   const blocks = await api.blocks.list(projectId);
   if (!blocks?.length) return;
   blocksList.innerHTML = '';
-  // 所有 blocks 都渲染（heading 级别的也要显示）
+  blocksById.clear();
+  blocksByOrder.length = 0;
+  // 是否「已提炼」以 status 字段为权威：upsert 时写 'outline_done' 才算完成。
+  // 不能用 key_points/requirement 是否为空兜底 —— 部分章节（纯目录、分组节点）
+  // LLM 提炼后这两个字段就是空串，会被误判为未完成。
+  const isDone = (b) => (b?.status === 'outline_done')
+    || (b?.status === 'done')
+    || !!(b?.key_points || b?.requirement);
+
   totalBlocks = blocks.length;
-  doneBlocks = blocks.filter(b => b.key_points || b.requirement).length;
-  blocks.forEach(b => renderBlockCard(b, (b.key_points || b.requirement) ? 'done' : 'pending'));
+  doneBlocks = blocks.filter(isDone).length;
+  blocks.forEach(b => {
+    const blockId = b.block_id || b.id;
+    blocksByOrder.push(b);
+    blocksById.set(blockId, b);
+    renderBlockCard(b, isDone(b) ? 'done' : 'pending');
+  });
   buildToc(blocks);
-  blocks.filter(b => b.key_points || b.requirement).forEach(b => markTocDone(b.block_id || b.id));
+  blocks.filter(isDone).forEach(b => markTocDone(b.block_id || b.id));
   updateSidebarProgress();
+  applyPageView();
+  if (silent) return;
   if (doneBlocks > 0) {
-    setStatusBar('done', '提炼完成', Math.round(doneBlocks / totalBlocks * 100), totalBlocks, doneBlocks);
+    const pct = Math.round(doneBlocks / totalBlocks * 100);
+    const isMatching = document.body.dataset.view === 'matching';
+    if (doneBlocks >= totalBlocks) {
+      setStatusBar('done', isMatching ? '匹配完成' : '提炼完成', pct, totalBlocks, doneBlocks);
+    } else {
+      // 部分提炼/匹配（取消后保留的进度）：进入 paused 态，让用户继续 / 重新触发
+      const tipDone = isMatching ? `已保留 ${doneBlocks}/${totalBlocks} 个已匹配章节` : `已保留 ${doneBlocks}/${totalBlocks} 个已提炼章节`;
+      setStatusBar('paused', tipDone, pct, totalBlocks, doneBlocks);
+    }
+  } else if (totalBlocks > 0) {
+    // 已解析章节但全部未提炼（解析后立即取消）：让用户能继续 / 重新提炼
+    setStatusBar('paused', `已解析 ${totalBlocks} 个章节，可继续提炼`, 0, totalBlocks, 0);
   }
 }
 
@@ -1587,12 +1850,45 @@ function attachStream(threadId) {
       const step = data?.step || '解析规范书';
       const cur = data?.current ?? 0;
       const tot = data?.total ?? 0;
+      // 仅在 parse_node 末尾显式发出的「解析完成」帧锁定总章节数。
+      // parser 内部 sub-step（"切页 2/2" 等）也满足 cur===tot，但 tot 是 sub-step 的而非
+      // 章节总数，会让 onOutlineExtract 的进度百分比超 100%。
+      if (tot > 0 && step === '解析完成') {
+        totalBlocks = tot;
+        loadExistingBlocks({ silent: true }).catch(e => console.warn('loadExisting on parse_done failed', e));
+      }
       const pct = tot ? Math.round(cur / tot * 100) : 0;
-      setStatusBar('extracting', `张衡解析：${step} ${cur}/${tot}`, pct, tot, cur);
+      setStatusBar('extracting', `张衡解析：${step} ${cur}/${tot}`, pct, totalBlocks || tot, doneBlocks);
       // 主区占位反馈：parse 阶段尚无 block 卡片，给用户进度感
       if (!blocksById.size) {
         blocksEmpty.innerHTML = `<p>正在解析文档结构…(${escapeHtml(step)} ${cur}/${tot})</p>`;
         blocksEmpty.style.display = 'block';
+      }
+    },
+    onOutlineExtractStart: (data) => {
+      // 章节真正开始处理：把对应卡片切到 'extracting' 态（骨架屏 + 闪烁进度条）。
+      // 由于 parse 阶段已 silent 加载占位卡，这里直接找卡片切状态即可。
+      const blockId = data?.block_id;
+      if (!blockId) return;
+      blocksEmpty.style.display = 'none';
+      const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+      if (!card) return;
+      const badge = card.querySelector('.block-status-badge');
+      if (badge) {
+        badge.className = 'block-status-badge extracting';
+        badge.textContent = '提炼中…';
+      }
+      const prog = card.querySelector('.block-card-progress');
+      if (prog) prog.classList.add('active');
+      // 滚动到首个 extracting 卡片，让用户看到当前焦点
+      if (!document.querySelector('.block-card.scroll-locked')) {
+        card.classList.add('scroll-locked');
+        const scroller = document.getElementById('blocks-scroll');
+        try {
+          scroller ? scroller.scrollTo({ top: card.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' })
+                   : card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch {}
+        setTimeout(() => card.classList.remove('scroll-locked'), 800);
       }
     },
     onOutlineExtract: (data) => {
@@ -1610,12 +1906,28 @@ function attachStream(threadId) {
         evidence_required: matrix.evidence_required || '',
         indicators: matrix.indicators || '',
       };
-      if (!blocksById.has(blockId)) {
+      const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+      if (card) {
+        // 已有占位 / extracting 卡片：原地更新到 done。
+        // wasDone 判定与 loadExistingBlocks 一致：以 status='outline_done' 为权威，
+        // 兜底允许 key_points/requirement 非空，避免重复 ++doneBlocks。
+        const prev = blocksById.get(blockId) || {};
+        const wasDone = (prev.status === 'outline_done')
+          || (prev.status === 'done')
+          || !!(prev.key_points || prev.requirement);
+        blocksById.set(blockId, { ...prev, ...block, status: 'outline_done' });
+        updateBlockCard(blockId, block);
+        markTocDone(blockId);
+        if (!wasDone) {
+          doneBlocks++;
+          if (!totalBlocks) totalBlocks = doneBlocks;
+        }
+      } else if (!blocksById.has(blockId)) {
+        // 没有占位卡片（极端情况：解析跳过 / parse_progress 没收到完成帧）：临时补建
         blocksByOrder.push(block);
         blocksById.set(blockId, block);
         blocksEmpty.style.display = 'none';
         renderBlockCard(block, 'done');
-        // 增量构建 toc：单条追加
         const level = inferTocLevel({ title: block.title });
         const tocBtn = document.createElement('button');
         tocBtn.className = 'toc-item' + (level === 1 ? '' : level >= 3 ? ' content level-' + level : ' content');
@@ -1629,24 +1941,53 @@ function attachStream(threadId) {
         tocBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           document.getElementById('sidebar-toc').style.display = 'none';
-          const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
-          if (card) {
+          const c = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+          if (c) {
             const scroller = document.getElementById('blocks-scroll');
-            scroller ? scroller.scrollTo({ top: card.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' }) : card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            scroller ? scroller.scrollTo({ top: c.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' }) : c.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         });
         sidebarToc.appendChild(tocBtn);
         markTocDone(blockId);
         doneBlocks++;
-        totalBlocks = Math.max(totalBlocks, doneBlocks);
+        if (!totalBlocks) totalBlocks = doneBlocks;
       } else {
-        // 同一 block 二次更新 → updateBlockCard
+        // 同一 block 二次更新但没有 DOM（不应发生）→ 兜底
         Object.assign(blocksById.get(blockId), block);
-        updateBlockCard(blockId, block);
       }
       updateSidebarProgress();
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
       setStatusBar('extracting', `张衡提炼 ${doneBlocks}/${totalBlocks} 章节`, pct, totalBlocks, doneBlocks);
+    },
+    onMatchStart: (data) => {
+      // 单 block 开始匹配：右侧"匹配素材"区切骨架屏 + 自动滚动聚焦
+      const blockId = data?.block_id;
+      if (!blockId) return;
+      const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+      if (!card) return;
+      const matchedWrap = card.querySelector('.block-card-matched');
+      if (matchedWrap) {
+        const cnt = matchedWrap.querySelector('.count');
+        if (cnt) cnt.textContent = '...';
+        const oldList = matchedWrap.querySelector('.block-card-matched-list, .block-card-matched-empty');
+        if (oldList) oldList.remove();
+        const skeleton = document.createElement('div');
+        skeleton.className = 'block-card-matched-empty';
+        skeleton.style.opacity = '0.6';
+        skeleton.textContent = '匹配中…';
+        matchedWrap.appendChild(skeleton);
+      }
+      const prog = card.querySelector('.block-card-progress');
+      if (prog) prog.classList.add('active');
+      if (!document.querySelector('.block-card.scroll-locked')) {
+        card.classList.add('scroll-locked');
+        const scroller = document.getElementById('blocks-scroll');
+        try {
+          scroller ? scroller.scrollTo({ top: card.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' })
+                   : card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch {}
+        setTimeout(() => card.classList.remove('scroll-locked'), 800);
+      }
     },
     onMatchProgress: (data) => {
       const blockId = data?.block_id;
@@ -1656,6 +1997,17 @@ function attachStream(threadId) {
       existing.matched_sources = matches;
       blocksById.set(blockId, existing);
       updateBlockCard(blockId, { ...existing, matched_sources: matches });
+      // 关掉进度条动画
+      const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
+      const prog = card?.querySelector('.block-card-progress');
+      if (prog) prog.classList.remove('active');
+      if (!matchedIds.has(blockId)) {
+        matchedIds.add(blockId);
+        matchedCount = matchedIds.size;
+      }
+      const tot = totalBlocks || matchedCount;
+      const pct = tot ? Math.round(matchedCount / tot * 100) : 0;
+      setStatusBar('extracting', `沈括匹配素材 ${matchedCount}/${tot} 章节`, pct, tot, matchedCount);
     },
     onGateOpen: (data) => {
       const gate = data?.gate;
@@ -1701,6 +2053,19 @@ function attachStream(threadId) {
 async function startExtraction(forceRestart = false) {
   // forceRestart：用户点「重新提炼」，先 abort 旧 thread 再起新
   resetWorkflowUi();
+  if (forceRestart) {
+    // 重新提炼回到「解析大纲」视图：清掉视图覆盖；不直接重置 currentStage 到 'parsing'，
+    // 否则进度条 active 会回退到「解析大纲」蓝色（但 graph 实际仍处于更后阶段）。
+    // 真实 stage 由 graph 跑起来时 SSE / state 返回。
+    pageViewOverride = 'outline';
+    // 同步 URL 上 view 参数，避免页面跳转 / 刷新后又被旧的 view=matching 拉回去
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set('view', 'outline');
+      history.replaceState({}, '', url);
+    } catch {}
+    applyPageView();
+  }
   setStatusBar('extracting', '准备提炼…', 0, 0, 0);
   btnExtract.disabled = true;
 
@@ -1709,6 +2074,10 @@ async function startExtraction(forceRestart = false) {
       try { await api.workflow.abort(currentThreadId); } catch {}
       clearThread(projectId);
       currentThreadId = null;
+    }
+    if (forceRestart) {
+      // 重新提炼：清空已落库的 blocks，避免 extract 节点把旧 outline_done 当已完成跳过
+      try { await api.blocks.clear(projectId); } catch (e) { console.warn('clear blocks failed', e); }
     }
 
     let threadId = forceRestart ? null : getThread(projectId);
@@ -1741,16 +2110,91 @@ async function startExtraction(forceRestart = false) {
   }
 }
 
+async function startMatching() {
+  // 「素材匹配」按钮：根据当前 thread / stage 决定推进路径，绝不重新跑 parse/extract。
+  // - 没 thread：start 一个新 thread（仅在没 outline 时才会发生），等到 stage=outline_review
+  //   后 resume('approve') 进入 match。
+  // - stage=outline_review：直接 resume('approve') → graph 跑 match。
+  // - stage=materials_review：rerun-match 端点把指针拨回 GATE_OUTLINE 后续 → match 重跑。
+  // - 其它 stage：报错并让按钮可重试。
+  btnExtract.disabled = true;
+  matchedIds.clear();
+  matchedCount = 0;
+  setStatusBar('extracting', '准备进入素材匹配…', 0, totalBlocks, doneBlocks);
+  try {
+    let tid = currentThreadId || getThread(projectId);
+    let stage = currentStage;
+    if (tid) {
+      try {
+        const s = await api.workflow.state(tid);
+        stage = s?.stage;
+        // 用 setStage 而非直接赋值：单调保护避免 backend stage 比当前内存里更早时拉回
+        if (stage) setStage(stage);
+      } catch {}
+    }
+    if (!tid) {
+      const resp = await api.workflow.start(projectId, { model: selectedModel });
+      tid = resp?.thread_id;
+      if (!tid) {
+        setStatusBar('idle', '', 0, 0, 0);
+        btnExtract.disabled = false;
+        return;
+      }
+      setThread(projectId, tid);
+      currentThreadId = tid;
+      attachStream(tid);
+      stage = await waitForStage(tid, 'outline_review', 60_000);
+    } else if (!currentEventSource) {
+      attachStream(tid);
+    }
+    if (stage === 'outline_review') {
+      await api.workflow.resume(tid, 'approve', {});
+      setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
+    } else if (stage === 'materials_review') {
+      // 已经停在闸门 2，按"重新匹配"语义把指针拨回 NODE_MATCH 之前
+      // emitter 会重建，旧 SSE 连接收不到新事件 → 重连一次
+      closeStream();
+      await api.workflow.rerunMatch(tid);
+      attachStream(tid);
+      setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
+    } else {
+      console.warn('[matching] 当前 stage 不可触发匹配：', stage);
+      setStatusBar('idle', '', 0, 0, 0);
+      btnExtract.disabled = false;
+    }
+  } catch (e) {
+    console.error('[matching] startMatching 失败', e);
+    btnExtract.disabled = false;
+  }
+}
+
+async function waitForStage(tid, expected, timeoutMs = 60_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const s = await api.workflow.state(tid);
+      const stage = s?.stage;
+      if (stage === expected) return stage;
+      if (stage === 'aborted' || stage === 'done') return stage;
+    } catch {}
+    await new Promise(r => setTimeout(r, 600));
+  }
+  return null;
+}
+
 async function cancelExtraction() {
   if (currentThreadId) {
     try { await api.workflow.abort(currentThreadId); } catch (e) { console.warn('abort failed', e); }
   }
   closeStream();
+  // 不清 thread / 不清卡片：已提炼内容由后端 upsert_outline_block 持久化，
+  // 用户在主页或刷新后仍能看到。状态栏切到 'paused' 提示已停止 + 可重新提炼。
   clearThread(projectId);
   currentThreadId = null;
   currentGate = null;
   btnExtract.disabled = false;
-  setStatusBar('idle', '', 0, 0, 0);
+  const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
+  setStatusBar('paused', `已取消，已保留 ${doneBlocks}/${totalBlocks || doneBlocks} 个已提炼章节`, pct, totalBlocks || doneBlocks, doneBlocks);
 }
 
 async function confirmOutlineGate() {
@@ -1850,7 +2294,10 @@ async function confirmMaterialsGate() {
     // 落到 checkpoint。这里等 user_choice='approve' 写盘后再跳，否则 workbench
     // 拿到 stage='materials_review' + user_choice='' 会跳回 project-init（ping-pong）。
     await waitForGateCommitted(tid, 'approve', 3000);
-    location.href = `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`;
+    // 显式带 backend=generating：用户点确认后已经"进入撰写"阶段，即使 backend state api
+    // 仍返回 materials_review（graph 还没跑到 generate 节点），workbench 进度条也会立即
+    // 把"方案撰写"标蓝。从 workbench 跳回素材匹配时也会保留正确的 furthestStage。
+    location.href = `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&backend=generating`;
   } catch (e) {
     console.error('[workflow] resume(review_materials) 失败', e);
     if (btn) btn.disabled = false;
@@ -1928,7 +2375,14 @@ fileInputSrc.addEventListener('change', () => {
   const f = fileInputSrc.files[0];
   if (f) uploadFile(f, 'source', btnAddSrc);
 });
-btnExtract.addEventListener('click', startExtraction);
+btnExtract.addEventListener('click', () => {
+  // 视图为 matching 时按钮承担「素材匹配」职责，否则维持「提炼大纲」
+  if (document.body.dataset.view === 'matching') {
+    startMatching();
+  } else {
+    startExtraction();
+  }
+});
 
 // ── 初始化 ──
 api.projects.get(projectId).then(p => {
@@ -1969,6 +2423,22 @@ if (params.get('autoExtract') === '1') {
 
 // 还原 stage 进度（断线续连场景）
 (() => {
+  // 用 URL 的 view 参数推算 backendStage 下界：用户能从顶部进度条点过来，
+  // 必然是 graph 已到达过的阶段。这样在 IIFE 异步 fetch 还没返回前，进度条
+  // 也能立即按"matching 已可达"渲染，避免 step 被错误 disabled。
+  try {
+    if (_viewParam === 'matching') {
+      const k = `furthestStage:${projectId}`;
+      const prev = sessionStorage.getItem(k);
+      const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
+      if (prevIdx < 1) sessionStorage.setItem(k, 'materials_review');
+    }
+  } catch {}
+
+  // 进入页面立刻按 PAGE_STAGE 点亮当前 step（active 不依赖后端 state，
+  // 否则在请求返回前进度条会全灰，看似"loading 没完成"）
+  renderStageBar();
+
   // URL 含 threadId（从 /projects 路由进来或顶部进度条历史回看）→ 优先写入 sessionStorage
   const urlTid = params.get('threadId');
   if (urlTid) {
@@ -1976,27 +2446,38 @@ if (params.get('autoExtract') === '1') {
     currentThreadId = urlTid;
   }
   const tid = urlTid || getThread(projectId);
+
+  // 先用 workflow-runs 表里的 stage 兜底点亮进度条（这是 routes 层 update_stage 持久化的版本，
+  // 即使 runner 内存清空 / checkpoint 读失败也能拿到）。然后再 best-effort 用 state API 校准。
+  fetch(`/api/projects/${projectId}/workflow-runs`).then(r => r.ok ? r.json() : []).then(runs => {
+    const latest = Array.isArray(runs) && runs.length ? runs[0] : null;
+    if (latest && latest.stage && STAGE_MAP[latest.stage]) {
+      // 没 thread 时也接受 workflow-runs 提供的 thread_id，确保 step 点击带上 threadId
+      if (!currentThreadId && latest.thread_id) {
+        setThread(projectId, latest.thread_id);
+        currentThreadId = latest.thread_id;
+      }
+      setStage(latest.stage);
+    }
+  }).catch(() => {});
+
   if (!tid) {
     // 无 thread：进度条已默认可见且所有 step 灰显，无需额外处理
     return;
   }
   api.workflow.state(tid).then(s => {
     const stage = s?.stage;
-    // 仅当 stage 是真实进行中的工作流阶段时才显示进度条
+    // 仅当 stage 是真实进行中的工作流阶段时才覆盖前面 workflow-runs 设置的进度
     if (stage && STAGE_MAP[stage]) {
       setStage(stage);
-    } else {
-      // idle / done / aborted / 未知 / 空 → 都视为无活跃工作流
+    } else if (stage === 'done' || stage === 'aborted') {
+      // 终态需要清掉过期 threadId
       resetStageProgress();
-      // 终态（done/aborted）或脏数据 → 清掉过期 threadId，避免下次再误显示
-      if (!stage || stage === 'done' || stage === 'aborted' || stage === 'idle') {
-        clearThread(projectId);
-      }
+      clearThread(projectId);
     }
+    // 其它情况（idle / 空 stage）保持 workflow-runs 兜底的进度，不主动清空
   }).catch(() => {
-    // 后端无该 thread / 请求失败 → 清掉过期 threadId 并隐藏
-    resetStageProgress();
-    clearThread(projectId);
+    // 后端无该 thread / 请求失败 → 不主动清空，保留 workflow-runs 的兜底
   });
 })();
     </script>

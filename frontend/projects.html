@@ -279,6 +279,7 @@
         transition: border-color 0.15s, background 0.15s;
         text-align: center;
       }
+      .drop-zone[hidden] { display: none; }
       .drop-zone:hover, .drop-zone.drag-over {
         border-color: var(--accent);
         background: var(--accent-soft);
@@ -331,22 +332,36 @@
         display: grid; place-items: center;
       }
       .file-remove:hover { color: var(--danger); }
+      .file-role-select {
+        flex: none;
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+        outline: none;
+      }
+      .file-role-select:hover { border-color: var(--muted); }
+      .file-role-select:focus { border-color: var(--accent, #2563eb); }
 
       .btn-add-more {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 6px;
-        padding: 9px;
-        border: 1.5px dashed #c2cfe0;
+        padding: 10px;
+        border: 1.5px dashed var(--line);
         border-radius: 10px;
         background: none;
         cursor: pointer;
         font-size: 13px;
         color: var(--muted);
         width: 100%;
+        transition: border-color 0.15s, color 0.15s;
       }
-      .btn-add-more:hover { border-color: var(--accent); color: var(--accent); }
+      .btn-add-more:hover { border-color: var(--text); color: var(--text); }
 
       /* 底部：模型选择 + 提炼大纲 */
       .modal-footer {
@@ -873,21 +888,31 @@
         const tid = thread.thread_id;
         const stage = thread.stage;
         const enc = encodeURIComponent(tid);
+
+        // 跳转前把 backend stage 持久化到 sessionStorage，让目标页面初次 renderStageBar
+        // 时能立即点亮"项目当前所处阶段"为蓝色 active，与 backend 真实 stage 对齐。
+        // 否则目标页面要等异步 state API / workflow-runs 返回才能校准颜色。
+        try {
+          if (stage) sessionStorage.setItem(`furthestStage:${projectId}`, stage);
+          sessionStorage.setItem(`workflow:${projectId}`, tid);
+        } catch {}
+
+        const backendQ = stage ? `&backend=${encodeURIComponent(stage)}` : '';
         switch (stage) {
           case 'idle':
           case 'parsing':
           case 'outline_review':
           case 'matching':
           case 'materials_review':
-            location.href = `/project-init?projectId=${projectId}&threadId=${enc}`;
+            location.href = `/project-init?projectId=${projectId}&threadId=${enc}${backendQ}`;
             break;
           case 'generating':
-            location.href = `/workbench?projectId=${projectId}&threadId=${enc}`;
+            location.href = `/workbench?projectId=${projectId}&threadId=${enc}${backendQ}`;
             break;
           case 'reviewing':
           case 'report_review':
           case 'done':
-            location.href = `/review?threadId=${enc}`;
+            location.href = `/review?threadId=${enc}${backendQ}`;
             break;
           case 'aborted':
           default:
@@ -942,7 +967,7 @@
       }
       function addFiles(fileList) {
         for (const f of fileList) {
-          reqFiles.push({ file: f, name: f.name, size: f.size, ext: extOf(f.name) });
+          reqFiles.push({ file: f, name: f.name, size: f.size, ext: extOf(f.name), role: 'spec' });
         }
         renderFileList();
         updateDistillBtn();
@@ -964,11 +989,23 @@
             <div class="file-row">
               <span class="file-type-badge ${f.ext || 'default'}">${f.ext.toUpperCase() || 'FILE'}</span>
               <span class="file-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+              <select class="file-role-select" data-idx="${i}" title="文件类型">
+                <option value="spec" ${f.role === 'spec' ? 'selected' : ''}>规范书</option>
+                <option value="main_rfp" ${f.role === 'main_rfp' ? 'selected' : ''}>主招标文件</option>
+                <option value="scoring" ${f.role === 'scoring' ? 'selected' : ''}>评分表</option>
+                <option value="evaluation" ${f.role === 'evaluation' ? 'selected' : ''}>评审要素</option>
+              </select>
               <span class="file-size">${fmtSize(f.size)}</span>
               <button class="file-remove" data-idx="${i}" title="移除">✕</button>
             </div>`).join('');
           reqFileList.querySelectorAll('.file-remove').forEach(btn => {
             btn.addEventListener('click', () => removeFile(+btn.dataset.idx));
+          });
+          reqFileList.querySelectorAll('.file-role-select').forEach(sel => {
+            sel.addEventListener('change', () => {
+              const idx = +sel.dataset.idx;
+              if (reqFiles[idx]) reqFiles[idx].role = sel.value;
+            });
           });
         } else {
           reqCountBadge.hidden = true;
@@ -1242,10 +1279,10 @@
           if (!project?.id) throw new Error('创建项目失败');
           createdProjectId = project.id;
 
-          // 2. 上传应标文件
+          // 2. 上传应标文件（按用户选定的 role 分类上传）
           btnDistill.textContent = '上传文件中…';
           for (const f of reqFiles) {
-            await api.materials.upload(project.id, f.file, 'requirement');
+            await api.materials.upload(project.id, f.file, f.role || 'spec');
           }
 
           // 3. 跳转到提炼大纲页

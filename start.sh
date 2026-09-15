@@ -105,8 +105,13 @@ echo ""
     fi
 ) &
 
-# ── 7. 启动 uvicorn（生产模式，无热重载）─────────
-#   开发模式（代码改动自动重启）请加 --reload 参数：
-#   uvicorn main:app --host 0.0.0.0 --port $PORT --reload
+# ── 7. 启动 uvicorn ───────────────────────────────
+#   传入 dev 参数启用热重载：./start.sh dev
+#   默认（无参数）走生产模式不重载：./start.sh
 cd "$BACKEND_DIR"
-exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-level info
+if [ "${1:-}" = "dev" ]; then
+    info "开发模式（代码改动自动重启）"
+    exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-level info --reload
+else
+    exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-level info
+fi

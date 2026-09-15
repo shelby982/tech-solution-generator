@@ -44,6 +44,26 @@ class FakeRunner:
         if thread_id == "missing":
             raise KeyError(thread_id)
 
+    async def pause(self, thread_id):
+        self.calls.append(("pause", (thread_id,)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+
+    async def skip_to_review(self, thread_id):
+        self.calls.append(("skip_to_review", (thread_id,)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+
+    async def resume_generation(self, thread_id):
+        self.calls.append(("resume_generation", (thread_id,)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+
+    async def rerun_match(self, thread_id):
+        self.calls.append(("rerun_match", (thread_id,)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+
     async def recover(self, thread_id):
         self.calls.append(("recover", (thread_id,)))
 
@@ -156,6 +176,38 @@ async def test_recover_ok(client, runner):
     assert runner.calls[0] == ("recover", ("tid-1",))
 
 
+async def test_pause_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/pause")
+    assert r.status_code == 200
+    assert r.json() == {"thread_id": "tid-1", "status": "pausing"}
+    assert runner.calls[0] == ("pause", ("tid-1",))
+
+
+async def test_skip_to_review_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/skip-to-review")
+    assert r.status_code == 200
+    assert r.json() == {"thread_id": "tid-1", "status": "skipping_to_review"}
+    assert runner.calls[0] == ("skip_to_review", ("tid-1",))
+
+
+async def test_resume_generation_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/resume-generation")
+    assert r.status_code == 200
+    assert r.json() == {"thread_id": "tid-1", "status": "resuming_generation"}
+    assert runner.calls[0] == ("resume_generation", ("tid-1",))
+
+
+async def test_rerun_match_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/rerun-match")
+    assert r.status_code == 200
+    assert r.json() == {"thread_id": "tid-1", "status": "rerunning_match"}
+    assert runner.calls[0] == ("rerun_match", ("tid-1",))
+
+
 async def test_state_ok(client, runner):
     workflow_routes.set_runner(runner)
     r = await client.get("/api/workflow/tid-1/state")
@@ -219,6 +271,30 @@ async def test_regen_unknown_tid_returns_404(client, runner):
 async def test_abort_unknown_tid_returns_404(client, runner):
     workflow_routes.set_runner(runner)
     r = await client.post("/api/workflow/missing/abort")
+    assert r.status_code == 404
+
+
+async def test_pause_unknown_tid_returns_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/pause")
+    assert r.status_code == 404
+
+
+async def test_skip_to_review_unknown_tid_returns_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/skip-to-review")
+    assert r.status_code == 404
+
+
+async def test_resume_generation_unknown_tid_returns_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/resume-generation")
+    assert r.status_code == 404
+
+
+async def test_rerun_match_unknown_tid_returns_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/rerun-match")
     assert r.status_code == 404
 
 

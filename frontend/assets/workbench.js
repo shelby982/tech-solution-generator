@@ -110,7 +110,36 @@ async function loadBlocksForOutline(pid, tid) {
       const matrix = (state && state.spec && state.spec.outline_matrix) || {};
       const toc    = Array.isArray(state && state.spec && state.spec.toc) ? state.spec.toc : [];
       if (toc.length > 0) {
-        return toc.map(sec => buildBlockFromTocSection(sec, blocks, matrix)).filter(Boolean);
+        // toc + LangGraph state 仅在 graph 跑过 generate 节点后才有 content；
+        // 之前用过老路径 `/api/blocks/{id}/generate` 写过 SQLite blocks 表的 content，
+        // 这里合并一下：state 没 content 时 fallback 到 db blocks 的 content / source，
+        // 避免"打开撰写视图时，已生成的章节内容看起来是空"，进而被误以为需要重跑。
+        let dbBlocksByBid = new Map();
+        try {
+          const dbList = await api.blocks.list(pid);
+          if (Array.isArray(dbList)) {
+            dbList.forEach(b => {
+              if (b?.block_id) dbBlocksByBid.set(String(b.block_id), b);
+            });
+          }
+        } catch (e) {
+          console.warn('[workbench] db blocks fallback failed', e);
+        }
+        return toc.map(sec => {
+          const built = buildBlockFromTocSection(sec, blocks, matrix);
+          if (!built) return null;
+          if (!built.content) {
+            const db = dbBlocksByBid.get(String(built.block_id));
+            if (db && typeof db.content === 'string' && db.content.trim()) {
+              built.content = db.content;
+              if (db.id) built.id = db.id;
+              if (db.source && (!built.source || built.source === '[]')) {
+                built.source = db.source;
+              }
+            }
+          }
+          return built;
+        }).filter(Boolean);
       }
       // toc 空 — workflow 未推进过闸门 1，回退老路径
     } catch (e) {
@@ -141,7 +170,10 @@ async function loadBlocks() {
   const blockList = await loadBlocksForOutline(projectId, threadId);
   const outlineNav = document.querySelector('.doc-outline');
   if (!outlineNav) return;
-  outlineNav.innerHTML = '';
+
+  // 第一次构建 outline DOM；之后的 loadBlocks() 调用只刷新已有节点的 content / 状态点，
+  // 不再 innerHTML='' 整体重建，避免章节"跳动"。
+  const alreadyBuilt = outlineNav.querySelector('.doc-outline-item');
 
   // 与 workbench.html 内联模块约定：__extractBlockMap 缓存 block 数据，
   // outline-item 点击调用 __onBlockSelected 让中间编辑器显示该 block。
@@ -159,6 +191,32 @@ async function loadBlocks() {
   const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
   const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
 
+  if (alreadyBuilt) {
+    // 仅刷新现有节点的内容缓存与"已完成"状态点；保留 DOM 顺序、不重建
+    blockList.forEach((b, idx) => {
+      const blockIdStr = b.block_id || b.id;
+      blockMap.set(blockIdStr, b);
+      const item = outlineNav.querySelector(`.doc-outline-item[data-block-id-str="${CSS.escape(String(blockIdStr))}"]`);
+      if (!item) return;
+      const dot = item.querySelector('.outline-item-dot');
+      if (dot) {
+        if (b.content && b.content.trim()) dot.classList.add('done');
+        else dot.classList.remove('done');
+      }
+    });
+    // 进度统计同样按内容章节
+    const contentBlocks = blockList.filter((b, i) => normalize(rawLevels[i]) >= 2);
+    const writtenCount = contentBlocks.filter(b => b.content && b.content.trim()).length;
+    const progressBadge = document.getElementById('outline-progress-badge');
+    const progressText  = document.getElementById('outline-progress-text');
+    const progressBar   = document.getElementById('outline-progress-bar');
+    if (progressBadge) progressBadge.textContent = String(contentBlocks.length);
+    if (progressText)  progressText.textContent  = `${writtenCount} / ${contentBlocks.length}`;
+    if (progressBar)   progressBar.style.width   = contentBlocks.length ? `${Math.round(writtenCount / contentBlocks.length * 100)}%` : '0%';
+    return;
+  }
+
+  outlineNav.innerHTML = '';
   let currentChildren = null;
   let firstContentItem = null;
 

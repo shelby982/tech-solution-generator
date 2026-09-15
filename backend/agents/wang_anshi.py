@@ -109,6 +109,7 @@ class WangAnshiAgent:
                 "block_id": block_id,
                 "agent": self.AGENT_NAME,
                 "score": finding.score,
+                "issues": [i.to_dict() for i in finding.issues],
                 "issues_count": len(finding.issues),
                 "error": finding.error,
             })

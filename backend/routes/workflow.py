@@ -99,6 +99,50 @@ async def regen(thread_id: str, req: RegenReq):
     return JSONResponse({"thread_id": thread_id, "regen_targets": req.block_ids})
 
 
+@router.post("/{thread_id}/rerun-match")
+async def rerun_match(thread_id: str):
+    """重新触发素材匹配：把状态拨回 GATE_OUTLINE 后 → graph 自动跑 match → gate_materials。"""
+    runner = get_runner()
+    try:
+        await runner.rerun_match(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    return JSONResponse({"thread_id": thread_id, "status": "rerunning_match"})
+
+
+@router.post("/{thread_id}/pause")
+async def pause(thread_id: str):
+    """生成阶段暂停：保留已生成 block，graph 跳到 GATE_PAUSE 闸门停止。"""
+    runner = get_runner()
+    try:
+        await runner.pause(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    return JSONResponse({"thread_id": thread_id, "status": "pausing"})
+
+
+@router.post("/{thread_id}/skip-to-review")
+async def skip_to_review(thread_id: str):
+    """从 GATE_PAUSE 出来跳到评审：用已生成 block 内容跑 review。"""
+    runner = get_runner()
+    try:
+        await runner.skip_to_review(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    return JSONResponse({"thread_id": thread_id, "status": "skipping_to_review"})
+
+
+@router.post("/{thread_id}/resume-generation")
+async def resume_generation(thread_id: str):
+    """从 GATE_PAUSE 出来回到 generate 节点继续生成。"""
+    runner = get_runner()
+    try:
+        await runner.resume_generation(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    return JSONResponse({"thread_id": thread_id, "status": "resuming_generation"})
+
+
 @router.post("/{thread_id}/abort")
 async def abort(thread_id: str):
     runner = get_runner()

@@ -59,6 +59,7 @@ GATE_OUTLINE = "gate_outline"
 NODE_MATCH = "shen_kuo_match"
 GATE_MATERIALS = "gate_materials"
 NODE_GENERATE = "zhuge_liang_generate"
+GATE_PAUSE = "gate_pause"
 NODE_TECH_REVIEW = "wang_anshi_review"
 NODE_COMP_REVIEW = "bao_zheng_review"
 NODE_AGGREGATE = "aggregate_review"
@@ -147,6 +148,28 @@ def _make_abort_node(emitter: Optional[EventEmitter]):
 # 闸门 3 后的条件路由
 # ─────────────────────────────────────────────
 
+def _route_after_generate(state: WorkflowState) -> str:
+    """generate 节点后的条件路由：暂停态 → GATE_PAUSE，正常 → 评审 fan-out。
+
+    user_choice='skip_to_review' 表示用户在暂停态选择"用已生成内容继续评审"，
+    这种 case 也直接进评审；否则按 stage 决定。
+    """
+    if state.get("user_choice") == "skip_to_review":
+        return "review"
+    if state.get("stage") == "paused":
+        return GATE_PAUSE
+    return "review"
+
+
+def _make_pause_gate_node(emitter: Optional[EventEmitter]):
+    """暂停闸门：interrupt_after 让 graph 停下，等用户决定继续 / 跳评审 / 放弃。"""
+    async def pause_gate(state: WorkflowState) -> WorkflowState:
+        if emitter is not None:
+            await emitter.emit(events.stage_change("paused", state.get("thread_id", "")))
+        return {"stage": "paused"}
+    return pause_gate
+
+
 def _route_after_report(state: WorkflowState) -> str:
     """读取 ``user_choice`` 决定下一步。
 
@@ -171,6 +194,7 @@ def build_graph(
     *,
     emitter: Optional[EventEmitter] = None,
     checkpointer: Optional[BaseCheckpointSaver] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ):
     """组装 LangGraph StateGraph 并 compile。
 
@@ -178,6 +202,8 @@ def build_graph(
         deps: 5 个 agent 实例 + spec_loader
         emitter: 节点事件出口；None 时图静默运行（适合非流式任务）
         checkpointer: AsyncSqliteSaver；None 时 graph 不持久化（适合单测）
+        should_cancel: 节点级取消信号探测，runner 通过它把 _Run.cancel_flag 闭包传进来；
+                       generate 等长跑节点在每个 block 开始前调一次决定是否跳过。
 
     返回 ``CompiledStateGraph``，闸门节点已配置 interrupt_before。
     """
@@ -204,7 +230,7 @@ def build_graph(
 
     async def generate_node(state: WorkflowState) -> WorkflowState:
         return await nodes.zhuge_liang_generate_node(
-            state, agent=deps.zhuge_liang, emitter=emitter,
+            state, agent=deps.zhuge_liang, emitter=emitter, should_cancel=should_cancel,
         )
 
     async def tech_review_node(state: WorkflowState) -> WorkflowState:
@@ -230,6 +256,7 @@ def build_graph(
         stage="materials_review", gate_name="review_materials", emitter=emitter,
     ))
     builder.add_node(NODE_GENERATE, generate_node)
+    builder.add_node(GATE_PAUSE, _make_pause_gate_node(emitter))
     builder.add_node(NODE_TECH_REVIEW, tech_review_node)
     builder.add_node(NODE_COMP_REVIEW, comp_review_node)
     builder.add_node(NODE_AGGREGATE, aggregate_node)
@@ -246,10 +273,51 @@ def build_graph(
     builder.add_edge(NODE_MATCH, GATE_MATERIALS)
     builder.add_edge(GATE_MATERIALS, NODE_GENERATE)
 
-    # fan-out：generate 完后两评审 agent 并发；LangGraph 看到从同一节点出多条边
-    # 自动 schedule 在同一 super-step 内并行执行
-    builder.add_edge(NODE_GENERATE, NODE_TECH_REVIEW)
-    builder.add_edge(NODE_GENERATE, NODE_COMP_REVIEW)
+    # generate → 条件路由：暂停 → GATE_PAUSE（interrupt_after 让 graph 停下）
+    #                    → 否则 fan-out 到两个评审 agent。
+    # LangGraph add_conditional_edges 不直接支持 fan-out 到多个目标，所以暂停态走单条边，
+    # 正常态用一个 sentinel 目标 'review'，再由 GATE_PAUSE 之外另起一段连到评审。
+    # 这里用更简洁的方式：generate 出来分两条普通边到两个评审 + 一条到 PAUSE。LangGraph
+    # 在 conditional_edges 内允许返回 list 表示多目标。
+    def _generate_fanout(state: WorkflowState) -> list[str]:
+        if state.get("user_choice") == "skip_to_review":
+            return [NODE_TECH_REVIEW, NODE_COMP_REVIEW]
+        if state.get("stage") == "paused":
+            return [GATE_PAUSE]
+        return [NODE_TECH_REVIEW, NODE_COMP_REVIEW]
+
+    builder.add_conditional_edges(
+        NODE_GENERATE,
+        _generate_fanout,
+        {
+            NODE_TECH_REVIEW: NODE_TECH_REVIEW,
+            NODE_COMP_REVIEW: NODE_COMP_REVIEW,
+            GATE_PAUSE: GATE_PAUSE,
+        },
+    )
+
+    # GATE_PAUSE 后的条件路由：
+    #   user_choice='skip_to_review' → 直接评审（用户选择"用已生成内容继续评审"）
+    #   user_choice='resume' → 回 generate 节点（已生成 block 在 generate_node 内会被跳过）
+    #   其它 → END（用户没决定，graph 停在 GATE_PAUSE，由 interrupt_after 暂停）
+    def _route_after_pause(state: WorkflowState) -> list[str] | str:
+        choice = state.get("user_choice", "")
+        if choice == "skip_to_review":
+            return [NODE_TECH_REVIEW, NODE_COMP_REVIEW]
+        if choice == "resume":
+            return NODE_GENERATE
+        return END
+
+    builder.add_conditional_edges(
+        GATE_PAUSE,
+        _route_after_pause,
+        {
+            NODE_TECH_REVIEW: NODE_TECH_REVIEW,
+            NODE_COMP_REVIEW: NODE_COMP_REVIEW,
+            NODE_GENERATE: NODE_GENERATE,
+            END: END,
+        },
+    )
 
     # fan-in：start_key 是 list 时，aggregate 等齐 list 中所有上游
     builder.add_edge([NODE_TECH_REVIEW, NODE_COMP_REVIEW], NODE_AGGREGATE)
@@ -271,7 +339,7 @@ def build_graph(
         checkpointer=checkpointer,
         # interrupt_after：闸门节点先跑（写入正确 stage、发 gate_open 事件），
         # 跑完后再暂停 —— 这样 state.stage 已经反映了"正等待人工"的状态
-        interrupt_after=[GATE_OUTLINE, GATE_MATERIALS, GATE_REPORT],
+        interrupt_after=[GATE_OUTLINE, GATE_MATERIALS, GATE_PAUSE, GATE_REPORT],
     )
 
 

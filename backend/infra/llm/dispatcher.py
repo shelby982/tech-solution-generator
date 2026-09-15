@@ -9,9 +9,10 @@ I/O 细节由 clients.py 承担；本模块只做 prompt 与调度。
 """
 
 import asyncio
+import inspect
 import json
 import logging
-from typing import AsyncGenerator, AsyncIterator
+from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 
 from agents.prompts import (
     LETTER_SYSTEM,
@@ -341,15 +342,23 @@ async def dispatch_outline_json(
     configs: list[LLMConfig],
     rr_start_index: int,
     sections: list[dict],
+    *,
+    on_start: Optional[Callable[[int], Awaitable[None] | None]] = None,
 ):
     """
-    按文档原始章节并发提炼响应矩阵（8 字段），按 idx 顺序逐章 yield。
+    按文档原始章节并发提炼响应矩阵（8 字段），**按完成顺序**逐章 yield。
 
     并发上限 5；每章节内部仍按"轮询 + Fallback"试遍所有 config，起点按 idx 散开。
 
+    yield 顺序为完成顺序（先完成先 yield），每个 item 自带 ``idx``，调用方据此回填到 toc。
+    这样可以让前端实时看到任一章节先完成先显示，而不是被慢章节阻塞批量刷新。
+
+    on_start: 可选，章节真正开始处理前回调一次（拿到信号量 + 调 LLM 前），
+              用于让前端把对应卡片切换到"提炼中"骨架屏。
+
     sections: [{"title": str, "content": str, "special_marks": str (optional),
                 "scoring_context": str (optional), "evaluation_context": str (optional)}, ...]
-    Yields: {"title": str, "requirement": str, "key_points": str, "veto_items": str,
+    Yields: {"idx": int, "title": str, "requirement": str, "key_points": str, "veto_items": str,
              "bonus_items": str, "score_items": str, "evidence_required": str,
              "constraint_level": str, "indicators": str, "error": str}
 
@@ -363,12 +372,24 @@ async def dispatch_outline_json(
 
     async def _worker(idx: int, sec: dict) -> dict:
         async with sem:
-            return await _extract_one_section(idx, sec, configs, rr_start_index, n)
+            if on_start is not None:
+                try:
+                    rv = on_start(idx)
+                    if inspect.isawaitable(rv):
+                        await rv
+                except Exception as e:
+                    logger.warning(f"dispatch_outline_json on_start 回调失败：{e}")
+            result = await _extract_one_section(idx, sec, configs, rr_start_index, n)
+            result["idx"] = idx
+            return result
 
     tasks = [asyncio.create_task(_worker(i, s)) for i, s in enumerate(sections)]
+    pending = set(tasks)
     try:
-        for t in tasks:
-            yield await t
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                yield t.result()
     except BaseException:
         for t in tasks:
             if not t.done():

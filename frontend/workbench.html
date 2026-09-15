@@ -1940,6 +1940,19 @@
         cursor: pointer;
       }
       #generation-done-banner .btn-go-review:hover { background: #15803d; }
+      .btn-go-review-top {
+        padding: 6px 14px;
+        border: 1px solid #16a34a;
+        border-radius: 6px;
+        background: #16a34a;
+        color: #fff;
+        font-size: 12.5px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-right: 8px;
+      }
+      .btn-go-review-top:hover { background: #15803d; }
+      .btn-go-review-top:disabled { opacity: 0.4; cursor: not-allowed; }
     </style>
     <!-- Markdown 渲染（用于预览模式） -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -1953,10 +1966,10 @@
             <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
             <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
             <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-            <div class="stage-step" data-stage="reviewing" data-stages="reviewing"><span class="stage-dot"></span><span class="stage-name">双视角评审</span></div>
-            <div class="stage-step" data-stage="report_review" data-stages="report_review"><span class="stage-dot"></span><span class="stage-name">报告确认</span></div>
+            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
           </nav>
           <div class="project-actions">
+            <button type="button" id="btn-go-review-top" class="btn-go-review-top" disabled>进入评审 →</button>
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
                 <span class="model-dot"></span>
@@ -1981,7 +1994,7 @@
 
         <!-- 撰写完成 banner（stage 切到 reviewing/report_review/done 时显示） -->
         <div id="generation-done-banner" hidden>
-          <span class="banner-text">材料撰写已完成，可进入双视角评审</span>
+          <span class="banner-text">材料撰写已完成，可进入评审确认</span>
           <button class="btn-go-review" type="button">进入评审 →</button>
         </div>
 
@@ -2027,7 +2040,7 @@
               <div class="outline-batch-status hidden" id="outline-batch-status">
                 <div class="outline-batch-row">
                   <span class="outline-batch-current" id="outline-batch-current">准备中…</span>
-                  <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">取消</button>
+                  <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">暂停</button>
                 </div>
                 <div class="outline-batch-track"><div class="outline-batch-bar" id="outline-batch-bar"></div></div>
                 <div class="outline-batch-meta" id="outline-batch-meta">0 / 0</div>
@@ -2346,77 +2359,140 @@
       const params = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
       let threadId = params.get('threadId');
+      // URL ?backend=... 兜底：跨页面跳转时显式带，让进度条第一次绘制就用真实 backend stage
+      const _backendParam = params.get('backend');
+      if (_backendParam && projectId) {
+        try {
+          // 单调推进，避免 URL 旧值覆盖更新的 sessionStorage
+          const k = `furthestStage:${projectId}`;
+          const prev = sessionStorage.getItem(k);
+          const STAGE_ORDER_LITERAL = ['parsing', 'matching', 'generating', 'reviewing'];
+          const STAGE_MAP_LITERAL = {
+            parsing: 'parsing', outline_review: 'parsing',
+            matching: 'matching', materials_review: 'matching',
+            generating: 'generating',
+            reviewing: 'reviewing',
+            report_review: 'reviewing',
+          };
+          const prevIdx = prev ? STAGE_ORDER_LITERAL.indexOf(STAGE_MAP_LITERAL[prev] || '') : -1;
+          const newIdx = STAGE_ORDER_LITERAL.indexOf(STAGE_MAP_LITERAL[_backendParam] || '');
+          if (newIdx >= 0 && newIdx >= prevIdx) sessionStorage.setItem(k, _backendParam);
+        } catch {}
+      }
 
       // ── 顶部 stage 进度条 ──
       const STAGE_ORDER = [
-        'parsing', 'matching', 'generating', 'reviewing', 'report_review',
+        'parsing', 'matching', 'generating', 'reviewing',
       ];
       const STAGE_MAP = {
-        parsing: 'parsing', outline_review: 'parsing',
-        matching: 'matching', materials_review: 'matching',
+        parsing: 'parsing',
+        // 闸门停留态映射回当前阶段：进度条与项目实际所处步骤一致
+        outline_review: 'parsing',
+        matching: 'matching',
+        materials_review: 'matching',
         generating: 'generating',
         reviewing: 'reviewing',
-        report_review: 'report_review',
+        // 报告确认与双视角评审合并为同一 step
+        report_review: 'reviewing',
       };
+
+      // 当前页面承担的阶段：仅作 backend 兜底（用户已在该页 → graph 至少到这）
+      const PAGE_STAGE = 'generating';
+      let currentBackendStage = (() => {
+        if (_backendParam && _backendParam.trim()) return _backendParam;
+        try {
+          const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+          if (cached) return cached;
+        } catch {}
+        return null;
+      })();
 
       function setStage(stage) {
         if (!stage) return;
+        // 单调推进：避免 SSE / state API 短暂返回更早的 stage 把进度条 active 拉回来
+        if (currentBackendStage && stage !== 'aborted' && stage !== 'done') {
+          const prevMapped = STAGE_MAP[currentBackendStage];
+          const newMapped = STAGE_MAP[stage];
+          const prevIdx = prevMapped ? STAGE_ORDER.indexOf(prevMapped) : -1;
+          const newIdx = newMapped ? STAGE_ORDER.indexOf(newMapped) : -1;
+          if (newIdx >= 0 && prevIdx >= 0 && newIdx < prevIdx) return;
+        }
+        currentBackendStage = stage;
+        // 维护项目级最远到达 stage（跨页面复用）
+        try {
+          const mappedNew = STAGE_MAP[stage];
+          if (mappedNew) {
+            const newIdx = STAGE_ORDER.indexOf(mappedNew);
+            const k = `furthestStage:${projectId}`;
+            const prev = sessionStorage.getItem(k);
+            const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
+            if (newIdx > prevIdx) sessionStorage.setItem(k, stage);
+          }
+        } catch {}
+        renderStageBar();
+        if (typeof _refreshGoReviewBtn === 'function') _refreshGoReviewBtn();
+      }
+
+      function renderStageBar() {
         const root = document.getElementById('stage-progress');
         if (!root) return;
-        const mapped = STAGE_MAP[stage];
-        if (!mapped && stage !== 'done' && stage !== 'aborted') {
-          // 未知 stage：清掉所有 step 状态但保持 nav 可见（进度条作为整体导航始终显示）
-          root.querySelectorAll('.stage-step').forEach(el => {
-            el.classList.remove('active', 'done', 'aborted');
-          });
-          return;
-        }
         if (root.hasAttribute('hidden')) root.removeAttribute('hidden');
-        const steps = root.querySelectorAll('.stage-step');
-        if (stage === 'aborted') {
-          const lastActive = root.querySelector('.stage-step.active');
-          if (lastActive) {
-            lastActive.classList.remove('active');
-            lastActive.classList.add('aborted');
-            lastActive.setAttribute('aria-disabled', 'true');
-            lastActive.setAttribute('tabindex', '-1');
-            lastActive.removeAttribute('aria-current');
-          }
-          return;
+
+        const pageIdx = STAGE_ORDER.indexOf(PAGE_STAGE);
+        let backend = currentBackendStage;
+        if (!backend) {
+          try {
+            const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+            if (cached) backend = cached;
+          } catch {}
         }
-        if (stage === 'done') {
+        if (!backend) backend = PAGE_STAGE;
+        let backendMapped = STAGE_MAP[backend];
+        let backendIdx = backendMapped ? STAGE_ORDER.indexOf(backendMapped) : -1;
+        if (backend === 'done') backendIdx = STAGE_ORDER.length;
+        if (backend === 'aborted') backendIdx = pageIdx;
+        if (backendIdx < pageIdx) backendIdx = pageIdx;
+
+        const steps = root.querySelectorAll('.stage-step');
+
+        if (backend === 'aborted') {
           steps.forEach(el => {
-            el.classList.remove('active', 'aborted');
-            el.classList.add('done');
+            const i = STAGE_ORDER.indexOf(el.dataset.stage);
+            el.classList.remove('active', 'done', 'aborted');
             el.removeAttribute('aria-current');
             el.removeAttribute('aria-disabled');
             el.setAttribute('role', 'button');
             el.setAttribute('tabindex', '0');
-            const name = el.querySelector('.stage-name')?.textContent || '';
-            el.setAttribute('aria-label', `跳转到 ${name}`);
+            if (i === backendIdx) {
+              el.classList.add('aborted');
+              el.setAttribute('aria-disabled', 'true');
+              el.setAttribute('tabindex', '-1');
+            } else if (i < backendIdx) {
+              el.classList.add('done');
+            } else {
+              el.setAttribute('aria-disabled', 'true');
+              el.setAttribute('tabindex', '-1');
+            }
           });
           return;
         }
-        const idx = STAGE_ORDER.indexOf(mapped);
+
         steps.forEach(el => {
           const i = STAGE_ORDER.indexOf(el.dataset.stage);
           el.classList.remove('active', 'done', 'aborted');
-          if (idx < 0) return;
-          if (i < idx) el.classList.add('done');
-          else if (i === idx) el.classList.add('active');
-        });
-        // 同步 aria + 不可达状态
-        steps.forEach(el => {
-          const i = STAGE_ORDER.indexOf(el.dataset.stage);
           el.removeAttribute('aria-current');
           el.removeAttribute('aria-disabled');
           el.setAttribute('role', 'button');
           el.setAttribute('tabindex', '0');
-          if (i > idx) {
+          if (i === backendIdx) {
+            el.classList.add('active');
+            el.setAttribute('aria-current', 'step');
+          } else if (i < backendIdx) {
+            el.classList.add('done');
+          } else {
+            // 未到达：灰色 disabled，不允许点击切换视图
             el.setAttribute('aria-disabled', 'true');
             el.setAttribute('tabindex', '-1');
-          } else if (i === idx) {
-            el.setAttribute('aria-current', 'step');
           }
           const name = el.querySelector('.stage-name')?.textContent || '';
           el.setAttribute('aria-label', `跳转到 ${name}`);
@@ -2426,17 +2502,34 @@
       document.getElementById('stage-progress')?.addEventListener('click', (e) => {
         const step = e.target.closest('.stage-step');
         if (!step) return;
+        if (step.classList.contains('aborted')) return;
+        // 未到达阶段不允许点击切换视图
         if (step.getAttribute('aria-disabled') === 'true') return;
-        if (step.classList.contains('active')) return;
         const stage = step.dataset.stage;
         const tid = threadId || sessionStorage.getItem(`workflow:${projectId}`);
         if (!tid) return;
+        // 跳转前把 backend stage 写 sessionStorage（跨页面继承）+ URL（同步可靠源）
+        let backendForUrl = currentBackendStage;
+        if (!backendForUrl || !STAGE_MAP[backendForUrl]) {
+          backendForUrl = sessionStorage.getItem(`furthestStage:${projectId}`) || '';
+        }
+        try {
+          if (backendForUrl && STAGE_MAP[backendForUrl]) {
+            const k = `furthestStage:${projectId}`;
+            const prev = sessionStorage.getItem(k);
+            const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
+            const newIdx = STAGE_ORDER.indexOf(STAGE_MAP[backendForUrl]);
+            if (newIdx > prevIdx) sessionStorage.setItem(k, backendForUrl);
+          }
+        } catch {}
+        const enc = encodeURIComponent(tid);
+        const backendQuery = backendForUrl ? `&backend=${encodeURIComponent(backendForUrl)}` : '';
         const routes = {
-          parsing: `/project-init?projectId=${projectId}`,
-          matching: `/project-init?projectId=${projectId}`,
-          generating: `/workbench?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`,
-          reviewing: `/review?threadId=${encodeURIComponent(tid)}`,
-          report_review: `/review?threadId=${encodeURIComponent(tid)}`,
+          parsing: `/project-init?projectId=${projectId}&threadId=${enc}&view=outline${backendQuery}`,
+          matching: `/project-init?projectId=${projectId}&threadId=${enc}&view=matching${backendQuery}`,
+          generating: `/workbench?projectId=${projectId}&threadId=${enc}${backendQuery}`,
+          reviewing: `/review?threadId=${enc}${backendQuery}`,
+          report_review: `/review?threadId=${enc}${backendQuery}`,
         };
         if (routes[stage]) location.href = routes[stage];
       });
@@ -2449,6 +2542,9 @@
         step.click();
       });
 
+      // 进入页面立刻按 PAGE_STAGE 点亮当前 step
+      renderStageBar();
+
       // 撰写完成 banner — 进入评审按钮
       document.querySelector('#generation-done-banner .btn-go-review')?.addEventListener('click', () => {
         if (!threadId) return;
@@ -2458,6 +2554,55 @@
           location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
         }, 200);
       });
+
+      // 顶部常驻「进入评审」按钮：用户随时可点（包括暂停态），调 skipToReview 让 graph
+      // 用已生成的 block 跑评审，然后跳 /review 页。
+      const btnGoReviewTop = document.getElementById('btn-go-review-top');
+      if (btnGoReviewTop) {
+        btnGoReviewTop.addEventListener('click', async () => {
+          if (!threadId) return;
+          btnGoReviewTop.disabled = true;
+          btnGoReviewTop.textContent = '准备评审…';
+          try {
+            // 已经在 review 阶段直接跳；否则先 skipToReview 让 graph 跑评审
+            const s = await api.workflow.state(threadId).catch(() => null);
+            const stage = s?.stage;
+            if (stage !== 'reviewing' && stage !== 'report_review' && stage !== 'done') {
+              await api.workflow.skipToReview(threadId).catch(() => {});
+            }
+            location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
+          } catch (e) {
+            console.error('[workbench] go-review-top failed', e);
+            btnGoReviewTop.disabled = false;
+            btnGoReviewTop.textContent = '进入评审 →';
+          }
+        });
+      }
+      // 当 backend stage 进入 generating 之后，按钮变可点（之前不可，避免还没生成就跳评审）。
+      // 用一个 helper 在 setStage / 初次渲染时调。
+      // 已生成 block 数：进入评审按钮启用判定使用，SSE block_done 时累加
+      let _generatedCount = 0;
+      function _refreshGoReviewBtn() {
+        if (!btnGoReviewTop) return;
+        // 启用条件：至少 1 个 block 已生成（用户需求："撰写到一半也可进入评审"）。
+        // 兜底：currentBackendStage 已到 generating 也启用（防止 SSE 还没推 block_done）。
+        const cur = currentBackendStage || sessionStorage.getItem(`furthestStage:${projectId}`);
+        const mapped = cur ? STAGE_MAP[cur] : null;
+        const idx = mapped ? STAGE_ORDER.indexOf(mapped) : -1;
+        const stageReady = idx >= STAGE_ORDER.indexOf('generating');
+        btnGoReviewTop.disabled = !(stageReady || _generatedCount > 0);
+      }
+      // 进入页面时拉一次 blocks 看是否已有内容
+      (async () => {
+        try {
+          const list = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+          if (Array.isArray(list)) {
+            _generatedCount = list.filter(b => b?.content && String(b.content).trim()).length;
+            _refreshGoReviewBtn();
+          }
+        } catch {}
+      })();
+      _refreshGoReviewBtn();
 
       // 初始化时还原 stage + stage routing（强制 threadId 模式）
       (async () => {
@@ -2519,8 +2664,17 @@
           case 'parsing':
           case 'outline_review':
           case 'matching':
-            // 前置阶段在 project-init 处理
-            location.href = `/project-init?projectId=${projectId}`;
+            // 前置阶段：用户大概率从 stage-progress 点击「方案撰写」误进；不再硬 redirect
+            // 否则会出现"闪一下方案撰写后跳回素材匹配"的体验。改为提示+引导。
+            try {
+              const banner = document.createElement('div');
+              banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
+              banner.innerHTML = `项目尚未到达「方案撰写」阶段，请先完成 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}" style="color:#1d4ed8;text-decoration:underline;">前置步骤</a>。`;
+              const stageBar = document.getElementById('stage-progress');
+              const main = document.querySelector('.workspace-main-shell') || document.body;
+              if (stageBar?.parentNode) stageBar.parentNode.insertBefore(banner, stageBar.nextSibling);
+              else main.insertBefore(banner, main.firstChild);
+            } catch {}
             return;
           case 'materials_review':
             if (s?.user_choice === 'approve') {
@@ -2529,12 +2683,39 @@
               autoStartWorkflowStream();
               return;
             }
-            location.href = `/project-init?projectId=${projectId}`;
+            // user 还没点"确认素材"——不再 redirect 回 project-init（避免"闪一下方案撰写又跳回"）；
+            // 留在 workbench 显示提示，引导用户回素材匹配页面确认。
+            try {
+              setStage('generating');
+              const banner = document.createElement('div');
+              banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
+              banner.innerHTML = `素材匹配尚未确认，请先回 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&view=matching" style="color:#1d4ed8;text-decoration:underline;">素材匹配页面</a> 点击「确认素材，进入撰写」。`;
+              const stageBar = document.getElementById('stage-progress');
+              const main = document.querySelector('.workspace-main-shell') || document.body;
+              if (stageBar?.parentNode) stageBar.parentNode.insertBefore(banner, stageBar.nextSibling);
+              else main.insertBefore(banner, main.firstChild);
+            } catch {}
             return;
-          case 'generating':
-            // 自动开流，无需用户点"批量编写"
+          case 'generating': {
+            // 仅当 graph 后台 task 真的还在跑时才自动开流；否则只展示已生成的内容，
+            // 避免"已生成完毕的项目重新进入工作台时，UI 进入批量进度条状态"的误导。
+            try {
+              const dbBlocks = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+              const list = Array.isArray(dbBlocks) ? dbBlocks : [];
+              const contentBlocks = list.filter(b => Number(b.level) >= 2 || b.kind !== 'heading');
+              const empty = contentBlocks.filter(b => !(b.content && String(b.content).trim()));
+              if (empty.length === 0 && contentBlocks.length > 0) {
+                // 全部章节均已落库 → 直接展示，不开 SSE 流，不显示批量进度条
+                if (typeof window.__loadBlocks === 'function') {
+                  try { window.__loadBlocks(); } catch {}
+                }
+                return;
+              }
+            } catch {}
+            // 否则正常自动开流（graph 在途，等 SSE 推 block_done）
             autoStartWorkflowStream();
             return;
+          }
           case 'reviewing':
           case 'report_review':
           case 'done': {
@@ -2706,6 +2887,11 @@
             if (typeof markOutlineDone === 'function' && data.block_id) {
               try { markOutlineDone(data.block_id, data); } catch {}
             }
+            // 单 block 生成完毕：进入评审按钮启用条件之一
+            if (typeof _generatedCount !== 'undefined') {
+              _generatedCount++;
+              if (typeof _refreshGoReviewBtn === 'function') _refreshGoReviewBtn();
+            }
             // 单 block regen 完成 → 复位编辑器顶部 banner / 进度
             if (window.__currentSingleRegenBlockId && window.__currentSingleRegenBlockId === data.block_id) {
               const banner = document.getElementById('ced-gen-banner');
@@ -2736,6 +2922,7 @@
           },
           onAborted: () => onWorkflowAborted(),
           onDone: () => onWorkflowDone(),
+          onPaused: (data) => onWorkflowPaused(data),
           onStageChange: (data) => {
             const stage = data?.stage;
             if (typeof stage !== 'string') return;
@@ -2799,6 +2986,77 @@
         // 不自动跳转 — 不 setStage，仅显示完成 banner，让用户主动点击"进入评审"
         const banner = document.getElementById('generation-done-banner');
         if (banner) banner.removeAttribute('hidden');
+      }
+
+      function onWorkflowPaused(data) {
+        // 暂停事件：保留已生成的 block 内容，graph 已停在 GATE_PAUSE 闸门；
+        // 显示提示卡让用户三选一：继续生成 / 仅评审已生成 / 放弃工作流。
+        closeWorkflowStream();
+        batchInFlight = false;
+        batchGenerating = false;
+        if (btnGen) btnGen.innerHTML = '✦ 批量编写';
+        const batchStatusEl = document.getElementById('outline-batch-status');
+        if (batchStatusEl) batchStatusEl.classList.add('hidden');
+        const btnBatchCancelEl = document.getElementById('btn-batch-cancel');
+        if (btnBatchCancelEl) {
+          btnBatchCancelEl.disabled = false;
+          btnBatchCancelEl.textContent = '暂停';
+        }
+        if (btnBatchGen) btnBatchGen.style.display = '';
+        // 暂停后顶部「进入评审」按钮立即可点（用已生成的 block 跑评审）
+        if (typeof _refreshGoReviewBtn === 'function') {
+          _generatedCount = Math.max(_generatedCount, data?.generated ?? 0);
+          _refreshGoReviewBtn();
+        }
+        // 渲染 / 复用提示卡
+        let card = document.getElementById('paused-banner');
+        if (!card) {
+          card = document.createElement('div');
+          card.id = 'paused-banner';
+          card.style.cssText = 'padding:14px 20px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:8px;margin:12px 20px;font-size:13px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;';
+          const banner = document.getElementById('generation-done-banner');
+          (banner?.parentNode || document.querySelector('.workspace-main-shell') || document.body).insertBefore(card, banner || null);
+        }
+        const generated = data?.generated ?? 0;
+        const total = data?.total ?? 0;
+        card.innerHTML = `
+          <span style="flex:1;">已暂停撰写。已生成 <b>${generated}/${total}</b> 个章节。</span>
+          <button type="button" class="btn-secondary" id="paused-resume">继续生成</button>
+          <button type="button" class="btn-primary" id="paused-skip">仅评审已生成</button>
+          <button type="button" class="btn-danger" id="paused-abort">放弃工作流</button>`;
+        const resumeBtn = card.querySelector('#paused-resume');
+        const skipBtn = card.querySelector('#paused-skip');
+        const abortBtn = card.querySelector('#paused-abort');
+        resumeBtn?.addEventListener('click', async () => {
+          resumeBtn.disabled = true;
+          skipBtn.disabled = true;
+          abortBtn.disabled = true;
+          try {
+            await api.workflow.resumeGeneration(threadId);
+            card.remove();
+            startWorkflowGeneration();
+          } catch (e) { console.error('resumeGeneration failed', e); resumeBtn.disabled = false; skipBtn.disabled = false; abortBtn.disabled = false; }
+        });
+        skipBtn?.addEventListener('click', async () => {
+          resumeBtn.disabled = true;
+          skipBtn.disabled = true;
+          abortBtn.disabled = true;
+          try {
+            await api.workflow.skipToReview(threadId);
+            card.remove();
+            // 等 graph 跑评审 → reviewing/report_review，stage_change 收到时显示完成 banner
+            ensureWorkflowStream();
+          } catch (e) { console.error('skipToReview failed', e); resumeBtn.disabled = false; skipBtn.disabled = false; abortBtn.disabled = false; }
+        });
+        abortBtn?.addEventListener('click', async () => {
+          resumeBtn.disabled = true;
+          skipBtn.disabled = true;
+          abortBtn.disabled = true;
+          try {
+            await api.workflow.abort(threadId);
+            card.remove();
+          } catch (e) { console.error('abort failed', e); }
+        });
       }
 
       window.addEventListener('pagehide', closeWorkflowStream);
@@ -4024,8 +4282,26 @@
       let batchAbort = null;
 
       if (btnBatchCancel) {
-        btnBatchCancel.addEventListener('click', () => {
-          if (batchAbort) batchAbort.abort();
+        btnBatchCancel.addEventListener('click', async () => {
+          // 1) 旧路径 fetch：通过 AbortController 中断
+          if (batchAbort) {
+            try { batchAbort.abort(); } catch {}
+          }
+          // 2) 新 LangGraph workflow 路径：无条件调 pause（不再依赖 workflowStream），
+          //    因为 graph 在后端 runner task 中独立运行，前端 SSE 只是订阅；用户进入页面
+          //    若刚好命中"已展示已生成内容、不开 SSE 流"分支，workflowStream 是 null，
+          //    但 graph 仍在跑——此时仍要让后端停下，否则用户看到"暂停后还自动进评审"。
+          if (typeof threadId !== 'undefined' && threadId) {
+            try { await api.workflow.pause(threadId).catch(() => {}); } catch {}
+          }
+          // 旧路径不需要等 SSE 事件，立刻清 UI
+          batchGenerating = false;
+          batchAbort = null;
+          // batchInFlight / workflowStream 不在此清空，保留给 onPaused 收到事件后再清。
+          if (btnBatchCancel) {
+            btnBatchCancel.disabled = true;
+            btnBatchCancel.textContent = '暂停中…';
+          }
         });
       }
 

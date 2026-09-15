@@ -187,45 +187,49 @@ else:
     logger.warning(f"前端目录不存在，跳过静态文件挂载：{frontend_dir}")
 
 
+_HTML_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+
 @app.get("/", include_in_schema=False)
 async def serve_frontend():
     if os.path.isfile(_projects_path):
-        return FileResponse(_projects_path)
+        return FileResponse(_projects_path, headers=_HTML_NO_CACHE)
     return JSONResponse(content={"message": "技术方案生成助手 API 运行中", "docs": "/docs"})
 
 
 @app.get("/projects", include_in_schema=False)
 async def serve_projects():
     if os.path.isfile(_projects_path):
-        return FileResponse(_projects_path)
+        return FileResponse(_projects_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "projects.html 不存在"})
 
 
 @app.get("/workbench", include_in_schema=False)
 async def serve_workbench():
     if os.path.isfile(_workbench_path):
-        return FileResponse(_workbench_path)
+        return FileResponse(_workbench_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "workbench.html 不存在"})
 
 
 @app.get("/diff-review", include_in_schema=False)
 async def serve_diff_review():
     if os.path.isfile(_diff_review_path):
-        return FileResponse(_diff_review_path)
+        return FileResponse(_diff_review_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "diff-review.html 不存在"})
 
 
 @app.get("/project-init", include_in_schema=False)
 async def serve_project_init():
     if os.path.isfile(_project_init_path):
-        return FileResponse(_project_init_path)
+        return FileResponse(_project_init_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
 
 
 @app.get("/review", include_in_schema=False)
 async def serve_review():
     if os.path.isfile(_review_path):
-        return FileResponse(_review_path)
+        # HTML 不缓存：避免改完顶部模块用户强刷仍看到旧版（CSS/JS 已带版本戳）
+        return FileResponse(_review_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "review.html 不存在"})
 
 

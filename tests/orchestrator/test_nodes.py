@@ -306,8 +306,9 @@ class _ReviewerStub:
         self.agent_name = agent_name
 
     async def review(self, *, blocks, outline_matrix, emitter=None):
-        return {
-            bid: Finding(
+        results = {}
+        for bid in blocks:
+            finding = Finding(
                 block_id=bid,
                 agent=self.agent_name,
                 score=80,
@@ -315,8 +316,23 @@ class _ReviewerStub:
                               suggestion="补图")],
                 strengths=["清晰"],
             )
-            for bid in blocks
-        }
+            # 与真实 agent 对齐：emit start + done 让 nodes 桥接转 review_block_start /
+            # review_finding SSE 事件，前端能逐 block 看到进度。
+            if emitter is not None:
+                rv = emitter("review_block_start", {
+                    "block_id": bid, "agent": self.agent_name,
+                })
+                if hasattr(rv, "__await__"): await rv
+                rv = emitter("review_block_done", {
+                    "block_id": bid, "agent": self.agent_name,
+                    "score": finding.score,
+                    "issues": [i.to_dict() for i in finding.issues],
+                    "issues_count": len(finding.issues),
+                    "error": "",
+                })
+                if hasattr(rv, "__await__"): await rv
+            results[bid] = finding
+        return results
 
 
 def _blocks_state(*ids):
@@ -345,7 +361,10 @@ async def test_wang_anshi_review_node_writes_tech_findings():
     assert findings["s1"]["score"] == 80
 
     frames = await _drain(emitter)
-    name, payload = frames[0]
+    # 现在节点会 emit review_block_start + review_finding 双事件；过滤出 review_finding 验证
+    finding_frames = [(n, p) for n, p in frames if n == "review_finding"]
+    assert len(finding_frames) >= 1
+    name, payload = finding_frames[0]
     assert name == "review_finding"
     assert payload["agent"] == "wang_anshi"
     assert payload["block_id"] == "s1"

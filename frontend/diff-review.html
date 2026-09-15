@@ -10,15 +10,13 @@
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
-          <a class="project-name" href="/projects">项目画廊</a>
+          <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
           <nav class="process-tabs" aria-label="项目流程">
-            <a class="process-tab" href="/project-init">项目信息</a>
-            <a class="process-tab" href="/workbench">材料撰写</a>
+            <a class="process-tab" href="/workbench" id="tab-workbench">材料撰写</a>
             <a class="process-tab active" href="/diff-review">审核导出</a>
           </nav>
           <div class="project-actions">
-            <button class="icon-button" type="button" aria-label="切换主题">◐</button>
-            <button class="icon-button" type="button" aria-label="项目设置">⚙</button>
+            <button id="btn-export-word" type="button" style="all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:var(--accent,#2563eb);color:#fff;font-size:12.5px;font-weight:600;box-shadow:0 6px 14px -6px oklch(0.55 0.16 256 / 0.5);">导出 Word</button>
           </div>
         </header>
 
@@ -40,105 +38,61 @@
           </div>
         </section>
 
-        <section class="diff-layout">
-          <aside class="compact-card nav-pane">
+        <section class="diff-layout" style="grid-template-columns: 270px minmax(0, 1fr);">
+          <aside class="compact-card nav-pane" style="display:flex; flex-direction:column; overflow:hidden;">
             <div class="compact-header">
               <div>
-                <div class="eyebrow">Revision Chain</div>
-                <h3>版本链与影响入口</h3>
+                <h3>迭代记录</h3>
               </div>
-              <span class="badge info">delta + snapshot</span>
+              <select id="filter-block" style="font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid var(--border,#e5e7eb);">
+                <option value="">全部章节</option>
+              </select>
             </div>
 
-            <div class="outline-tree" id="revision-chain">
+            <div class="outline-tree" id="revision-chain" style="flex:1; overflow-y:auto; display:block;">
               <p class="muted" style="padding:12px;">加载中...</p>
-            </div>
-
-            <div class="compact-divider"></div>
-
-            <div class="toolbar" style="margin-top: 12px;">
-              <div class="mini-button primary">按章节看</div>
-              <div class="mini-button">按问题看</div>
             </div>
           </aside>
 
-          <section class="compact-card">
-            <div class="editor-toolbar">
-              <div class="chip-row">
-                <span class="chip">同步滚动</span>
-                <span class="chip">折叠未变化片段</span>
-                <span class="chip info">normalized view</span>
-              </div>
-              <div class="toolbar">
-                <div class="mini-button">上一个差异</div>
-                <div class="mini-button">下一个差异</div>
-                <button id="btn-accept-mapping" class="mini-button primary" type="button">接受映射建议</button>
-              </div>
-            </div>
-
-            <div class="diff-columns" style="margin-top: 12px;">
+          <section class="compact-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="diff-columns" style="margin-top: 0; flex:1; min-height:0;">
               <section class="diff-pane">
-                <div class="compact-header">
+                <div class="compact-header" style="flex:0 0 auto;">
                   <div>
                     <div class="eyebrow">Base Revision</div>
                     <h3>旧版本</h3>
                   </div>
-                  <span class="badge success">左侧基线</span>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼</span>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#a7f3d0;color:#065f46;font-weight:600;">素材</span>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#fde68a;color:#92400e;font-weight:600;">补充</span>
+                  </div>
                 </div>
-                <div class="diff-list" id="diff-left">
+                <div class="diff-list" id="diff-left" style="flex:1;overflow-y:auto;">
                   <p class="muted">加载中...</p>
                 </div>
               </section>
 
               <section class="diff-pane">
-                <div class="compact-header">
+                <div class="compact-header" style="flex:0 0 auto;">
                   <div>
                     <div class="eyebrow">Compare Revision</div>
                     <h3>当前修订版</h3>
                   </div>
-                  <span class="badge info">右侧当前版</span>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼</span>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#a7f3d0;color:#065f46;font-weight:600;">素材</span>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#fde68a;color:#92400e;font-weight:600;">补充</span>
+                  </div>
                 </div>
-                <div class="diff-list" id="diff-right">
+                <div class="diff-list" id="diff-right" style="flex:1;overflow-y:auto;">
                   <p class="muted">加载中...</p>
                 </div>
               </section>
             </div>
           </section>
-
-          <aside class="compact-card">
-            <div class="compact-header">
-              <div>
-                <div class="eyebrow">Export</div>
-                <h3>导出</h3>
-              </div>
-              <span class="badge success">ready</span>
-            </div>
-
-            <div class="right-stack">
-              <div class="side-card">
-                <div class="compact-header">
-                  <div>
-                    <h3>导出操作</h3>
-                  </div>
-                </div>
-                <div class="quick-grid">
-                  <button id="btn-export-word" class="option-card" type="button">导出 Word</button>
-                </div>
-              </div>
-            </div>
-          </aside>
         </section>
 
-        <details class="ai-status-drawer">
-          <summary>
-            <span class="status-grip"></span>
-            <strong>AI 进程</strong>
-            <span>审核导出模式</span>
-          </summary>
-          <div class="status-drawer-body">
-            <div>diff 分析完成</div>
-          </div>
-        </details>
       </main>
     </div>
 
@@ -148,6 +102,12 @@
       const params    = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
       if (!projectId) { location.href = '/projects'; }
+
+      document.getElementById('tab-workbench').href = `/workbench?projectId=${projectId}`;
+
+      fetch(`/api/projects/${projectId}`).then(r => r.json()).then(p => {
+        if (p?.name) document.getElementById('header-project-name').textContent = p.name;
+      });
 
       const btnAccept = document.getElementById('btn-accept-mapping');
       const btnExport = document.getElementById('btn-export-word');
@@ -164,23 +124,6 @@
         const metricAffected = document.querySelector('.metric-affected');
         if (metricChanged)  metricChanged.textContent  = changed.length;
         if (metricAffected) metricAffected.textContent = changed.reduce((n, c) => n + (c.affected_blocks?.length || 0), 0);
-
-        const leftPane  = document.getElementById('diff-left');
-        const rightPane = document.getElementById('diff-right');
-
-        if (leftPane) {
-          leftPane.innerHTML = [
-            ...changed.map(c => `<div class="diff-block changed"><strong>${c.block_id}</strong><p>旧：${c.old_content?.slice(0, 80) ?? ''}…</p></div>`),
-            ...removed.map(r => `<div class="diff-block removed"><strong>${r.block_id}</strong><p>已删除：${r.title}</p></div>`),
-          ].join('') || '<p class="muted">无差异</p>';
-        }
-
-        if (rightPane) {
-          rightPane.innerHTML = [
-            ...changed.map(c => `<div class="diff-block changed"><strong>${c.block_id}</strong><p>新：${c.new_content?.slice(0, 80) ?? ''}…</p></div>`),
-            ...added.map(a => `<div class="diff-block added"><strong>${a.block_id}</strong><p>新增：${a.title}</p></div>`),
-          ].join('') || '<p class="muted">无差异</p>';
-        }
       }
 
       btnAccept?.addEventListener('click', async () => {
@@ -196,6 +139,189 @@
       });
 
       loadDiff();
+
+      // ── Revision Chain 面板 ──────────────────────────
+
+      const SOURCE_LABELS = { generate: 'AI 生成', edit: '手动编辑', restore: '版本回溯' };
+      const chainEl = document.getElementById('revision-chain');
+      const filterEl = document.getElementById('filter-block');
+      const leftPane = document.getElementById('diff-left');
+      const rightPane = document.getElementById('diff-right');
+
+      let revisionData = [];
+
+      function fmtTime(iso) {
+        if (!iso) return '';
+        const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T'));
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        return `${mm}-${dd} ${hh}:${mi}`;
+      }
+
+      function timeKey(iso) {
+        if (!iso) return 'unknown';
+        return iso.slice(0, 16).replace('T', ' ');
+      }
+
+      function fmtDelta(n) {
+        if (n == null) return '';
+        if (n > 0) return `<span style="color:var(--green,#22c55e);">+${n}字</span>`;
+        if (n < 0) return `<span style="color:var(--red,#ef4444);">${n}字</span>`;
+        return '<span class="muted">±0</span>';
+      }
+
+      function escHtml(s) {
+        const el = document.createElement('div');
+        el.textContent = s || '';
+        return el.innerHTML;
+      }
+
+      function groupByTime(revisions) {
+        const groups = [];
+        const map = {};
+        for (const r of revisions) {
+          const key = timeKey(r.created_at);
+          if (!map[key]) {
+            map[key] = { time: key, items: [] };
+            groups.push(map[key]);
+          }
+          map[key].items.push(r);
+        }
+        for (const g of groups) {
+          g.items.sort((a, b) => (a.order_idx ?? 999) - (b.order_idx ?? 999));
+        }
+        return groups;
+      }
+
+      function renderChain() {
+        const filterBlock = filterEl.value;
+        let data = revisionData;
+        if (filterBlock) {
+          data = data.filter(r => String(r.block_id) === filterBlock);
+        }
+
+        const groups = groupByTime(data);
+
+        if (!groups.length) {
+          chainEl.innerHTML = '<p class="muted" style="padding:12px;">暂无迭代记录</p>';
+          return;
+        }
+
+        chainEl.innerHTML = groups.map((g, gi) => `
+          <div class="time-group" style="margin-bottom:4px;">
+            <div style="padding:8px 12px 4px; font-size:12px; font-weight:600; color:var(--muted,#6b7280); display:flex; justify-content:space-between; align-items:center;">
+              <span>${g.time}</span>
+              <span class="badge info" style="font-size:11px;">${g.items.length}章节</span>
+            </div>
+            ${g.items.map((r, ri) => `
+              <div class="rev-item" data-gi="${gi}" data-ri="${ri}"
+                   style="padding:6px 12px; cursor:pointer; border-left:3px solid transparent; transition:all .15s;"
+                   onmouseenter="this.style.background='var(--hover,#f3f4f6)'"
+                   onmouseleave="this.style.background=''"
+              >
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:13px;">${escHtml(r.block_title || '')}</span>
+                  <span style="font-size:12px;">${fmtDelta(r.char_delta)}</span>
+                </div>
+                <div style="font-size:11px; color:var(--muted,#6b7280); margin-top:2px;">
+                  <span class="chip info" style="font-size:10px; padding:1px 4px;">${SOURCE_LABELS[r.source] || r.source}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `).join('');
+
+        chainEl.querySelectorAll('.rev-item').forEach(el => {
+          el.addEventListener('click', () => {
+            chainEl.querySelectorAll('.rev-item').forEach(e => {
+              e.style.borderLeftColor = 'transparent';
+              e.style.background = '';
+            });
+            el.style.borderLeftColor = 'var(--primary,#3b82f6)';
+            el.style.background = 'var(--hover,#f3f4f6)';
+
+            const gi = parseInt(el.dataset.gi);
+            const ri = parseInt(el.dataset.ri);
+            const filterBlock = filterEl.value;
+            let data = revisionData;
+            if (filterBlock) data = data.filter(r => String(r.block_id) === filterBlock);
+            const groups = groupByTime(data);
+            const rev = groups[gi]?.items[ri];
+            if (rev) showDiff(rev);
+          });
+        });
+      }
+
+      function showDiff(rev) {
+        const prev = rev.prev_content || '';
+        const curr = rev.content || '';
+
+        if (leftPane) {
+          if (prev) {
+            leftPane.innerHTML = `
+              <div style="padding:12px;">
+                <div style="font-size:12px; color:var(--muted,#6b7280); margin-bottom:8px;">
+                  修改前 · ${escHtml(rev.block_title)} · r${rev.revision_no - 1 || 0}
+                </div>
+                <div style="font-size:13px; line-height:1.8; word-break:break-all;">${renderAnnotatedInline(prev)}</div>
+              </div>`;
+          } else {
+            leftPane.innerHTML = `
+              <div style="display:flex;align-items:center;justify-content:center;height:100%;min-height:200px;color:var(--muted,#6b7280);font-size:13px;">
+                首次生成，无历史版本
+              </div>`;
+          }
+        }
+
+        if (rightPane) {
+          rightPane.innerHTML = `
+            <div style="padding:12px;">
+              <div style="font-size:12px; color:var(--muted,#6b7280); margin-bottom:8px;">
+                修改后 · ${escHtml(rev.block_title)} · r${rev.revision_no}
+              </div>
+              <div style="font-size:13px; line-height:1.8; word-break:break-all;">${renderAnnotatedInline(curr)}</div>
+            </div>`;
+        }
+      }
+
+      function renderAnnotatedInline(content) {
+        let html = escHtml(content || '');
+        html = html.replace(/\[G\]([\s\S]*?)\[\/G\]/g, '<span style="background:#dbeafe;border-radius:2px;">$1</span>');
+        html = html.replace(/\[M\]([\s\S]*?)\[\/M\]/g, '<span style="background:#d1fae5;border-radius:2px;">$1</span>');
+        html = html.replace(/\[E\]([\s\S]*?)\[\/E\]/g, '<span style="background:#fef3c7;border-radius:2px;">$1</span>');
+        html = html.replace(/\[G\]|\[\/G\]|\[M\]|\[\/M\]|\[E\]|\[\/E\]/g, '');
+        return `<span style="white-space:pre-wrap;">${html}</span>`;
+      }
+
+      filterEl?.addEventListener('change', renderChain);
+
+      async function loadRevisions() {
+        try {
+          const res = await api.revisions.listByProject(projectId);
+          revisionData = res.revisions || [];
+        } catch { revisionData = []; }
+
+        const blockSet = new Map();
+        for (const r of revisionData) {
+          if (!blockSet.has(r.block_id)) {
+            blockSet.set(r.block_id, r.block_title || `block#${r.block_id}`);
+          }
+        }
+        filterEl.innerHTML = '<option value="">全部章节</option>' +
+          [...blockSet.entries()].map(([id, title]) =>
+            `<option value="${id}">${escHtml(title)}</option>`
+          ).join('');
+
+        renderChain();
+
+        // 默认选中第一个时间组的第一个章节
+        const firstItem = chainEl.querySelector('.rev-item');
+        if (firstItem) firstItem.click();
+      }
+
+      loadRevisions();
     </script>
   </body>
 </html>

@@ -121,19 +121,27 @@ async def zhang_heng_parse_node(
 
     state 写入：``stage="parsing"``，``spec.{doc_id, doc_title, doc_summary, toc}``。
     """
+    import asyncio
+
     _check_cancel(state)
 
     project_id = state["project_id"]
     file_source, suffix, filename = await spec_loader(project_id)
 
-    async def _on_progress(step: str, current: int, total: int) -> None:
-        await _emit_frame(emitter, events.parse_progress(step, current, total))
+    loop = asyncio.get_running_loop()
 
     def _sync_progress(step: str, current: int, total: int) -> None:
-        # parse_document 用 sync 回调；emit 是 async，这里用 fire-and-forget
-        # 简单实现：忽略 sync 阶段进度（runner 在外层另发 stage_change）。
-        # 若要完整推送，需在外层 wrap parser 为 async。
-        return None
+        # parse_document 跑在 to_thread 中，回调是 sync。把 emit 调度回事件循环线程。
+        if emitter is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                emitter.emit(events.parse_progress(step, current, total)),
+                loop,
+            )
+        except Exception:
+            # emit 失败不影响解析主流程
+            return
 
     parsed = await agent.parse(
         file_source,
@@ -141,6 +149,43 @@ async def zhang_heng_parse_node(
         filename=filename,
         progress_callback=_sync_progress,
     )
+
+    # 解析完成后把章节总数同步给前端，作为 extract 阶段进度的上界，
+    # 否则前端 totalBlocks 在 extract 第一帧前一直是 0。
+    toc_total = len(parsed.toc)
+    if toc_total:
+        await _emit_frame(emitter, events.parse_progress("解析完成", toc_total, toc_total))
+
+    # 持久化占位 blocks：让用户取消 / 刷新仍能看到已解析章节。
+    # 失败不抛（落库不成功不影响 graph 主流程，仅意味着取消保存能力降级）。
+    try:
+        from db import get_db
+        from services.block_store import list_blocks, upsert_outline_block
+
+        toc_ids = {sec.id for sec in parsed.toc}
+        async with get_db() as db:
+            # 清掉历史遗留的"不在当前 toc"的 blocks（典型：旧 materials.py 路径写入的
+            # outline-N 与新 LangGraph 的 s1/s1.1 命名共存，导致前端列出双份、
+            # 新的那一份全空显示骨架屏）。
+            existing = await list_blocks(db, project_id)
+            stale_ids = [b.get("id") for b in existing if b.get("block_id") not in toc_ids]
+            for stale_pk in stale_ids:
+                await db.execute("DELETE FROM blocks WHERE id = ?", (stale_pk,))
+            if stale_ids:
+                await db.commit()
+                logger.info(f"parse_node：清理 {len(stale_ids)} 条遗留 block（项目 {project_id}）")
+            for idx, sec in enumerate(parsed.toc):
+                await upsert_outline_block(
+                    db,
+                    project_id=project_id,
+                    block_id=sec.id,
+                    level=int(sec.level or 1),
+                    title=sec.title or sec.id,
+                    order_idx=idx,
+                    matrix=None,
+                )
+    except Exception as e:
+        logger.warning(f"parse_node：占位 block 落库失败（{e}），不阻断")
 
     return {
         "stage": "parsing",
@@ -171,17 +216,90 @@ async def zhang_heng_extract_node(
 
     spec = state.get("spec") or {}
     toc_raw = spec.get("toc") or []
-    toc = [_dict_to_section(d) for d in toc_raw]
+    toc_full = [_dict_to_section(d) for d in toc_raw]
+    project_id = state.get("project_id")
 
-    matrix = await agent.extract(toc)
+    # 章节 → 顺序索引：on_section 落库要写 order_idx，避免后端目录乱序
+    section_order = {s.id: i for i, s in enumerate(toc_full)}
 
     matrix_dict: dict[str, dict] = {}
-    for block_id, row in matrix.items():
-        row_dict = _row_to_dict(row)
-        matrix_dict[block_id] = row_dict
-        await _emit_frame(emitter, events.outline_extract(
-            block_id=block_id, title=row.title, matrix=row_dict,
+
+    # 跳过已提炼章节（continue/恢复场景）：从 blocks 表读 status='outline_done' 集合
+    skip_ids: set[str] = set()
+    if project_id is not None:
+        try:
+            from db import get_db
+            from services.block_store import list_blocks
+
+            async with get_db() as db:
+                existing = await list_blocks(db, int(project_id))
+            for b in existing:
+                if (b.get("status") == "outline_done") and (b.get("key_points") or b.get("requirement")):
+                    skip_ids.add(str(b.get("block_id")))
+                    # 把已完成行回填到 matrix_dict / state，让后续闸门快照与 emit 完整
+                    matrix_dict[str(b.get("block_id"))] = {
+                        "block_id": str(b.get("block_id")),
+                        "title": b.get("title", ""),
+                        "requirement": b.get("requirement", "") or "",
+                        "key_points": b.get("key_points", "") or "",
+                        "veto_items": b.get("veto_items", "") or "",
+                        "bonus_items": b.get("bonus_items", "") or "",
+                        "score_items": b.get("score_items", "") or "",
+                        "evidence_required": b.get("evidence_required", "") or "",
+                        "constraint_level": b.get("constraint_level", "recommended") or "recommended",
+                        "indicators": b.get("indicators", "") or "",
+                        "error": "",
+                    }
+        except Exception as e:
+            logger.warning(f"extract_node：读已提炼 blocks 失败（{e}），全量重跑")
+            skip_ids = set()
+
+    toc = [s for s in toc_full if s.id not in skip_ids]
+    if skip_ids:
+        logger.info(f"extract_node：跳过 {len(skip_ids)} 个已提炼章节，剩余 {len(toc)}")
+
+    async def _on_section_start(section: DomainSection) -> None:
+        # 章节真正开始处理（worker 抢到信号量 + 调 LLM 前）：让前端把对应卡片切到"提炼中"。
+        await _emit_frame(emitter, events.outline_extract_start(
+            block_id=section.id, title=section.title or section.id,
         ))
+
+    async def _on_section(section: DomainSection, row: OutlineMatrixRow) -> None:
+        # 张衡每完成一章节立即推一帧，保证前端实时看到模块卡片增长。
+        row_dict = _row_to_dict(row)
+        matrix_dict[section.id] = row_dict
+        await _emit_frame(emitter, events.outline_extract(
+            block_id=section.id, title=row.title, matrix=row_dict,
+        ))
+        # 同步落库：取消 / 刷新后已提炼内容仍可在主页恢复显示
+        if project_id is not None:
+            try:
+                from db import get_db
+                from services.block_store import upsert_outline_block
+
+                async with get_db() as db:
+                    await upsert_outline_block(
+                        db,
+                        project_id=int(project_id),
+                        block_id=section.id,
+                        level=int(section.level or 1),
+                        title=row.title or section.title or section.id,
+                        order_idx=section_order.get(section.id, 0),
+                        matrix=row_dict,
+                    )
+            except Exception as e:
+                logger.warning(f"extract_node：block 落库失败（{section.id} / {e}），仅缓存到 state")
+
+    matrix = await agent.extract(toc, on_section=_on_section, on_section_start=_on_section_start)
+
+    # 回调可能因极端异常未触发，这里兜底一次：保证 matrix_dict 与 matrix 一致
+    for block_id, row in matrix.items():
+        if block_id not in matrix_dict:
+            row_dict = _row_to_dict(row)
+            matrix_dict[block_id] = row_dict
+            await _emit_frame(emitter, events.outline_extract(
+                block_id=block_id, title=row.title, matrix=row_dict,
+            ))
 
     return {"spec": {"outline_matrix": matrix_dict}}
 
@@ -196,7 +314,7 @@ async def shen_kuo_match_node(
     agent: ShenKuoAgent,
     emitter: EmitterArg = None,
 ) -> WorkflowState:
-    """沈括：素材匹配，逐 block 推 match_progress 事件。
+    """沈括：素材匹配，逐 block 推 match_start / match_progress 事件。
 
     state 写入：``materials.matches``。
     """
@@ -210,16 +328,61 @@ async def shen_kuo_match_node(
         for bid, d in (spec.get("outline_matrix") or {}).items()
     }
     chunks = list(materials.get("chunks") or [])
-
-    matches = await agent.match(toc, outline_matrix, chunks)
+    project_id = state.get("project_id")
 
     matches_dict: dict[str, list[dict]] = {}
-    for block_id, mlist in matches.items():
-        serialized = [_match_to_dict(m) for m in mlist]
-        matches_dict[block_id] = serialized
-        await _emit_frame(emitter, events.match_progress(
-            block_id=block_id, matches=serialized,
+
+    async def _on_section_start(section: DomainSection) -> None:
+        await _emit_frame(emitter, events.match_start(
+            block_id=section.id, title=section.title or section.id,
         ))
+
+    async def _on_section(section: DomainSection, mlist: list[Match]) -> None:
+        serialized = [_match_to_dict(m) for m in mlist]
+        matches_dict[section.id] = serialized
+        await _emit_frame(emitter, events.match_progress(
+            block_id=section.id, matches=serialized,
+        ))
+        # 落库 source 字段（用于刷新页面恢复显示）
+        if project_id is not None:
+            try:
+                from db import get_db
+                from services.block_store import update_block_source
+
+                async with get_db() as db:
+                    await update_block_source(
+                        db,
+                        project_id=int(project_id),
+                        block_id=section.id,
+                        sources=serialized,
+                    )
+            except Exception as e:
+                logger.warning(f"match_node：source 落库失败（{section.id} / {e}），仅缓存到 state")
+
+    # 测试 stub 可能不接受新 callback 参数 —— 用签名探测降级
+    import inspect as _inspect
+    try:
+        sig = _inspect.signature(agent.match)
+        supports_callbacks = "on_section" in sig.parameters
+    except (TypeError, ValueError):
+        supports_callbacks = False
+
+    if supports_callbacks:
+        matches = await agent.match(
+            toc, outline_matrix, chunks,
+            on_section=_on_section, on_section_start=_on_section_start,
+        )
+    else:
+        matches = await agent.match(toc, outline_matrix, chunks)
+
+    # 兜底：极端情况回调没触发，确保 state 完整
+    for block_id, mlist in matches.items():
+        if block_id not in matches_dict:
+            serialized = [_match_to_dict(m) for m in mlist]
+            matches_dict[block_id] = serialized
+            await _emit_frame(emitter, events.match_progress(
+                block_id=block_id, matches=serialized,
+            ))
 
     return {"materials": {"matches": matches_dict}}
 
@@ -233,6 +396,7 @@ async def zhuge_liang_generate_node(
     *,
     agent: ZhugeLiangAgent,
     emitter: EmitterArg = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> WorkflowState:
     """诸葛亮：逐 block 生成（流式 token），并在已完成 block 上跳过。
 
@@ -267,9 +431,16 @@ async def zhuge_liang_generate_node(
             bid for bid in regen_targets if bid in outline_matrix
         ]
     else:
-        # 正向模式：把已完成 block 从 outline_matrix 视图过滤掉
+        # 正向模式：按 toc 顺序生成（spec.outline_matrix 字典 key 顺序由完成顺序决定，
+        # 不再是 toc 顺序，直接迭代会让生成顺序与文档章节脱节）。
+        toc_for_order = state.get("spec", {}).get("toc") or []
+        ordered_ids = [s.get("id") for s in toc_for_order if s.get("id") in outline_matrix]
+        # toc 之外的兜底（理论上不会有）
+        for bid in outline_matrix.keys():
+            if bid not in ordered_ids:
+                ordered_ids.append(bid)
         target_for_agent = [
-            bid for bid in outline_matrix.keys() if bid not in existing_blocks
+            bid for bid in ordered_ids if bid not in existing_blocks
         ]
 
     if not target_for_agent:
@@ -282,13 +453,30 @@ async def zhuge_liang_generate_node(
     # 视图过滤：传给 agent 的 outline_matrix 仅含待生成 block
     sub_matrix = {bid: outline_matrix[bid] for bid in target_for_agent}
 
+    # 测试 stub agent 可能没声明 should_cancel 参数 → 用签名探测降级
+    import inspect as _inspect
+    try:
+        sig = _inspect.signature(agent.generate)
+        supports_should_cancel = "should_cancel" in sig.parameters
+    except (TypeError, ValueError):
+        supports_should_cancel = False
+
     bridge = _make_agent_emitter_bridge(emitter)
-    new_blocks, _consumed = await agent.generate(
-        outline_matrix=sub_matrix,
-        materials=matches,
-        regenerate_targets=target_for_agent if regen_targets else None,
-        emitter=bridge,
-    )
+    if supports_should_cancel:
+        new_blocks, _consumed = await agent.generate(
+            outline_matrix=sub_matrix,
+            materials=matches,
+            regenerate_targets=target_for_agent if regen_targets else None,
+            emitter=bridge,
+            should_cancel=should_cancel,
+        )
+    else:
+        new_blocks, _consumed = await agent.generate(
+            outline_matrix=sub_matrix,
+            materials=matches,
+            regenerate_targets=target_for_agent if regen_targets else None,
+            emitter=bridge,
+        )
 
     # 合并：重生覆盖已存在；正向只新增
     merged_blocks = dict(existing_blocks)
@@ -304,6 +492,22 @@ async def zhuge_liang_generate_node(
                 "needs_diagram": output.needs_diagram,
             },
         ))
+
+    # 检测用户暂停：should_cancel 真 → 标 stage='paused' + emit paused 事件
+    paused = bool(should_cancel and should_cancel())
+    if paused:
+        await _emit_frame(emitter, events.paused(
+            reason="user_pause",
+            generated=len(merged_blocks),
+            total=len(outline_matrix),
+        ))
+        return {
+            "stage": "paused",
+            "proposal": {
+                "blocks": merged_blocks,
+                "regenerate_targets": [],
+            },
+        }
 
     return {
         "stage": "generating",
@@ -366,22 +570,49 @@ async def _run_review(
         for bid, d in (spec.get("outline_matrix") or {}).items()
     }
 
+    # 桥接 agent 内部的 review_block_start/done 事件到 SSE：让前端实时看到逐 block
+    # "正在评审 → 已完成"的过程。
+    async def _review_bridge(event_type: str, payload: dict) -> None:
+        if event_type == "review_block_start":
+            row = outline_matrix.get(payload.get("block_id", ""))
+            title = row.title if row else ""
+            await _emit_frame(emitter, events.review_block_start(
+                block_id=payload.get("block_id", ""),
+                agent=agent_name,
+                title=title,
+            ))
+        elif event_type == "review_block_done":
+            await _emit_frame(emitter, events.review_finding(
+                block_id=payload.get("block_id", ""),
+                agent=agent_name,
+                score=float(payload.get("score") or 0),
+                issues=payload.get("issues") or [],
+            ))
+
     findings = await agent.review(
         blocks=blocks,
         outline_matrix=outline_matrix,
-        emitter=None,  # agent 内部 emit 的 review_block_* 我们不直接转 SSE
+        emitter=_review_bridge,
     )
 
     findings_dict: dict[str, dict] = {}
     for block_id, finding in findings.items():
-        d = finding.to_dict()
-        findings_dict[block_id] = d
-        await _emit_frame(emitter, events.review_finding(
-            block_id=block_id,
-            agent=agent_name,
-            score=float(finding.score),
-            issues=[i.to_dict() for i in finding.issues],
-        ))
+        # review_finding 已在 _review_bridge 内逐 block emit，这里仅累计 state patch
+        findings_dict[block_id] = finding.to_dict()
+
+    # 持久化到 reviews 表：刷新 review 页面 / 跨进程恢复时仍能读到完整评审数据
+    thread_id = state.get("thread_id")
+    if thread_id and findings:
+        try:
+            from db import get_db
+            from domain.review import ReviewRepository
+
+            async with get_db() as db:
+                repo = ReviewRepository(db)
+                for finding in findings.values():
+                    await repo.add_finding(thread_id, finding)
+        except Exception as e:
+            logger.warning(f"_run_review：finding 落库失败（{agent_name} / {e}），仅缓存 state")
 
     return {"review": {finding_field: findings_dict}}
 

@@ -317,3 +317,51 @@ async def test_abort_at_gate3_marks_aborted(tmp_path):
         snap = await graph.aget_state(config)
         assert snap.next == ()
         assert snap.values.get("stage") == "aborted"
+
+
+async def test_pause_during_generate_stops_at_gate_pause(tmp_path):
+    """generate 中调 should_cancel → 节点返回 stage='paused' → graph 走 GATE_PAUSE。
+
+    核心验证：暂停后 graph 不会继续到评审节点，stage 停在 'paused'。
+    """
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid-pause"}}
+
+    # 跑过 1 个 block 后翻 cancel_flag
+    cancelled = {"flag": False}
+
+    class _PausingZhuge:
+        async def generate(self, *, outline_matrix, materials,
+                           regenerate_targets=None, emitter=None,
+                           should_cancel=None):
+            results = {}
+            for bid in outline_matrix:
+                if should_cancel and should_cancel():
+                    continue
+                results[bid] = BlockOutput(
+                    block_id=bid, kind="tech",
+                    content=f"v1-{bid}",
+                    outline="", sources=[],
+                )
+                # 跑完第一个 block 翻 flag，让节点末尾 should_cancel 返回真
+                cancelled["flag"] = True
+            return results, list(regenerate_targets or [])
+
+    wang = _DelayingReviewer("wang_anshi", delay=0.0)
+    bao = _DelayingReviewer("bao_zheng", delay=0.0)
+    deps = _build_deps(zhuge=_PausingZhuge(), wang=wang, bao=bao)
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(
+            deps, checkpointer=saver,
+            should_cancel=lambda: cancelled["flag"],
+        )
+        await graph.ainvoke({"project_id": 1}, config=config)  # gate1
+        await graph.ainvoke(None, config=config)               # gate2
+        await graph.ainvoke(None, config=config)               # generate → GATE_PAUSE
+
+        snap = await graph.aget_state(config)
+        assert snap.values.get("stage") == "paused"
+        # 评审节点不应被触发
+        assert wang.entered_at is None
+        assert bao.entered_at is None

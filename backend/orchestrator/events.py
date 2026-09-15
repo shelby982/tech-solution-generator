@@ -44,11 +44,30 @@ def outline_extract(block_id: str, title: str, matrix: dict[str, Any]) -> str:
     })
 
 
+def outline_extract_start(block_id: str, title: str) -> str:
+    """张衡 extract 阶段：开始处理一个章节（worker 拿到并发槽 + 开始调 LLM）。
+
+    前端用它把对应卡片切到"提炼中"骨架屏，避免用户在并发等待期看不到反馈。
+    """
+    return format_sse_event("outline_extract_start", {
+        "block_id": block_id,
+        "title": title,
+    })
+
+
 def match_progress(block_id: str, matches: list[dict[str, Any]]) -> str:
     """沈括：单 block 匹配结果。"""
     return format_sse_event("match_progress", {
         "block_id": block_id,
         "matches": matches,
+    })
+
+
+def match_start(block_id: str, title: str) -> str:
+    """沈括：开始匹配某章节（前端用它把卡片切到"匹配中"骨架屏）。"""
+    return format_sse_event("match_start", {
+        "block_id": block_id,
+        "title": title,
     })
 
 
@@ -96,6 +115,15 @@ def review_finding(
     })
 
 
+def review_block_start(block_id: str, agent: str, title: str = "") -> str:
+    """王安石/包拯：开始评审某 block（前端用以显示"正在评审"状态）。"""
+    return format_sse_event("review_block_start", {
+        "block_id": block_id,
+        "agent": agent,
+        "title": title,
+    })
+
+
 def report_ready(report: dict[str, Any]) -> str:
     """评审汇总节点：全局报告生成完成。"""
     return format_sse_event("report_ready", {"report": report})
@@ -138,6 +166,18 @@ def done(download_url: str) -> str:
 def aborted(reason: str) -> str:
     """ABORT 节点：被用户取消或不可恢复错误终止。"""
     return format_sse_event("aborted", {"reason": reason})
+
+
+def paused(reason: str, generated: int, total: int) -> str:
+    """生成阶段用户主动暂停：保留已生成的章节内容，graph 状态停在 generate 节点之前。
+
+    前端据此显示"暂停态"提示卡，用户可选择继续生成 / 仅评审已生成 / 放弃。
+    """
+    return format_sse_event("paused", {
+        "reason": reason,
+        "generated": generated,
+        "total": total,
+    })
 
 
 # ─────────────────────────────────────────────
@@ -194,17 +234,21 @@ __all__ = [
     "stage_change",
     "parse_progress",
     "outline_extract",
+    "outline_extract_start",
     "match_progress",
+    "match_start",
     "block_start",
     "block_token",
     "block_done",
     "review_finding",
+    "review_block_start",
     "report_ready",
     "gate_open",
     "error",
     "checkpoint",
     "done",
     "aborted",
+    "paused",
     # 异步管道
     "EventEmitter",
 ]

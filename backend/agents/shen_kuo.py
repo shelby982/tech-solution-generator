@@ -10,8 +10,9 @@
 - chunks 为空 / toc 为空 / 无 LLM 配置 → 返回空 dict 或全空 list，不抛错
 """
 
+import inspect
 import logging
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from domain.spec import OutlineMatrixRow, Section
 from infra.retrieval import Match, keyword_search, llm_rerank
@@ -53,6 +54,13 @@ class ShenKuoAgent:
         toc: list[Section],
         outline_matrix: dict[str, OutlineMatrixRow],
         chunks: list[dict],
+        *,
+        on_section: Optional[
+            Callable[[Section, list[Match]], Optional[Awaitable[None]]]
+        ] = None,
+        on_section_start: Optional[
+            Callable[[Section], Optional[Awaitable[None]]]
+        ] = None,
     ) -> dict[str, list[Match]]:
         """为 toc 中每个 block 匹配 top-N 素材。
 
@@ -61,14 +69,41 @@ class ShenKuoAgent:
         - 无 LLM 配置 → 仅 keyword 截断，score=0、reason 标识未重排
         - 单 block llm_rerank 抛错 → 该 block 置空，不影响其它 block
 
+        on_section / on_section_start：让节点层逐 block 流式推 SSE 事件。
+
         返回的 dict 在 toc 非空时总是覆盖 toc 中每个 section.id。
         """
         if not toc:
             return {}
 
+        async def _fire(section: Section, matches: list[Match]) -> None:
+            if on_section is None:
+                return
+            try:
+                rv = on_section(section, matches)
+                if inspect.isawaitable(rv):
+                    await rv
+            except Exception as e:
+                logger.warning(f"沈括：on_section 回调失败（{section.id}）：{e}")
+
+        async def _fire_start(section: Section) -> None:
+            if on_section_start is None:
+                return
+            try:
+                rv = on_section_start(section)
+                if inspect.isawaitable(rv):
+                    await rv
+            except Exception as e:
+                logger.warning(f"沈括：on_section_start 回调失败（{section.id}）：{e}")
+
         # 空 chunks 短路：所有 block 返空匹配
         if not chunks:
-            return {s.id: [] for s in toc}
+            result: dict[str, list[Match]] = {}
+            for s in toc:
+                await _fire_start(s)
+                result[s.id] = []
+                await _fire(s, [])
+            return result
 
         configs, rr_start = self._configs_provider()
 
@@ -77,6 +112,7 @@ class ShenKuoAgent:
 
         result: dict[str, list[Match]] = {}
         for idx, section in enumerate(toc):
+            await _fire_start(section)
             row = outline_matrix.get(section.id)
             requirement = (row.requirement if row else "") or ""
             query = f"{section.title} {requirement}".strip()
@@ -91,12 +127,13 @@ class ShenKuoAgent:
 
             if not candidates:
                 result[section.id] = []
+                await _fire(section, [])
                 continue
 
             if not configs:
                 # 无 LLM 配置：直接把 keyword_search 的 top_k 截到 top_n 作为兜底
                 # 给一个保守的 score=0 标识此结果未经 LLM 重排
-                result[section.id] = [
+                fallback = [
                     Match(
                         chunk_id=c.get("id") or c.get("chunk_id"),
                         score=0.0,
@@ -105,6 +142,8 @@ class ShenKuoAgent:
                     )
                     for c in candidates[: self.rerank_top_n]
                 ]
+                result[section.id] = fallback
+                await _fire(section, fallback)
                 continue
 
             # LLM 重排 top-n（每 block 错开 rr_index 散开 LLM 调用起点）
@@ -124,6 +163,7 @@ class ShenKuoAgent:
                 matches = []
 
             result[section.id] = matches
+            await _fire(section, matches)
 
         return result
 

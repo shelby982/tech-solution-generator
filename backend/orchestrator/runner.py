@@ -147,13 +147,59 @@ class WorkflowRunner:
             edits={"proposal": {"regenerate_targets": list(block_ids)}},
         )
 
+    async def rerun_match(self, thread_id: str) -> None:
+        """重新触发素材匹配：把 thread 状态指针拨回 GATE_OUTLINE 节点，再 ainvoke 让 graph
+        重新跑 shen_kuo_match → gate_materials。
+
+        典型场景：用户已停在 gate_materials 状态点击「素材匹配」，希望沈括按当前已有 outline
+        重新匹配（无需再走 parse / extract）。
+
+        实现：
+        - aupdate_state(as_node=GATE_OUTLINE) 让 LangGraph 把这次 update 视作 GATE_OUTLINE 节点
+          的产物 → next 自动指向 NODE_MATCH（按图边推断）。
+        - 顺便把 materials.matches 清空，避免旧匹配混入。
+        """
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
+        else:
+            # 旧 emitter 可能已 close（前次 stream 已结束），重建一份让新 stream 收事件
+            run.emitter = EventEmitter()
+        run.task = asyncio.create_task(
+            self._rerun_match_until_pause(run),
+            name=f"wf-{thread_id}-rerun-match",
+        )
+
+    async def _rerun_match_until_pause(self, run: _Run) -> None:
+        """rerun_match 的后台 task：as_node=GATE_OUTLINE 后 ainvoke 走 match → gate_materials。"""
+        from orchestrator.graph import GATE_OUTLINE
+
+        try:
+            config = {"configurable": {"thread_id": run.thread_id}}
+            async with self._checkpointer_provider() as saver:
+                graph = self._build(saver, run.emitter, thread_id=run.thread_id)
+                # 清掉旧 matches，并把指针拨回 GATE_OUTLINE 之后（next = match_node）
+                await graph.aupdate_state(
+                    config,
+                    {"materials": {"matches": {}}, "user_choice": "approve"},
+                    as_node=GATE_OUTLINE,
+                )
+                await graph.ainvoke(None, config=config)
+            await self._sync_stage(run.thread_id, graph_done=False)
+        except WorkflowCancelled:
+            await self._mark_aborted(run)
+        except Exception as e:
+            logger.exception(f"runner: thread {run.thread_id} rerun_match 异常")
+            await run.emitter.emit(events.error(str(e), retryable=False))
+
     async def abort(self, thread_id: str) -> None:
         """请求取消：设 cancel_requested。下一节点开头会抛 WorkflowCancelled。"""
         run = self._get_run(thread_id)
         run.cancel_flag = True
         # 直接走 update_state 而非 resume —— 避免 graph 已暂停在闸门时再 invoke
         async with self._checkpointer_provider() as saver:
-            graph = self._build(saver, run.emitter)
+            graph = self._build(saver, run.emitter, thread_id=run.thread_id)
             await graph.aupdate_state(
                 {"configurable": {"thread_id": thread_id}},
                 {"cancel_requested": True, "user_choice": "abort"},
@@ -162,6 +208,42 @@ class WorkflowRunner:
             await WorkflowRunRepository(db).update_stage(thread_id, "aborted")
         await run.emitter.emit(events.aborted("user_abort"))
         await run.emitter.aclose()
+
+    async def pause(self, thread_id: str) -> None:
+        """生成阶段用户主动暂停：设 _Run.cancel_flag=True，generate 节点在每个 block 开始
+        前检测到后跳过剩余 block，把 stage 写为 'paused' 并 emit paused 事件，graph 在
+        GATE_PAUSE 闸门停下，等用户决定继续 / 跳评审 / 放弃。"""
+        run = self._get_run(thread_id)
+        run.cancel_flag = True
+        # 不动 user_choice，因为暂停期间用户还没做决定。
+
+    async def skip_to_review(self, thread_id: str) -> None:
+        """从 GATE_PAUSE 出来，跳到评审节点（用已生成内容继续评审）。"""
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
+        elif run.emitter._closed:
+            run.emitter = EventEmitter()
+        run.cancel_flag = False  # 进评审前清掉暂停标记
+        run.task = asyncio.create_task(
+            self._resume_until_pause(run, {"user_choice": "skip_to_review"}),
+            name=f"wf-{thread_id}-skip-to-review",
+        )
+
+    async def resume_generation(self, thread_id: str) -> None:
+        """从 GATE_PAUSE 出来，回到 generate 节点继续生成（已生成 block 会被跳过）。"""
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
+        elif run.emitter._closed:
+            run.emitter = EventEmitter()
+        run.cancel_flag = False
+        run.task = asyncio.create_task(
+            self._resume_until_pause(run, {"user_choice": "resume", "stage": "generating"}),
+            name=f"wf-{thread_id}-resume-gen",
+        )
 
     async def recover(self, thread_id: str) -> None:
         """显式恢复：用现有 thread_id 继续跑（崩溃恢复用）。"""
@@ -193,7 +275,7 @@ class WorkflowRunner:
         """初次跑：从 START 到第一个闸门。"""
         try:
             async with self._checkpointer_provider() as saver:
-                graph = self._build(saver, run.emitter)
+                graph = self._build(saver, run.emitter, thread_id=run.thread_id)
                 await graph.ainvoke(
                     state,
                     config={"configurable": {"thread_id": run.thread_id}},
@@ -210,7 +292,7 @@ class WorkflowRunner:
         try:
             config = {"configurable": {"thread_id": run.thread_id}}
             async with self._checkpointer_provider() as saver:
-                graph = self._build(saver, run.emitter)
+                graph = self._build(saver, run.emitter, thread_id=run.thread_id)
                 if patch:
                     await graph.aupdate_state(config, patch)
                 await graph.ainvoke(None, config=config)
@@ -256,9 +338,19 @@ class WorkflowRunner:
             raise KeyError(f"未知 thread_id：{thread_id}")
         return run
 
-    def _build(self, saver: BaseCheckpointSaver, emitter: Optional[EventEmitter]):
+    def _build(
+        self,
+        saver: BaseCheckpointSaver,
+        emitter: Optional[EventEmitter],
+        *,
+        thread_id: Optional[str] = None,
+    ):
         deps = self._deps_factory()
-        return build_graph(deps, emitter=emitter, checkpointer=saver)
+        # 把 _Run.cancel_flag 闭包传给 generate 节点：用户调 pause() 时设此 flag，
+        # generate 节点在每个 block 开始前检查决定是否跳过。
+        run = self._runs.get(thread_id) if thread_id else None
+        should_cancel = (lambda: bool(run and run.cancel_flag)) if run else None
+        return build_graph(deps, emitter=emitter, checkpointer=saver, should_cancel=should_cancel)
 
 
 __all__ = ["WorkflowRunner"]

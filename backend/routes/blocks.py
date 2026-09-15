@@ -40,6 +40,16 @@ async def get_project_blocks(project_id: int):
     return JSONResponse(content=blocks)
 
 
+@router.delete("/projects/{project_id}/blocks")
+async def delete_project_blocks(project_id: int):
+    """清空指定项目的所有 blocks（前端「重新提炼」入口用）。"""
+    from services.block_store import delete_blocks_by_project
+
+    async with get_db() as db:
+        await delete_blocks_by_project(db, project_id)
+    return JSONResponse(content={"project_id": project_id, "status": "cleared"})
+
+
 # ── GET /api/blocks/{block_id}/matched-sources ───────────
 
 @router.get("/blocks/{block_id}/matched-sources")

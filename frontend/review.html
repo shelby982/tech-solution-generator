@@ -5,23 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · 评审报告</title>
     <link rel="stylesheet" href="./assets/styles.css" />
-    <link rel="stylesheet" href="./assets/review.css" />
+    <link rel="stylesheet" href="./assets/review.css?v=2026-06-22h" />
   </head>
   <body>
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
-          <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
-          <nav class="process-tabs" aria-label="项目流程">
-            <a class="process-tab" href="/project-init" id="tab-init">项目信息</a>
-            <a class="process-tab" href="/workbench" id="tab-workbench">材料撰写</a>
-            <a class="process-tab active" href="/review">评审报告</a>
+          <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
+          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
+            <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
+            <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
+            <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
+            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
           </nav>
           <div class="project-actions">
-            <span id="thread-id-display" class="thread-id-display"></span>
+            <div class="model-selector-wrap">
+              <button class="model-selector-btn" id="model-selector-btn" type="button">
+                <span class="model-dot"></span>
+                <span id="model-selector-label">Sonnet 4.6</span>
+                <span style="font-size:10px;color:var(--muted)">▾</span>
+              </button>
+              <div class="model-dropdown" id="model-dropdown">
+                <div class="model-dropdown-header">提炼模型</div>
+                <div class="model-list" id="model-list"></div>
+                <div class="model-dropdown-footer">
+                  <button class="btn-add-config" id="btn-add-config" type="button">
+                    <span class="btn-add-config-left">
+                      <span class="btn-add-config-plus">＋</span>
+                      <span>添加 API 配置</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </header>
 
+        <div class="review-content">
         <section class="review-banner" id="review-banner" hidden>
           <div class="banner-cell">
             <div class="banner-label">总分</div>
@@ -41,9 +61,17 @@
           </div>
         </section>
 
-        <section class="review-recover" id="review-recover" hidden>
-          <span id="recover-msg">检测到未完成工作流。</span>
-          <button type="button" class="btn-primary" id="btn-recover">恢复</button>
+        <section class="review-progress" id="review-progress" hidden>
+          <div class="rev-progress-row" data-agent="wang_anshi">
+            <span class="rev-progress-label">王安石（技术）</span>
+            <div class="rev-progress-track"><div class="rev-progress-bar"></div></div>
+            <span class="rev-progress-meta">0/0</span>
+          </div>
+          <div class="rev-progress-row" data-agent="bao_zheng">
+            <span class="rev-progress-label">包拯（合规）</span>
+            <div class="rev-progress-track"><div class="rev-progress-bar"></div></div>
+            <span class="rev-progress-meta">0/0</span>
+          </div>
         </section>
 
         <section class="review-actions">
@@ -55,17 +83,25 @@
           </div>
         </section>
 
-        <section class="review-stage" id="review-stage">
-          <span class="stage-label">当前阶段</span>
-          <span class="stage-value" id="stage-value">—</span>
+        <section class="review-body">
+          <aside class="review-outline" id="review-outline">
+            <div class="review-outline-head">
+              <span class="review-outline-title">章节目录</span>
+              <div class="review-outline-actions">
+                <button type="button" id="btn-outline-all" class="btn-outline-mini">全选</button>
+                <button type="button" id="btn-outline-none" class="btn-outline-mini">清空</button>
+              </div>
+            </div>
+            <nav class="review-outline-list" id="review-outline-list" aria-label="章节多选"></nav>
+          </aside>
+          <section class="review-grid" id="review-grid">
+            <p class="muted">加载评审快照中…</p>
+          </section>
         </section>
-
-        <section class="review-grid" id="review-grid">
-          <p class="muted">加载评审快照中…</p>
-        </section>
+        </div>
       </main>
     </div>
 
-    <script type="module" src="./assets/review.js"></script>
+    <script type="module" src="./assets/review.js?v=2026-06-22e"></script>
   </body>
 </html>
