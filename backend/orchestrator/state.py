@@ -9,6 +9,10 @@
 - 王安石：只写 review.tech_findings
 - 包拯：只写 review.compliance_findings
 - Orchestrator 汇总节点：只写 review.report
+- 编排闭环节点：collect_gaps 写 materials.matches / proposal.material_requests
+-               check_convergence 写 review.convergence
+-               build_feedback 写 review.feedback / proposal.material_requests /
+-                               proposal.regenerate_targets / iteration
 
 state 是易失中间态（每次工作流跑产出的 outline_matrix/matches/findings 都进 checkpoint）；
 最终 proposal.blocks 完成后由 routes 写回 blocks 表作为正式数据。
@@ -42,13 +46,17 @@ class ProposalState(TypedDict, total=False):
     """诸葛亮产出。"""
     blocks: dict[str, dict]            # block_id → BlockOutput.to_dict()
     regenerate_targets: list[str]
+    updated_blocks: list[str]          # 本轮实际生成的 block（评审范围）
+    material_requests: dict[str, list[dict]]   # block_id → [{query, reason}]
 
 
 class ReviewState(TypedDict, total=False):
-    """两位评审 agent + aggregate 节点产出。"""
+    """两位评审 agent + aggregate/判定/转译节点产出。"""
     tech_findings: dict[str, dict]         # block_id → Finding.to_dict()
     compliance_findings: dict[str, dict]
     report: dict                            # GlobalReport.to_dict()
+    feedback: dict[str, dict]               # block_id → {issues, scores}
+    convergence: dict                       # {status, unconverged_blocks, reason}
 
 
 class UserConfig(TypedDict, total=False):
@@ -131,6 +139,7 @@ class WorkflowState(TypedDict, total=False):
     stage: StageLiteral
     user_choice: UserChoiceLiteral
     cancel_requested: bool
+    iteration: int                     # 协同闭环迭代轮次，首轮为 0
 
     # ── 各 agent 产出 ────────────────────────────
     spec: Annotated[SpecState, _merge_dict]

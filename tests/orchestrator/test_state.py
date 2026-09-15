@@ -131,3 +131,51 @@ def test_merge_state_handles_empty_base():
     patch: WorkflowState = {"stage": "parsing"}
     result = merge_state({}, patch)
     assert result == patch
+
+
+def test_merge_state_merges_new_proposal_fields():
+    """material_requests / updated_blocks 走 proposal 的浅 merge，不冲掉 blocks。"""
+    from orchestrator.state import merge_state
+
+    base = {"proposal": {"blocks": {"s1": {"content": "x"}}, "regenerate_targets": []}}
+    patch = {
+        "proposal": {
+            "material_requests": {"s1": [{"query": "业绩证明", "reason": "缺证据"}]},
+            "updated_blocks": ["s1"],
+        }
+    }
+
+    merged = merge_state(base, patch)
+
+    assert merged["proposal"]["blocks"] == {"s1": {"content": "x"}}
+    assert merged["proposal"]["material_requests"] == {
+        "s1": [{"query": "业绩证明", "reason": "缺证据"}]
+    }
+    assert merged["proposal"]["updated_blocks"] == ["s1"]
+
+
+def test_merge_state_merges_new_review_fields():
+    """feedback / convergence 走 review 的浅 merge，不冲掉 findings。"""
+    from orchestrator.state import merge_state
+
+    base = {"review": {"tech_findings": {"s1": {"score": 50}}}}
+    patch = {
+        "review": {
+            "feedback": {"s1": {"issues": [], "scores": {"tech": 50, "comp": 40}}},
+            "convergence": {"status": "refine", "unconverged_blocks": ["s1"]},
+        }
+    }
+
+    merged = merge_state(base, patch)
+
+    assert merged["review"]["tech_findings"] == {"s1": {"score": 50}}
+    assert merged["review"]["feedback"]["s1"]["scores"]["tech"] == 50
+    assert merged["review"]["convergence"]["status"] == "refine"
+
+
+def test_iteration_is_scalar_and_overwrites():
+    """iteration 是标量，patch 直接覆盖而非合并。"""
+    from orchestrator.state import merge_state
+
+    assert merge_state({"iteration": 1}, {"iteration": 2})["iteration"] == 2
+    assert merge_state({}, {"iteration": 1})["iteration"] == 1
