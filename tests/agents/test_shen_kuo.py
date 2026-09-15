@@ -214,3 +214,61 @@ async def test_match_query_combines_title_and_requirement(monkeypatch):
     await agent.match(toc=toc, outline_matrix=matrix, chunks=chunks)
     assert "数据库性能" in captured_query["q"]
     assert "支持百万 QPS" in captured_query["q"]
+
+
+async def test_retrieve_for_empty_inputs_returns_empty():
+    """空请求 / 空语料都返回 {}，不抛错。"""
+    agent = ShenKuoAgent(configs_provider=lambda: ([], 0))
+
+    assert await agent.retrieve_for({}, [{"id": 1, "content": "x"}]) == {}
+    assert await agent.retrieve_for({"s1": [{"query": "q"}]}, []) == {}
+
+
+async def test_retrieve_for_without_llm_falls_back_to_keyword():
+    """无 LLM 配置时降级为纯关键词截断，与 match() 的降级行为一致。"""
+    agent = ShenKuoAgent(configs_provider=lambda: ([], 0), rerank_top_n=2)
+    chunks = [
+        {"id": 1, "content": "配电柜温升试验报告 型式试验"},
+        {"id": 2, "content": "无关内容 园林绿化"},
+        {"id": 3, "content": "配电柜温升 试验数据"},
+    ]
+
+    result = await agent.retrieve_for({"s1": [{"query": "配电柜温升试验"}]}, chunks)
+
+    assert "s1" in result
+    assert len(result["s1"]) <= 2
+    assert all(m.score == 0.0 for m in result["s1"])
+    assert all("未配置 LLM" in m.reason for m in result["s1"])
+
+
+async def test_retrieve_for_batches_all_requests():
+    """多个 block 的请求在一次调用里处理，每块各得结果。"""
+    agent = ShenKuoAgent(configs_provider=lambda: ([], 0), rerank_top_n=2)
+    chunks = [
+        {"id": 1, "content": "配电柜温升试验报告"},
+        {"id": 2, "content": "安全生产许可证 复印件"},
+        # BM25Okapi 在 2 篇语料下所有 idf 恰为 0（rank_bm25 只对负 idf 做
+        # epsilon 兜底），keyword_search 的 `scores[i] > 0` 过滤会全部滤掉。
+        # 补一条无关键干扰项使语料 ≥3 篇，让本用例真正测到批处理行为。
+        {"id": 3, "content": "无关内容 园林绿化"},
+    ]
+
+    result = await agent.retrieve_for(
+        {
+            "s1": [{"query": "配电柜温升试验"}],
+            "s2": [{"query": "安全生产许可证"}],
+        },
+        chunks,
+    )
+
+    assert set(result.keys()) == {"s1", "s2"}
+
+
+async def test_retrieve_for_skips_blank_queries():
+    """空 query 的请求被跳过，不产生检索。"""
+    agent = ShenKuoAgent(configs_provider=lambda: ([], 0))
+    chunks = [{"id": 1, "content": "配电柜温升试验报告"}]
+
+    result = await agent.retrieve_for({"s1": [{"query": "   "}, {}]}, chunks)
+
+    assert result == {}

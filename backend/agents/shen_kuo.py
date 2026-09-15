@@ -167,5 +167,90 @@ class ShenKuoAgent:
 
         return result
 
+    # ── retrieve_for ───────────────────────────
+
+    async def retrieve_for(
+        self,
+        requests_by_block: dict[str, list[dict]],
+        chunks: list[dict],
+    ) -> dict[str, list[Match]]:
+        """按补料请求定向检索素材 —— 收集角色的按需服务入口。
+
+        requests_by_block: {block_id: [{"query": str, "reason": str}, ...]}
+        chunks:            全语料切片
+
+        返回 {block_id: list[Match]}，只为真正检索到结果的 block 建键。
+        空入参 → 返回 {}。BM25 索引对本批次只建一次。
+
+        单条请求检索/重排失败只跳过该请求，不影响其它请求与其它 block。
+        """
+        if not requests_by_block or not chunks:
+            return {}
+
+        configs, rr_start = self._configs_provider()
+        bm25_index, _ = build_bm25_index(chunks)
+
+        result: dict[str, list[Match]] = {}
+        idx = 0
+
+        for block_id, requests in requests_by_block.items():
+            merged: dict[object, Match] = {}
+
+            for req in (requests or []):
+                query = (req.get("query") or "").strip()
+                if not query:
+                    continue
+
+                candidates = keyword_search(
+                    chunks, query=query, top_k=self.keyword_top_k,
+                    bm25_index=bm25_index,
+                )
+                rr_index = (rr_start + idx) % max(len(configs), 1)
+                idx += 1
+
+                if not candidates:
+                    continue
+
+                if not configs:
+                    # 与 match() 的降级一致：关键词 top_n 截断，score=0 标识未重排
+                    for c in candidates[: self.rerank_top_n]:
+                        cid = c.get("id") or c.get("chunk_id")
+                        if cid not in merged:
+                            merged[cid] = Match(
+                                chunk_id=cid,
+                                score=0.0,
+                                reason="(未配置 LLM，仅关键词检索结果)",
+                                hit_points=[],
+                            )
+                    continue
+
+                try:
+                    matches = await llm_rerank(
+                        candidates,
+                        query=query,
+                        requirement=(req.get("reason") or query),
+                        top_n=self.rerank_top_n,
+                        configs=configs,
+                        rr_start_index=rr_index,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"沈括：补料请求 {query!r}（{block_id}）重排异常，跳过：{e}"
+                    )
+                    continue
+
+                # 同一 chunk 被多条请求命中时保留高分
+                for m in matches:
+                    existing = merged.get(m.chunk_id)
+                    if existing is None or m.score > existing.score:
+                        merged[m.chunk_id] = m
+
+            if merged:
+                result[block_id] = sorted(
+                    merged.values(), key=lambda x: x.score, reverse=True,
+                )
+
+        return result
+
 
 __all__ = ["ShenKuoAgent"]
