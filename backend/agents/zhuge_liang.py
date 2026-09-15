@@ -33,6 +33,32 @@ _DIAGRAM_PLACEHOLDER_RE = re.compile(
 )
 
 
+# 大纲里的"待补充"占位符：写作阶段发现欠缺的外部素材/数据，
+# 直接转成补料请求（见 spec §4.6 的补料请求抽取说明），省掉一次 LLM 调用。
+_MATERIAL_PLACEHOLDER_RE = re.compile(r"【待补充[：:]([^】]+)】")
+
+
+def _collect_material_requests(outline: str) -> list[dict]:
+    """把写作大纲中的 【待补充：xx】 占位符转成补料请求（去重，保序）。
+
+    返回 [{"query": xx, "reason": "..."}]；无占位符或大纲为空时返回 []。
+    """
+    if not outline:
+        return []
+    seen: set[str] = set()
+    requests: list[dict] = []
+    for m in _MATERIAL_PLACEHOLDER_RE.finditer(outline):
+        query = m.group(1).strip()
+        if not query or query in seen:
+            continue
+        seen.add(query)
+        requests.append({
+            "query": query,
+            "reason": "写作大纲中的待补充占位符",
+        })
+    return requests
+
+
 # per-block 并发上限：默认 1（按章节顺序逐个生成，让用户能看到一章接一章的流式进度，
 # 同时点击暂停时只需等当前一章 LLM 流完成即可立即停下，不会有 5 个并发还在跑）。
 # 如需提速可通过 env 覆盖到更高并发。
@@ -291,6 +317,7 @@ class ZhugeLiangAgent:
             outline=outline or "",
             sources=sources,
             needs_diagram=needs_diagram,
+            material_requests=_collect_material_requests(outline or ""),
         )
 
     # ── 辅助 ──────────────────────────────────

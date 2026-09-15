@@ -56,6 +56,7 @@ class BlockOutput:
     outline: str = ""            # 写作大纲（工作流中间态）
     content: str = ""            # 最终正文
     sources: list[Source] = field(default_factory=list)
+    material_requests: list[dict] = field(default_factory=list)  # [{query, reason}]，工作流中间态
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +66,7 @@ class BlockOutput:
             "outline": self.outline,
             "content": self.content,
             "sources": [s.to_dict() for s in self.sources],
+            "material_requests": [dict(r) for r in self.material_requests],
         }
 
     @classmethod
@@ -76,6 +78,9 @@ class BlockOutput:
             outline=d.get("outline", ""),
             content=d.get("content", ""),
             sources=[Source.from_dict(s) for s in d.get("sources", [])],
+            material_requests=[
+                dict(r) for r in d.get("material_requests", []) if isinstance(r, dict)
+            ],
         )
 
 

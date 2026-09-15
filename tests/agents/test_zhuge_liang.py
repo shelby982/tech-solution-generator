@@ -284,3 +284,90 @@ async def test_generate_concurrent_blocks_isolated_on_single_failure(monkeypatch
             continue
         assert results[bid].content, f"{bid} 的 content 不应为空"
         assert results[bid].outline, f"{bid} 的 outline 不应为空"
+
+
+def test_collect_material_requests_extracts_placeholders():
+    """从写作大纲的 【待补充：xx】 占位符抽取补料请求。"""
+    from agents.zhuge_liang import _collect_material_requests
+
+    outline = (
+        "## 配电系统\n"
+        "- 引用【待补充：配电柜型式试验报告】证明绝缘性能\n"
+        "- 参见【待补充：近三年同类项目业绩证明合同】\n"
+        "- 交付周期【待补充：配电柜型式试验报告】\n"
+    )
+
+    reqs = _collect_material_requests(outline)
+
+    assert [r["query"] for r in reqs] == [
+        "配电柜型式试验报告",
+        "近三年同类项目业绩证明合同",
+    ]
+    assert all(r["reason"] for r in reqs)
+
+
+def test_collect_material_requests_handles_empty_and_none():
+    """无大纲 / 无占位符都返回空列表，不抛错。"""
+    from agents.zhuge_liang import _collect_material_requests
+
+    assert _collect_material_requests("") == []
+    assert _collect_material_requests("## 纯文字大纲，没有占位符") == []
+
+
+def test_block_output_carries_material_requests():
+    """BlockOutput 的 material_requests 能完整往返。"""
+    from domain.proposal import BlockOutput
+
+    out = BlockOutput(
+        block_id="s1",
+        kind="tech",
+        content="正文",
+        material_requests=[{"query": "业绩证明", "reason": "缺证据"}],
+    )
+
+    d = out.to_dict()
+    assert d["material_requests"] == [{"query": "业绩证明", "reason": "缺证据"}]
+    assert BlockOutput.from_dict(d).material_requests == d["material_requests"]
+
+
+def test_block_output_from_dict_tolerates_legacy_payload():
+    """老 checkpoint 里的 BlockOutput 没有 material_requests，反序列化不炸。"""
+    from domain.proposal import BlockOutput
+
+    legacy = {"block_id": "s1", "kind": "tech", "content": "正文", "sources": []}
+    assert BlockOutput.from_dict(legacy).material_requests == []
+
+
+@pytest.mark.asyncio
+async def test_generate_tech_attaches_material_requests_from_outline(monkeypatch):
+    """_generate_tech 产出的 BlockOutput 必须挂上大纲占位符抽取的补料请求。
+
+    上述两个单测分别验证了抽取函数与 BlockOutput 字段，但都不覆盖二者之间的
+    挂接 —— 删掉 _generate_tech 里的 material_requests=... 调用，前面全部用例
+    仍然全绿，补料功能会静默失效。
+    """
+    monkeypatch.setenv("LLM_MODE", "mock")
+
+    async def fake_outline(*a, **kw):
+        return "## 配电系统\n- 引用【待补充：配电柜型式试验报告】\n"
+
+    async def fake_block_write(**kwargs):
+        yield "正文"
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "generate_section_outline", fake_outline)
+    monkeypatch.setattr(infra.llm, "dispatch_block_write", fake_block_write)
+
+    agent = ZhugeLiangAgent(configs_provider=_fake_configs)
+    results, _ = await agent.generate(
+        outline_matrix={
+            "s1": OutlineMatrixRow(
+                block_id="s1", title="配电系统", requirement="绝缘性能",
+            ),
+        },
+        materials={"s1": []},
+    )
+
+    assert results["s1"].material_requests == [
+        {"query": "配电柜型式试验报告", "reason": "写作大纲中的待补充占位符"},
+    ]
