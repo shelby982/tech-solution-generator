@@ -3,3 +3,14 @@ __pycache__/
 *.pyc
 backend/.tmp_uploads/
 .api_config.json
+.gstack/
+
+# ── 运行时数据 ────────────────────────────────
+# SQLite 数据库 + 用户上传的投标文件。入库会让仓库膨胀近百 MB，
+# 且每次运行都会产生二进制脏改动。
+backend/data/
+
+# ── 本地工具目录 ──────────────────────────────
+.superpowers/
+.planning/
+.DS_Store
