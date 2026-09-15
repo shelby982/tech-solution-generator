@@ -80,3 +80,56 @@ async def test_mock_letter_response_contains_required_placeholders(monkeypatch):
     text = await generate_letter_content([cfg], 0, block)
     assert "【招标人/采购人名称】" in text
     assert "【公司全称】" in text
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：dispatch_block_write 注入评审意见
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dispatch_block_write_injects_feedback(monkeypatch):
+    """feedback_text 非空时注入 extra_prompt，内容出现在实际发出的 prompt 里。"""
+    captured = {}
+
+    async def _fake_stream(**kwargs):
+        captured.update(kwargs)
+        yield "ok"
+
+    import infra.llm.dispatcher as dispatcher
+    monkeypatch.setattr(dispatcher, "dispatch_stream_generate", _fake_stream)
+
+    tokens = [
+        t async for t in dispatcher.dispatch_block_write(
+            configs=[], rr_start_index=0, title="配电系统",
+            requirement="提供业绩证明", chunks=[],
+            feedback_text="【上轮评审意见】\n1. [CRITICAL] 缺业绩证明",
+        )
+    ]
+
+    assert tokens == ["ok"]
+    assert "上轮评审意见" in captured["extra_prompt"]
+    assert "提供业绩证明" in captured["extra_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_block_write_without_feedback_unchanged(monkeypatch):
+    """不传 feedback_text 时，prompt 内容与改造前一致。"""
+    captured = {}
+
+    async def _fake_stream(**kwargs):
+        captured.update(kwargs)
+        yield "ok"
+
+    import infra.llm.dispatcher as dispatcher
+    monkeypatch.setattr(dispatcher, "dispatch_stream_generate", _fake_stream)
+
+    async for _ in dispatcher.dispatch_block_write(
+        configs=[], rr_start_index=0, title="配电系统",
+        requirement="提供业绩证明", chunks=[],
+    ):
+        pass
+
+    assert "上轮评审意见" not in captured["extra_prompt"]
+    # 逐字节钉死改造前的 prompt —— 仅断言"不含评审意见"是弱断言：
+    # 把它改成无条件拼接 f"\n\n{feedback_text}" 也照样通过。
+    assert captured["extra_prompt"] == "【应标要求】\n提供业绩证明\n\n"

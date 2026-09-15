@@ -306,10 +306,14 @@ async def dispatch_block_write(
     requirement: str,
     chunks: list[dict],
     target_words: int = 600,
+    feedback_text: str = "",
 ):
     """
     为单个 block 流式生成正文内容。
     将 requirement + chunks 拼入 extra_prompt，复用 dispatch_stream_generate。
+
+    feedback_text：协同闭环回灌的上一轮评审意见（已由
+    ``agents.prompts.format_feedback_block`` 格式化）。为空时行为与改造前一致。
     """
     snippets = "\n".join(
         f"- {c['content'][:200]}" for c in chunks
@@ -319,6 +323,8 @@ async def dispatch_block_write(
         extra_prompt += f"【应标要求】\n{requirement}\n\n"
     if snippets:
         extra_prompt += f"【参考素材】\n{snippets}"
+    if feedback_text:
+        extra_prompt += f"\n\n{feedback_text}"
 
     async for token in dispatch_stream_generate(
         configs=configs,
