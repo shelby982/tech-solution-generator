@@ -531,6 +531,13 @@ def test_parse_finding_reads_material_fields():
 
 （`test_wang_anshi.py` 若未 `import json` 需在文件头补上。）
 
+⚠️ 执行时发现的计划缺陷：还要给 `tests/agents/test_bao_zheng.py` 追加**镜像的**
+同款测试（断言 `needs_material` / `material_query` 的解析与缺省退化）。原计划只
+覆盖了王安石一侧 —— 而两者的 `_parse_finding` 实现逐字节相同，把包拯那侧改坏
+不会有任何测试报警。变异实测：将 bao_zheng 的解析改为恒返回 False/""，全量
+`209 passed` 仍全绿。合规视角恰是最常提出补料需求的一方（缺资质证书、业绩证明、
+检测报告），漏测方向是反的。
+
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `PYTHONPATH=backend pytest tests/agents/test_prompts.py -k material_fields tests/agents/test_wang_anshi.py -k material_fields -v`

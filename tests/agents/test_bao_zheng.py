@@ -235,3 +235,43 @@ async def test_review_supports_sync_emitter(monkeypatch):
     await agent.review(blocks=blocks, outline_matrix=matrix, emitter=sync_emitter)
     assert "review_block_start" in captured
     assert "review_block_done" in captured
+
+
+# ─────────────────────────────────────────────
+# 补料字段解析
+# ─────────────────────────────────────────────
+
+def test_parse_finding_reads_material_fields():
+    """_parse_finding 解析 needs_material / material_query。
+
+    合规视角是最常提出补料需求的一方（缺资质证书、业绩证明、检测报告），
+    这里必须与王安石同样有回归保护 —— 二者 _parse_finding 的实现逐字节相同，
+    但只覆盖其一的话，事后单独改坏包拯这一侧不会有任何测试报警。
+    """
+    agent = BaoZhengAgent(configs_provider=lambda: ([], 0))
+    raw = json.dumps({
+        "score": 55,
+        "issues": [
+            {
+                "severity": "critical",
+                "point": "未提供近三年同类项目业绩证明",
+                "suggestion": "补充业绩证明材料",
+                "needs_material": True,
+                "material_query": "近三年同类项目业绩证明合同",
+            },
+            {
+                "severity": "low",
+                "point": "章节编号格式不统一",
+                "suggestion": "统一编号",
+            },
+        ],
+        "strengths": [],
+    })
+
+    finding = agent._parse_finding("s1", raw)
+
+    assert finding.issues[0].needs_material is True
+    assert finding.issues[0].material_query == "近三年同类项目业绩证明合同"
+    # 缺省字段必须退化为"非补料问题"，否则会把格式类问题误转成检索请求
+    assert finding.issues[1].needs_material is False
+    assert finding.issues[1].material_query == ""
