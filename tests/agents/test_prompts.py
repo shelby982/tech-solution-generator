@@ -123,3 +123,18 @@ def test_review_users_handle_none_block_fields():
     comp_user = build_compliance_review_user(block, matrix)
     assert "None" not in tech_user
     assert "None" not in comp_user
+
+
+def test_review_prompts_request_material_fields():
+    """两位评审的 user prompt 都必须要求输出 needs_material / material_query。"""
+    from agents.prompts import build_compliance_review_user, build_tech_review_user
+
+    block = {"block_id": "s1", "title": "配电系统", "content": "正文", "kind": "tech"}
+    row = {"requirement": "提供业绩证明", "veto_items": "★必须提供 3 年内业绩"}
+
+    for prompt in (
+        build_tech_review_user(block, row),
+        build_compliance_review_user(block, row),
+    ):
+        assert "needs_material" in prompt
+        assert "material_query" in prompt

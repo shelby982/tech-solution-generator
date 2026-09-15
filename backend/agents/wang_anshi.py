@@ -186,6 +186,8 @@ class WangAnshiAgent:
                     severity=str(item.get("severity", "medium")),
                     point=str(item.get("point", "")),
                     suggestion=str(item.get("suggestion", "")),
+                    needs_material=bool(item.get("needs_material", False)),
+                    material_query=str(item.get("material_query", "") or ""),
                 ))
 
         strengths_raw = obj.get("strengths") or []

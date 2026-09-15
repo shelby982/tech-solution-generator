@@ -235,3 +235,34 @@ async def test_review_supports_sync_emitter(monkeypatch):
     await agent.review(blocks=blocks, outline_matrix=matrix, emitter=sync_emitter)
     assert "review_block_start" in captured
     assert "review_block_done" in captured
+
+
+def test_parse_finding_reads_material_fields():
+    """_parse_finding 解析 needs_material / material_query。"""
+    agent = WangAnshiAgent(configs_provider=lambda: ([], 0))
+    raw = json.dumps({
+        "score": 60,
+        "issues": [
+            {
+                "severity": "critical",
+                "point": "未提供型式试验数据",
+                "suggestion": "补充试验报告",
+                "needs_material": True,
+                "material_query": "配电柜型式试验报告",
+            },
+            {
+                "severity": "low",
+                "point": "表述冗长",
+                "suggestion": "精简",
+            },
+        ],
+        "strengths": [],
+    })
+
+    finding = agent._parse_finding("s1", raw)
+
+    assert finding.issues[0].needs_material is True
+    assert finding.issues[0].material_query == "配电柜型式试验报告"
+    # 缺省字段必须退化为"非补料问题"，否则会把重写类问题误转成检索请求
+    assert finding.issues[1].needs_material is False
+    assert finding.issues[1].material_query == ""
