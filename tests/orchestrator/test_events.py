@@ -225,3 +225,81 @@ async def test_emitter_aclose_is_idempotent():
 
     frames = [f async for f in emitter.stream()]
     assert frames == []
+
+
+# ─────────────────────────────────────────────
+# 协同闭环事件（spec §10）
+# ─────────────────────────────────────────────
+
+def test_iteration_and_gap_events():
+    """新增的迭代/补料事件帧格式合法。"""
+    from orchestrator import events
+
+    for frame in [
+        events.iteration_start(1),
+        events.gaps_collecting("s1", "配电柜型式试验报告"),
+        events.gaps_done("s1", 3, 5),
+        events.feedback_ready({"targets": ["s1"], "material_request_count": 2, "iteration": 1}),
+    ]:
+        assert frame.startswith("event: ")
+        assert frame.endswith("\n\n")
+
+
+def test_iteration_start_frame_content():
+    """只断言帧外壳是弱断言（任何帧都成立），必须钉住事件名与载荷。"""
+    name, data = _parse_frame(events.iteration_start(2))
+    assert name == "iteration_start"
+    assert data == {"iteration": 2}
+
+
+def test_gaps_collecting_frame_content():
+    name, data = _parse_frame(
+        events.gaps_collecting("s1", "配电柜型式试验报告")
+    )
+    assert name == "gaps_collecting"
+    assert data == {"block_id": "s1", "query": "配电柜型式试验报告"}
+
+
+def test_gaps_done_frame_content():
+    name, data = _parse_frame(events.gaps_done("s1", 3, 5))
+    assert name == "gaps_done"
+    assert data == {"block_id": "s1", "new_matches": 3, "total_matches": 5}
+
+
+def test_feedback_ready_frame_content():
+    payload = {"targets": ["s1", "s3"], "material_request_count": 4, "iteration": 2}
+    name, data = _parse_frame(events.feedback_ready(payload))
+    assert name == "feedback_ready"
+    assert data == payload
+
+
+def test_convergence_event_payload():
+    """convergence 事件携带判定结果。"""
+    import json
+    from orchestrator import events
+
+    frame = events.convergence({
+        "status": "refine",
+        "unconverged_blocks": ["s1"],
+        "reason": "存在未达标 block",
+        "iteration": 1,
+    })
+
+    assert "event: convergence" in frame
+    payload = json.loads(frame.split("data: ", 1)[1].strip())
+    assert payload["status"] == "refine"
+    assert payload["unconverged_blocks"] == ["s1"]
+
+
+def test_convergence_frame_content():
+    """收敛帧的事件名与全部载荷字段都要落到位。"""
+    payload = {
+        "status": "max_iterations",
+        "unconverged_blocks": ["s1", "s2"],
+        "reason": "已达迭代上限 3 轮",
+        "iteration": 3,
+        "review_failed": False,
+    }
+    name, data = _parse_frame(events.convergence(payload))
+    assert name == "convergence"
+    assert data == payload

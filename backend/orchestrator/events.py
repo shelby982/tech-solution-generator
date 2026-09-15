@@ -181,6 +181,42 @@ def paused(reason: str, generated: int, total: int) -> str:
 
 
 # ─────────────────────────────────────────────
+# 协同闭环事件（spec §10）
+# ─────────────────────────────────────────────
+
+def iteration_start(iteration: int) -> str:
+    """进入第 N 轮迭代（collect_gaps 发出）。"""
+    return format_sse_event("iteration_start", {"iteration": int(iteration)})
+
+
+def gaps_collecting(block_id: str, query: str) -> str:
+    """正在为某 block 检索补充素材。"""
+    return format_sse_event("gaps_collecting", {
+        "block_id": block_id,
+        "query": query,
+    })
+
+
+def gaps_done(block_id: str, new_matches: int, total_matches: int) -> str:
+    """某 block 补料完成。"""
+    return format_sse_event("gaps_done", {
+        "block_id": block_id,
+        "new_matches": int(new_matches),
+        "total_matches": int(total_matches),
+    })
+
+
+def convergence(payload: dict[str, Any]) -> str:
+    """收敛判定结果。"""
+    return format_sse_event("convergence", dict(payload))
+
+
+def feedback_ready(payload: dict[str, Any]) -> str:
+    """修订指令与补料请求已生成。"""
+    return format_sse_event("feedback_ready", dict(payload))
+
+
+# ─────────────────────────────────────────────
 # EventEmitter：节点 → routes 的异步事件管道
 # ─────────────────────────────────────────────
 
@@ -249,6 +285,11 @@ __all__ = [
     "done",
     "aborted",
     "paused",
+    "iteration_start",
+    "gaps_collecting",
+    "gaps_done",
+    "convergence",
+    "feedback_ready",
     # 异步管道
     "EventEmitter",
 ]
