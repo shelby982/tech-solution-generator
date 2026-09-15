@@ -272,3 +272,61 @@ async def test_retrieve_for_skips_blank_queries():
     result = await agent.retrieve_for({"s1": [{"query": "   "}, {}]}, chunks)
 
     assert result == {}
+
+
+async def test_retrieve_for_llm_path_dedups_by_higher_score(monkeypatch):
+    """有 LLM 配置时走真实重排路径：同一 chunk 被多条请求命中要保留高分。
+
+    上面几个用例都传空 configs，走的是关键词降级分支，覆盖不到 llm_rerank
+    这条生产主路径 —— 而去重取高分、按 score 降序这两段逻辑只在主路径执行。
+    """
+    monkeypatch.setenv("LLM_MODE", "mock")
+    import json
+
+    # chunk 1 先以 9.0 命中、再以 6.0 命中 —— 高者在前，才能区分
+    # "保留高分" 与 "后者覆盖"：若高分在后，两种实现结果相同，测不出差别。
+    responses = [
+        json.dumps({"matches": [
+            {"chunk_id": 1, "score": 9.0, "reason": "高度相关", "hit_points": ["要点1"]},
+        ]}, ensure_ascii=False),
+        json.dumps({"matches": [
+            {"chunk_id": 1, "score": 6.0, "reason": "一般", "hit_points": []},
+            {"chunk_id": 2, "score": 7.0, "reason": "相关", "hit_points": []},
+        ]}, ensure_ascii=False),
+    ]
+    prompts: list[str] = []
+
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+        prompts.append(user_prompt)
+        return responses[min(len(prompts) - 1, len(responses) - 1)]
+
+    monkeypatch.setattr(
+        "infra.retrieval.rerank.generate_oneshot_openai", fake_oneshot,
+    )
+
+    agent = ShenKuoAgent(configs_provider=_fake_configs, rerank_top_n=5)
+    chunks = [
+        {"id": 1, "content": "配电柜温升试验报告 型式试验数据"},
+        {"id": 2, "content": "配电柜绝缘性能 检测报告"},
+        {"id": 3, "content": "安全生产许可证 复印件"},
+        {"id": 4, "content": "园林绿化工程 施工方案"},
+        {"id": 5, "content": "近三年同类项目业绩证明合同"},
+    ]
+
+    result = await agent.retrieve_for(
+        {"s1": [
+            {"query": "配电柜温升试验", "reason": "缺温升数据"},
+            {"query": "配电柜绝缘", "reason": "缺绝缘报告"},
+        ]},
+        chunks,
+    )
+
+    matches = result["s1"]
+    # chunk 1 被两条请求命中，保留 9.0 而非 6.0；且整体按 score 降序
+    assert [m.chunk_id for m in matches] == [1, 2]
+    assert matches[0].score == 9.0
+    assert matches[0].reason == "高度相关"
+    assert matches[0].hit_points == ["要点1"]
+    # reason 被当作 requirement 传给重排，用于判定 hit_points
+    assert "缺温升数据" in prompts[0]
+    assert "缺绝缘报告" in prompts[1]
