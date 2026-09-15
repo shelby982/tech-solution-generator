@@ -225,7 +225,16 @@ def test_iteration_is_scalar_and_overwrites():
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `PYTHONPATH=backend pytest tests/orchestrator/test_state.py -k "new_proposal_fields or new_review_fields or scalar" -v`
-Expected: FAIL — `KeyError: 'material_requests'`（前两个）
+Expected: **实际上是 3 passed，不会失败。**
+
+⚠️ 执行时发现的计划缺陷：`merge_state()` 只按字面 key 做浅 union，不认识 TypedDict
+声明；而 TypedDict 的注解在运行时被擦除 —— 新字段加不加，`merge_state` 都照常合并
+成功。上面三个用例测的是 merge_state 的既有通用行为，**在改动前也是绿的**，给不出
+回归保护。
+
+因此 Step 1 追加的测试中必须再补一个真正锁住声明的用例
+（`test_closed_loop_fields_are_declared`，断言 `__annotations__` 含新字段）：
+改动前 FAIL、改动后 PASS，这才是 Task 2 的红灯。
 
 - [ ] **Step 3: 实现**
 

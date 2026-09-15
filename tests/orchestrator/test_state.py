@@ -179,3 +179,25 @@ def test_iteration_is_scalar_and_overwrites():
 
     assert merge_state({"iteration": 1}, {"iteration": 2})["iteration"] == 2
     assert merge_state({}, {"iteration": 1})["iteration"] == 1
+
+
+# ─────────────────────────────────────────────
+# 闭环字段的声明本身
+# ─────────────────────────────────────────────
+
+def test_closed_loop_fields_are_declared():
+    """协同闭环字段必须声明在 TypedDict 上。
+
+    上面几个 merge_state 测试无法覆盖这一条：merge_state 只按字面 key 做浅
+    union，不认识 TypedDict 声明；而 TypedDict 的注解在运行时被擦除，新字段
+    加不加它都照常合并成功。所以那些测试在改动前也是绿的，给不出回归保护。
+    字段一旦被误删，唯一的运行时报错会推迟到 Task 3-11 的消费方，本用例把
+    它提前到声明处。
+    """
+    from orchestrator.state import ProposalState, ReviewState, WorkflowState
+
+    assert "updated_blocks" in ProposalState.__annotations__
+    assert "material_requests" in ProposalState.__annotations__
+    assert "feedback" in ReviewState.__annotations__
+    assert "convergence" in ReviewState.__annotations__
+    assert "iteration" in WorkflowState.__annotations__
