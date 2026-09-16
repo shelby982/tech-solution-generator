@@ -178,3 +178,95 @@ def test_format_feedback_block_empty_returns_blank():
 
     assert format_feedback_block([]) == ""
     assert format_feedback_block(None) == ""
+
+
+# ─────────────────────────────────────────────
+# build_outline_draft_user / build_spec_digest
+# ─────────────────────────────────────────────
+
+def test_outline_draft_prompt_contains_mock_routing_keyword():
+    """mock 模式靠这个关键词路由到目录 fixture，删了会让 mock/单测静默走错分支。"""
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(instruction="", doc_summary="", spec_digest="【一】")
+    assert "提炼应答文件目录" in user
+
+
+def test_outline_draft_prompt_puts_instruction_first_and_marks_priority():
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(
+        instruction="按评分项逐条拆章",
+        doc_summary="摘要",
+        spec_digest="【一】正文",
+    )
+    assert "最高优先级" in user
+    assert "按评分项逐条拆章" in user
+    # 用户要求必须排在规范书摘要之前
+    assert user.index("按评分项逐条拆章") < user.index("【一】正文")
+
+
+def test_outline_draft_prompt_truncates_instruction():
+    from agents.prompts import (
+        OUTLINE_DRAFT_INSTRUCTION_BUDGET,
+        build_outline_draft_user,
+    )
+    user = build_outline_draft_user(
+        instruction="x" * (OUTLINE_DRAFT_INSTRUCTION_BUDGET + 500),
+        doc_summary="", spec_digest="",
+    )
+    assert "x" * (OUTLINE_DRAFT_INSTRUCTION_BUDGET + 1) not in user
+    assert "x" * OUTLINE_DRAFT_INSTRUCTION_BUDGET in user
+
+
+def test_outline_draft_prompt_omits_empty_previous_and_material():
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(instruction="", doc_summary="", spec_digest="")
+    assert "上一版目录" not in user
+    assert "原始素材摘录" not in user
+
+
+def test_outline_draft_prompt_includes_previous_outline_when_given():
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(
+        instruction="", doc_summary="", spec_digest="",
+        previous_outline="- 上一版一级",
+    )
+    assert "上一版目录" in user
+    assert "- 上一版一级" in user
+
+
+def test_outline_draft_prompt_keeps_material_extension_point():
+    """本轮不读素材，但形参要留着 —— 下一轮接入时只改调用侧。"""
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(
+        instruction="", doc_summary="", spec_digest="",
+        material_digest="素材片段甲",
+    )
+    assert "原始素材摘录" in user
+    assert "素材片段甲" in user
+
+
+def test_spec_digest_respects_budget():
+    from agents.prompts import build_spec_digest
+    sections = [
+        {"title": f"章节{i}", "content": "正文" * 500}
+        for i in range(20)
+    ]
+    digest = build_spec_digest(sections, budget=2000)
+    assert len(digest) < 2000 + 100 * len(sections)  # 标题开销之外不超预算
+    assert "章节0" in digest
+
+
+def test_spec_digest_keeps_titles_for_empty_sections():
+    from agents.prompts import build_spec_digest
+    digest = build_spec_digest([
+        {"title": "空章节", "content": ""},
+        {"title": "有内容", "content": "正文"},
+    ])
+    assert "【空章节】" in digest
+    assert "正文" in digest
+
+
+def test_spec_digest_handles_empty_input():
+    from agents.prompts import build_spec_digest
+    assert build_spec_digest([]) == ""
+    assert build_spec_digest(None) == ""

@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
 from dataclasses import dataclass
 
@@ -29,16 +31,27 @@ from orchestrator.events import EventEmitter
 from orchestrator.graph import (
     GATE_MATERIALS,
     GATE_OUTLINE,
+    GATE_PAUSE,
     GATE_REPORT,
     NODE_AGGREGATE,
     NODE_COLLECT_GAPS,
     NODE_COMP_REVIEW,
     NODE_GENERATE,
     NODE_MATCH,
+    NODE_OUTLINE_DRAFT,
     NODE_TECH_REVIEW,
     GraphDeps,
     build_graph,
 )
+
+
+_FRAME_RE = re.compile(r"^event: (?P<event>[^\n]+)\ndata: (?P<data>.+)\n\n$", re.S)
+
+
+def _parse_frame(frame: str) -> tuple[str, dict]:
+    m = _FRAME_RE.match(frame)
+    assert m, f"非法 SSE 帧：{frame!r}"
+    return m.group("event"), json.loads(m.group("data"))
 
 
 # ─────────────────────────────────────────────
@@ -56,6 +69,15 @@ class _StubZhangHeng:
                 DomainSection(id="s2", level=1, title="实施计划",
                               raw_content="", special_marks=[]),
             ],
+        )
+
+    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
+                            previous_toc=None):
+        """stub 沿用规范书目录（等价降级路径），保持既有 block_id 断言不变。"""
+        from agents.zhang_heng import OutlineDraftResult
+        return OutlineDraftResult(
+            sections=[DomainSection(**s.to_dict()) for s in source_toc],
+            degraded=True, error="stub 未派生",
         )
 
     async def extract(self, toc, **kw):
@@ -526,3 +548,67 @@ async def test_partially_converged_narrows_review_scope(tmp_path):
     # s1 的历史高分必须保留 —— 被抹掉的话下一轮判定会把它读成 0 分，
     # 于是 s1 又被拖回回炉，两个 block 交替清空、永久振荡。
     assert snap.values["review"]["tech_findings"]["s1"]["score"] == 95
+
+
+# ─────────────────────────────────────────────
+# 目录派生节点接线
+# ─────────────────────────────────────────────
+
+def _edges(deps) -> set[tuple[str, str]]:
+    compiled = build_graph(deps)
+    return {(e.source, e.target) for e in compiled.get_graph().edges}
+
+
+def test_outline_draft_inserted_between_parse_and_extract():
+    """parse → outline_draft → extract：目录派生必须在正则解析之后、8 字段提炼之前。"""
+    edges = _edges(_build_deps())
+
+    assert ("zhang_heng_parse", NODE_OUTLINE_DRAFT) in edges
+    assert (NODE_OUTLINE_DRAFT, "zhang_heng_extract") in edges
+    # extract 仍直连闸门 1；parse 不再直连 extract（插节点后旧边必须断掉，
+    # 否则派生目录会被 extract 无视）
+    assert ("zhang_heng_extract", GATE_OUTLINE) in edges
+    assert ("zhang_heng_parse", "zhang_heng_extract") not in edges
+
+
+def test_interrupt_after_set_unchanged_by_outline_draft():
+    """新节点不得成为暂停点：闸门集合仍是原来那四个。"""
+    compiled = build_graph(_build_deps())
+
+    assert list(compiled.interrupt_after_nodes) == [
+        GATE_OUTLINE, GATE_MATERIALS, GATE_PAUSE, GATE_REPORT,
+    ]
+
+
+async def test_outline_gate_emits_draft_frames_and_snapshot_fields(tmp_path):
+    """跑到闸门 1：先推 outline_draft 两帧，闸门快照带回提炼要求与版本号。"""
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid"}}
+    emitter = EventEmitter()
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(_build_deps(), emitter=emitter, checkpointer=saver)
+        await graph.ainvoke(
+            {"project_id": 1, "config": {"outline_instruction": "按评分项拆章"}},
+            config=config,
+        )
+        snap = await graph.aget_state(config)
+        assert snap.next == (NODE_MATCH,)
+
+    await emitter.aclose()
+    frames = [_parse_frame(f) async for f in emitter.stream()]
+    names = [n for n, _ in frames]
+    assert "outline_draft_start" in names
+    assert names.index("outline_draft_start") < names.index("outline_draft")
+    assert names.index("outline_draft") < names.index("gate_open")
+
+    draft = dict(frames)["outline_draft"]
+    assert draft["revision"] == 1
+    assert [s["id"] for s in draft["toc"]] == ["s1", "s2"]
+
+    gate = dict(frames)["gate_open"]
+    assert gate["gate"] == "review_outline"
+    assert gate["snapshot"]["outline_instruction"] == "按评分项拆章"
+    assert gate["snapshot"]["outline_revision"] == 1
+    assert gate["snapshot"]["outline_error"] == "stub 未派生"
+    assert [s["id"] for s in gate["snapshot"]["toc"]] == ["s1", "s2"]

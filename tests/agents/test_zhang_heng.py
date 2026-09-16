@@ -177,3 +177,218 @@ async def test_extract_handles_dispatch_error_per_section(monkeypatch):
     assert matrix["s1"].error == ""
     assert matrix["s1"].requirement == "ok"
     assert "失败" in matrix["s2"].error or "mock" in matrix["s2"].error
+
+
+# ─────────────────────────────────────────────
+# draft_outline
+# ─────────────────────────────────────────────
+
+def _no_configs():
+    return ([], 0)
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_degrades_without_llm_configs():
+    """无 LLM 配置时沿用规范书目录，不抛错，error 写明原因。"""
+    agent = ZhangHengAgent(configs_provider=_no_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="技术方案", raw_content="正文",
+                      special_marks=["★"]),
+    ]
+
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is True
+    assert "未配置模型" in result.error
+    assert [(s.id, s.level, s.title) for s in result.sections] == [("s1", 1, "技术方案")]
+    # 降级路径要原样带上 raw_content / special_marks，extract 仍能正常跑
+    assert result.sections[0].raw_content == "正文"
+    assert result.sections[0].special_marks == ["★"]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_degrades_on_empty_source_toc():
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    result = await agent.draft_outline([])
+    assert result.degraded is True
+    assert result.sections == []
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_degrades_when_dispatch_raises(monkeypatch):
+    async def _boom(configs, rr_start, payload):
+        raise RuntimeError("全部 API 失败")
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _boom)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is True
+    assert "全部 API 失败" in result.error
+    assert [s.title for s in result.sections] == ["技术方案"]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_degrades_when_nodes_unparsable(monkeypatch):
+    async def _garbage(configs, rr_start, payload):
+        return {"nodes": ["不是 dict", {"title": "  "}]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _garbage)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is True
+    assert "无法解析" in result.error
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_degrades_when_too_few_top_level(monkeypatch):
+    """一级章节 < MIN_TOP_LEVEL_NODES 视为目录不可信，整体降级。"""
+    async def _thin(configs, rr_start, payload):
+        return {"nodes": [{"level": 1, "title": "唯一一级"}]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _thin)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is True
+    assert "结构不完整" in result.error
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_builds_hierarchical_ids(monkeypatch):
+    async def _tree(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "项目理解"},
+            {"level": 2, "parent": 0, "title": "需求理解"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 2, "parent": 2, "title": "架构设计"},
+            {"level": 3, "parent": 3, "title": "数据层"},
+            {"level": 1, "title": "服务保障"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _tree)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="正文")]
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is False
+    assert [(s.id, s.level) for s in result.sections] == [
+        ("s1", 1), ("s1.1", 2), ("s2", 1), ("s2.1", 2), ("s2.1.1", 3), ("s3", 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_grounds_raw_content_and_inherits_marks(monkeypatch):
+    """派生章节靠 BM25 挂回规范书原文，raw_content 与 ★/▲ 都从原文章节继承。"""
+    async def _tree(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "技术方案"},
+            {"level": 1, "title": "实施计划"},
+            {"level": 1, "title": "售后服务"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _tree)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="技术方案要求",
+                      raw_content="系统须采用微服务架构。", special_marks=["★"]),
+        DomainSection(id="s2", level=1, title="实施计划要求",
+                      raw_content="工期为 90 日历天。", special_marks=[]),
+    ]
+    result = await agent.draft_outline(source)
+
+    by_title = {s.title: s for s in result.sections}
+    assert "微服务" in by_title["技术方案"].raw_content
+    assert by_title["技术方案"].special_marks == ["★"]
+    assert "90 日历天" in by_title["实施计划"].raw_content
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_passes_instruction_into_prompt(monkeypatch):
+    """用户提炼要求必须真的进 prompt，且带最高优先级标注。"""
+    seen = {}
+
+    async def _capture(configs, rr_start, payload):
+        seen.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "A"}, {"level": 1, "title": "B"},
+            {"level": 1, "title": "C"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _capture)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="正文")]
+    await agent.draft_outline(source, instruction="按评分项逐条拆章", doc_summary="项目摘要")
+
+    assert seen["instruction"] == "按评分项逐条拆章"
+    assert seen["doc_summary"] == "项目摘要"
+    assert "技术方案" in seen["spec_digest"]
+    # 本轮不读素材，扩展点保留但恒为空
+    assert seen["material_digest"] == ""
+    assert seen["previous_outline"] == ""
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_passes_previous_outline_on_redraft(monkeypatch):
+    """整版重出时把上一版目录喂回 prompt，迭代才有连续性。"""
+    seen = {}
+
+    async def _capture(configs, rr_start, payload):
+        seen.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "A"}, {"level": 1, "title": "B"},
+            {"level": 1, "title": "C"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _capture)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+    previous = [
+        DomainSection(id="s1", level=1, title="上一版一级", raw_content=""),
+        DomainSection(id="s1.1", level=2, title="上一版二级", raw_content=""),
+    ]
+    await agent.draft_outline(source, previous_toc=previous)
+
+    assert "上一版一级" in seen["previous_outline"]
+    assert "  - 上一版二级" in seen["previous_outline"]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_reports_warnings_in_error_but_not_degraded(monkeypatch):
+    """部分节点被截断/重挂属于「成功但有警告」，不能算降级。"""
+    async def _messy(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "A"},
+            {"level": 1, "title": "A"},
+            {"level": 1, "title": "B"},
+            {"level": 1, "title": "C"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _messy)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+    result = await agent.draft_outline(source)
+
+    assert result.degraded is False
+    assert "重名" in result.error
+    assert len(result.sections) == 3

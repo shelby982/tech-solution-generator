@@ -43,6 +43,7 @@ async def test_cancel_check_raises_in_each_node():
 
     class _Stub:
         async def parse(self, *a, **kw): raise AssertionError("不该被调到")
+        async def draft_outline(self, *a, **kw): raise AssertionError("不该被调到")
         async def extract(self, *a, **kw): raise AssertionError("不该被调到")
         async def match(self, *a, **kw): raise AssertionError("不该被调到")
         async def generate(self, *a, **kw): raise AssertionError("不该被调到")
@@ -55,6 +56,7 @@ async def test_cancel_check_raises_in_each_node():
 
     for call in [
         lambda: nodes.zhang_heng_parse_node(state, agent=stub, spec_loader=loader),
+        lambda: nodes.zhang_heng_outline_draft_node(state, agent=stub),
         lambda: nodes.zhang_heng_extract_node(state, agent=stub),
         lambda: nodes.shen_kuo_match_node(state, agent=stub),
         lambda: nodes.zhuge_liang_generate_node(state, agent=stub),
@@ -957,3 +959,206 @@ async def test_build_feedback_refine_at_max_iterations_refuses_regen():
     assert len(patch["review"]["feedback"]["s1"]["issues"]) == 1
     assert patch["errors"][0]["agent"] == "build_feedback"
     assert patch["errors"][0]["retryable"] is False
+
+
+# ─────────────────────────────────────────────
+# 张衡 outline_draft
+# ─────────────────────────────────────────────
+
+class _OutlineDraftStub:
+    """记录调用参数，返回给定 sections/degraded。"""
+
+    def __init__(self, sections, *, degraded=False, error=""):
+        from agents.zhang_heng import OutlineDraftResult
+        self._result = OutlineDraftResult(
+            sections=sections, degraded=degraded, error=error,
+        )
+        self.calls = []
+
+    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
+                            previous_toc=None):
+        self.calls.append({
+            "source_titles": [s.title for s in source_toc],
+            "instruction": instruction,
+            "doc_summary": doc_summary,
+            "previous_titles": (
+                [s.title for s in previous_toc] if previous_toc else None
+            ),
+        })
+        return self._result
+
+
+def _draft_state(*, toc=None, source_toc=None, revision=0, instruction=""):
+    return {
+        "project_id": None,
+        "thread_id": "tid",
+        "config": {"outline_instruction": instruction},
+        "spec": {
+            "doc_summary": "摘要",
+            "source_toc": source_toc if source_toc is not None else [
+                {"id": "s1", "level": 1, "title": "技术方案",
+                 "raw_content": "原文", "special_marks": ["★"]},
+            ],
+            "toc": toc if toc is not None else [],
+            "outline_revision": revision,
+        },
+    }
+
+
+async def test_outline_draft_node_writes_toc_and_bumps_revision():
+    sections = [
+        DomainSection(id="s1", level=1, title="项目理解", raw_content="原文"),
+        DomainSection(id="s2", level=1, title="技术响应", raw_content="原文"),
+    ]
+    emitter = EventEmitter()
+    patch = await nodes.zhang_heng_outline_draft_node(
+        _draft_state(), agent=_OutlineDraftStub(sections), emitter=emitter,
+    )
+
+    assert patch["stage"] == "parsing"
+    spec = patch["spec"]
+    assert [s["id"] for s in spec["toc"]] == ["s1", "s2"]
+    assert spec["outline_revision"] == 1
+    assert spec["outline_error"] == ""
+    # 目录换了，旧的 8 字段矩阵必须整体作废（否则闸门 1 会显示上个版本的章节要求）
+    assert spec["outline_matrix"] == {}
+    # source_toc 是输入，节点不得回写
+    assert "source_toc" not in spec
+
+    frames = await _drain(emitter)
+    assert [n for n, _ in frames] == ["outline_draft_start", "outline_draft"]
+    assert frames[0][1] == {"revision": 1}
+    assert frames[1][1]["revision"] == 1
+    assert [s["title"] for s in frames[1][1]["toc"]] == ["项目理解", "技术响应"]
+    assert frames[1][1]["degraded"] is False
+
+
+async def test_outline_draft_node_degrades_to_source_toc_with_error():
+    """模型不可用：节点照常写 toc（=原目录）并把原因写进 outline_error，不抛。"""
+    source = [DomainSection(id="s1", level=1, title="技术方案",
+                            raw_content="原文", special_marks=["★"])]
+    patch = await nodes.zhang_heng_outline_draft_node(
+        _draft_state(),
+        agent=_OutlineDraftStub(source, degraded=True, error="未配置模型，沿用规范书目录"),
+        emitter=EventEmitter(),
+    )
+
+    spec = patch["spec"]
+    assert [s["title"] for s in spec["toc"]] == ["技术方案"]
+    assert spec["outline_error"] == "未配置模型，沿用规范书目录"
+    assert spec["outline_revision"] == 1
+
+
+async def test_outline_draft_node_passes_instruction_and_revision_upstream():
+    """用户提炼要求进 agent；第二版起才把上一版目录当 previous 喂回去。"""
+    sections = [DomainSection(id="s1", level=1, title="新一级", raw_content="")]
+    stub = _OutlineDraftStub(sections)
+
+    await nodes.zhang_heng_outline_draft_node(
+        _draft_state(revision=0, instruction="按评分项拆章"),
+        agent=stub, emitter=EventEmitter(),
+    )
+    await nodes.zhang_heng_outline_draft_node(
+        _draft_state(
+            toc=[{"id": "s1", "level": 1, "title": "上一版",
+                  "raw_content": "", "special_marks": []}],
+            revision=1, instruction="再拆细一层",
+        ),
+        agent=stub, emitter=EventEmitter(),
+    )
+
+    first, second = stub.calls
+    assert first["instruction"] == "按评分项拆章"
+    assert first["doc_summary"] == "摘要"
+    # 首轮 spec.toc 就是 parse 写的规范书目录，不是用户看过的草稿，不能当「上一版」
+    assert first["previous_titles"] is None
+    assert second["previous_titles"] == ["上一版"]
+    # 无 source_toc（老 checkpoint）时退回当前 toc 当输入，而不是空目录降级
+    assert second["source_titles"] == ["技术方案"]
+
+
+async def test_outline_draft_node_prefers_source_toc_over_current_toc():
+    sections = [DomainSection(id="s1", level=1, title="派生", raw_content="")]
+    stub = _OutlineDraftStub(sections)
+    await nodes.zhang_heng_outline_draft_node(
+        _draft_state(
+            toc=[{"id": "s9", "level": 1, "title": "当前 toc",
+                  "raw_content": "", "special_marks": []}],
+            source_toc=[{"id": "s1", "level": 1, "title": "规范书原文目录",
+                         "raw_content": "原文", "special_marks": []}],
+        ),
+        agent=stub, emitter=EventEmitter(),
+    )
+    assert stub.calls[0]["source_titles"] == ["规范书原文目录"]
+
+
+async def test_outline_draft_node_syncs_placeholder_blocks(tmp_path, monkeypatch):
+    """落库：新目录建占位行、目录外空行清掉，但已有正文的行宁可留脏也不删。"""
+    import aiosqlite
+
+    import db as db_module
+    from db import init_db
+    from services.block_store import list_blocks
+
+    db_path = str(tmp_path / "wf.db")
+    conn = await aiosqlite.connect(db_path)
+    conn.row_factory = aiosqlite.Row
+    await init_db(conn)
+    cursor = await conn.execute("INSERT INTO projects (name) VALUES (?)", ("测试",))
+    await conn.commit()
+    pid = cursor.lastrowid
+    # 上一版目录：old-1 空占位（不在新 toc 里，应被清）、s9 已有正文（新 toc 里也没有，
+    # 但宁可留脏也不删）
+    for block_id, content in [("old-1", ""), ("s9", "已写好的正文")]:
+        await conn.execute(
+            "INSERT INTO blocks (project_id, block_id, kind, level, title,"
+            " content, order_idx) VALUES (?, ?, 'outline', 1, ?, ?, 0)",
+            (pid, block_id, block_id, content),
+        )
+    await conn.commit()
+    await conn.close()
+
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+
+    sections = [
+        DomainSection(id="s1", level=1, title="项目理解", raw_content=""),
+        DomainSection(id="s2", level=1, title="技术响应", raw_content=""),
+    ]
+    state = {**_draft_state(), "project_id": pid}
+    patch = await nodes.zhang_heng_outline_draft_node(
+        state, agent=_OutlineDraftStub(sections), emitter=EventEmitter(),
+    )
+    assert [s["id"] for s in patch["spec"]["toc"]] == ["s1", "s2"]
+
+    conn = await aiosqlite.connect(db_path)
+    conn.row_factory = aiosqlite.Row
+    rows = await list_blocks(conn, pid)
+    await conn.close()
+
+    by_id = {r["block_id"]: r for r in rows}
+    # 目录外的空占位清掉了，有正文的留脏，新目录逐节建占位
+    assert set(by_id) == {"s1", "s2", "s9"}
+    assert by_id["s1"]["title"] == "项目理解"
+    assert by_id["s2"]["title"] == "技术响应"
+    assert by_id["s9"]["content"] == "已写好的正文"
+
+
+async def test_outline_draft_node_skips_db_when_project_id_missing():
+    """project_id 缺失（纯图单测）时不得尝试落库，避免污染默认 DB。"""
+    sections = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
+
+    async def _boom(*a, **kw):
+        raise AssertionError("project_id 为 None 时不该碰数据库")
+
+    import db as db_module
+    monkey = _boom
+    original = db_module.get_db
+    db_module.get_db = monkey
+    try:
+        patch = await nodes.zhang_heng_outline_draft_node(
+            _draft_state(), agent=_OutlineDraftStub(sections), emitter=EventEmitter(),
+        )
+    finally:
+        db_module.get_db = original
+
+    assert [s["id"] for s in patch["spec"]["toc"]] == ["s1"]

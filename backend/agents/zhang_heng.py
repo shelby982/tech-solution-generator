@@ -15,6 +15,12 @@ from typing import Any, Awaitable, BinaryIO, Callable, Optional, Union
 
 from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
+from domain.spec.outline_draft import (
+    MIN_TOP_LEVEL_NODES,
+    build_sections,
+    count_top_level,
+    normalize_nodes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +39,98 @@ class SpecParseResult:
     doc_title: str
     doc_summary: str
     toc: list[DomainSection]
+
+
+# ─────────────────────────────────────────────
+# 目录派生：grounding 辅助
+# ─────────────────────────────────────────────
+
+# 每个派生章节从规范书原文摘录进 raw_content 的字符上限
+GROUNDING_SNIPPET_CHARS = 3000
+
+
+def _render_toc_text(sections: list[DomainSection]) -> str:
+    """把目录渲染成缩进文本，供「上一版目录」进 prompt。"""
+    lines = []
+    for sec in sections:
+        indent = "  " * max(0, int(sec.level or 1) - 1)
+        lines.append(f"{indent}- {sec.title}")
+    return "\n".join(lines)
+
+
+def _ground_sections(
+    sections: list[DomainSection],
+    source_sections: list[DomainSection],
+) -> None:
+    """用 BM25 把派生章节挂回规范书原文（就地修改）。
+
+    模型只产出标题，而 ``extract`` 依赖每节的 ``raw_content`` 与 ``special_marks``
+    （★/▲ 是 8 字段提炼 prompt 的关键输入）。这里用确定性检索补，而不是让模型写
+    「依据」——后者会幻觉，还白费 token。
+
+    命中则 `raw_content = 原文章节标题 + 正文[:3000]` 并继承其 special_marks；
+    未命中就留空，extract 会走「内容较短」分支，不报错。
+
+    BM25 在小语料上会退化：``rank_bm25`` 对「出现在半数文档里的词」算出的 idf 为 0，
+    规范书只有两三个章节时整条检索都会落空。所以 BM25 无命中时再退一级到
+    「词重叠最多」的确定性兜底，仍然零重叠才留空。
+    """
+    if not sections or not source_sections:
+        return
+
+    from infra.retrieval.keyword import (
+        build_bm25_index,
+        keyword_search,
+        tokenize,
+    )
+
+    corpus = [
+        {"content": f"{s.title}\n{s.raw_content}", "_src_idx": i}
+        for i, s in enumerate(source_sections)
+    ]
+    index, _ = build_bm25_index(corpus)
+
+    for sec in sections:
+        if not sec.title:
+            continue
+        hits = keyword_search(corpus, sec.title, top_k=1, bm25_index=index)
+        if hits:
+            src = source_sections[hits[0]["_src_idx"]]
+        else:
+            src = _best_overlap_section(sec.title, source_sections, tokenize)
+            if src is None:
+                continue
+        sec.raw_content = f"{src.title}\n{src.raw_content}"[:GROUNDING_SNIPPET_CHARS]
+        sec.special_marks = list(src.special_marks)
+
+
+def _best_overlap_section(query: str, source_sections, tokenize_fn):
+    """BM25 兜底：返回与 query 词重叠最多的原文章节，零重叠返回 None。"""
+    query_tokens = set(tokenize_fn(query))
+    if not query_tokens:
+        return None
+    best, best_score = None, 0
+    for src in source_sections:
+        overlap = len(query_tokens & set(tokenize_fn(f"{src.title}\n{src.raw_content}")))
+        if overlap > best_score:
+            best, best_score = src, overlap
+    return best
+
+
+# ─────────────────────────────────────────────
+# 目录派生：产出
+# ─────────────────────────────────────────────
+
+@dataclass
+class OutlineDraftResult:
+    """draft_outline 的产出。
+
+    degraded=True 表示未采用模型输出，``sections`` 是规范书原始目录（等价改造前
+    的行为），``error`` 写明原因供前端展示。
+    """
+    sections: list[DomainSection]
+    degraded: bool = False
+    error: str = ""
 
 
 # ─────────────────────────────────────────────
@@ -119,6 +217,82 @@ class ZhangHengAgent:
             doc_title=parsed.title,
             doc_summary=doc_summary,
             toc=toc,
+        )
+
+    # ── draft_outline ──────────────────────────
+
+    async def draft_outline(
+        self,
+        source_toc: list[DomainSection],
+        *,
+        instruction: str = "",
+        doc_summary: str = "",
+        previous_toc: Optional[list[DomainSection]] = None,
+    ) -> OutlineDraftResult:
+        """依据规范书目录 + 项目概述 + 用户提炼要求，派生「应答文件目录」。
+
+        与 ``extract`` 的分工：本方法只产出**目录结构**（id/level/title +
+        grounding 回的 raw_content/special_marks），8 字段章节要求仍由 ``extract``
+        逐节点填。职责边界与改造前一致，只是 toc 的来源从正则变成了模型。
+
+        任何失败都不抛：降级为「沿用规范书原始目录」并把原因写进 ``error``，
+        让用户能在闸门 1 看到并决定是否重出。
+        """
+        from agents.prompts import build_spec_digest
+
+        if not source_toc:
+            return OutlineDraftResult(
+                sections=[], degraded=True, error="规范书目录为空，无法派生应答目录",
+            )
+
+        def _fallback(reason: str) -> OutlineDraftResult:
+            logger.warning(f"张衡：目录派生降级（{reason}），沿用规范书原始目录")
+            return OutlineDraftResult(
+                sections=[DomainSection(**s.to_dict()) for s in source_toc],
+                degraded=True,
+                error=reason,
+            )
+
+        configs, rr_start = self._configs_provider()
+        if not configs:
+            return _fallback("未配置模型，沿用规范书目录")
+
+        payload = {
+            "instruction": instruction,
+            "doc_summary": doc_summary,
+            "spec_digest": build_spec_digest(
+                [{"title": s.title, "content": s.raw_content} for s in source_toc],
+            ),
+            "previous_outline": (
+                _render_toc_text(previous_toc) if previous_toc else ""
+            ),
+            # 本轮不读素材；保留该键作为下一轮接入素材的扩展点。
+            "material_digest": "",
+        }
+
+        import infra.llm
+
+        try:
+            raw = await infra.llm.dispatch_outline_draft_json(configs, rr_start, payload)
+        except Exception as e:
+            return _fallback(f"模型调用失败：{e}")
+
+        nodes, warnings = normalize_nodes(raw.get("nodes"))
+        sections = build_sections(nodes)
+
+        if not sections:
+            return _fallback("模型输出无法解析出目录节点")
+        if count_top_level(sections) < MIN_TOP_LEVEL_NODES:
+            return _fallback(
+                f"目录结构不完整（仅 {count_top_level(sections)} 个一级章节）"
+            )
+
+        _ground_sections(sections, source_toc)
+
+        return OutlineDraftResult(
+            sections=sections,
+            degraded=False,
+            error="；".join(warnings),
         )
 
     # ── extract ────────────────────────────────

@@ -69,6 +69,13 @@ class FakeRunner:
         if thread_id == "missing":
             raise KeyError(thread_id)
 
+    async def redraft_outline(self, thread_id, instruction):
+        self.calls.append(("redraft_outline", (thread_id, instruction)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+        if thread_id == "busy":
+            raise ValueError("当前任务仍在运行，请等待完成后再操作")
+
     async def recover(self, thread_id):
         self.calls.append(("recover", (thread_id,)))
 
@@ -330,3 +337,40 @@ async def test_workspace_action_contract(client, runner, tid, action, ids, statu
     assert response.status_code == status
     if status == 200:
         assert runner.calls[-1] == ("workspace_action", (tid, ids, action))
+
+
+# ─────────────────────────────────────────────
+# redraft-outline
+# ─────────────────────────────────────────────
+
+async def test_redraft_outline_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post(
+        "/api/workflow/tid-1/redraft-outline",
+        json={"instruction": "按评分项逐条拆章"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"thread_id": "tid-1", "status": "redrafting_outline"}
+    assert runner.calls[0] == ("redraft_outline", ("tid-1", "按评分项逐条拆章"))
+
+
+async def test_redraft_outline_without_body_sends_empty_instruction(client, runner):
+    """body 可省：不带提炼要求时按空串重出（模型只看规范书）。"""
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/redraft-outline")
+    assert r.status_code == 200
+    assert runner.calls[0] == ("redraft_outline", ("tid-1", ""))
+
+
+async def test_redraft_outline_unknown_tid_returns_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/redraft-outline", json={})
+    assert r.status_code == 404
+
+
+async def test_redraft_outline_busy_returns_409(client, runner):
+    """工作流正在跑 / 不在闸门 1：runner 抛 ValueError → 409，不是 500。"""
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/busy/redraft-outline", json={})
+    assert r.status_code == 409
+    assert "仍在运行" in r.json()["detail"]

@@ -4,6 +4,7 @@
 
     START
       → zhang_heng_parse
+      → zhang_heng_outline_draft   # 依据规范书 + 用户提炼要求派生应答文件目录
       → zhang_heng_extract
       → gate_outline           # 闸门 1（interrupt_before）
       → shen_kuo_match
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 NODE_PARSE = "zhang_heng_parse"
+NODE_OUTLINE_DRAFT = "zhang_heng_outline_draft"
 NODE_EXTRACT = "zhang_heng_extract"
 GATE_OUTLINE = "gate_outline"
 NODE_MATCH = "shen_kuo_match"
@@ -122,6 +124,12 @@ def _gate_snapshot(state: WorkflowState, gate_name: str) -> dict:
             "doc_summary": spec.get("doc_summary", ""),
             "toc": list(spec.get("toc") or []),
             "outline_matrix": dict(spec.get("outline_matrix") or {}),
+            # 前端刷新后要回填提炼要求输入框、显示「第 N 版」与降级提示
+            "outline_instruction": str(
+                (state.get("config") or {}).get("outline_instruction") or ""
+            ),
+            "outline_revision": int(spec.get("outline_revision") or 0),
+            "outline_error": str(spec.get("outline_error") or ""),
         }
     if gate_name == "review_materials":
         return {
@@ -221,6 +229,11 @@ def build_graph(
             emitter=emitter,
         )
 
+    async def outline_draft_node(state: WorkflowState) -> WorkflowState:
+        return await nodes.zhang_heng_outline_draft_node(
+            state, agent=deps.zhang_heng, emitter=emitter,
+        )
+
     async def extract_node(state: WorkflowState) -> WorkflowState:
         return await nodes.zhang_heng_extract_node(
             state, agent=deps.zhang_heng, emitter=emitter,
@@ -261,6 +274,7 @@ def build_graph(
         return await nodes.build_feedback_node(state, emitter=emitter)
 
     builder.add_node(NODE_PARSE, parse_node)
+    builder.add_node(NODE_OUTLINE_DRAFT, outline_draft_node)
     builder.add_node(NODE_EXTRACT, extract_node)
     builder.add_node(GATE_OUTLINE, _make_gate_node(
         stage="outline_review", gate_name="review_outline", emitter=emitter,
@@ -284,7 +298,8 @@ def build_graph(
 
     # ── 边 ───────────────────────────────────────
     builder.add_edge(START, NODE_PARSE)
-    builder.add_edge(NODE_PARSE, NODE_EXTRACT)
+    builder.add_edge(NODE_PARSE, NODE_OUTLINE_DRAFT)
+    builder.add_edge(NODE_OUTLINE_DRAFT, NODE_EXTRACT)
     builder.add_edge(NODE_EXTRACT, GATE_OUTLINE)
     builder.add_edge(GATE_OUTLINE, NODE_MATCH)
     builder.add_edge(NODE_MATCH, GATE_MATERIALS)
@@ -401,6 +416,7 @@ __all__ = [
     "build_graph",
     "GraphDeps",
     "NODE_PARSE",
+    "NODE_OUTLINE_DRAFT",
     "NODE_EXTRACT",
     "GATE_OUTLINE",
     "NODE_MATCH",

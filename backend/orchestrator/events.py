@@ -35,6 +35,30 @@ def parse_progress(step: str, current: int, total: int) -> str:
     })
 
 
+def outline_draft_start(revision: int) -> str:
+    """张衡 outline_draft 阶段开始：模型正在派生应答文件目录。"""
+    return format_sse_event("outline_draft_start", {"revision": revision})
+
+
+def outline_draft(
+    toc: list[dict[str, Any]],
+    revision: int,
+    degraded: bool = False,
+    error: str = "",
+) -> str:
+    """张衡 outline_draft 阶段：应答目录已确定（一次推全量）。
+
+    目录是整体替换的，不存在逐条增量，所以一次性推 toc 全量。
+    degraded=True 表示模型没能派生、沿用了规范书原始目录，error 写明原因。
+    """
+    return format_sse_event("outline_draft", {
+        "toc": toc,
+        "revision": revision,
+        "degraded": degraded,
+        "error": error,
+    })
+
+
 def outline_extract(block_id: str, title: str, matrix: dict[str, Any]) -> str:
     """张衡 extract 阶段：每提炼完一章节推一次。"""
     return format_sse_event("outline_extract", {

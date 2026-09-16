@@ -47,13 +47,40 @@ _REVIEW_FIXTURE: dict = {
 }
 
 
+# 应答文件目录 fixture：扁平数组 + 显式 parent 下标，含三级结构，
+# 便于前端树渲染与派生节点的规整逻辑在 mock 模式下都能被真实验证。
+_OUTLINE_DRAFT_FIXTURE: dict = {
+    "nodes": [
+        {"level": 1, "title": "项目理解与总体方案"},
+        {"level": 2, "parent": 0, "title": "项目背景与需求理解"},
+        {"level": 2, "parent": 0, "title": "总体技术方案"},
+        {"level": 1, "title": "技术响应"},
+        {"level": 2, "parent": 3, "title": "技术指标逐条应答"},
+        {"level": 2, "parent": 3, "title": "系统架构设计"},
+        {"level": 3, "parent": 5, "title": "数据层设计"},
+        {"level": 3, "parent": 5, "title": "应用层设计"},
+        {"level": 1, "title": "实施与服务保障"},
+        {"level": 2, "parent": 8, "title": "实施计划与进度"},
+        {"level": 2, "parent": 8, "title": "售后服务承诺"},
+    ],
+}
+
+
 # ─────────────────────────────────────────────
 # 路由
 # ─────────────────────────────────────────────
 
 def _select_fixture(system_prompt: str, user_prompt: str) -> str:
-    """根据 prompt 关键词选择 fixture。匹配优先级：大纲 > 公文 > 评审 > 默认。"""
+    """根据 prompt 关键词选择 fixture。
+
+    匹配优先级：目录派生 > 八项提炼 > 公文 > 评审 > 默认。
+    目录派生必须排在最前 —— 它的 system prompt 里含「评审要素」字样，
+    落到后面的「评审」分支会被错误路由成 _REVIEW_FIXTURE。
+    """
     haystack = f"{system_prompt}\n{user_prompt}"
+
+    if "提炼应答文件目录" in haystack:
+        return json.dumps(_OUTLINE_DRAFT_FIXTURE, ensure_ascii=False)
 
     if "提炼以下八项内容" in haystack:
         return json.dumps(_OUTLINE_FIXTURE, ensure_ascii=False)

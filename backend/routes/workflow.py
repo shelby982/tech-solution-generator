@@ -73,6 +73,10 @@ class WorkspaceActionReq(BaseModel):
     block_ids: list[str] = Field(min_length=1, max_length=2000)
 
 
+class RedraftOutlineReq(BaseModel):
+    instruction: str = Field(default="", max_length=10000)
+
+
 @router.post("/{thread_id}/workspace-action")
 async def workspace_action(thread_id: str, req: WorkspaceActionReq):
     try:
@@ -124,6 +128,19 @@ async def rerun_match(thread_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
     return JSONResponse({"thread_id": thread_id, "status": "rerunning_match"})
+
+
+@router.post("/{thread_id}/redraft-outline")
+async def redraft_outline(thread_id: str, req: RedraftOutlineReq | None = None):
+    """整版重出应答文件目录：换一份提炼要求，跳过 parse 直接重跑张衡的目录派生。"""
+    runner = get_runner()
+    try:
+        await runner.redraft_outline(thread_id, (req.instruction if req else "") or "")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse({"thread_id": thread_id, "status": "redrafting_outline"})
 
 
 @router.post("/{thread_id}/pause")

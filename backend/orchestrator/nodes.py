@@ -172,42 +172,117 @@ async def zhang_heng_parse_node(
 
     # 持久化占位 blocks：让用户取消 / 刷新仍能看到已解析章节。
     # 失败不抛（落库不成功不影响 graph 主流程，仅意味着取消保存能力降级）。
+    # 清掉历史遗留的"不在当前 toc"的 blocks（典型：旧 materials.py 路径写入的
+    # outline-N 与新的 s1/s1.1 命名共存，导致前端列出双份、新的那一份全空显示骨架屏）。
     try:
         from db import get_db
-        from services.block_store import list_blocks, upsert_outline_block
+        from services.block_store import sync_outline_placeholders
 
-        toc_ids = {sec.id for sec in parsed.toc}
         async with get_db() as db:
-            # 清掉历史遗留的"不在当前 toc"的 blocks（典型：旧 materials.py 路径写入的
-            # outline-N 与新 LangGraph 的 s1/s1.1 命名共存，导致前端列出双份、
-            # 新的那一份全空显示骨架屏）。
-            existing = await list_blocks(db, project_id)
-            stale_ids = [b.get("id") for b in existing if b.get("block_id") not in toc_ids]
-            for stale_pk in stale_ids:
-                await db.execute("DELETE FROM blocks WHERE id = ?", (stale_pk,))
-            if stale_ids:
-                await db.commit()
-                logger.info(f"parse_node：清理 {len(stale_ids)} 条遗留 block（项目 {project_id}）")
-            for idx, sec in enumerate(parsed.toc):
-                await upsert_outline_block(
-                    db,
-                    project_id=project_id,
-                    block_id=sec.id,
-                    level=int(sec.level or 1),
-                    title=sec.title or sec.id,
-                    order_idx=idx,
-                    matrix=None,
-                )
+            stats = await sync_outline_placeholders(db, project_id, parsed.toc)
+        if stats["removed"]:
+            logger.info(f"parse_node：清理 {stats['removed']} 条遗留 block（项目 {project_id}）")
     except Exception as e:
         logger.warning(f"parse_node：占位 block 落库失败（{e}），不阻断")
 
+    toc_dicts = [_section_to_dict(s) for s in parsed.toc]
     return {
         "stage": "parsing",
         "spec": {
             "doc_id": parsed.doc_id,
             "doc_title": parsed.doc_title,
             "doc_summary": parsed.doc_summary,
-            "toc": [_section_to_dict(s) for s in parsed.toc],
+            # source_toc：正则解析出的规范书原始目录，只读、供 outline_draft 做 grounding。
+            # toc 会在 outline_draft 节点被模型派生的应答目录整体替换。
+            "source_toc": toc_dicts,
+            "toc": toc_dicts,
+        },
+    }
+
+
+# ─────────────────────────────────────────────
+# 张衡 outline_draft 节点
+# ─────────────────────────────────────────────
+
+async def zhang_heng_outline_draft_node(
+    state: WorkflowState,
+    *,
+    agent: ZhangHengAgent,
+    emitter: EmitterArg = None,
+) -> WorkflowState:
+    """张衡 outline_draft：依据规范书 + 用户提炼要求派生「应答文件目录」。
+
+    state 写入：``stage="parsing"``，``spec.{toc, outline_revision, outline_error}``，
+    并显式清空 ``spec.outline_matrix``（目录换了，旧的章节要求全部作废）。
+
+    ``spec.source_toc`` 只读不动 —— 它是本节点的输入，也是降级时的兜底目录。
+
+    与 parse 一样不抛：模型不可用 / 输出不可解析时沿用规范书原始目录，把原因写进
+    ``outline_error``，照常进闸门 1 让用户看到并决定是否重出。
+    """
+    _check_cancel(state)
+
+    project_id = state.get("project_id")
+    spec = state.get("spec") or {}
+    config = state.get("config") or {}
+
+    source_toc = [_dict_to_section(d) for d in (spec.get("source_toc") or [])]
+    # source_toc 缺失（老 checkpoint）时退回当前 toc —— 等效于「不派生的现状」
+    if not source_toc:
+        source_toc = [_dict_to_section(d) for d in (spec.get("toc") or [])]
+
+    # 上一版目录：只有「已经派生过一次」（revision ≥ 1）才喂给模型，迭代才有连续性。
+    # 首轮 spec.toc 就是 parse 写的规范书目录，不是用户看过的草稿，不能当 previous。
+    prev_revision = int(spec.get("outline_revision") or 0)
+    previous_toc = (
+        [_dict_to_section(d) for d in (spec.get("toc") or [])] or None
+    ) if prev_revision >= 1 else None
+
+    revision = prev_revision + 1
+    await _emit_frame(emitter, events.outline_draft_start(revision))
+
+    result = await agent.draft_outline(
+        source_toc,
+        instruction=str(config.get("outline_instruction") or ""),
+        doc_summary=str(spec.get("doc_summary") or ""),
+        previous_toc=previous_toc,
+    )
+
+    toc_dicts = [_section_to_dict(s) for s in result.sections]
+
+    # 占位 blocks 落库：id 整体换了一轮，旧行由 sync_outline_placeholders 清理
+    #（只删 content 为空的行，已有正文的宁可留脏也不删）。失败不阻断主流程。
+    if project_id is not None and result.sections:
+        try:
+            from db import get_db
+            from services.block_store import sync_outline_placeholders
+
+            async with get_db() as db:
+                stats = await sync_outline_placeholders(
+                    db, int(project_id), result.sections,
+                )
+            if stats["removed"]:
+                logger.info(
+                    f"outline_draft_node：清理 {stats['removed']} 条目录外 block"
+                    f"（项目 {project_id}）"
+                )
+        except Exception as e:
+            logger.warning(f"outline_draft_node：占位 block 落库失败（{e}），不阻断")
+
+    await _emit_frame(emitter, events.outline_draft(
+        toc=toc_dicts,
+        revision=revision,
+        degraded=result.degraded,
+        error=result.error,
+    ))
+
+    return {
+        "stage": "parsing",
+        "spec": {
+            "toc": toc_dicts,
+            "outline_matrix": {},
+            "outline_revision": revision,
+            "outline_error": result.error,
         },
     }
 

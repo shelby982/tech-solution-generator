@@ -46,6 +46,16 @@ class _StubZhang:
                                raw_content="", special_marks=[])],
         )
 
+    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
+                            previous_toc=None):
+        """stub 直接沿用规范书目录（等价于「模型不可用」的降级路径），
+        这样现有用例断言的 block_id 仍是 s1，不受目录派生影响。"""
+        from agents.zhang_heng import OutlineDraftResult
+        return OutlineDraftResult(
+            sections=[DomainSection(**s.to_dict()) for s in source_toc],
+            degraded=True, error="stub 未派生",
+        )
+
     async def extract(self, toc, **kw):
         return {s.id: OutlineMatrixRow(block_id=s.id, title=s.title,
                                         requirement="r")
@@ -333,3 +343,134 @@ async def test_workspace_review_stops_even_when_scores_fail(runner_env):
     assert state["stage"] == "report_review"
     assert state["review"]["tech_findings"]["s1"]["score"] == 40
     assert state["proposal"]["blocks"]["s1"]["content"] == "人工修订正文"
+
+
+# ─────────────────────────────────────────────
+# redraft_outline：整版重出目录
+# ─────────────────────────────────────────────
+
+class _RecordingZhang(_StubZhang):
+    """每次 draft_outline 换一份目录，用来证明「整版替换」而非原地保留。"""
+
+    def __init__(self):
+        self.draft_calls = []
+
+    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
+                            previous_toc=None):
+        from agents.zhang_heng import OutlineDraftResult
+        self.draft_calls.append({
+            "instruction": instruction,
+            "previous_titles": (
+                [s.title for s in previous_toc] if previous_toc else None
+            ),
+        })
+        n = len(self.draft_calls)
+        return OutlineDraftResult(
+            sections=[
+                DomainSection(id=f"v{n}-{i}", level=1, title=f"第{n}版第{i}章",
+                              raw_content="", special_marks=[])
+                for i in range(1, n + 1)
+            ],
+            degraded=False, error="",
+        )
+
+
+async def test_redraft_outline_replaces_toc_and_bumps_revision(runner_env):
+    runner, pid, _ = runner_env
+    zhang = _RecordingZhang()
+    deps = _deps_factory()
+    deps.zhang_heng = zhang
+    runner._deps_factory = lambda: deps
+
+    tid = await runner.start(pid, config={"outline_instruction": "第一版要求"})
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    assert [s["id"] for s in state["spec"]["toc"]] == ["v1-1"]
+    assert state["spec"]["outline_revision"] == 1
+    assert state["stage"] == "outline_review"
+
+    old_emitter = runner._runs[tid].emitter
+    await runner.redraft_outline(tid, "第二版要求：拆到三级")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    # 整版替换：旧目录一个不留，版本号自增，回到同一个闸门
+    assert [s["id"] for s in state["spec"]["toc"]] == ["v2-1", "v2-2"]
+    assert state["spec"]["outline_revision"] == 2
+    assert state["config"]["outline_instruction"] == "第二版要求：拆到三级"
+    assert state["stage"] == "outline_review"
+    # 旧 emitter 可能已 close，必须换新的，否则前端收不到新一版的帧
+    assert runner._runs[tid].emitter is not old_emitter
+
+    # 第二轮把上一版目录喂回模型，迭代才有连续性
+    assert zhang.draft_calls[0]["previous_titles"] is None
+    assert zhang.draft_calls[1]["instruction"] == "第二版要求：拆到三级"
+    assert zhang.draft_calls[1]["previous_titles"] == ["第1版第1章"]
+
+
+async def test_redraft_outline_clears_outline_matrix(runner_env):
+    """目录换了，上一版的 8 字段要求必须整体清空，否则闸门 1 会显示错章节的要求。"""
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+    before = await runner.state(tid)
+    assert before["spec"]["outline_matrix"], "首轮 extract 应已产出矩阵"
+
+    await runner.redraft_outline(tid, "重来")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["spec"]["outline_matrix"], "重出后 extract 会重建矩阵"
+    assert all(k.startswith("s") for k in state["spec"]["outline_matrix"])
+
+
+async def test_redraft_outline_keeps_source_toc(runner_env):
+    """source_toc 是 grounding 输入，重出不得把它清掉。"""
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+
+    await runner.redraft_outline(tid, "换要求")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert [s["title"] for s in state["spec"]["source_toc"]] == ["技术方案"]
+
+
+async def test_redraft_outline_unknown_thread_raises_key_error(runner_env):
+    runner, _, _ = runner_env
+    with pytest.raises(KeyError):
+        await runner.redraft_outline("不存在", "随便")
+
+
+async def test_redraft_outline_rejects_wrong_stage(runner_env):
+    """闸门 1 之前/之后都不能重出：还没派生过，或已经进生成阶段。"""
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+
+    # 推进到生成阶段（gate1 → match → gate2）
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        await graph.aupdate_state(
+            {"configurable": {"thread_id": tid}}, {"stage": "generating"},
+        )
+
+    with pytest.raises(ValueError, match="要求与大纲"):
+        await runner.redraft_outline(tid, "来不及了")
+
+
+async def test_redraft_outline_rejects_while_running(runner_env):
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+
+    runner._runs[tid].task = asyncio.create_task(asyncio.sleep(30))
+    try:
+        with pytest.raises(ValueError, match="仍在运行"):
+            await runner.redraft_outline(tid, "并发调用")
+    finally:
+        runner._runs[tid].task.cancel()

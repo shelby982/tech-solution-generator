@@ -102,6 +102,120 @@ def build_outline_extract_user(
 
 
 # ─────────────────────────────────────────────
+# 张衡：应答文件目录派生
+# ─────────────────────────────────────────────
+
+# 规范书章节正文进入 prompt 的总预算（字符）。加权分配算法同
+# ``dispatcher._generate_doc_summary``，遍历时用剩余预算限制单章配额。
+OUTLINE_DRAFT_SPEC_BUDGET = 8000
+# 用户提炼要求进 prompt 的预算（字符），置顶且标注为最高优先级。
+OUTLINE_DRAFT_INSTRUCTION_BUDGET = 1000
+
+OUTLINE_DRAFT_SYSTEM = (
+    "你是资深的投标文件编制专家，擅长依据招标文件与规范书，为投标人编排应答文件的章节目录。\n"
+    "你的任务不是复述招标文件的目录，而是**站在投标人的角度，重新组织出一份应答文件应有的目录结构**。\n"
+    "编排原则：\n"
+    "1. 覆盖性：招标文件与规范书中出现的技术要求、评分项、评审要素，都应在目录中找到明确的落点章节；\n"
+    "2. 可响应性：章节标题应当指向「我方要写什么」，而不是「招标方提了什么」；\n"
+    "3. 层次性：一级章节为大的应答板块，其下按需拆分二级、三级，最多四级；避免只有一层或层级过深；\n"
+    "4. 用户优先：用户给出的提炼要求与拆分逻辑具有最高优先级，与之冲突时以用户要求为准；\n"
+    "5. 可读性：标题简洁明确，不用「关于……的说明」这类冗余前缀，不加序号（序号由系统生成）。\n"
+    "只输出合法 JSON 对象，不包含任何额外说明或 markdown 代码块。"
+)
+
+
+def build_spec_digest(sections: list[dict], budget: int = OUTLINE_DRAFT_SPEC_BUDGET) -> str:
+    """把规范书章节列表压成带预算的摘要文本。
+
+    按内容长度加权分配字符配额（每章至少 100 字），遍历时用剩余预算限制单章
+    配额，使总长度自然落在 ``budget`` 内。
+
+    sections: [{"title": str, "content": str}, ...]
+    """
+    entries = [
+        (s, len(s.get("content") or ""))
+        for s in (sections or [])
+    ]
+    total_len = sum(length for _, length in entries) or 1
+
+    remaining = budget
+    parts: list[str] = []
+    for sec, content_len in entries:
+        title = sec.get("title") or ""
+        content = sec.get("content") or ""
+        if not content or remaining <= 0:
+            parts.append(f"【{title}】")
+            continue
+        quota = max(100, int(budget * content_len / total_len))
+        quota = min(quota, remaining)
+        snippet = content[:quota]
+        parts.append(f"【{title}】\n{snippet}")
+        remaining -= len(snippet)
+
+    return "\n\n".join(parts)
+
+
+def build_outline_draft_user(
+    instruction: str,
+    doc_summary: str,
+    spec_digest: str,
+    previous_outline: str = "",
+    material_digest: str = "",
+) -> str:
+    """构造应答文件目录派生的 user prompt。
+
+    instruction 置顶并标注为最高优先级，截断至 ``OUTLINE_DRAFT_INSTRUCTION_BUDGET``。
+    previous_outline 非空时（整版重出场景）告诉模型在上一版基础上调整，保证迭代有连续性。
+    material_digest 当前恒为空串 —— 本轮不读素材，保留形参作为下一轮的扩展点。
+
+    返回的字符串末尾必须包含关键短语 '提炼应答文件目录'，
+    以便 LLM mock 模式按关键词路由到目录 fixture。
+    """
+    instruction = (instruction or "").strip()
+    instruction = instruction[:OUTLINE_DRAFT_INSTRUCTION_BUDGET]
+
+    parts: list[str] = []
+
+    if instruction:
+        parts.append(
+            "【用户的提炼要求与拆分逻辑 —— 最高优先级，与之冲突时以本节为准】\n"
+            f"{instruction}"
+        )
+
+    if doc_summary:
+        parts.append(f"【规范书项目概述】\n{doc_summary.strip()}")
+
+    parts.append(f"【规范书章节目录与原文摘录】\n{spec_digest}")
+
+    if material_digest:
+        parts.append(f"【原始素材摘录】\n{material_digest}")
+
+    if previous_outline:
+        parts.append(
+            "【上一版目录 —— 用户已看过这一版，请在此基础上按上面的要求调整】\n"
+            f"{previous_outline}"
+        )
+
+    body = "\n\n".join(parts)
+
+    return (
+        f"{body}\n\n"
+        "请依据以上材料，提炼应答文件目录。\n\n"
+        "输出格式（**扁平数组 + 显式父节点下标**，不要嵌套 children）：\n"
+        '{"nodes": [{"level": 1, "title": "项目理解与总体方案"}, '
+        '{"level": 2, "parent": 0, "title": "项目背景与需求理解"}]}\n\n'
+        "字段说明：\n"
+        "- level：层级，1 为一级章节，最大 4；\n"
+        "- parent：父节点在 nodes 数组中的**下标**（从 0 开始），必须小于当前节点下标；"
+        "level=1 的节点不输出 parent 或输出 null；"
+        "某节点的 level 必须恰好比其 parent 的 level 大 1；\n"
+        "- title：章节标题，不带序号、不带「第X章」前缀。\n\n"
+        "要求：一级章节 3-12 个为宜；总节点数不超过 120 个；按应答文件的阅读顺序排列。\n"
+        '只输出 JSON 对象，格式：{"nodes":[...]}'
+    )
+
+
+# ─────────────────────────────────────────────
 # 沈括：素材 LLM 重排
 # ─────────────────────────────────────────────
 

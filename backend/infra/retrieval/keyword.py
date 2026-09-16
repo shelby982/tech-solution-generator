@@ -12,6 +12,11 @@ def _tokenize(text: str) -> list[str]:
     return [w for w in jieba.cut(text) if len(w.strip()) > 1]
 
 
+def tokenize(text: str) -> list[str]:
+    """公开的分词入口，供需要在 BM25 之外做词重叠的调用方复用同一套分词规则。"""
+    return _tokenize(text)
+
+
 def assign_chunks_to_sections(
     chunks: list[dict],
     section_texts: list[str],

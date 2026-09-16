@@ -16,10 +16,12 @@ from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 
 from agents.prompts import (
     LETTER_SYSTEM,
+    OUTLINE_DRAFT_SYSTEM,
     OUTLINE_EXTRACT_SYSTEM,
     SECTION_OUTLINE_SYSTEM,
     TONE_SYSTEM_PROMPTS,
     build_letter_user,
+    build_outline_draft_user,
     build_outline_extract_user,
     build_section_outline_user,
 )
@@ -27,6 +29,7 @@ from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 from . import clients
 from .json_utils import extract_json_object as _extract_json_object
+from .json_utils import salvage_nodes_array as _salvage_nodes_array
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +296,69 @@ async def dispatch_doc_summary(
             last_error = e
             logger.warning(
                 f"API [{config.provider}/{config.model}] 摘要生成失败，"
+                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+            )
+
+    raise last_error  # type: ignore[misc]
+
+
+async def dispatch_outline_draft_json(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    payload: dict,
+) -> dict:
+    """依据规范书 + 用户提炼要求派生「应答文件目录」，返回解析后的 JSON 对象。
+
+    payload 字段（全部可选，缺省空串）：
+        instruction / doc_summary / spec_digest / previous_outline / material_digest
+
+    从 rr_start_index 起轮询 + fallback，全部失败时上抛最后一个异常（由节点兜底）。
+    模型输出不是合法 JSON 对象时同样抛 ValueError，走同一条降级路径。
+    """
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先添加模型配置")
+
+    user = build_outline_draft_user(
+        instruction=payload.get("instruction", "") or "",
+        doc_summary=payload.get("doc_summary", "") or "",
+        spec_digest=payload.get("spec_digest", "") or "",
+        previous_outline=payload.get("previous_outline", "") or "",
+        material_digest=payload.get("material_digest", "") or "",
+    )
+
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_start_index + i) % n]
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 派生应答文件目录")
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await clients.generate_oneshot_openai(
+                    config, OUTLINE_DRAFT_SYSTEM, user, max_tokens=8000,
+                )
+            else:
+                result = await clients.generate_oneshot_claude(
+                    config, OUTLINE_DRAFT_SYSTEM, user, max_tokens=8000,
+                )
+            try:
+                obj = _extract_json_object(result)
+            except ValueError:
+                # 输出被 max_tokens 截断：抢救数组里已写完整的节点，降级为部分成功
+                salvaged = _salvage_nodes_array(result)
+                if not salvaged:
+                    raise
+                logger.warning(
+                    f"目录派生输出被截断，仅抢救出 {len(salvaged)} 个节点"
+                )
+                obj = {"nodes": salvaged}
+
+            if not isinstance(obj, dict) or not isinstance(obj.get("nodes"), list):
+                raise ValueError("模型输出缺少 nodes 数组")
+            return obj
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 目录派生失败，"
                 f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
             )
 

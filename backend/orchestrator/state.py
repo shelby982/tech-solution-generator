@@ -3,7 +3,8 @@
 5 个 agent 之间的唯一通信介质。设计原则：每个 agent 只读自己依赖的字段、只写自己产出的字段。
 
 字段写入约定（spec §5）：
-- 张衡：只写 spec.*
+- 张衡：只写 spec.*（parse 写 source_toc，outline_draft 写 toc / outline_revision /
+        outline_error，extract 写 outline_matrix）
 - 沈括：只写 materials.matches（materials.chunks 由 routes 注入）
 - 诸葛亮：只写 proposal.blocks（regenerate_targets 由 routes 写、agent 读完清空）
 - 王安石：只写 review.tech_findings
@@ -32,8 +33,11 @@ class SpecState(TypedDict, total=False):
     doc_id: str
     doc_title: str
     doc_summary: str
-    toc: list[dict]                    # 列表元素是 Section.to_dict()
+    source_toc: list[dict]             # 列表元素是 Section.to_dict()，parse 的正则解析结果，只读
+    toc: list[dict]                    # 列表元素是 Section.to_dict()，应答文件目录（模型派生）
     outline_matrix: dict[str, dict]    # block_id → OutlineMatrixRow.to_dict()
+    outline_revision: int              # 目录版本号，由 outline_draft 节点自增；0 = 未派生
+    outline_error: str                 # 目录派生降级原因，空串 = 模型派生成功
 
 
 class MaterialsState(TypedDict, total=False):
@@ -67,6 +71,7 @@ class UserConfig(TypedDict, total=False):
     tone: Literal["official", "tech", "concise"]
     target_words: int
     doc_template: str
+    outline_instruction: str    # 用户对原始素材的提炼要求 / 大纲拆分逻辑，整版重出时可改
 
 
 class ErrorEntry(TypedDict, total=False):

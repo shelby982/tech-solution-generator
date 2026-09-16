@@ -201,3 +201,50 @@ def test_closed_loop_fields_are_declared():
     assert "feedback" in ReviewState.__annotations__
     assert "convergence" in ReviewState.__annotations__
     assert "iteration" in WorkflowState.__annotations__
+
+
+# ─────────────────────────────────────────────
+# 目录派生字段
+# ─────────────────────────────────────────────
+
+def test_workflow_state_accepts_outline_draft_fields():
+    """SpecState / UserConfig 的新字段都是 additive 的，老 state 不带也能合并。"""
+    state: WorkflowState = {
+        "spec": {
+            "source_toc": [{"id": "s1", "level": 1, "title": "规范书原文"}],
+            "toc": [{"id": "s1", "level": 1, "title": "应答目录"}],
+            "outline_revision": 2,
+            "outline_error": "",
+        },
+        "config": {"outline_instruction": "按评分项拆章"},
+    }
+
+    merged = merge_state({"spec": {"doc_title": "T"}}, state)
+
+    assert merged["spec"]["source_toc"][0]["title"] == "规范书原文"
+    assert merged["spec"]["outline_revision"] == 2
+    assert merged["config"]["outline_instruction"] == "按评分项拆章"
+
+
+def test_merge_state_clears_outline_matrix_with_empty_dict():
+    """整版重出：``{"outline_matrix": {}}`` 必须真的清空，而不是被当成「无更新」跳过。
+
+    ``_merge_dict`` 对 spec 整体做 update，空 dict 是合法新值；若哪天有人把
+    ``patch`` 为空的判断写成「任何值都空就跳过」，矩阵会留着上一版的章节要求，
+    闸门 1 展示的 8 字段就与新目录对不上了。
+    """
+    base: WorkflowState = {
+        "spec": {
+            "doc_title": "T",
+            "outline_matrix": {"s1": {"requirement": "旧要求"}},
+            "outline_revision": 1,
+        }
+    }
+    patch: WorkflowState = {"spec": {"outline_matrix": {}}}
+
+    result = merge_state(base, patch)
+
+    assert result["spec"]["outline_matrix"] == {}
+    # 其余 spec 字段不受影响（重出时 source_toc 必须留着做 grounding）
+    assert result["spec"]["doc_title"] == "T"
+    assert result["spec"]["outline_revision"] == 1

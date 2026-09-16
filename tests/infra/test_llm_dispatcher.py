@@ -133,3 +133,133 @@ async def test_dispatch_block_write_without_feedback_unchanged(monkeypatch):
     # 逐字节钉死改造前的 prompt —— 仅断言"不含评审意见"是弱断言：
     # 把它改成无条件拼接 f"\n\n{feedback_text}" 也照样通过。
     assert captured["extra_prompt"] == "【应标要求】\n提供业绩证明\n\n"
+
+
+# ─────────────────────────────────────────────
+# dispatch_outline_draft_json：目录派生
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_under_mock(monkeypatch):
+    """mock 模式下按「提炼应答文件目录」关键词路由到目录 fixture。"""
+    from infra.llm import dispatch_outline_draft_json
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+    cfg = _fake_config()
+
+    obj = await dispatch_outline_draft_json([cfg], 0, {
+        "instruction": "按评分项逐条拆章",
+        "doc_summary": "摘要",
+        "spec_digest": "【技术方案】\n正文",
+    })
+
+    assert isinstance(obj["nodes"], list)
+    assert len(obj["nodes"]) > 0
+    assert all("title" in n and "level" in n for n in obj["nodes"])
+    # fixture 里要有真正的层级，否则前端树渲染在 mock 下测不出东西
+    assert max(n["level"] for n in obj["nodes"]) >= 3
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_raises_without_configs():
+    from infra.llm import dispatch_outline_draft_json
+
+    with pytest.raises(ValueError):
+        await dispatch_outline_draft_json([], 0, {"spec_digest": "x"})
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_falls_back_to_next_config(monkeypatch):
+    """第一个 config 失败要轮询到下一个，而不是直接把异常抛给调用方。"""
+    from infra import llm
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    calls = []
+
+    async def _gen(config, system, user, max_tokens=0):
+        calls.append(config.model)
+        if config.model == "bad":
+            raise RuntimeError("第一个 API 挂了")
+        return '{"nodes": [{"level": 1, "title": "OK"}]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _gen)
+
+    good = _fake_config()
+    good.model = "good"
+    bad = _fake_config()
+    bad.model = "bad"
+
+    obj = await dispatch_outline_draft_json([bad, good], 0, {"spec_digest": "x"})
+
+    assert calls == ["bad", "good"]
+    assert obj["nodes"][0]["title"] == "OK"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_raises_last_error_when_all_fail(monkeypatch):
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    async def _always_fail(config, system, user, max_tokens=0):
+        raise RuntimeError(f"{config.model} 挂了")
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _always_fail)
+
+    a = _fake_config()
+    a.model = "a"
+    b = _fake_config()
+    b.model = "b"
+
+    with pytest.raises(RuntimeError, match="b 挂了"):
+        await dispatch_outline_draft_json([a, b], 0, {"spec_digest": "x"})
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_rejects_non_nodes_output(monkeypatch):
+    """模型输出是合法 JSON 但没有 nodes 数组 → 当失败处理，走降级。"""
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    async def _wrong_shape(config, system, user, max_tokens=0):
+        return '{"chapters": [{"title": "错的字段"}]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _wrong_shape)
+
+    with pytest.raises(ValueError, match="nodes"):
+        await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_salvages_truncated_prefix(monkeypatch):
+    """扁平数组格式的核心动机：被 max_tokens 截断后仍能抢救出完整前缀，部分成功。"""
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    async def _truncated(config, system, user, max_tokens=0):
+        # 最后一条写到一半就没了，外层 }]} 也没收尾
+        return (
+            '{"nodes": [{"level": 1, "title": "完整一"}, '
+            '{"level": 1, "title": "完整二"}, {"level": 2, "title": "被截'
+        )
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _truncated)
+
+    obj = await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
+
+    assert [n["title"] for n in obj["nodes"]] == ["完整一", "完整二"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_fails_when_nothing_salvageable(monkeypatch):
+    """连一个完整节点都没有 → 仍然算失败，由节点层降级。"""
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    async def _barely_started(config, system, user, max_tokens=0):
+        return '{"nodes": [{"level": 1, "tit'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _barely_started)
+
+    with pytest.raises(ValueError):
+        await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})

@@ -51,6 +51,26 @@ export function projectChapters(state = {}, rows = []) {
       materialRequests: proposal.material_requests?.[bid] || [] };
   });
 }
+// 目录树：把扁平 sections 按 level 折成 [{node, children}]。
+// 与后端 domain/spec/outline_draft.normalize_nodes 同一套规则 —— 文档顺序是层级的
+// 最终权威，level 只当提示：父节点必须是「前面出现过的、level 更小」的那个，
+// 否则挂到最近一个 level 更小的前驱；一个都没有就落到顶层。
+// 前端照抄规则而不是相信 level 的数字自洽，是因为模型输出可能给出
+// [{level:1},{level:3}] 这类跳级序列，按 level 数字硬分组会造出空父层。
+export function buildOutlineTree(sections = []) {
+  const roots = [];
+  const stack = []; // [{level, entry}]，level 严格递增
+  for (const node of sections) {
+    const level = Math.max(1, Math.min(4, Number(node?.level) || 1));
+    while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+    const entry = {node, children: []};
+    if (!stack.length) roots.push(entry);
+    else stack[stack.length - 1].entry.children.push(entry);
+    stack.push({level, entry});
+  }
+  return roots;
+}
+
 export function summarize(chapters) {
   const counts = {};
   for (const b of chapters) counts[b.status] = (counts[b.status] || 0) + 1;

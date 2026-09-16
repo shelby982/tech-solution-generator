@@ -159,6 +159,8 @@
 body[data-view="matching"] #mat-section-req { display: none; }
 /* 解析大纲视图：隐藏原始素材模块（仅在素材匹配视图才需要看到素材） */
 body[data-view="outline"] #mat-section-src { display: none; }
+/* 提炼要求只作用于「解析大纲」阶段（闸门 1 的整版重出） */
+body[data-view="matching"] #mat-section-instruction { display: none; }
 
 /* 底部操作区 */
 .materials-footer {
@@ -326,6 +328,68 @@ body[data-view="outline"] #mat-section-src { display: none; }
 .blocks-scroll { flex: 1; overflow-y: auto; padding: 20px; }
 .blocks-empty { text-align: center; color: var(--muted); padding: 60px 0; font-size: 13.5px; }
 .blocks-list { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── 目录树：一级折叠分组 + 下级缩进卡片 ── */
+.outline-tree { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.ot-node { display: flex; flex-direction: column; }
+.ot-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+  user-select: none;
+}
+.ot-row:hover { border-color: var(--text); }
+.ot-chevron {
+  flex: none; width: 12px;
+  color: var(--muted); font-size: 12px;
+  transition: transform 0.15s;
+}
+.ot-node.open > .ot-row > .ot-chevron { transform: rotate(90deg); }
+.ot-node[data-level="1"] > .ot-row { background: var(--bg-2, #f9f9f7); }
+.ot-node[data-level="1"] > .ot-row .ot-title { font-weight: 700; }
+.ot-title {
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: none; max-width: 60%;
+}
+.ot-sub {
+  flex: 1; min-width: 0;
+  font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ot-sub:empty { display: none; }
+.ot-badge { margin-left: auto; }
+.ot-children {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 8px 0 0 18px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--line);
+}
+/* 卡片默认折叠：字段收起，点行展开。DOM 契约不变（.block-card 始终在树上），
+   闸门 1 的 collectOutlineEdits / makeOutlineEditable 靠它定位。 */
+.ot-node > .block-card { display: none; margin-top: 8px; }
+.ot-node.open > .block-card { display: block; }
+
+/* 提炼要求输入（左侧面板底部，「原始素材」之下） */
+.outline-instruction-input {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+.outline-instruction-input:focus { outline: none; border-color: var(--text); }
+.outline-instruction-input:disabled { opacity: 0.6; }
 
 /* 模块卡片 */
 .block-card {
@@ -680,7 +744,7 @@ body[data-view="outline"] #mat-section-src { display: none; }
   background: #eff6ff;
 }
     </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop2" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop4" />
   </head>
   <body data-view="outline">
     <div class="workspace-shell">
@@ -750,6 +814,18 @@ body[data-view="outline"] #mat-section-src { display: none; }
         <div class="mat-add-row">
           <button class="btn-add-mat" id="btn-add-src" type="button">+ 添加原始素材</button>
         </div>
+      </div>
+      <div class="mat-section" id="mat-section-instruction">
+        <div class="mat-section-top">
+          <div class="mat-section-header">
+            <span class="mat-index">03</span>
+            <strong>提炼要求</strong>
+          </div>
+          <p class="mat-sub">写给张衡的大纲拆分逻辑，留空则只依据规范书</p>
+        </div>
+        <div class="mat-divider"></div>
+        <textarea id="outline-instruction" class="outline-instruction-input" rows="4"
+          placeholder="示例：按评分表条目组织章节，技术方案拆到三级，突出实施与售后"></textarea>
       </div>
     </div>
     <div class="materials-footer">
@@ -859,6 +935,7 @@ body[data-view="outline"] #mat-section-src { display: none; }
 
     <script type="module">
 import { api } from './assets/api.js';
+import { buildOutlineTree } from './assets/workspace-model.mjs?v=20260916-loop4';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -927,6 +1004,10 @@ let selectedModelLabel = 'Sonnet 4.6';
 let currentThreadId = null;
 let currentEventSource = null;
 let currentGate = null; // null | 'review_outline' | 'review_materials' | 'review_report'
+// 目录派生（应答文件目录）状态：版本号由后端 outline_draft 帧累加，error 非空表示
+// 模型没能派生、沿用了规范书原始目录（降级），需要在闸门 1 提示用户
+let draftRevision = 0;
+let outlineError = '';
 // URL backend 参数（来自顶部 stage-progress click）作为 currentStage 初值，
 // 让 renderStageBar 第一次绘制就用上真实 backend stage，不依赖异步 state API。
 // 没 URL backend 时用 sessionStorage furthestStage 兜底。
@@ -976,6 +1057,10 @@ function applyPageView() {
       btn.innerHTML = '✦ 提炼大纲';
       hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
     }
+  }
+  // 素材匹配视图全展开（用户要逐章核对素材），大纲视图按用户折叠记忆
+  if (typeof applyOutlineExpansion === 'function') {
+    applyOutlineExpansion(view === 'matching');
   }
   // view 切换会改变 PAGE_STAGE → 顶部进度条 active 跟着切
   if (typeof renderStageBar === 'function') renderStageBar();
@@ -1187,6 +1272,7 @@ function markBlockError(blockId, message) {
     badge.textContent = '失败';
     if (message) badge.title = message;
   }
+  syncOutlineRow(blockId);
 }
 
 // ── 模型选择器 ──
@@ -1484,8 +1570,10 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   } else if (state === 'gate_outline') {
     statusActions.innerHTML = `
       <button class="btn-status-secondary" id="btn-cancel">取消</button>
+      <button class="btn-status-secondary" id="btn-redraft-outline">重新提炼大纲</button>
       <button class="btn-status-primary" id="btn-confirm-outline">确认大纲，继续匹配素材</button>`;
     document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+    document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
     document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
     makeOutlineEditable();
   } else if (state === 'gate_materials') {
@@ -1577,17 +1665,9 @@ function buildToc(blocks) {
       e.stopPropagation();
       // 关闭浮层
       document.getElementById('sidebar-toc').style.display = 'none';
-      // 滚动到对应卡片
-      const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
-      if (card) {
-        const scroller = document.getElementById('blocks-scroll');
-        if (scroller) {
-          const top = card.offsetTop - scroller.offsetTop - 16;
-          scroller.scrollTo({ top, behavior: 'smooth' });
-        } else {
-          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }
+      // 滚动到对应卡片：先展开祖先链，否则折叠卡片的 offsetTop 恒为 0
+      expandToBlock(blockId);
+      scrollToOutlineNode(blockId);
     });
     sidebarToc.appendChild(btn);
   });
@@ -1677,13 +1757,22 @@ function parseSource(block) {
   } catch { return []; }
 }
 
+// 一行目录摘要（row 副标题）：要求为空时整行隐藏
+function firstLine(text) {
+  const s = String(text ?? '').split('\n').map(l => l.trim()).filter(Boolean);
+  return s.length ? s[0] : '';
+}
+
+const BADGE_TEXT = { pending: '待提炼', extracting: '提炼中', done: '已完成 ✓', error: '提炼失败' };
+
 function renderBlockCard(block, status = 'pending') {
   blocksEmpty.style.display = 'none';
+  const blockId = block.block_id || block.id;
   const el = document.createElement('div');
   el.className = 'block-card';
-  el.dataset.blockId = block.block_id || block.id;
+  el.dataset.blockId = blockId;
   const sources = parseSource(block);
-  const badgeText = { pending: '待提炼', extracting: '提炼中', done: '已完成 ✓', error: '提炼失败' }[status] || status;
+  const badgeText = BADGE_TEXT[status] || status;
   el.innerHTML = `
     <div class="block-card-header">
       <span class="block-card-title">${escapeHtml(block.title)}</span>
@@ -1710,7 +1799,29 @@ function renderBlockCard(block, status = 'pending') {
         ${renderMatchedHtml(sources)}
       </div>
     </div>`;
-  blocksList.appendChild(el);
+
+  // 目录树节点：row 一行摘要（始终可见）+ 卡片（默认折叠）。
+  // 卡片仍是 .block-card[data-block-id]，闸门 1 的编辑工具按原契约定位它。
+  const node = document.createElement('div');
+  node.className = 'ot-node';
+  node.dataset.blockId = blockId;
+  node.dataset.level = String(
+    Number.isFinite(block.level) ? Math.max(1, Math.min(4, block.level))
+                                 : inferTocLevel(block)
+  );
+  const row = document.createElement('header');
+  row.className = 'ot-row';
+  row.innerHTML = `
+    <span class="ot-chevron">›</span>
+    <span class="ot-title" title="${escapeHtml(block.title)}">${escapeHtml(block.title)}</span>
+    <span class="ot-sub">${escapeHtml(firstLine(block.requirement))}</span>
+    <span class="block-status-badge ${status} ot-badge" ${block.error ? `title="${escapeHtml(block.error)}"` : ''}>${badgeText}</span>`;
+  row.addEventListener('click', () => toggleOutlineNode(blockId));
+  node.appendChild(row);
+  node.appendChild(el);
+
+  const host = blocksList.querySelector('.outline-tree') || blocksList;
+  host.appendChild(node);
 }
 function renderField(label, value, cls) {
   const isEmpty = !value;
@@ -1730,6 +1841,132 @@ function renderField(label, value, cls) {
     ${content}
   </div>`;
 }
+// ── 目录树：层级挂载 / 折叠 / 定位 ──
+// 卡片默认折叠，row 常显。树形结构的纯逻辑在 assets/workspace-model.mjs 的
+// buildOutlineTree（与后端 normalize_nodes 同一套规则），这里只负责 DOM 搬运。
+const OUTLINE_OPEN_KEY = (pid) => `outlineTree:${pid}`;
+
+function outlineNodeEl(blockId) {
+  return document.querySelector(`.ot-node[data-block-id="${blockId}"]`);
+}
+
+function readOpenSet() {
+  try { return new Set(JSON.parse(sessionStorage.getItem(OUTLINE_OPEN_KEY(projectId)) || '[]')); }
+  catch { return new Set(); }
+}
+
+function writeOpenSet(set) {
+  try { sessionStorage.setItem(OUTLINE_OPEN_KEY(projectId), JSON.stringify([...set])); } catch {}
+}
+
+function toggleOutlineNode(blockId) {
+  const node = outlineNodeEl(blockId);
+  if (!node) return;
+  const open = !node.classList.contains('open');
+  node.classList.toggle('open', open);
+  const set = readOpenSet();
+  if (open) set.add(blockId); else set.delete(blockId);
+  writeOpenSet(set);
+}
+
+// 展开祖先链：隐藏卡片的 offsetTop 是 0，不展开就滚到顶部
+function expandToBlock(blockId) {
+  let node = outlineNodeEl(blockId);
+  const set = readOpenSet();
+  let changed = false;
+  while (node) {
+    if (!node.classList.contains('open')) {
+      node.classList.add('open');
+      changed = true;
+    }
+    set.add(node.dataset.blockId);
+    node = node.parentElement?.closest('.ot-node') || null;
+  }
+  if (changed) writeOpenSet(set);
+}
+
+function scrollToOutlineNode(blockId) {
+  const node = outlineNodeEl(blockId);
+  if (!node) return;
+  const scroller = document.getElementById('blocks-scroll');
+  try {
+    scroller
+      ? scroller.scrollTo({ top: node.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' })
+      : node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch {}
+}
+
+// 展开态：matching 视图全展开（用户要逐章核对素材），outline 视图按用户折叠记忆
+function applyOutlineExpansion(forceAll = false) {
+  const stored = readOpenSet();
+  blocksList.querySelectorAll('.ot-node').forEach(node => {
+    node.classList.toggle('open', forceAll || stored.has(node.dataset.blockId));
+  });
+}
+
+// 按 level 把已渲染的 .ot-node 重新挂成树
+function renderOutlineTree() {
+  const entries = Array.from(blocksList.querySelectorAll('.ot-node'))
+    .map(node => ({
+      node,
+      id: node.dataset.blockId,
+      level: Number(node.dataset.level) || 1,
+    }));
+  if (!entries.length) return;
+  const byId = new Map(entries.map(e => [e.id, e.node]));
+  const tree = buildOutlineTree(entries.map(e => ({ id: e.id, level: e.level })));
+
+  const root = document.createElement('div');
+  root.className = 'outline-tree';
+  const place = (entry) => {
+    const el = byId.get(entry.node.id);
+    if (!el) return null;
+    el.querySelector(':scope > .ot-children')?.remove();
+    if (entry.children.length) {
+      const kids = document.createElement('div');
+      kids.className = 'ot-children';
+      entry.children.forEach(c => { const child = place(c); if (child) kids.appendChild(child); });
+      el.appendChild(kids);
+    }
+    return el;
+  };
+  tree.forEach(t => { const el = place(t); if (el) root.appendChild(el); });
+  blocksList.innerHTML = '';
+  blocksList.appendChild(root);
+}
+
+// 闸门打开时不重排 DOM：用户可能正在编辑，重排会夺走焦点
+function scheduleOutlineTree() {
+  if (extractionState === 'gate_outline' || extractionState === 'gate_materials') return;
+  renderOutlineTree();
+}
+
+// row 是卡片的摘要镜像：徽章 / 要求首行都从卡片里同步，避免两份状态各自漂移
+function syncOutlineRow(blockId) {
+  const node = outlineNodeEl(blockId);
+  const card = node?.querySelector(':scope > .block-card');
+  if (!node || !card) return;
+  const src = card.querySelector('.block-status-badge');
+  const badge = node.querySelector(':scope > .ot-row .block-status-badge');
+  if (src && badge) {
+    badge.className = src.className + ' ot-badge';
+    badge.textContent = src.textContent;
+    if (src.title) badge.title = src.title;
+  }
+  const sub = node.querySelector(':scope > .ot-row .ot-sub');
+  if (sub) {
+    // 第一个字段 = 应标要求；多行走 <ul>，单行走 .block-field-value。
+    // 读 textContent 不读 innerText：卡片折叠时没有布局，innerText 会退化成 textContent，
+    // 展开后结果就该一致，不能因为折叠与否给出两种副标题。
+    const field = card.querySelector('.block-card-grid .block-field');
+    const items = field ? Array.from(field.querySelectorAll('.block-field-list li')) : [];
+    const raw = items.length
+      ? items.map(li => li.textContent).filter(Boolean).join('\n')
+      : (field?.querySelector('.block-field-value')?.textContent || '');
+    sub.textContent = firstLine(raw);
+  }
+}
+
 function updateBlockCard(blockId, data) {
   // 闸门 1（gate_outline）/ 闸门 2（gate_materials）期间避免冲掉用户编辑：后端若重发 outline_extract / match_progress 直接忽略
   if (extractionState === 'gate_outline' || extractionState === 'gate_materials') return;
@@ -1767,6 +2004,7 @@ function updateBlockCard(blockId, data) {
     if (oldList) oldList.remove();
     matchedWrap.insertAdjacentHTML('beforeend', renderMatchedHtml(sources));
   }
+  syncOutlineRow(blockId);
 }
 
 // ── 加载已有 blocks ──
@@ -1791,6 +2029,8 @@ async function loadExistingBlocks({ silent = false } = {}) {
     blocksById.set(blockId, b);
     renderBlockCard(b, isDone(b) ? 'done' : 'pending');
   });
+  renderOutlineTree();
+  applyOutlineExpansion(document.body.dataset.view === 'matching');
   buildToc(blocks);
   blocks.filter(isDone).forEach(b => markTocDone(b.block_id || b.id));
   updateSidebarProgress();
@@ -1822,6 +2062,8 @@ function resetWorkflowUi() {
   blocksByOrder.length = 0;
   blocksById.clear();
   currentGate = null;
+  draftRevision = 0;
+  outlineError = '';
   updateSidebarProgress();
 }
 
@@ -1834,10 +2076,42 @@ function closeStream() {
 
 window.addEventListener('pagehide', closeStream);
 
+// 原生 SSE 连接失败（404 / 断线）≠ 工作流报错。最常见的原因是后端重启过：thread 不在
+// runner 的内存 _runs 里，stream 直接 404，而 checkpoint 里状态完好 —— 这时 POST /recover
+// 就能把 _Run 重建回来（停在闸门时 ainvoke(None) 是空跑，不会触发新的模型调用，也就不会
+// 产生新的费用）。正在跑的 stage 一律不擅自续跑，只把原因显示出来，避免把「重出目录失败：
+// …」这类更具体的状态栏文案盖掉。
+const RECOVERABLE_STAGES = new Set(['outline_review', 'materials_review', 'report_review', 'paused']);
+const MAX_STREAM_RECOVER = 2;
+let streamRecoverCount = 0;
+
+async function recoverStreamAfterDrop() {
+  const tid = currentThreadId || getThread(projectId);
+  if (!tid) return;
+  if (!RECOVERABLE_STAGES.has(currentStage) || streamRecoverCount >= MAX_STREAM_RECOVER) {
+    setStatusBar('extracting',
+      '事件流已断开：该任务不在本次服务运行中（后端可能已重启）。请刷新页面后重试。',
+      0, totalBlocks, doneBlocks);
+    return;
+  }
+  streamRecoverCount++;
+  try {
+    await api.workflow.recover(tid); // 后端按 checkpoint 重建 _Run
+    attachStream(tid);               // emitter 是新的，必须重连才能收到后续帧
+  } catch (e) {
+    console.warn('[workflow] 断线恢复失败', e);
+    setStatusBar('extracting',
+      '事件流已断开，按检查点恢复也失败（该任务可能已被清理）。请刷新页面后重试。',
+      0, totalBlocks, doneBlocks);
+  }
+}
+
 function attachStream(threadId) {
   closeStream();
   currentEventSource = api.workflow.stream(threadId, {
+    onStreamError: () => { void recoverStreamAfterDrop(); },
     onStageChange: (data) => {
+      streamRecoverCount = 0; // 收到真实帧说明连接是好的，恢复额度重置
       if (typeof data?.stage === 'string') {
         setStage(data.stage);
       }
@@ -1876,14 +2150,13 @@ function attachStream(threadId) {
       }
       const prog = card.querySelector('.block-card-progress');
       if (prog) prog.classList.add('active');
-      // 滚动到首个 extracting 卡片，让用户看到当前焦点
+      // 提炼中的卡片自动展开：进度条 / 骨架屏才有地方显示
+      outlineNodeEl(blockId)?.classList.add('open');
+      syncOutlineRow(blockId);
+      // 滚动到首个 extracting 节点，让用户看到当前焦点
       if (!document.querySelector('.block-card.scroll-locked')) {
         card.classList.add('scroll-locked');
-        const scroller = document.getElementById('blocks-scroll');
-        try {
-          scroller ? scroller.scrollTo({ top: card.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' })
-                   : card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } catch {}
+        scrollToOutlineNode(blockId);
         setTimeout(() => card.classList.remove('scroll-locked'), 800);
       }
     },
@@ -1937,14 +2210,12 @@ function attachStream(threadId) {
         tocBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           document.getElementById('sidebar-toc').style.display = 'none';
-          const c = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
-          if (c) {
-            const scroller = document.getElementById('blocks-scroll');
-            scroller ? scroller.scrollTo({ top: c.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' }) : c.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
+          expandToBlock(blockId);
+          scrollToOutlineNode(blockId);
         });
         sidebarToc.appendChild(tocBtn);
         markTocDone(blockId);
+        scheduleOutlineTree();
         doneBlocks++;
         if (!totalBlocks) totalBlocks = doneBlocks;
       } else {
@@ -1954,6 +2225,44 @@ function attachStream(threadId) {
       updateSidebarProgress();
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
       setStatusBar('extracting', `张衡提炼 ${doneBlocks}/${totalBlocks} 章节`, pct, totalBlocks, doneBlocks);
+    },
+    onOutlineDraftStart: (data) => {
+      // 模型正在派生应答目录：目录还没有内容，先把张衡的进度文案切上去
+      draftRevision = Number(data?.revision) || draftRevision;
+      const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
+      setStatusBar('extracting', `张衡梳理应答目录${ver}…`, 0, totalBlocks, doneBlocks);
+      blocksEmpty.innerHTML = '<p>正在依据规范书与提炼要求梳理应答目录…</p>';
+      blocksEmpty.style.display = 'block';
+    },
+    onOutlineDraft: (data) => {
+      // 目录是整体替换的：一次收全量，旧卡片全部推倒重建
+      const toc = Array.isArray(data?.toc) ? data.toc : [];
+      resetWorkflowUi();
+      draftRevision = Number(data?.revision) || draftRevision;
+      outlineError = String(data?.error || '');
+      blocksEmpty.innerHTML = '<p>上传应标文件后点击「提炼大纲」开始</p>';
+      blocksEmpty.style.display = toc.length ? 'none' : 'block';
+      toc.forEach(sec => {
+        const block = {
+          block_id: sec.id,
+          title: sec.title || sec.id,
+          level: sec.level,
+          status: 'pending',
+        };
+        blocksByOrder.push(block);
+        blocksById.set(sec.id, block);
+        renderBlockCard(block, 'pending');
+      });
+      totalBlocks = toc.length;
+      doneBlocks = 0;
+      renderOutlineTree();
+      // 新一版目录先全展开：用户要核对张衡是不是按他的要求改了结构
+      applyOutlineExpansion(true);
+      buildToc(toc);
+      updateSidebarProgress();
+      const ver = draftRevision ? `第 ${draftRevision} 版` : '';
+      setStatusBar('extracting', `目录已更新${ver ? `（${ver}）` : ''}，正在提炼章节要求…`,
+        0, totalBlocks, 0);
     },
     onMatchStart: (data) => {
       // 单 block 开始匹配：右侧"匹配素材"区切骨架屏 + 自动滚动聚焦
@@ -1977,11 +2286,7 @@ function attachStream(threadId) {
       if (prog) prog.classList.add('active');
       if (!document.querySelector('.block-card.scroll-locked')) {
         card.classList.add('scroll-locked');
-        const scroller = document.getElementById('blocks-scroll');
-        try {
-          scroller ? scroller.scrollTo({ top: card.offsetTop - scroller.offsetTop - 16, behavior: 'smooth' })
-                   : card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } catch {}
+        scrollToOutlineNode(blockId);
         setTimeout(() => card.classList.remove('scroll-locked'), 800);
       }
     },
@@ -2006,11 +2311,24 @@ function attachStream(threadId) {
       setStatusBar('extracting', `沈括匹配素材 ${matchedCount}/${tot} 章节`, pct, tot, matchedCount);
     },
     onGateOpen: (data) => {
+      streamRecoverCount = 0; // 收到真实帧说明连接是好的，恢复额度重置
       const gate = data?.gate;
       currentGate = gate;
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
       if (gate === 'review_outline') {
-        setStatusBar('gate_outline', '大纲提炼完成，请检查并编辑后继续匹配素材', pct, totalBlocks, doneBlocks);
+        // 快照是后端权威：刷新后靠它回填提炼要求、显示版本号与降级提示
+        const snap = data?.snapshot || {};
+        if (Number(snap.outline_revision)) draftRevision = Number(snap.outline_revision);
+        if (typeof snap.outline_error === 'string' && snap.outline_error) {
+          outlineError = snap.outline_error;
+        }
+        restoreOutlineInstruction({ text: typeof snap.outline_instruction === 'string' ? snap.outline_instruction : '' });
+        const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
+        setStatusBar('gate_outline',
+          outlineError
+            ? `大纲提炼完成${ver}；目录派生降级：${outlineError}`
+            : `大纲提炼完成${ver}，请检查并编辑后继续匹配素材`,
+          pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_materials') {
         setStatusBar('gate_materials', '素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_report') {
@@ -2087,7 +2405,10 @@ async function startExtraction(forceRestart = false) {
       }
     }
     if (!threadId) {
-      const resp = await api.workflow.start(projectId, { model: selectedModel });
+      const resp = await api.workflow.start(projectId, {
+        model: selectedModel,
+        outline_instruction: readOutlineInstruction(),
+      });
       threadId = resp?.thread_id;
       if (!threadId) {
         setStatusBar('idle', '', 0, 0, 0);
@@ -2129,7 +2450,10 @@ async function startMatching() {
       } catch {}
     }
     if (!tid) {
-      const resp = await api.workflow.start(projectId, { model: selectedModel });
+      const resp = await api.workflow.start(projectId, {
+        model: selectedModel,
+        outline_instruction: readOutlineInstruction(),
+      });
       tid = resp?.thread_id;
       if (!tid) {
         setStatusBar('idle', '', 0, 0, 0);
@@ -2210,6 +2534,66 @@ async function confirmOutlineGate() {
   } catch (e) {
     console.error('[workflow] resume(review_outline) 失败', e);
     if (btn) btn.disabled = false;
+  }
+}
+
+// ── 提炼要求输入（左侧面板底部，闸门 1 可反复改） ──
+const OUTLINE_INSTRUCTION_KEY = (pid) => `outlineInstruction:${pid}`;
+
+function instructionInput() {
+  return document.getElementById('outline-instruction');
+}
+
+function persistOutlineInstruction() {
+  const ta = instructionInput();
+  if (!ta) return;
+  try { localStorage.setItem(OUTLINE_INSTRUCTION_KEY(projectId), ta.value.trim()); } catch {}
+}
+
+function readOutlineInstruction() {
+  const ta = instructionInput();
+  if (ta) return ta.value.trim();
+  try { return (localStorage.getItem(OUTLINE_INSTRUCTION_KEY(projectId)) || '').trim(); } catch { return ''; }
+}
+
+// 回填优先级：闸门快照（后端权威） > localStorage。已有内容不覆盖，避免刷掉用户正在打的字。
+function restoreOutlineInstruction({ text = '', force = false } = {}) {
+  const ta = instructionInput();
+  if (!ta) return;
+  if (force || !ta.value.trim()) {
+    let cached = '';
+    try { cached = localStorage.getItem(OUTLINE_INSTRUCTION_KEY(projectId)) || ''; } catch {}
+    ta.value = text || cached;
+  }
+  persistOutlineInstruction();
+}
+
+instructionInput()?.addEventListener('input', persistOutlineInstruction);
+
+// 闸门 1：换一份提炼要求，让张衡整版重出目录。
+// 刻意不走 startExtraction(true) —— 那条路会 abort + 重跑 parse（几百页 PDF 再 OCR 一遍）。
+async function redraftOutline() {
+  const text = readOutlineInstruction();
+  persistOutlineInstruction();
+  freezeOutlineEdit();
+  const tid = currentThreadId || getThread(projectId);
+  if (!tid) {
+    // 还没有 thread（首次就点重出）：退回正常启动路径
+    await startExtraction(false);
+    return;
+  }
+  try {
+    closeStream();
+    await api.workflow.redraftOutline(tid, text);
+    currentThreadId = tid;
+    // runner 会重建 emitter，旧 SSE 连接收不到新一版的帧
+    attachStream(tid);
+    setStatusBar('extracting', '已提交提炼要求，张衡重新梳理应答目录…', 0, totalBlocks, doneBlocks);
+  } catch (e) {
+    console.error('[workflow] redraftOutline 失败', e);
+    attachStream(tid);
+    const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
+    setStatusBar('gate_outline', `重出目录失败：${e?.message || e}`, pct, totalBlocks, doneBlocks);
   }
 }
 
@@ -2418,6 +2802,8 @@ if (params.get('autoExtract') === '1') {
   loadMaterials();
   loadExistingBlocks();
   loadModels();
+  // 提炼要求：先按 localStorage 回填，闸门 1 快照到达后再以后端值覆盖空输入框
+  restoreOutlineInstruction();
 }
 
 // 还原 stage 进度（断线续连场景）
@@ -2480,6 +2866,6 @@ if (params.get('autoExtract') === '1') {
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260916-loop2"></script>
+  <script type="module" src="./assets/workspace.js?v=20260916-loop4"></script>
   </body>
 </html>

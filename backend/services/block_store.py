@@ -376,6 +376,49 @@ async def upsert_outline_block(
     return await get_block(db, cursor.lastrowid)
 
 
+async def sync_outline_placeholders(
+    db: aiosqlite.Connection,
+    project_id: int,
+    sections,
+) -> dict:
+    """把当前 toc 同步进 blocks 表：清理不在 toc 的孤儿行 + 逐节 upsert 占位。
+
+    parse 与 outline_draft 各调一次（目录换版后 block_id 会整体变化）。
+
+    清理保护：**只删 content 为空的行**。目录重排后若该行已有正文，宁可留一条
+    脏数据也不删用户内容。
+
+    sections: 可迭代的 Section-like（需有 .id / .level / .title），顺序即 order_idx。
+
+    返回 ``{"removed": int, "created": int}``。
+    """
+    sections = list(sections)
+    toc_ids = {sec.id for sec in sections}
+
+    existing = await list_blocks(db, project_id)
+    stale_ids = [
+        b.get("id") for b in existing
+        if b.get("block_id") not in toc_ids and not (b.get("content") or "").strip()
+    ]
+    for stale_pk in stale_ids:
+        await db.execute("DELETE FROM blocks WHERE id = ?", (stale_pk,))
+    if stale_ids:
+        await db.commit()
+
+    for idx, sec in enumerate(sections):
+        await upsert_outline_block(
+            db,
+            project_id=project_id,
+            block_id=sec.id,
+            level=int(sec.level or 1),
+            title=sec.title or sec.id,
+            order_idx=idx,
+            matrix=None,
+        )
+
+    return {"removed": len(stale_ids), "created": len(sections)}
+
+
 # ══════════════════════════════════════════════════
 # block_revisions
 # ══════════════════════════════════════════════════

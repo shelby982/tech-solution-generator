@@ -153,6 +153,18 @@ export const api = {
     rerunMatch: (threadId) =>
       fetch(`/api/workflow/${threadId}/rerun-match`, { method: 'POST' }).then(r => r.json()),
 
+    // 整版重出应答目录：换一份提炼要求，跳过 parse 只重跑目录派生
+    redraftOutline: (threadId, instruction = '') =>
+      fetch(`/api/workflow/${threadId}/redraft-outline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction }),
+      }).then(async r => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.detail || `重出目录失败（HTTP ${r.status}）`);
+        return body;
+      }),
+
     recover: (threadId) =>
       fetch(`/api/workflow/${threadId}/recover`, { method: 'POST' }).then(r => r.json()),
 
@@ -165,6 +177,14 @@ export const api = {
       const wire = (eventName, handler) => {
         if (!handler) return;
         es.addEventListener(eventName, (ev) => {
+          // 浏览器自己的连接失败（404 / 断线 / 重连中）也是 'error' 事件，但它是 Event
+          // 而不是 MessageEvent，没有 data。必须与后端发来的工作流错误帧分开处理，
+          // 否则「服务重启后该 thread 不在 runner 内存里」会被显示成「工作流出错」，
+          // 用户看不到任何原因。
+          if (eventName === 'error' && !(ev instanceof MessageEvent)) {
+            handlers.onStreamError?.(ev);
+            return;
+          }
           let data = {};
           try { data = JSON.parse(ev.data); } catch {}
           handler(data);
@@ -172,6 +192,8 @@ export const api = {
       };
       wire('stage_change',     handlers.onStageChange);
       wire('parse_progress',   handlers.onParseProgress);
+      wire('outline_draft_start', handlers.onOutlineDraftStart);
+      wire('outline_draft',    handlers.onOutlineDraft);
       wire('outline_extract_start', handlers.onOutlineExtractStart);
       wire('outline_extract',  handlers.onOutlineExtract);
       wire('match_start',      handlers.onMatchStart);

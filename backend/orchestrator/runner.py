@@ -251,6 +251,66 @@ class WorkflowRunner:
             name=f"wf-{thread_id}-rerun-match",
         )
 
+    async def redraft_outline(self, thread_id: str, instruction: str) -> None:
+        """整版重出「应答文件目录」：换一份提炼要求，让张衡重新派生目录。
+
+        与 ``rerun_match`` 同为「把状态指针拨回上游节点后 ainvoke」：
+        - ``aupdate_state(..., as_node=NODE_PARSE)`` → LangGraph 推断 next =
+          NODE_OUTLINE_DRAFT，天然**跳过 parse**（不必为改一次要求重跑一遍 PDF OCR）。
+        - ``spec.outline_matrix`` 清空（借 ``_merge_dict`` 浅合并整版替换），
+          ``spec.source_toc`` **不动** —— 它是派生节点的 grounding 输入。
+        - **刻意不清 ``spec.toc``**：派生节点要读它当「上一版目录」喂回模型，迭代才有
+          连续性。清空属于多此一举 —— 节点返回值里的 ``toc`` 本就整版替换旧值，
+          提前清掉只会让上一版目录丢失（上一版目录 = 用户在闸门 1 看过的那一版）。
+        """
+        from orchestrator.graph import NODE_PARSE
+
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
+        elif run.task and not run.task.done():
+            raise ValueError("当前任务仍在运行，请等待完成后再操作")
+
+        state = await self.state(thread_id)
+        if not state or not state.get("project_id"):
+            raise KeyError(thread_id)
+        if state.get("cancel_requested") or state.get("stage") == "aborted":
+            raise ValueError("该工作流已作废，请创建新的工作流")
+        if state.get("stage") not in {"outline_review", "materials_review", "paused"}:
+            raise ValueError("请在「要求与大纲」闸门处重出目录")
+
+        # 旧 emitter 可能已 close（前次 stream 已结束），重建一份让新 stream 收事件
+        run.emitter = EventEmitter()
+        run.cancel_flag = False
+
+        async def _redraft(r: _Run, text: str) -> None:
+            try:
+                config = {"configurable": {"thread_id": r.thread_id}}
+                async with self._checkpointer_provider() as saver:
+                    graph = self._build(saver, r.emitter, thread_id=r.thread_id)
+                    await graph.aupdate_state(
+                        config,
+                        {
+                            "spec": {"outline_matrix": {}},
+                            "config": {"outline_instruction": text},
+                            "user_choice": "",
+                        },
+                        as_node=NODE_PARSE,
+                    )
+                    await graph.ainvoke(None, config=config)
+                await self._sync_stage(r.thread_id, graph_done=False)
+            except WorkflowCancelled:
+                await self._mark_aborted(r)
+            except Exception as e:
+                logger.exception(f"runner: thread {r.thread_id} redraft_outline 异常")
+                await r.emitter.emit(events.error(str(e), retryable=False))
+
+        run.task = asyncio.create_task(
+            _redraft(run, instruction or ""),
+            name=f"wf-{thread_id}-redraft-outline",
+        )
+
     async def _rerun_match_until_pause(self, run: _Run) -> None:
         """rerun_match 的后台 task：as_node=GATE_OUTLINE 后 ainvoke 走 match → gate_materials。"""
         from orchestrator.graph import GATE_OUTLINE
