@@ -69,17 +69,16 @@ def export_docx(项目路径: Path, template_path: Path = None) -> bool:
         print("[错误] 未找到整合后的草稿文件（应标文件_草稿.md）", file=sys.stderr)
         print("请先运行 merge_docs.py", file=sys.stderr)
         return False
-    try:
-        project_file = 项目路径 / "project.json"
-        项目名称 = 项目路径.name
-        if project_file.exists():
-            try:
-                项目信息 = json.loads(project_file.read_text(encoding="utf-8"))
-                项目名称 = 项目信息.get("项目名称", 项目路径.name)
-            except (json.JSONDecodeError) e:
-                print(f"[警告] project.json 解析失败，使用默认名称：{e}", file=sys.stderr)
-            except FileNotFoundError:
-                pass
+    project_file = 项目路径 / "project.json"
+    项目名称 = 项目路径.name
+    if project_file.exists():
+        try:
+            项目信息 = json.loads(project_file.read_text(encoding="utf-8"))
+            项目名称 = 项目信息.get("项目名称", 项目路径.name)
+        except json.JSONDecodeError as e:
+            print(f"[警告] project.json 解析失败，使用默认名称：{e}", file=sys.stderr)
+        except FileNotFoundError:
+            pass
     时间戳 = datetime.now().strftime("%Y%m%d")
     输出文件 = 项目路径 / "30_最终输出" / f"应标文件_{项目名称}_{时间戳}.docx"
     模板文件 = template_path or find_template(项目路径)
