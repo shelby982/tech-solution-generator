@@ -182,6 +182,11 @@ export const api = {
       wire('review_block_start', handlers.onReviewBlockStart);
       wire('review_finding',   handlers.onReviewFinding);
       wire('report_ready',     handlers.onReportReady);
+      wire('iteration_start',  handlers.onIterationStart);
+      wire('gaps_collecting',  handlers.onGapsCollecting);
+      wire('gaps_done',        handlers.onGapsDone);
+      wire('convergence',      handlers.onConvergence);
+      wire('feedback_ready',   handlers.onFeedbackReady);
       wire('gate_open',        handlers.onGateOpen);
       wire('error',            handlers.onError);
       wire('checkpoint',       handlers.onCheckpoint);

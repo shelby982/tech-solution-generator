@@ -530,3 +530,16 @@
 }
 .model-option:hover { background: var(--bg-2, #eef2f7); }
 .model-option.selected { background: #eff6ff; color: #1d4ed8; }
+
+.convergence-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--surface-2, #f5f5f5);
+  font-size: 13px;
+}
+.convergence-bar.unconverged { background: #fff4e5; color: #8a5300; }
+.convergence-bar .cv-unconverged { color: #b45309; }

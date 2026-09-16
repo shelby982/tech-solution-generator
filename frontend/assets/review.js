@@ -335,6 +335,37 @@ function renderBanner(report) {
   fillList(els.bannerMB,    report.missing_bonus);
 }
 
+// ── 渲染：协同闭环迭代条 ──────────────────────────
+function renderConvergence({ iteration, status, unconverged }) {
+  const bar = document.getElementById('convergence-bar');
+  if (!bar) return;
+  bar.hidden = false;
+
+  const round = document.getElementById('cv-round');
+  if (round && iteration != null) round.textContent = String(Number(iteration) + 1);
+
+  const statusEl = document.getElementById('cv-status');
+  const listEl = document.getElementById('cv-unconverged');
+  const unconvergedList = Array.isArray(unconverged) ? unconverged : [];
+
+  if (status === 'converged') {
+    bar.classList.remove('unconverged');
+    if (statusEl) statusEl.textContent = '已收敛';
+    if (listEl) listEl.textContent = '';
+    return;
+  }
+  if (status === 'max_iterations') {
+    bar.classList.add('unconverged');
+    if (statusEl) statusEl.textContent = '已达迭代上限，未收敛：';
+    if (listEl) listEl.textContent = unconvergedList.join('、') || '—';
+    return;
+  }
+  // refine / 进行中
+  bar.classList.remove('unconverged');
+  if (statusEl) statusEl.textContent = '修订中';
+  if (listEl) listEl.textContent = unconvergedList.length ? `待修订 ${unconvergedList.join('、')}` : '';
+}
+
 // ── 渲染：阶段 + 恢复条 ──────────────────────────
 function renderStage(stage) {
   // 顶部进度条同步：active 永远是 reviewing（PAGE_STAGE），backend stage 仅决定 done/disabled
@@ -382,6 +413,22 @@ function openStream() {
     },
     onReportReady: (data) => {
       renderBanner(data?.report);
+    },
+    onIterationStart: (data) => {
+      renderConvergence({ iteration: data?.iteration, status: 'refine', unconverged: [] });
+    },
+    onGapsCollecting: (data) => {
+      const bar = document.getElementById('convergence-bar');
+      const statusEl = document.getElementById('cv-status');
+      if (bar) bar.hidden = false;
+      if (statusEl) statusEl.textContent = `补充素材中：${data?.query || ''}`;
+    },
+    onConvergence: (data) => {
+      renderConvergence({
+        iteration: data?.iteration,
+        status: data?.status,
+        unconverged: data?.unconverged_blocks,
+      });
     },
     onCheckpoint: (data) => {
       if (data?.stage) renderStage(data.stage);
