@@ -65,6 +65,9 @@ NODE_COMP_REVIEW = "bao_zheng_review"
 NODE_AGGREGATE = "aggregate_review"
 GATE_REPORT = "gate_report"
 NODE_ABORT = "abort_marker"
+NODE_COLLECT_GAPS = "collect_gaps"
+NODE_CHECK_CONVERGENCE = "check_convergence"
+NODE_BUILD_FEEDBACK = "build_feedback"
 
 
 # ─────────────────────────────────────────────
@@ -246,6 +249,17 @@ def build_graph(
     async def aggregate_node(state: WorkflowState) -> WorkflowState:
         return await nodes.aggregate_review_node(state, emitter=emitter)
 
+    async def collect_gaps_node(state: WorkflowState) -> WorkflowState:
+        return await nodes.collect_gaps_node(
+            state, agent=deps.shen_kuo, emitter=emitter,
+        )
+
+    async def check_convergence_node(state: WorkflowState) -> WorkflowState:
+        return await nodes.check_convergence_node(state, emitter=emitter)
+
+    async def build_feedback_node(state: WorkflowState) -> WorkflowState:
+        return await nodes.build_feedback_node(state, emitter=emitter)
+
     builder.add_node(NODE_PARSE, parse_node)
     builder.add_node(NODE_EXTRACT, extract_node)
     builder.add_node(GATE_OUTLINE, _make_gate_node(
@@ -264,6 +278,9 @@ def build_graph(
         stage="report_review", gate_name="review_report", emitter=emitter,
     ))
     builder.add_node(NODE_ABORT, _make_abort_node(emitter))
+    builder.add_node(NODE_COLLECT_GAPS, collect_gaps_node)
+    builder.add_node(NODE_CHECK_CONVERGENCE, check_convergence_node)
+    builder.add_node(NODE_BUILD_FEEDBACK, build_feedback_node)
 
     # ── 边 ───────────────────────────────────────
     builder.add_edge(START, NODE_PARSE)
@@ -271,7 +288,8 @@ def build_graph(
     builder.add_edge(NODE_EXTRACT, GATE_OUTLINE)
     builder.add_edge(GATE_OUTLINE, NODE_MATCH)
     builder.add_edge(NODE_MATCH, GATE_MATERIALS)
-    builder.add_edge(GATE_MATERIALS, NODE_GENERATE)
+    builder.add_edge(GATE_MATERIALS, NODE_COLLECT_GAPS)
+    builder.add_edge(NODE_COLLECT_GAPS, NODE_GENERATE)
 
     # generate → 条件路由：暂停 → GATE_PAUSE（interrupt_after 让 graph 停下）
     #                    → 否则 fan-out 到两个评审 agent。
@@ -321,7 +339,40 @@ def build_graph(
 
     # fan-in：start_key 是 list 时，aggregate 等齐 list 中所有上游
     builder.add_edge([NODE_TECH_REVIEW, NODE_COMP_REVIEW], NODE_AGGREGATE)
-    builder.add_edge(NODE_AGGREGATE, GATE_REPORT)
+    builder.add_edge(NODE_AGGREGATE, NODE_CHECK_CONVERGENCE)
+
+    def _route_convergence(state: WorkflowState) -> str:
+        """refine 与 max_iterations 都先去 build_feedback，由其出边再区分。"""
+        status = (
+            (state.get("review") or {}).get("convergence") or {}
+        ).get("status", "")
+        return NODE_BUILD_FEEDBACK if status in ("refine", "max_iterations") \
+            else GATE_REPORT
+
+    builder.add_conditional_edges(
+        NODE_CHECK_CONVERGENCE,
+        _route_convergence,
+        {
+            NODE_BUILD_FEEDBACK: NODE_BUILD_FEEDBACK,
+            GATE_REPORT: GATE_REPORT,
+        },
+    )
+
+    def _route_feedback(state: WorkflowState) -> str:
+        """refine 回环补料；max_iterations 直连闸门 3。"""
+        status = (
+            (state.get("review") or {}).get("convergence") or {}
+        ).get("status", "")
+        return NODE_COLLECT_GAPS if status == "refine" else GATE_REPORT
+
+    builder.add_conditional_edges(
+        NODE_BUILD_FEEDBACK,
+        _route_feedback,
+        {
+            NODE_COLLECT_GAPS: NODE_COLLECT_GAPS,
+            GATE_REPORT: GATE_REPORT,
+        },
+    )
 
     # 闸门 3 后的条件路由
     builder.add_conditional_edges(
@@ -357,4 +408,7 @@ __all__ = [
     "NODE_AGGREGATE",
     "GATE_REPORT",
     "NODE_ABORT",
+    "NODE_COLLECT_GAPS",
+    "NODE_CHECK_CONVERGENCE",
+    "NODE_BUILD_FEEDBACK",
 ]

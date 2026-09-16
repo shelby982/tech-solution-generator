@@ -31,6 +31,7 @@ from orchestrator.graph import (
     GATE_OUTLINE,
     GATE_REPORT,
     NODE_AGGREGATE,
+    NODE_COLLECT_GAPS,
     NODE_COMP_REVIEW,
     NODE_GENERATE,
     NODE_MATCH,
@@ -160,7 +161,9 @@ async def test_graph_pauses_at_each_gate_in_sequence(tmp_path):
 
         await graph.ainvoke(None, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (NODE_GENERATE,)
+        # 闭环落地后 gate2 的下一个节点是 collect_gaps（generate 前的补料空操作），
+        # 不再是 generate 本身。
+        assert snap.next == (NODE_COLLECT_GAPS,)
         assert snap.values["stage"] == "materials_review"
 
         await graph.ainvoke(None, config=config)
@@ -221,10 +224,10 @@ async def test_resume_after_close_continues_from_checkpoint(tmp_path):
         snap = await graph2.aget_state(config)
         assert snap.next == (NODE_MATCH,)
         assert snap.values["spec"]["outline_matrix"] == matrix_before
-        # 续跑：经 match 节点后落在 gate2 之后等 generate
+        # 续跑：经 match 节点后落在 gate2 之后，等 collect_gaps → generate
         await graph2.ainvoke(None, config=config)
         snap = await graph2.aget_state(config)
-        assert snap.next == (NODE_GENERATE,)
+        assert snap.next == (NODE_COLLECT_GAPS,)
 
 
 # ─────────────────────────────────────────────
@@ -365,3 +368,161 @@ async def test_pause_during_generate_stops_at_gate_pause(tmp_path):
         # 评审节点不应被触发
         assert wang.entered_at is None
         assert bao.entered_at is None
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：收敛判定 → 回边 → 闸门
+# ─────────────────────────────────────────────
+
+class _ScoreReviewer:
+    """恒定打分的评审 stub —— 用来驱动收敛判定的两个分支。"""
+
+    def __init__(self, name: str, score: int):
+        self.name = name
+        self.score = score
+        self.reviewed: list[list[str]] = []
+
+    async def review(self, *, blocks, outline_matrix, emitter=None):
+        self.reviewed.append(sorted(blocks.keys()))
+        return {
+            bid: Finding(block_id=bid, agent=self.name, score=self.score)
+            for bid in blocks
+        }
+
+
+class _RetrieveStubShenKuo(_StubShenKuo):
+    """补上闭环所需的按需检索入口。"""
+
+    def __init__(self):
+        self.retrieve_calls: list[dict] = []
+
+    async def retrieve_for(self, requests_by_block, chunks):
+        self.retrieve_calls.append(dict(requests_by_block))
+        return {}
+
+
+async def test_converged_goes_straight_to_gate_report(tmp_path):
+    """全部达标 → check_convergence 判 converged → 直达闸门 3，不回炉。"""
+    from orchestrator.nodes import MAX_ITERATIONS  # noqa: F401  (确认常量存在)
+
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid-converged"}}
+    shen = _RetrieveStubShenKuo()
+    wang = _ScoreReviewer("wang_anshi", score=95)
+    bao = _ScoreReviewer("bao_zheng", score=95)
+
+    deps = _build_deps(wang=wang, bao=bao)
+    deps.shen_kuo = shen
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(deps, checkpointer=saver)
+        await graph.ainvoke({"project_id": 1}, config=config)  # gate1
+        await graph.ainvoke(None, config=config)               # gate2
+        await graph.ainvoke(None, config=config)               # generate+review+判定
+
+        snap = await graph.aget_state(config)
+
+    assert snap.values["stage"] == "report_review"
+    assert snap.values["review"]["convergence"]["status"] == "converged"
+    assert snap.values.get("iteration", 0) == 0
+    # 达标就不该转译任何修订指令
+    assert not snap.values["review"].get("feedback")
+    # 更强的断言：达标时 build_feedback 必须压根没跑过。它即使"无事可做"也会写下
+    # 空的 feedback / material_requests —— 键存在即说明绕了远路（前端据此显示
+    # "已转译 0 条意见"，且 errors 被清空）。
+    assert "feedback" not in snap.values["review"]
+    assert "material_requests" not in (snap.values.get("proposal") or {})
+    # 两位评审各只跑一次，没有重复评审
+    assert wang.reviewed == [["s1", "s2"]]
+    assert bao.reviewed == [["s1", "s2"]]
+
+
+async def test_unconverged_loops_until_max_iterations_then_gate_report(tmp_path):
+    """持续未达标 → 回炉直到迭代上限 → 停在闸门 3 等人工终审。"""
+    from orchestrator.nodes import MAX_ITERATIONS
+
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid-unconverged"}}
+    zhuge = _StubZhugeLiang()
+    shen = _RetrieveStubShenKuo()
+    wang = _ScoreReviewer("wang_anshi", score=50)
+    bao = _ScoreReviewer("bao_zheng", score=50)
+
+    deps = _build_deps(zhuge=zhuge, wang=wang, bao=bao)
+    deps.shen_kuo = shen
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(deps, checkpointer=saver)
+        await graph.ainvoke({"project_id": 1}, config=config)  # gate1
+        await graph.ainvoke(None, config=config)               # gate2
+        await graph.ainvoke(None, config=config)               # 回炉直到上限
+
+        snap = await graph.aget_state(config)
+
+    assert snap.values["stage"] == "report_review"
+    assert snap.values["iteration"] == MAX_ITERATIONS
+    assert snap.values["review"]["convergence"]["status"] == "max_iterations"
+    # 达上限后仍补跑一次 build_feedback，把意见留给人工终审参考
+    assert snap.values["review"]["feedback"]
+    # 首轮全量 + MAX_ITERATIONS 轮回炉
+    assert len(zhuge.calls) == MAX_ITERATIONS + 1
+    assert zhuge.calls[0] == ["s1", "s2"]
+    assert zhuge.calls[1] == ["s1", "s2"]   # 两个 block 都未达标
+
+
+class _PerBlockReviewer:
+    """按 block 给不同分数的评审 stub —— 用来制造"部分收敛"。"""
+
+    def __init__(self, name: str, scores: dict[str, int]):
+        self.name = name
+        self.scores = scores
+        self.reviewed: list[list[str]] = []
+
+    async def review(self, *, blocks, outline_matrix, emitter=None):
+        self.reviewed.append(sorted(blocks.keys()))
+        return {
+            bid: Finding(
+                block_id=bid, agent=self.name,
+                score=self.scores.get(bid, 50),
+            )
+            for bid in blocks
+        }
+
+
+async def test_partially_converged_narrows_review_scope(tmp_path):
+    """s1 达标 / s2 不达标 → 只回炉 s2 → 后续复审范围也应只剩 s2。
+
+    若复审范围未收窄，每轮都会全量重评；未改动的 s1 会因 LLM 采样随机性拿到
+    不同分数，可能被误判为未达标而额外回炉，甚至在两轮之间振荡。
+    """
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid-scope"}}
+    wang = _PerBlockReviewer("wang_anshi", {"s1": 95, "s2": 50})
+    bao = _PerBlockReviewer("bao_zheng", {"s1": 95, "s2": 50})
+
+    deps = _build_deps(wang=wang, bao=bao)
+    # 闭环会真实走到 collect_gaps；裸 _StubShenKuo 没有 retrieve_for，
+    # 一旦有补料请求就会被 collect_gaps 内部的 try/except 吞成 errors（测试仍绿，
+    # 但已悄悄丧失覆盖）。显式注入带检索入口的 stub 消除这个潜伏陷阱。
+    deps.shen_kuo = _RetrieveStubShenKuo()
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(deps, checkpointer=saver)
+        await graph.ainvoke({"project_id": 1}, config=config)  # gate1
+        await graph.ainvoke(None, config=config)               # gate2
+        await graph.ainvoke(None, config=config)               # 回炉直到上限
+
+        snap = await graph.aget_state(config)
+
+    assert snap.values["review"]["convergence"]["status"] == "max_iterations"
+    assert snap.values["review"]["convergence"]["unconverged_blocks"] == ["s2"]
+
+    # 首轮全量，此后每轮只复审仍在回炉的 s2
+    assert wang.reviewed[0] == ["s1", "s2"]
+    assert all(scope == ["s2"] for scope in wang.reviewed[1:]), (
+        f"复审范围应收窄到本轮更新的 block，实际 {wang.reviewed}"
+    )
+
+    # s1 的历史高分必须保留 —— 被抹掉的话下一轮判定会把它读成 0 分，
+    # 于是 s1 又被拖回回炉，两个 block 交替清空、永久振荡。
+    assert snap.values["review"]["tech_findings"]["s1"]["score"] == 95
