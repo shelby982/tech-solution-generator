@@ -513,6 +513,22 @@ async def zhuge_liang_generate_node(
             },
         ))
 
+    # 将每轮正文及修订写入工作台已有存储，导出/手改/历史使用同一份内容。
+    if new_blocks and state.get("project_id") and state.get("thread_id"):
+        from db import get_db
+        from services.block_store import list_blocks, update_block_content, add_revision, list_revisions
+        async with get_db() as db:
+            db_blocks = {b["block_id"]: b for b in await list_blocks(db, state["project_id"])}
+            for bid, output in new_blocks.items():
+                row = db_blocks.get(bid)
+                if row is None or row.get("content") == output.content:
+                    continue
+                if row.get("content") and not await list_revisions(db, row["id"]):
+                    await add_revision(db, row["id"], row["content"], "修订前正文", "baseline")
+                await update_block_content(db, row["id"], output.content)
+                await add_revision(db, row["id"], output.content,
+                                   f"第 {int(state.get('iteration') or 0) + 1} 轮 AI 撰写/修订", "generate")
+
     # 检测用户暂停：should_cancel 真 → 标 stage='paused' + emit paused 事件
     paused = bool(should_cancel and should_cancel())
     if paused:
@@ -649,7 +665,10 @@ async def _run_review(
     existing = dict((state.get("review") or {}).get(finding_field) or {})
     existing.update(findings_dict)
 
-    return {"review": {finding_field: existing}}
+    content_field = "tech_contents" if finding_field == "tech_findings" else "compliance_contents"
+    reviewed_contents = dict((state.get("review") or {}).get(content_field) or {})
+    reviewed_contents.update({bid: blocks[bid].content for bid in findings if bid in blocks})
+    return {"review": {finding_field: existing, content_field: reviewed_contents}}
 
 
 # ─────────────────────────────────────────────
@@ -847,7 +866,11 @@ async def check_convergence_node(
     unconverged: list[str] = []
     review_failed = False
 
-    for block_id in sorted(set(tech) | set(comp)):
+    scope = (state.get("proposal") or {}).get("revision_scope")
+    review_ids = set(tech) | set(comp)
+    if state.get("user_choice") == "regen_blocks" and scope:
+        review_ids &= set(scope)
+    for block_id in sorted(review_ids):
         t = tech.get(block_id) or {}
         c = comp.get(block_id) or {}
 

@@ -39,6 +39,11 @@ class FakeRunner:
         if thread_id == "missing":
             raise KeyError(thread_id)
 
+    async def workspace_action(self, thread_id, block_ids, action):
+        self.calls.append(("workspace_action", (thread_id, block_ids, action)))
+        if thread_id == "missing": raise KeyError(thread_id)
+        if thread_id == "busy": raise ValueError("当前任务仍在运行")
+
     async def abort(self, thread_id):
         self.calls.append(("abort", (thread_id,)))
         if thread_id == "missing":
@@ -312,3 +317,16 @@ async def test_start_rejects_invalid_project_id(client, runner):
     workflow_routes.set_runner(runner)
     r = await client.post("/api/workflow/start", json={"project_id": 0})
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("tid,action,ids,status", [
+    ("ok", "review", ["s1"], 200), ("ok", "revise", ["s2"], 200),
+    ("missing", "review", ["s1"], 404), ("busy", "review", ["s1"], 409),
+    ("ok", "delete", ["s1"], 422), ("ok", "review", [], 422),
+])
+async def test_workspace_action_contract(client, runner, tid, action, ids, status):
+    workflow_routes.set_runner(runner)
+    response = await client.post(f"/api/workflow/{tid}/workspace-action", json={"action": action, "block_ids": ids})
+    assert response.status_code == status
+    if status == 200:
+        assert runner.calls[-1] == ("workspace_action", (tid, ids, action))

@@ -234,3 +234,102 @@ async def test_unknown_thread_id_raises(runner_env):
     runner, _, _ = runner_env
     with pytest.raises(KeyError):
         await runner.resume("不存在", user_choice="approve")
+
+
+async def _ready_workspace(runner_env):
+    from db import get_db
+    from services.block_store import create_block
+    from orchestrator.graph import GATE_REPORT
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    matrix = dict(state["spec"]["outline_matrix"])
+    matrix["s2"] = {**matrix["s1"], "block_id": "s2", "title": "保护章节"}
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None)
+        await graph.aupdate_state({"configurable": {"thread_id": tid}}, {
+            "spec": {"outline_matrix": matrix},
+            "proposal": {"blocks": {**state["proposal"]["blocks"],
+                         "s2": {"block_id": "s2", "kind": "tech", "content": "保护原文"}}},
+        }, as_node=GATE_REPORT)
+    async with get_db() as db:
+        await db.execute("DELETE FROM block_revisions")
+        await db.execute("DELETE FROM blocks")
+        await db.commit()
+        for i, text in enumerate(["人工修订正文", "保护原文"], 1):
+            await create_block(db, pid, f"s{i}", "content", 1, f"章节{i}", "", "", "r", "", "[]", i, content=text)
+    return runner, tid
+
+
+async def test_workspace_review_uses_saved_text_and_never_generates(runner_env):
+    from db import get_db
+    from services.block_store import list_blocks, list_revisions
+    runner, tid = await _ready_workspace(runner_env)
+    await runner.workspace_action(tid, ["s1"], "review")
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    assert state["stage"] == "report_review"
+    assert state["review"]["tech_contents"]["s1"] == "人工修订正文"
+    assert state["review"]["compliance_contents"]["s1"] == "人工修订正文"
+    assert state["proposal"]["blocks"]["s2"]["content"] == "保护原文"
+    async with get_db() as db:
+        rows = await list_blocks(db, runner_env[1])
+        assert rows[0]["content"] == "人工修订正文"
+        assert await list_revisions(db, rows[0]["id"]) == []
+
+
+async def test_workspace_revise_protects_unselected_and_records_versions(runner_env):
+    from db import get_db
+    from services.block_store import list_blocks, list_revisions
+    runner, tid = await _ready_workspace(runner_env)
+    # Simulate process restart: only checkpoint survives.
+    runner._runs.clear()
+    await runner.workspace_action(tid, ["s1"], "revise")
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    assert state["stage"] == "report_review"
+    assert state["review"]["tech_contents"]["s1"] == "正文"
+    async with get_db() as db:
+        rows = await list_blocks(db, runner_env[1])
+        assert [r["content"] for r in rows] == ["正文", "保护原文"]
+        revisions = await list_revisions(db, rows[0]["id"])
+        assert [r["content"] for r in revisions] == ["人工修订正文", "正文"]
+        assert await list_revisions(db, rows[1]["id"]) == []
+
+
+async def test_workspace_rejects_invalid_or_empty_chapters(runner_env):
+    from db import get_db
+    from services.block_store import list_blocks, update_block_content
+    runner, tid = await _ready_workspace(runner_env)
+    with pytest.raises(ValueError, match="有效章节"):
+        await runner.workspace_action(tid, ["missing"], "revise")
+    async with get_db() as db:
+        rows = await list_blocks(db, runner_env[1])
+        await update_block_content(db, rows[0]["id"], "")
+    with pytest.raises(ValueError, match="尚无正文"):
+        await runner.workspace_action(tid, ["s1"], "review")
+
+async def test_workspace_review_stops_even_when_scores_fail(runner_env):
+    runner, tid = await _ready_workspace(runner_env)
+    deps = _deps_factory()
+    class LowReviewer:
+        async def review(self, *, blocks, outline_matrix, emitter=None):
+            return {bid: Finding(block_id=bid, agent="test", score=40) for bid in blocks}
+    class NoGeneration:
+        async def generate(self, **kwargs):
+            raise AssertionError("仅复审不得触发生成")
+    deps.wang_anshi = LowReviewer()
+    deps.bao_zheng = LowReviewer()
+    deps.zhuge_liang = NoGeneration()
+    runner._deps_factory = lambda: deps
+    await runner.workspace_action(tid, ["s1"], "review")
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    assert state["stage"] == "report_review"
+    assert state["review"]["tech_findings"]["s1"]["score"] == 40
+    assert state["proposal"]["blocks"]["s1"]["content"] == "人工修订正文"

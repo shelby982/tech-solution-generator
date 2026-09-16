@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Diff Review</title>
     <link rel="stylesheet" href="./assets/styles.css" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop2" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -15,7 +16,7 @@
             <a class="process-tab" href="/workbench" id="tab-workbench">材料撰写</a>
             <a class="process-tab active" href="/diff-review">审核导出</a>
           </nav>
-          <div class="project-actions">
+          <nav id="workspace-nav" aria-label="项目工作区"></nav><div class="project-actions">
             <button id="btn-export-word" type="button" style="all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:var(--accent,#2563eb);color:#fff;font-size:12.5px;font-weight:600;box-shadow:0 6px 14px -6px oklch(0.55 0.16 256 / 0.5);">导出 Word</button>
           </div>
         </header>
@@ -323,5 +324,6 @@
 
       loadRevisions();
     </script>
+  <script type="module" src="./assets/workspace.js?v=20260916-loop2"></script>
   </body>
 </html>

@@ -92,6 +92,7 @@ class WorkflowRunner:
         self._deps_factory = deps_factory
         self._checkpointer_provider = checkpointer_provider or checkpointer_from_default
         self._runs: dict[str, _Run] = {}
+        self._workspace_locks: dict[str, asyncio.Lock] = {}
 
     # ── 公共 API ──────────────────────────────
 
@@ -128,8 +129,16 @@ class WorkflowRunner:
         edits: Optional[dict] = None,
     ) -> None:
         """闸门处续跑：写入 user_choice + edits（patch dict），从下一个 super-step 继续。"""
-        run = self._get_run(thread_id)
+        current = await self.state(thread_id)
+        if not current or not current.get("project_id"):
+            raise KeyError(thread_id)
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
         patch: dict = dict(edits or {})
+        if current.get("stage") == "report_review" and user_choice == "approve":
+            patch["stage"] = "done"
         if user_choice:
             patch["user_choice"] = user_choice
 
@@ -146,6 +155,77 @@ class WorkflowRunner:
             user_choice="regen_blocks",
             edits={"proposal": {"regenerate_targets": list(block_ids)}},
         )
+
+    async def workspace_action(self, thread_id: str, block_ids: list[str], action: str) -> None:
+        """对用户选择的章节修订或仅复审；可从已结束/重启后的 checkpoint 再进入。"""
+        from orchestrator.graph import GATE_MATERIALS, NODE_GENERATE
+        from services.block_store import list_blocks, list_chunks_with_filename
+
+        lock = self._workspace_locks.setdefault(thread_id, asyncio.Lock())
+        async with lock:
+            run = self._runs.get(thread_id)
+            if run and run.task and not run.task.done():
+                raise ValueError("当前任务仍在运行，请等待完成后再操作")
+            state = await self.state(thread_id)
+            if not state or not state.get("project_id"):
+                raise KeyError(thread_id)
+            if state.get("cancel_requested") or state.get("stage") == "aborted":
+                raise ValueError("该工作流已作废，请创建新的工作流")
+            if state.get("stage") not in {"report_review", "done", "paused", "materials_review"}:
+                raise ValueError("请先完成大纲和素材确认，或等待当前运行结束")
+            if action not in {"review", "revise"}:
+                raise ValueError("不支持的章节操作")
+            ids = list(dict.fromkeys(block_ids))
+            matrix = (state.get("spec") or {}).get("outline_matrix") or {}
+            if not ids or any(bid not in matrix for bid in ids):
+                raise ValueError("请选择当前工作流中的有效章节")
+            async with get_db() as db:
+                rows = await list_blocks(db, state["project_id"])
+                chunks = await list_chunks_with_filename(db, state["project_id"])
+            db_map = {b["block_id"]: b for b in rows}
+            proposal = state.get("proposal") or {}
+            blocks = dict(proposal.get("blocks") or {})
+            review = state.get("review") or {}
+            feedback = dict(review.get("feedback") or {})
+            requests = {}
+            for bid in ids:
+                row = db_map.get(bid)
+                if row is not None:
+                    blocks[bid] = {**blocks.get(bid, {}), "block_id": bid,
+                                   "content": row.get("content") or "", "kind": "tech"}
+                if action == "review" and not (blocks.get(bid) or {}).get("content", "").strip():
+                    raise ValueError("选中章节尚无正文，请先撰写或生成")
+                tech = (review.get("tech_findings") or {}).get(bid) or {}
+                comp = (review.get("compliance_findings") or {}).get(bid) or {}
+                issues = list(tech.get("issues") or []) + list(comp.get("issues") or [])
+                feedback[bid] = {"issues": issues, "scores": {
+                    "tech": tech.get("score"), "comp": comp.get("score")}}
+                requests[bid] = [{"query": i.get("material_query") or i.get("point", ""),
+                                  "reason": i.get("point", "")}
+                                 for i in issues if i.get("needs_material")]
+            if run is None:
+                run = _Run(thread_id, EventEmitter())
+                self._runs[thread_id] = run
+            elif run.emitter._closed:
+                run.emitter = EventEmitter()
+            run.cancel_flag = False
+            patch = {
+                "stage": "reviewing" if action == "review" else "generating",
+                "user_choice": "review_only" if action == "review" else "regen_blocks",
+                "proposal": {"blocks": blocks, "updated_blocks": ids, "revision_scope": ids,
+                             "regenerate_targets": ids if action == "revise" else [],
+                             "material_requests": requests if action == "revise" else {}},
+                "review": {"feedback": feedback},
+                "materials": {"chunks": chunks},
+            }
+            if action == "revise":
+                patch["iteration"] = int(state.get("iteration") or 0) + 1
+            # 使用确定的图入口，避免 done checkpoint 没有 next 导致空跑。
+            entry = NODE_GENERATE if action == "review" else GATE_MATERIALS
+            async with self._checkpointer_provider() as saver:
+                graph = self._build(saver, run.emitter, thread_id=thread_id)
+                await graph.aupdate_state({"configurable": {"thread_id": thread_id}}, patch, as_node=entry)
+            run.task = asyncio.create_task(self._resume_until_pause(run, {}), name=f"wf-{thread_id}-{action}")
 
     async def rerun_match(self, thread_id: str) -> None:
         """重新触发素材匹配：把 thread 状态指针拨回 GATE_OUTLINE 节点，再 ainvoke 让 graph

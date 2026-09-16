@@ -1,0 +1,74 @@
+/* Fixed work areas; runtime state never changes the selected navigation item. */
+#workspace-nav {display:flex;flex:1;justify-content:center;gap:4px;min-width:0;overflow-x:auto;}
+#workspace-nav a {display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;color:#526076;font-size:13px;padding:9px 13px;border-radius:8px;}
+#workspace-nav a:hover {background:#f1f5f9;}
+#workspace-nav a[aria-current="page"] {background:#eaf1ff;color:#1d4ed8;font-weight:650;}
+.ws-count {font-size:11px;border-radius:10px;background:#dce7ff;padding:1px 6px;}
+.ws-status {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid #dde4ed;background:#fff;flex-shrink:0;}
+.ws-state-copy {display:flex;align-items:center;gap:16px;font-size:12px;flex-wrap:wrap;}
+#ws-run-detail,.ws-muted {color:#637188;font-size:12px;}
+.ws-status-actions {display:flex;gap:8px;align-items:center;white-space:nowrap;}
+.ws-status-actions a,.ws-status-actions button {font:inherit;font-size:12px;color:#34445d;border:1px solid #dce3ed;background:#fff;border-radius:6px;padding:5px 9px;text-decoration:none;cursor:pointer;}
+.ws-status[data-busy="true"] #ws-run-label {color:#1d4ed8;}
+.ws-error {color:#a44213;background:#fff4e9;padding:10px 14px;border-radius:6px;font-size:13px;}
+.ws-dialog {width:min(940px,90vw);max-height:85vh;padding:0;border:1px solid #dce3ed;border-radius:12px;color:#172338;box-shadow:0 24px 90px #182c4540;}
+.ws-dialog::backdrop {background:#17233860;}
+.ws-dialog>header {display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0;}
+.ws-dialog h2 {font-size:18px;margin:0;}
+.ws-dialog-body {padding:18px 20px;line-height:1.7;}
+.ws-dialog button,.ws-button {font:inherit;font-size:13px;padding:7px 12px;border:1px solid #ced7e5;border-radius:7px;background:white;cursor:pointer;}
+.ws-dialog footer {display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+button.ws-primary {background:#2563eb;color:#fff;border-color:#2563eb;}
+button:disabled {opacity:.5;cursor:not-allowed;}
+.ws-dialog button:focus-visible,#workspace-nav a:focus-visible,.ws-status a:focus-visible {outline:2px solid #2563eb;outline-offset:3px;}
+.ws-diff {display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.ws-diff section {min-width:0;background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:14px;}
+.ws-diff pre {white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui;margin:0;}
+.ws-diff h4 {margin:0 0 12px;}
+.ws-history-list {display:flex;flex-direction:column;gap:5px;max-height:180px;overflow-y:auto;}
+.ws-history-list button {text-align:left;}
+.ws-history-list button.active {color:#1d4ed8;background:#edf3ff;}
+.ws-summary {display:flex;gap:16px;background:#f3f6fa;padding:14px;border-radius:8px;}
+.ws-chapter-status {display:inline-block;font-size:11px;padding:2px 6px;border-radius:5px;background:#edf1f7;color:#53657e;white-space:nowrap;}
+.ws-chapter-status[data-status="passed"] {color:#166534;background:#e9f8ef;}
+.ws-chapter-status[data-status="material"],.ws-chapter-status[data-status="revise"],.ws-chapter-status[data-status="stale"] {color:#9a4812;background:#fff0db;}
+.ws-chapter-status[data-status="error"] {color:#b42318;background:#feeceb;}
+#workspace-status [hidden],.ws-dialog [hidden],[data-workspace-ui][hidden] {display:none!important;}
+body .project-header {flex-shrink:0;}
+/* The shared status replaces duplicate claims that all writing is complete. */
+body:has(#workspace-nav) #generation-done-banner,body:has(#workspace-nav) #btn-go-review-top {display:none!important;}
+.ws-outline-tools {padding:8px 12px;display:grid;gap:6px;border-bottom:1px solid #e2e8f0;}
+.ws-outline-tools input,.ws-outline-tools select {width:100%;box-sizing:border-box;border:1px solid #d5deea;border-radius:6px;padding:7px;font:12px system-ui;background:white;}
+.ws-editor-review {padding:12px;border-bottom:1px solid #dce3ed;background:#fff;}
+.ws-editor-review h3 {font-size:13px;margin:0 0 8px;}
+.ws-editor-review p {font-size:12px;line-height:1.6;}
+.ws-editor-review a {color:#2563eb;font-size:12px;}
+.doc-outline-item .ws-chapter-status {margin-left:auto;}
+.doc-outline-item[hidden],.outline-group[hidden] {display:none!important;}
+@media(max-width:900px) {
+  body .project-header {flex-wrap:wrap;height:auto;gap:8px;padding:10px 14px;}
+  #workspace-nav {order:3;flex-basis:100%;justify-content:flex-start;}
+  .ws-status {flex-wrap:wrap;padding:10px 14px;}
+  .ws-diff {grid-template-columns:1fr;}
+}
+
+.ws-editor-review {flex-shrink:0;min-height:max-content;}
+.context-pane > .ws-editor-review h3,.context-pane > .ws-editor-review button {visibility:visible;opacity:1;}
+.ws-diff ins {display:block;background:#dcfce7;text-decoration:none;}
+.ws-diff del {display:block;background:#fee2e2;text-decoration:none;}
+
+@media(max-width:900px) {
+  body .ws-editor-layout {display:block!important;overflow:auto!important;}
+  .workspace-shell .ws-editor-layout .outline-pane {width:100%;height:260px;max-height:260px;border-bottom:1px solid #dce3ed;}
+  .workspace-shell .ws-editor-layout .editor-pane {width:100%;height:600px;min-height:500px;display:flex;}
+  .workspace-shell .ws-editor-layout .context-pane {width:100%!important;height:auto;min-height:300px;display:block;}
+  body .project-header #header-project-name {font-size:18px;max-width:calc(100vw - 140px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+}
+@media(max-width:900px) {
+  .workspace-shell .ws-editor-layout .outline-pane {height:350px!important;max-height:350px!important;}
+  body .ced-header {flex-wrap:wrap;gap:8px;}
+  body .ced-title {flex-basis:100%;}
+  body #ced-gen-idle {flex-wrap:wrap;}
+  body #btn-ai-gen {white-space:nowrap;flex-shrink:0;}
+  body #source-legend {white-space:nowrap;}
+}

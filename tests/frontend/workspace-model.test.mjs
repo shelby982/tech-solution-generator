@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {projectChapters,summarize,diffHtml} from '../../frontend/assets/workspace-model.mjs';
+const base={spec:{toc:[{id:'s1',title:'架构'}]},review:{tech_findings:{s1:{score:90}},compliance_findings:{s1:{score:90}},tech_contents:{s1:'原文'},compliance_contents:{s1:'原文'}}};
+const chapter=(s=base,text='原文')=>projectChapters(s,[{id:1,block_id:'s1',content:text}])[0];
+test('saved edits invalidate previous review even when scores passed',()=>assert.equal(chapter(base,'手改').status,'stale'));
+test('empty saved text cannot inherit passing proposal/review',()=>assert.equal(chapter({...base,proposal:{blocks:{s1:{content:'旧文'}}}},'').status,'empty'));
+test('historical scores without content snapshots cannot claim passed',()=>assert.equal(chapter({...base,review:{tech_findings:{s1:{score:99}},compliance_findings:{s1:{score:99}}}}).status,'historical'));
+test('threshold from server controls pass',()=>assert.equal(chapter({...base,ui:{review_threshold:95}}).status,'revise'));
+test('valid paired review passes; summary counts statuses',()=>{assert.equal(chapter().status,'passed');assert.equal(summarize([chapter(),chapter(base,'新文')]).needsAction,1);});
+test('diff escapes untrusted text and highlights changed lines',()=>{const html=diffHtml('same\n<script>old</script>','same\nnew');assert.ok(html.includes('<del>&lt;script&gt;old&lt;/script&gt;</del>'));assert.ok(html.includes('<ins>new</ins>'));assert.ok(!html.includes('<script>'));});

@@ -3,26 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AiBidding · 评审报告</title>
+    <title>AiBidding · 质量检查</title>
     <link rel="stylesheet" href="./assets/styles.css" />
-    <link rel="stylesheet" href="./assets/review.css?v=2026-06-22h" />
+    <link rel="stylesheet" href="./assets/review.css?v=20260916-loop2" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop2" />
   </head>
   <body>
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
-          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
-            <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
-            <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
-            <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
-          </nav>
+          <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn" type="button">
                 <span class="model-dot"></span>
-                <span id="model-selector-label">Sonnet 4.6</span>
+                <span id="model-selector-label">模型配置</span>
                 <span style="font-size:10px;color:var(--muted)">▾</span>
               </button>
               <div class="model-dropdown" id="model-dropdown">
@@ -41,73 +37,46 @@
           </div>
         </header>
 
-        <div class="review-content">
-        <section class="review-banner" id="review-banner" hidden>
-          <div class="banner-cell">
-            <div class="banner-label">总分</div>
-            <div class="banner-value" id="banner-score">—</div>
-          </div>
-          <div class="banner-cell">
-            <div class="banner-label">主要风险</div>
-            <ul class="banner-list" id="banner-risks"><li class="muted">等待评审完成…</li></ul>
-          </div>
-          <div class="banner-cell">
-            <div class="banner-label">缺失证明</div>
-            <ul class="banner-list" id="banner-missing-evidence"><li class="muted">—</li></ul>
-          </div>
-          <div class="banner-cell">
-            <div class="banner-label">缺失加分项</div>
-            <ul class="banner-list" id="banner-missing-bonus"><li class="muted">—</li></ul>
-          </div>
-        </section>
-
-      <div id="convergence-bar" class="convergence-bar" hidden>
-        <span class="cv-iteration">第 <b id="cv-round">1</b> 轮</span>
-        <span id="cv-status" class="cv-status"></span>
-        <span id="cv-unconverged" class="cv-unconverged"></span>
-      </div>
-
-        <section class="review-progress" id="review-progress" hidden>
-          <div class="rev-progress-row" data-agent="wang_anshi">
-            <span class="rev-progress-label">王安石（技术）</span>
-            <div class="rev-progress-track"><div class="rev-progress-bar"></div></div>
-            <span class="rev-progress-meta">0/0</span>
-          </div>
-          <div class="rev-progress-row" data-agent="bao_zheng">
-            <span class="rev-progress-label">包拯（合规）</span>
-            <div class="rev-progress-track"><div class="rev-progress-bar"></div></div>
-            <span class="rev-progress-meta">0/0</span>
-          </div>
-        </section>
-
-        <section class="review-actions">
-          <div class="actions-status" id="actions-status">已选 0 个 block</div>
-          <div class="actions-buttons">
-            <button type="button" class="btn-primary" id="btn-download">批准下载</button>
-            <button type="button" class="btn-secondary" id="btn-regen" disabled>重新生成 0 个</button>
-            <button type="button" class="btn-danger" id="btn-abort">整体作废</button>
-          </div>
-        </section>
-
-        <section class="review-body">
-          <aside class="review-outline" id="review-outline">
-            <div class="review-outline-head">
-              <span class="review-outline-title">章节目录</span>
-              <div class="review-outline-actions">
-                <button type="button" id="btn-outline-all" class="btn-outline-mini">全选</button>
-                <button type="button" id="btn-outline-none" class="btn-outline-mini">清空</button>
-              </div>
+        <div class="quality-content">
+          <section class="quality-summary" id="quality-summary" aria-label="质量概览"></section>
+          <details class="quality-report"><summary>全局报告与运行结论</summary>
+            <div id="quality-report-body"></div>
+            <div id="convergence-bar" class="convergence-bar" hidden>
+              <span class="cv-iteration">第 <b id="cv-round">1</b> 轮</span>
+              <span id="cv-status" class="cv-status"></span><span id="cv-unconverged" class="cv-unconverged"></span>
             </div>
-            <nav class="review-outline-list" id="review-outline-list" aria-label="章节多选"></nav>
-          </aside>
-          <section class="review-grid" id="review-grid">
-            <p class="muted">加载评审快照中…</p>
-          </section>
-        </section>
+          </details>
+          <div class="quality-toolbar">
+            <span id="quality-selection" role="status">请选择章节处理</span>
+            <div><button id="quality-revise" class="ws-button" disabled>按意见修订</button>
+              <button id="quality-recheck" class="ws-button ws-primary" disabled>仅复审</button>
+              <button id="quality-approve" class="ws-button" disabled>确认本轮完成</button><button id="quality-export" class="ws-button" disabled>导出当前正文</button></div>
+          </div>
+          <div class="quality-layout">
+            <aside class="quality-queue" aria-label="章节与问题">
+              <h2>章节与问题</h2>
+              <input id="quality-search" type="search" placeholder="搜索章节或评审问题" aria-label="搜索章节或评审问题" />
+              <select id="quality-filter" aria-label="筛选章节状态">
+                <option value="all">全部章节</option><option value="attention">需要处理</option>
+                <option value="material">待补料</option><option value="stale">待复审</option>
+                <option value="passed">已通过</option><option value="empty">待撰写</option>
+              </select>
+              <div class="quality-queue-actions"><button id="quality-select-visible">选择当前筛选结果</button><button id="quality-clear">清空选择</button></div>
+              <div id="quality-list"></div>
+              <button id="quality-more" hidden>显示更多章节</button>
+            </aside>
+            <section class="quality-document" aria-label="正文与修改对比">
+              <header><div><span class="ws-muted" id="quality-breadcrumb">当前草稿</span><h2 id="quality-title">选择一个章节</h2></div><a id="quality-edit" hidden>编辑正文</a></header>
+              <div class="quality-doc-tabs" role="group" aria-label="正文视图"><button data-doc-mode="current" aria-pressed="true">当前正文</button><button data-doc-mode="diff" aria-pressed="false">与上次评审对比</button><button id="quality-history">章节版本</button></div>
+              <div id="quality-document-body" class="quality-document-body"><p>从左侧选择章节，查看正文、评审依据和修订意见。</p></div>
+            </section>
+            <aside class="quality-findings" id="quality-findings" aria-label="评审意见"><h2>评审意见</h2><p>选择章节后展示。</p></aside>
+          </div>
         </div>
       </main>
     </div>
 
-    <script type="module" src="./assets/review.js?v=2026-06-22e"></script>
+    <script type="module" src="./assets/review.js?v=20260916-loop2"></script>
+  <script type="module" src="./assets/workspace.js?v=20260916-loop2"></script>
   </body>
 </html>

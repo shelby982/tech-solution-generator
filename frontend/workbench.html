@@ -1956,18 +1956,14 @@
     </style>
     <!-- Markdown 渲染（用于预览模式） -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop2" />
   </head>
   <body>
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">← 项目列表</a>
-          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
-            <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
-            <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
-            <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
-          </nav>
+          <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <button type="button" id="btn-go-review-top" class="btn-go-review-top" disabled>进入评审 →</button>
             <div class="model-selector-wrap">
@@ -2016,7 +2012,7 @@
           <button type="button" class="extract-cancel-btn" id="extract-cancel-btn">取消</button>
         </div>
 
-        <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
+        <div class="ws-editor-layout" style="display:flex; flex:1; min-height:0; overflow:hidden;">
           <!-- Left: outline nav -->
           <aside class="outline-pane" aria-label="文档大纲">
             <div class="outline-pane-header">
@@ -2036,7 +2032,7 @@
                 <span class="outline-progress-count" id="outline-progress-text">—</span>
               </div>
               <div class="outline-progress-track"><div class="outline-progress-bar" id="outline-progress-bar"></div></div>
-              <button type="button" class="outline-batch-gen-btn" id="btn-batch-generate">批量生成</button>
+              <button type="button" class="outline-batch-gen-btn" id="btn-batch-generate">生成未写章节</button>
               <div class="outline-batch-status hidden" id="outline-batch-status">
                 <div class="outline-batch-row">
                   <span class="outline-batch-current" id="outline-batch-current">准备中…</span>
@@ -2080,10 +2076,10 @@
 
                   <!-- 头部 -->
                   <div class="ced-header">
-                    <span class="ced-step-badge">04</span>
-                    <h3 class="ced-title">撰写正文</h3>
+
+                    <h3 class="ced-title" id="ced-section-title">撰写正文</h3>
                     <span class="ced-page-hint" id="ced-page-hint" hidden></span>
-                    <span class="ced-auto-badge">基于四项提炼自动生成</span>
+                    <span class="ced-auto-badge">基于应标要求自动生成</span>
                     <span style="flex:1;"></span>
                     <span class="ced-save-time" id="ced-save-time">—</span>
                   </div>
@@ -2161,10 +2157,10 @@
                   <div class="ced-body" id="ced-body">
                     <!-- 空白状态：placeholder -->
                     <div class="ced-placeholder" id="ced-placeholder">
-                      在此撰写本节正文，或点击上方「AI 生成」让模型基于四项提炼自动起草…
+                      在此撰写本节正文，或点击上方「AI 生成」让模型基于应标要求自动起草…
                     </div>
                     <!-- 可编辑内容区 -->
-                    <div class="ced-editable" id="ced-editable" contenteditable="true" style="display:none;"></div>
+                    <div class="ced-editable" id="ced-editable" role="textbox" aria-label="章节正文" aria-multiline="true" contenteditable="true" style="display:none;"></div>
                     <!-- 预览容器（markdown 渲染） -->
                     <div class="ced-preview" id="ced-preview" style="display:none;"></div>
                   </div>
@@ -2173,11 +2169,11 @@
                   <div class="ced-footer">
                     <span class="ced-footer-wordcount" id="ced-footer-wc">0 / 800 字</span>
                     <span class="ced-divider"></span>
-                    <span id="ced-footer-model">Sonnet 4.6 · 公文文风</span>
+                    <span id="ced-footer-model">公文文风</span>
                     <span style="flex:1;"></span>
-                    <button type="button" class="ced-footer-btn" id="btn-polish">润色</button>
-                    <button type="button" class="ced-footer-btn" id="btn-expand">扩写</button>
-                    <button type="button" class="ced-footer-btn" id="btn-shrink">缩写</button>
+                    <button type="button" class="ced-footer-btn" id="btn-polish" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">润色</button>
+                    <button type="button" class="ced-footer-btn" id="btn-expand" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">扩写</button>
+                    <button type="button" class="ced-footer-btn" id="btn-shrink" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">缩写</button>
                     <button type="button" class="ced-footer-save" id="btn-save-draft">保存草稿</button>
                   </div>
 
@@ -2349,11 +2345,12 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/workbench.js?v=20260620a"></script>
+    <script type="module" src="./assets/workbench.js?v=20260916-loop2"></script>
     <script type="module">
       import { GenerateSession } from './assets/generate-session.js';
       import { initContextPanel } from './assets/context-panel.js';
       import { api } from './assets/api.js';
+      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20260916-loop2';
       initContextPanel();
 
       const params = new URLSearchParams(location.search);
@@ -2616,7 +2613,7 @@
 
         if (!tid) {
           // 强制：没 thread 不能进 workbench，跳回 project-init 让用户启动工作流
-          location.replace(`/project-init?projectId=${projectId}`);
+          // 固定工作区保持可访问；空态由共享工作区展示。
           return;
         }
 
@@ -2638,7 +2635,7 @@
         } catch {
           // state fetch 失败：清掉过期 sessionStorage，跳回 project-init
           try { sessionStorage.removeItem(`workflow:${projectId}`); } catch {}
-          location.replace(`/project-init?projectId=${projectId}`);
+          // 固定工作区保持可访问；空态由共享工作区展示。
           return;
         }
 
@@ -2646,7 +2643,7 @@
         if (!stage || stage === 'idle') {
           // 没有真实推进，跳回 project-init
           try { sessionStorage.removeItem(`workflow:${projectId}`); } catch {}
-          location.replace(`/project-init?projectId=${projectId}`);
+          // 固定工作区保持可访问；空态由共享工作区展示。
           return;
         }
 
@@ -3063,18 +3060,36 @@
 
       // ── 编辑器数据绑定 ──────────────────────────────────────────────
       let currentBlock = null;
+      let editorDirty = false;
+      window.__editorDirty = () => editorDirty;
+      window.__discardEditorChanges = () => { editorDirty = false; };
+      window.addEventListener('beforeunload', e => {
+        if (editorDirty) { e.preventDefault(); e.returnValue = ''; }
+      });
       let editorGenerating = false;
       // blockId → 最新内容（批量生成后同步）
       const blockContentCache = new Map();
 
       // 暴露 selectBlock 到全局供 workbench.js 调用
       window.__onBlockSelected = function(b) {
+        if (editorDirty && !confirm('当前章节尚未保存，是否放弃修改并切换章节？')) return false;
+        editorDirty = false;
         currentBlock = b;
+        window.__currentEditorBlock = b;
         showEditorWorkspace(b);
         renderPageHint(b);
         // 切回编辑模式（避免新 block 还显示上一份预览）
         setEditorMode('edit');
+        document.getElementById('ced-section-title').textContent = b.title || '撰写正文';
+        return true;
       };
+      window.__refreshEditorChapter = function(b) {
+        if (!editorDirty && currentBlock?.id === b.id && currentBlock.content !== b.content) {
+          currentBlock = b; window.__currentEditorBlock = b;
+          showEditorWorkspace(b);
+        }
+      };
+      window.dispatchEvent(new Event('workspace:editor-ready'));
 
       // 编辑/预览模式切换：编辑态用 contenteditable，预览态用 marked 渲染 markdown
       function setEditorMode(mode) {
@@ -3176,7 +3191,8 @@
         const editable = document.getElementById('ced-editable');
         const placeholder = document.getElementById('ced-placeholder');
         const hint = document.getElementById('ced-ai-hint');
-        const content = (blockContentCache.has(b.id) ? blockContentCache.get(b.id) : (b.content || '')).trim();
+        const content = b.content || '';
+        blockContentCache.set(b.id, content);
         // 先全部重置，再按内容状态设置
         editable.style.display = 'none';
         editable.textContent = '';
@@ -3361,7 +3377,15 @@
         if (footerWc) footerWc.textContent = `${wc} / ${limit} 字`;
       }
 
-      document.getElementById('ced-editable')?.addEventListener('input', updateWordCount);
+      document.getElementById('ced-editable')?.addEventListener('input', () => {
+        updateWordCount(); editorDirty = true;
+        document.getElementById('ced-save-time').textContent = '未保存';
+      });
+      document.getElementById('ced-placeholder')?.addEventListener('click', () => {
+        if (!currentBlock) return;
+        const editable = document.getElementById('ced-editable');
+        editable.style.display = ''; document.getElementById('ced-placeholder').style.display = 'none'; editable.focus();
+      });
       document.getElementById('ced-wordlimit')?.addEventListener('input', updateWordCount);
 
       // ── 溯源标注：双击切换为纯文本编辑 ──
@@ -3384,6 +3408,24 @@
         });
       })();
 
+      const markdownTokens = {'加粗':['**','**'], '斜体':['*','*'], '下划线':['<u>','</u>'], '一级标题':['# ',''], '二级标题':['## ',''], '列表':['- ','']};
+      document.querySelectorAll('.ced-fmt-btn,.ced-fmt-label-btn').forEach(button => {
+        button.addEventListener('mousedown', e => e.preventDefault());
+        button.addEventListener('click', () => {
+          const editable = document.getElementById('ced-editable');
+          const selection = window.getSelection();
+          const tokens = markdownTokens[button.title];
+          if (!tokens || !currentBlock) return;
+          editable.style.display = ''; document.getElementById('ced-placeholder').style.display = 'none';
+          if (!selection.rangeCount || !editable.contains(selection.anchorNode)) editable.focus();
+          if (!selection.rangeCount || !editable.contains(selection.anchorNode)) return;
+          const range = selection.getRangeAt(0);
+          const node = document.createTextNode(tokens[0] + (selection.toString() || '文字') + tokens[1]);
+          range.deleteContents(); range.insertNode(node); range.selectNodeContents(node);
+          selection.removeAllRanges(); selection.addRange(range);
+          editable.dispatchEvent(new Event('input', {bubbles:true}));
+        });
+      });
       // ── 文风切换 ──
       document.querySelectorAll('.ced-tone-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3665,6 +3707,11 @@
       };
 
       function openPromptPreview() {
+        if (threadId && currentBlock?.block_id) {
+          if (editorDirty) { alert('请先保存正文，再发起修订。'); return; }
+          confirmChapterAction([currentBlock.block_id], 'revise');
+          return;
+        }
         if (!currentBlock) return;
         window.__isBatchPrompt = false;
 
@@ -3833,18 +3880,29 @@
         if (currentBlock && e.detail.block_id === currentBlock.id) updateWordCount();
       });
 
-      // ── 保存草稿 ──
+      // ── 保存草稿：真实成功后确认，网络失败保留用户输入 ──
       document.getElementById('btn-save-draft')?.addEventListener('click', async () => {
         if (!currentBlock) return;
         const editable = document.getElementById('ced-editable');
-        if (!editable) return;
-        await fetch(`/api/blocks/${currentBlock.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: editable.innerHTML }),
-        });
-        document.getElementById('ced-save-time').textContent =
-          `已保存 · ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
+        const button = document.getElementById('btn-save-draft');
+        const status = document.getElementById('ced-save-time');
+        const block = currentBlock;
+        if (!Number.isInteger(Number(block.id))) { status.textContent = '本章未落库，暂不能保存'; return; }
+        const content = editable.innerText;
+        button.disabled = true; status.textContent = '保存中…';
+        try {
+          const saved = await workspaceRequest(`/api/blocks/${block.id}`, {
+            method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({content}),
+          });
+          block.content = saved.content; block.updated_at = saved.updated_at;
+          blockContentCache.set(block.id, saved.content);
+          if (currentBlock === block) {
+            editorDirty = editable.innerText !== content;
+            status.textContent = editorDirty ? '仍有未保存修改' : '已保存 · 修改后请复审';
+          }
+          await refreshWorkspace();
+        } catch (e) { if (currentBlock === block) status.textContent = `保存失败：${e.message}，内容已保留，请重试`; }
+        finally { button.disabled = false; }
       });
 
       // ── 右侧面板（无 Tab，两个上下模块） ──
@@ -4107,9 +4165,10 @@
       // 章节切换时刷新匹配面板
       const _origOnSelected = window.__onBlockSelected;
       window.__onBlockSelected = function(b) {
-        if (typeof _origOnSelected === 'function') _origOnSelected(b);
+        if (typeof _origOnSelected === 'function' && _origOnSelected(b) === false) return false;
         currentBlock = b;
         refreshMatchedForCurrent();
+        return true;
       };
 
       // 刷新按钮：请求最新匹配
@@ -4307,6 +4366,12 @@
 
       if (btnBatchGen) {
         btnBatchGen.addEventListener('click', () => {
+          if (workspace.threadId) {
+            if (editorDirty) { alert('请先保存正文。'); return; }
+            const ids = workspace.chapters.filter(b => !b.content.trim()).map(b => b.block_id);
+            if (!ids.length) { location.href = '/review?projectId=' + projectId + '&threadId=' + encodeURIComponent(workspace.threadId); return; }
+            confirmChapterAction(ids, 'revise'); return;
+          }
           openBatchPromptPreview();
         });
       }
@@ -5173,5 +5238,6 @@
       })();
     })();
     </script>
+  <script type="module" src="./assets/workspace.js?v=20260916-loop2"></script>
   </body>
 </html>

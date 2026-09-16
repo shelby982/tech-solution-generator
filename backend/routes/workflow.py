@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -66,6 +66,22 @@ class ResumeReq(BaseModel):
 
 class RegenReq(BaseModel):
     block_ids: list[str] = Field(default_factory=list)
+
+
+class WorkspaceActionReq(BaseModel):
+    action: Literal["revise", "review"]
+    block_ids: list[str] = Field(min_length=1, max_length=2000)
+
+
+@router.post("/{thread_id}/workspace-action")
+async def workspace_action(thread_id: str, req: WorkspaceActionReq):
+    try:
+        await get_runner().workspace_action(thread_id, req.block_ids, req.action)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"status": "started", "action": req.action, "block_ids": req.block_ids}
 
 
 # ─────────────────────────────────────────────
@@ -164,7 +180,8 @@ async def recover(thread_id: str):
 async def state(thread_id: str):
     runner = get_runner()
     snap = await runner.state(thread_id)
-    return JSONResponse(snap)
+    from orchestrator.nodes import REVIEW_SCORE_THRESHOLD
+    return JSONResponse({**snap, "ui": {"review_threshold": REVIEW_SCORE_THRESHOLD}})
 
 
 @router.get("/{thread_id}/stream")

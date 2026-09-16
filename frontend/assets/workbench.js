@@ -1,280 +1,72 @@
-import { api } from './api.js';
-
-const params    = new URLSearchParams(location.search);
-const projectId = params.get('projectId');
-const threadId  = params.get('threadId');
-if (!projectId) { location.href = '/projects'; }
-
-// 模块级共享状态：避免 loadBlocks 多次调用时累积 window listener
-const _blocksMap = new Map();  // block_id (raw) → block object
-
-function _findOutlineItem(bid) {
-  if (!bid) return null;
-  return document.querySelector(`.doc-outline-item[data-block-id-str="${CSS.escape(String(bid))}"]`);
+import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260916-loop2';
+const nav = document.querySelector('.doc-outline');
+let selectedId = new URLSearchParams(location.search).get('blockId');
+let limit = 150, initialSelection = false;
+const tools = document.createElement('div');tools.className='ws-outline-tools';
+tools.innerHTML='<input type="search" aria-label="搜索章节" placeholder="搜索章节名称或问题" /><select aria-label="筛选章节"><option value="all">全部章节</option><option value="attention">需要处理</option><option value="empty">待撰写</option><option value="stale">待复审</option><option value="material">待补料</option><option value="passed">已通过</option></select>';
+nav.before(tools);
+const search=tools.querySelector('input'), filter=tools.querySelector('select');
+document.querySelector('.outline-search-btn').onclick=()=>search.focus();
+search.oninput=filter.onchange=()=>{limit=150;renderOutline();};
+function editableBlock(b) {
+  return {...b,id:b.db_id || b.block_id,kind:'content',source:b.source || '[]'};
 }
-
-function _onBlockStart(e) {
-  const bid = e.detail?.block_id;
-  if (!bid) return;
-  const b = _blocksMap.get(bid);
-  if (!b) return;
-  const item = _findOutlineItem(bid);
-  if (!item) return;
-  const dot = item.querySelector('.outline-item-dot');
-  if (dot) {
-    dot.classList.remove('done');
-    dot.classList.add('writing');
-  }
-}
-
-function _onBlockDone(e) {
-  const bid = e.detail?.block_id;
-  if (!bid) return;
-  const b = _blocksMap.get(bid);
-  if (!b) return;
-  const item = _findOutlineItem(bid);
-  if (item) {
-    const dot = item.querySelector('.outline-item-dot');
-    if (dot) {
-      dot.classList.remove('writing');
-      dot.classList.add('done');
-    }
-  }
-  // 同步缓存内容，便于章节切换时立即看到
-  if (e.detail?.content) {
-    b.content = e.detail.content;
-    if (window.__extractBlockMap) {
-      const cached = window.__extractBlockMap.get(bid);
-      if (cached) cached.content = e.detail.content;
-    }
-  }
-}
-
-function _onBlockError(e) {
-  const bid = e.detail?.block_id;
-  if (!bid) return;
-  const item = _findOutlineItem(bid);
-  if (!item) return;
-  const dot = item.querySelector('.outline-item-dot');
-  if (dot) dot.classList.remove('writing');
-  item.classList.add('block-error');
-}
-
-window.addEventListener('block:start', _onBlockStart);
-window.addEventListener('block:done', _onBlockDone);
-window.addEventListener('block:error', _onBlockError);
-
-// threadId 模式下用 spec.toc 主导章节列表（闸门 1 完成即就绪），
-// proposal.blocks 仅注入"已生成内容"（闸门 3 之后才完整）。
-// outline_matrix 提供 8 字段（requirement/key_points/...）。
-function buildBlockFromTocSection(section, blocks, matrix) {
-  if (!section || !section.id) {
-    console.warn('[workbench] toc section missing id', section);
-    return null;
-  }
-  const blockId  = section.id;
-  const output   = blocks[blockId] || {};
-  const row      = matrix[blockId] || {};
-  const rawLevel = Number(section.level) || 1;
-  const level    = Math.max(1, Math.min(4, rawLevel));
-  const isHeading = level === 1;
-  const sources  = Array.isArray(output.sources) ? output.sources : [];
-  return {
-    id: String(blockId).replace(/\./g, '_'),  // DOM-safe id
-    block_id: blockId,                          // 业务 id（含点的 s1.1 等）
-    title: section.title || row.title || blockId,
-    kind: isHeading ? 'heading' : 'content',
-    level,
-    content: output.content || '',
-    outline: output.outline || '',
-    source: JSON.stringify(sources),
-    requirement:       row.requirement       || '',
-    key_points:        row.key_points        || '',
-    veto_items:        row.veto_items        || '',
-    bonus_items:       row.bonus_items       || '',
-    score_items:       row.score_items       || '',
-    evidence_required: row.evidence_required || '',
-    constraint_level:  row.constraint_level  || 'recommended',
-    indicators:        row.indicators        || '',
-    domain: '',
-    parent_title: '',
-    score: '',
-  };
-}
-
-async function loadBlocksForOutline(pid, tid) {
-  if (tid) {
-    try {
-      const state  = await api.workflow.state(tid);
-      const blocks = (state && state.proposal && state.proposal.blocks) || {};
-      const matrix = (state && state.spec && state.spec.outline_matrix) || {};
-      const toc    = Array.isArray(state && state.spec && state.spec.toc) ? state.spec.toc : [];
-      if (toc.length > 0) {
-        // toc + LangGraph state 仅在 graph 跑过 generate 节点后才有 content；
-        // 之前用过老路径 `/api/blocks/{id}/generate` 写过 SQLite blocks 表的 content，
-        // 这里合并一下：state 没 content 时 fallback 到 db blocks 的 content / source，
-        // 避免"打开撰写视图时，已生成的章节内容看起来是空"，进而被误以为需要重跑。
-        let dbBlocksByBid = new Map();
-        try {
-          const dbList = await api.blocks.list(pid);
-          if (Array.isArray(dbList)) {
-            dbList.forEach(b => {
-              if (b?.block_id) dbBlocksByBid.set(String(b.block_id), b);
-            });
-          }
-        } catch (e) {
-          console.warn('[workbench] db blocks fallback failed', e);
-        }
-        return toc.map(sec => {
-          const built = buildBlockFromTocSection(sec, blocks, matrix);
-          if (!built) return null;
-          if (!built.content) {
-            const db = dbBlocksByBid.get(String(built.block_id));
-            if (db && typeof db.content === 'string' && db.content.trim()) {
-              built.content = db.content;
-              if (db.id) built.id = db.id;
-              if (db.source && (!built.source || built.source === '[]')) {
-                built.source = db.source;
-              }
-            }
-          }
-          return built;
-        }).filter(Boolean);
-      }
-      // toc 空 — workflow 未推进过闸门 1，回退老路径
-    } catch (e) {
-      console.warn('[workbench] workflow state failed, falling back', e);
-    }
-  }
-  return await api.blocks.list(pid);
-}
-
-// 顶部 tab 链接注入 projectId
-document.querySelectorAll('.process-tab').forEach(a => {
-  const url = new URL(a.href, location.origin);
-  url.searchParams.set('projectId', projectId);
-  a.href = url.pathname + '?' + url.searchParams.toString();
-});
-// 加载项目名称
-let projectName = '项目画廊';
-api.projects.get(projectId).then(p => {
-  if (p?.name) {
-    projectName = p.name;
-    document.title = `AiBidding · ${p.name}`;
-    const el = document.getElementById('header-project-name');
-    if (el) el.textContent = p.name;
-  }
-});
-
-async function loadBlocks() {
-  const blockList = await loadBlocksForOutline(projectId, threadId);
-  const outlineNav = document.querySelector('.doc-outline');
-  if (!outlineNav) return;
-
-  // 第一次构建 outline DOM；之后的 loadBlocks() 调用只刷新已有节点的 content / 状态点，
-  // 不再 innerHTML='' 整体重建，避免章节"跳动"。
-  const alreadyBuilt = outlineNav.querySelector('.doc-outline-item');
-
-  // 与 workbench.html 内联模块约定：__extractBlockMap 缓存 block 数据，
-  // outline-item 点击调用 __onBlockSelected 让中间编辑器显示该 block。
-  if (!window.__extractBlockMap) window.__extractBlockMap = new Map();
-  const blockMap = window.__extractBlockMap;
-  // 暴露完整列表给 renderPageHint 等使用
-  window.__allBlocks = blockList;
-
-  // 模块级 listener 用 _blocksMap 判断 block 归属，每次 loadBlocks 重置一次
-  _blocksMap.clear();
-  blockList.forEach(b => _blocksMap.set(b.block_id, b));
-
-  // 规整化 level：找到全局最小值，平移成 1（兼容文档没有 level=1 标题的情况）
-  const rawLevels = blockList.map(b => Number(b.level) || 1);
-  const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
-  const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
-
-  if (alreadyBuilt) {
-    // 仅刷新现有节点的内容缓存与"已完成"状态点；保留 DOM 顺序、不重建
-    blockList.forEach((b, idx) => {
-      const blockIdStr = b.block_id || b.id;
-      blockMap.set(blockIdStr, b);
-      const item = outlineNav.querySelector(`.doc-outline-item[data-block-id-str="${CSS.escape(String(blockIdStr))}"]`);
-      if (!item) return;
-      const dot = item.querySelector('.outline-item-dot');
-      if (dot) {
-        if (b.content && b.content.trim()) dot.classList.add('done');
-        else dot.classList.remove('done');
-      }
-    });
-    // 进度统计同样按内容章节
-    const contentBlocks = blockList.filter((b, i) => normalize(rawLevels[i]) >= 2);
-    const writtenCount = contentBlocks.filter(b => b.content && b.content.trim()).length;
-    const progressBadge = document.getElementById('outline-progress-badge');
-    const progressText  = document.getElementById('outline-progress-text');
-    const progressBar   = document.getElementById('outline-progress-bar');
-    if (progressBadge) progressBadge.textContent = String(contentBlocks.length);
-    if (progressText)  progressText.textContent  = `${writtenCount} / ${contentBlocks.length}`;
-    if (progressBar)   progressBar.style.width   = contentBlocks.length ? `${Math.round(writtenCount / contentBlocks.length * 100)}%` : '0%';
+function selectChapter(id) {
+  const b=workspace.chapters.find(b=>b.block_id===id);if(!b)return;
+  if(window.__editorDirty?.()) {
+    const dialog=openDialog('保留未保存修改', '<p>当前章节尚未保存。取消后可继续编辑并保存，或放弃修改后切换章节。</p><footer><button data-stay>继续编辑</button><button data-discard>放弃修改并切换</button></footer>');
+    dialog.querySelector('[data-stay]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-discard]').onclick=()=>{window.__discardEditorChanges?.();dialog.close();selectChapter(id);};
     return;
   }
-
-  outlineNav.innerHTML = '';
-  let currentChildren = null;
-  let firstContentItem = null;
-
-  blockList.forEach((b, idx) => {
-    const blockIdStr = b.block_id || b.id;
-    const title = b.title || '（无标题）';
-    const level = normalize(rawLevels[idx]);
-    blockMap.set(blockIdStr, b);
-
-    if (level === 1) {
-      const group = document.createElement('div');
-      group.className = 'outline-group';
-      const headingBtn = document.createElement('button');
-      headingBtn.type = 'button';
-      headingBtn.className = 'doc-outline-heading';
-      headingBtn.innerHTML = `<span class="outline-chevron">›</span><span class="outline-item-label"></span>`;
-      headingBtn.querySelector('.outline-item-label').textContent = title;
-      headingBtn.addEventListener('click', () => group.classList.toggle('collapsed'));
-      group.appendChild(headingBtn);
-      currentChildren = document.createElement('div');
-      currentChildren.className = 'outline-children';
-      group.appendChild(currentChildren);
-      outlineNav.appendChild(group);
-    } else {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = `doc-outline-item level-${level}`;
-      item.dataset.blockIdStr = blockIdStr;
-      item.dataset.level = String(level);
-      item.innerHTML = `<span class="outline-item-bullet"></span><span class="outline-item-label"></span><span class="outline-item-dot${b.content ? ' done' : ''}"></span>`;
-      item.querySelector('.outline-item-label').textContent = title;
-      item.addEventListener('click', () => {
-        outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
-        const block = blockMap.get(blockIdStr) || b;
-        if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
-      });
-      (currentChildren || outlineNav).appendChild(item);
-      if (!firstContentItem) firstContentItem = item;
-    }
-  });
-
-  // 初始化撰写进度展示
-  const contentBlocks = blockList.filter((b, i) => normalize(rawLevels[i]) >= 2);
-  const writtenCount = contentBlocks.filter(b => b.content && b.content.trim()).length;
-  const progressBadge = document.getElementById('outline-progress-badge');
-  const progressText  = document.getElementById('outline-progress-text');
-  const progressBar   = document.getElementById('outline-progress-bar');
-  if (progressBadge) progressBadge.textContent = String(contentBlocks.length);
-  if (progressText)  progressText.textContent  = `${writtenCount} / ${contentBlocks.length}`;
-  if (progressBar)   progressBar.style.width   = contentBlocks.length ? `${Math.round(writtenCount / contentBlocks.length * 100)}%` : '0%';
-
-  // 自动选中首个内容章节
-  if (firstContentItem) firstContentItem.click();
+  const block=editableBlock(b);
+  if (typeof window.__onBlockSelected !== 'function') return;
+  if(window.__onBlockSelected(block)===false)return;
+  selectedId=id;initialSelection=true;
+  const url=new URL(location.href);url.searchParams.set('blockId',id);history.replaceState(null,'',url);
+  nav.querySelectorAll('[data-block-id-str]').forEach(el=>el.classList.toggle('active',el.dataset.blockIdStr===id));
+  renderContext();
 }
-
-window.__loadBlocks = loadBlocks;
-loadBlocks();
-window.addEventListener('beforeunload', () => {
-  document.querySelectorAll('[data-sse]').forEach(el => el._sse?.close());
+function renderOutline() {
+  window.__extractBlockMap=new Map(workspace.chapters.map(b=>[b.block_id,editableBlock(b)]));
+  window.__allBlocks=[...window.__extractBlockMap.values()];
+  const q=search.value.toLowerCase().trim();
+  const list=workspace.chapters.filter(b=>(!q||`${b.title} ${b.issues.map(i=>i.point).join(' ')}`.toLowerCase().includes(q)) && (filter.value==='all'||(filter.value==='attention'?['material','revise','stale','error','historical','unreviewed'].includes(b.status):b.status===filter.value)));
+  nav.innerHTML=list.slice(0,limit).map(b=>`<button type="button" class="doc-outline-item level-${Math.min(4,Number(b.level)||1)}${b.block_id===selectedId?' active':''}" data-block-id-str="${esc(b.block_id)}" data-block-id="${esc(b.db_id || '')}" title="${esc(b.title)}"><span class="outline-item-label">${esc(b.title)}</span><span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span><span class="outline-item-dot" hidden></span></button>`).join('')||'<p class="ws-muted" style="padding:12px">暂无符合条件的章节</p>';
+  if(list.length>limit){const more=document.createElement('button');more.className='ws-button';more.textContent=`显示更多（${limit}/${list.length}）`;more.onclick=()=>{limit+=150;renderOutline();};nav.append(more);}
+  document.getElementById('outline-progress-badge').textContent=workspace.chapters.length;
+  const n=workspace.chapters.filter(b=>b.content.trim()).length;
+  document.getElementById('outline-progress-text').textContent=`${n} / ${workspace.chapters.length}`;
+  document.getElementById('outline-progress-bar').style.width=`${workspace.chapters.length?n/workspace.chapters.length*100:0}%`;
+}
+nav.addEventListener('click',e=>{const item=e.target.closest('[data-block-id-str]');if(item)selectChapter(item.dataset.blockIdStr);});
+let context;
+function renderContext() {
+  const b=workspace.chapters.find(b=>b.block_id===selectedId);if(!b)return;
+  if(!context){context=document.createElement('section');context.className='ws-editor-review';document.querySelector('[aria-label="参考与素材"]')?.prepend(context);}
+  context.innerHTML=`<h3>本章质量检查 <span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span></h3>
+    ${b.stale?'<p>正文已变更，请复审验证修改结果。</p>':''}
+    ${b.issues.slice(0,3).map(i=>`<p>${esc(i.point)}</p>`).join('') || '<p>暂无具体评审意见。</p>'}
+    <a href="${esc(workspaceUrl('review',b.block_id))}">查看全部意见与正文对比 →</a><p><button type="button" class="ws-button" data-review ${!b.content.trim()||workspace.busy?'disabled':''}>复审本章</button> <button type="button" class="ws-button" data-history ${!b.db_id?'disabled':''}>版本</button></p>`;
+  context.querySelector('[data-review]').onclick=()=>{
+    if(window.__editorDirty?.()){alert('请先保存正文，再发起复审。');return;}
+    confirmChapterAction([b.block_id],'review');
+  };
+  context.querySelector('[data-history]').onclick=()=>showHistory(b.db_id);
+}
+subscribe(()=>{
+  renderOutline();
+  if(!initialSelection){const target=workspace.chapters.find(b=>b.block_id===selectedId)||workspace.chapters.find(b=>b.content.trim())||workspace.chapters[0];if(target)selectChapter(target.block_id);}
+  else {
+    renderContext();
+    const b=workspace.chapters.find(b=>b.block_id===selectedId);
+    if(b)window.__refreshEditorChapter?.(editableBlock(b));
+  }
+  const locked=workspace.busy;
+  const editor=document.getElementById('ced-editable');
+  if(editor)editor.contentEditable=String(!locked);
+  document.getElementById('btn-batch-generate').disabled=locked;
 });
+window.__loadBlocks=refreshWorkspace;
+window.addEventListener('block:done',()=>refreshWorkspace());
+window.addEventListener('workspace:editor-ready',()=>{if(workspace.ready&&!initialSelection){const b=workspace.chapters.find(b=>b.block_id===selectedId)||workspace.chapters[0];if(b)selectChapter(b.block_id);}});

@@ -680,18 +680,14 @@ body[data-view="outline"] #mat-section-src { display: none; }
   background: #eff6ff;
 }
     </style>
+  <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop2" />
   </head>
   <body data-view="outline">
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
-          <nav class="stage-progress" id="stage-progress" aria-label="工作流进度">
-            <div class="stage-step" data-stage="parsing" data-stages="parsing,outline_review"><span class="stage-dot"></span><span class="stage-name">解析大纲</span></div>
-            <div class="stage-step" data-stage="matching" data-stages="matching,materials_review"><span class="stage-dot"></span><span class="stage-name">素材匹配</span></div>
-            <div class="stage-step" data-stage="generating" data-stages="generating"><span class="stage-dot"></span><span class="stage-name">方案撰写</span></div>
-            <div class="stage-step" data-stage="reviewing" data-stages="reviewing,report_review"><span class="stage-dot"></span><span class="stage-name">评审确认</span></div>
-          </nav>
+          <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
@@ -2157,6 +2153,9 @@ async function startMatching() {
       await api.workflow.rerunMatch(tid);
       attachStream(tid);
       setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
+    } else if (['report_review', 'done', 'paused'].includes(stage)) {
+      // 补充的素材由局部修订入口实时读取，返回质量检查选择受影响章节。
+      location.href = `/review?projectId=${projectId}&threadId=${encodeURIComponent(tid)}`;
     } else {
       console.warn('[matching] 当前 stage 不可触发匹配：', stage);
       setStatusBar('idle', '', 0, 0, 0);
@@ -2481,5 +2480,6 @@ if (params.get('autoExtract') === '1') {
   });
 })();
     </script>
+  <script type="module" src="./assets/workspace.js?v=20260916-loop2"></script>
   </body>
 </html>

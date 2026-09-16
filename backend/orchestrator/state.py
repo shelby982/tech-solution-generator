@@ -46,6 +46,7 @@ class ProposalState(TypedDict, total=False):
     """诸葛亮产出。"""
     blocks: dict[str, dict]            # block_id → BlockOutput.to_dict()
     regenerate_targets: list[str]
+    revision_scope: list[str]         # 人工局部修订的范围，自动回炉不得越界
     updated_blocks: list[str]          # 本轮实际生成的 block（评审范围）
     material_requests: dict[str, list[dict]]   # block_id → [{query, reason}]
 
@@ -54,6 +55,8 @@ class ReviewState(TypedDict, total=False):
     """两位评审 agent + aggregate/判定/转译节点产出。"""
     tech_findings: dict[str, dict]         # block_id → Finding.to_dict()
     compliance_findings: dict[str, dict]
+    tech_contents: dict[str, str]          # 评审对应的正文快照
+    compliance_contents: dict[str, str]
     report: dict                            # GlobalReport.to_dict()
     feedback: dict[str, dict]               # block_id → {issues, scores}
     convergence: dict                       # {status, unconverged_blocks, reason}
@@ -84,7 +87,7 @@ StageLiteral = Literal[
 ]
 
 UserChoiceLiteral = Literal[
-    "approve", "edit", "regen_blocks", "abort", "",
+    "approve", "edit", "regen_blocks", "review_only", "abort", "",
 ]
 
 

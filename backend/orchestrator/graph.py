@@ -343,6 +343,9 @@ def build_graph(
 
     def _route_convergence(state: WorkflowState) -> str:
         """refine 与 max_iterations 都先去 build_feedback，由其出边再区分。"""
+        # 人工选择“仅复审”时不自动改写正文，结果交回用户处理。
+        if state.get("user_choice") == "review_only":
+            return GATE_REPORT
         status = (
             (state.get("review") or {}).get("convergence") or {}
         ).get("status", "")

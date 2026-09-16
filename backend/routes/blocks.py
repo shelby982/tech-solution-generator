@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from db import get_db
 from services.block_store import (
     get_block, update_block_content, update_block_status,
-    list_blocks, add_revision, update_block_requirement,
+    list_blocks, add_revision, update_block_requirement, list_revisions,
 )
 from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
 from infra.llm import dispatch_stream_generate
@@ -105,7 +105,9 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
         if existing is None:
             raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
         updated = existing
-        if body.content is not None:
+        if body.content is not None and body.content != existing.get("content"):
+            if existing.get("content") and not await list_revisions(db, block_id):
+                await add_revision(db, block_id, existing["content"], "首次编辑前正文", "baseline")
             updated = await update_block_content(db, block_id, body.content)
             await add_revision(db, block_id_int=block_id, content=body.content,
                                source="edit", summary="手动编辑")
