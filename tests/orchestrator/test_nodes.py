@@ -460,3 +460,456 @@ async def test_aggregate_review_empty_findings_returns_zero_total():
     assert report["total_score"] == 0.0
     assert report["per_block"] == {}
     assert report["top_risks"] == []
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：check_convergence
+# ─────────────────────────────────────────────
+
+def _finding(score: int, issues=None, error: str = "") -> dict:
+    return {
+        "block_id": "s1", "agent": "x", "score": score,
+        "issues": issues or [], "strengths": [], "error": error,
+    }
+
+
+async def test_check_convergence_all_pass():
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(90)},
+            "compliance_findings": {"s1": _finding(85)},
+        },
+        "iteration": 0,
+    }
+
+    patch = await nodes.check_convergence_node(state)
+
+    assert patch["review"]["convergence"]["status"] == "converged"
+    assert patch["review"]["convergence"]["unconverged_blocks"] == []
+
+
+async def test_check_convergence_low_score_triggers_refine():
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(50)},
+            "compliance_findings": {"s1": _finding(85)},
+        },
+        "iteration": 0,
+    }
+
+    patch = await nodes.check_convergence_node(state)
+
+    assert patch["review"]["convergence"]["status"] == "refine"
+    assert patch["review"]["convergence"]["unconverged_blocks"] == ["s1"]
+
+
+async def test_check_convergence_critical_triggers_refine_even_with_high_score():
+    """双分都高，但含 critical issue —— 仍判未达标。"""
+    issue = {"severity": "critical", "point": "否决项未响应"}
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(95, [issue])},
+            "compliance_findings": {"s1": _finding(95)},
+        },
+        "iteration": 0,
+    }
+
+    patch = await nodes.check_convergence_node(state)
+
+    assert patch["review"]["convergence"]["status"] == "refine"
+
+
+async def test_check_convergence_stops_at_max_iterations():
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(50)},
+            "compliance_findings": {"s1": _finding(50)},
+        },
+        "iteration": nodes.MAX_ITERATIONS,
+    }
+
+    patch = await nodes.check_convergence_node(state)
+
+    assert patch["review"]["convergence"]["status"] == "max_iterations"
+
+
+async def test_check_convergence_ignores_review_failures():
+    """评审本身报错（基础设施故障）不触发回炉。"""
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(0, error="全部 API 失败")},
+            "compliance_findings": {"s1": _finding(0, error="全部 API 失败")},
+        },
+        "iteration": 0,
+    }
+
+    patch = await nodes.check_convergence_node(state)
+
+    assert patch["review"]["convergence"]["status"] == "converged"
+    assert patch["review"]["convergence"]["review_failed"] is True
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：build_feedback
+# ─────────────────────────────────────────────
+
+async def test_build_feedback_splits_issues_into_two_channels():
+    issues = [
+        {"severity": "critical", "point": "缺业绩证明", "suggestion": "补充",
+         "needs_material": True, "material_query": "近三年业绩证明合同"},
+        {"severity": "low", "point": "表述冗余", "suggestion": "精简",
+         "needs_material": False, "material_query": ""},
+    ]
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(50, issues)},
+            "compliance_findings": {"s1": _finding(40)},
+            "convergence": {"status": "refine", "unconverged_blocks": ["s1"]},
+        },
+        "proposal": {"blocks": {"s1": {}}},
+        "iteration": 0,
+    }
+
+    patch = await nodes.build_feedback_node(state)
+
+    assert len(patch["review"]["feedback"]["s1"]["issues"]) == 2
+    assert patch["review"]["feedback"]["s1"]["scores"] == {"tech": 50, "comp": 40}
+    assert patch["proposal"]["material_requests"]["s1"] == [
+        {"query": "近三年业绩证明合同", "reason": "缺业绩证明"}
+    ]
+    assert patch["proposal"]["regenerate_targets"] == ["s1"]
+    assert patch["iteration"] == 1
+
+
+async def test_build_feedback_max_iterations_mode_writes_no_regen():
+    """达上限模式只写反馈与补料请求，不回炉、不递增。"""
+    issues = [{"severity": "high", "point": "p", "suggestion": "s",
+               "needs_material": True, "material_query": "q"}]
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(50, issues)},
+            "compliance_findings": {"s1": _finding(40)},
+            "convergence": {"status": "max_iterations", "unconverged_blocks": ["s1"]},
+        },
+        "proposal": {"blocks": {"s1": {}}},
+        "iteration": nodes.MAX_ITERATIONS,
+    }
+
+    patch = await nodes.build_feedback_node(state)
+
+    assert "feedback" in patch["review"]
+    assert "material_requests" in patch["proposal"]
+    assert "regenerate_targets" not in patch["proposal"]
+    assert "iteration" not in patch
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：collect_gaps
+# ─────────────────────────────────────────────
+
+class _CollectGapsStub:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def retrieve_for(self, requests_by_block, chunks):
+        self.calls.append({"requests": requests_by_block, "chunks": chunks})
+        return self.result
+
+
+async def test_collect_gaps_no_requests_is_noop():
+    """无补料请求时是空操作，不碰 materials.matches。"""
+    stub = _CollectGapsStub({})
+    state = {"proposal": {}, "materials": {"chunks": [{"id": 1}]}}
+
+    patch = await nodes.collect_gaps_node(state, agent=stub)
+
+    assert patch == {}
+    assert stub.calls == []
+
+
+async def test_collect_gaps_appends_without_overwriting():
+    """新素材追加到已有 matches，同 chunk_id 去重，旧的不被冲掉。"""
+    from infra.retrieval import Match
+
+    stub = _CollectGapsStub({"s1": [
+        Match(chunk_id=2, score=8.0, reason="新", hit_points=[]),
+        Match(chunk_id=1, score=9.0, reason="重复", hit_points=[]),
+    ]})
+    state = {
+        "proposal": {"material_requests": {"s1": [{"query": "q"}]}},
+        "materials": {
+            "chunks": [{"id": 1}],
+            "matches": {"s1": [{"chunk_id": 1, "score": 5.0, "reason": "旧"}]},
+        },
+    }
+
+    patch = await nodes.collect_gaps_node(state, agent=stub)
+
+    matches = patch["materials"]["matches"]["s1"]
+    assert [m["chunk_id"] for m in matches] == [1, 2]
+    assert matches[0]["reason"] == "旧"          # 原有匹配保留，不被覆盖
+    assert patch["proposal"]["material_requests"] == {}
+
+
+async def test_collect_gaps_does_not_wipe_matches_when_nothing_found():
+    """补料返回空时不得写 materials.matches，否则会把原匹配清空。"""
+    stub = _CollectGapsStub({})
+    state = {
+        "proposal": {"material_requests": {"s1": [{"query": "q"}]}},
+        "materials": {"chunks": [{"id": 1}], "matches": {"s1": [{"chunk_id": 1}]}},
+    }
+
+    patch = await nodes.collect_gaps_node(state, agent=stub)
+
+    assert "materials" not in patch
+    assert patch["proposal"]["material_requests"] == {}
+
+
+async def test_collect_gaps_retrieval_failure_does_not_block():
+    """检索抛错时记 errors 并放行，不改 matches。"""
+    class _Boom:
+        async def retrieve_for(self, *a, **kw):
+            raise RuntimeError("bm25 挂了")
+
+    state = {
+        "proposal": {"material_requests": {"s1": [{"query": "q"}]}},
+        "materials": {"chunks": [{"id": 1}], "matches": {"s1": [{"chunk_id": 1}]}},
+    }
+
+    patch = await nodes.collect_gaps_node(state, agent=_Boom())
+
+    assert "materials" not in patch
+    assert patch["errors"][0]["agent"] == "collect_gaps"
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：_run_review 复审范围与 finding 合并
+# ─────────────────────────────────────────────
+
+class _RecordingReviewer:
+    """记录每次复审到的 block_id 列表，返回固定 finding。"""
+
+    def __init__(self, score: int = 80):
+        self.score = score
+        self.scopes: list[list[str]] = []
+
+    async def review(self, *, blocks, outline_matrix, emitter=None):
+        from domain.review import Finding
+        self.scopes.append(sorted(blocks.keys()))
+        return {
+            bid: Finding(block_id=bid, agent="wang_anshi", score=self.score)
+            for bid in blocks
+        }
+
+
+def _block(block_id: str) -> dict:
+    from domain.proposal import BlockOutput
+    return BlockOutput(
+        block_id=block_id, kind="tech", content="正文", sources=[],
+    ).to_dict()
+
+
+async def test_run_review_narrows_scope_to_updated_blocks():
+    """有 updated_blocks 时只复审本轮重跑过的 block。"""
+    agent = _RecordingReviewer()
+    state = {
+        "proposal": {
+            "blocks": {"s1": _block("s1"), "s2": _block("s2")},
+            "updated_blocks": ["s2"],
+        },
+    }
+
+    await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+
+    assert agent.scopes == [["s2"]]
+
+
+async def test_run_review_without_updated_blocks_reviews_all():
+    """老 checkpoint 无 updated_blocks 字段 → 复审全部（不能退化成零 block）。"""
+    agent = _RecordingReviewer()
+    state = {"proposal": {"blocks": {"s1": _block("s1"), "s2": _block("s2")}}}
+
+    await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+
+    assert agent.scopes == [["s1", "s2"]]
+
+
+async def test_run_review_merges_into_existing_findings():
+    """部分复审时必须并入已有 findings —— 整体替换会抹掉未复审 block 的历史分数。
+
+    若被抹掉，check_convergence 会把缺失 block 的 score 读成 0 判为未达标，
+    反复回炉且两个 block 交替被清空，收敛判定永远无法稳定。
+    """
+    agent = _RecordingReviewer(score=60)
+    state = {
+        "review": {
+            "tech_findings": {
+                "s1": _finding(95),
+                "s2": _finding(50),
+            },
+        },
+        "proposal": {
+            "blocks": {"s1": _block("s1"), "s2": _block("s2")},
+            "updated_blocks": ["s2"],
+        },
+    }
+
+    patch = await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+
+    findings = patch["review"]["tech_findings"]
+    assert findings["s1"]["score"] == 95     # 未复审，历史分数保留
+    assert findings["s2"]["score"] == 60     # 已复审，被本轮结果覆盖
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：zhuge_liang_generate 的 feedback 透传 / updated_blocks
+# ─────────────────────────────────────────────
+
+class _FeedbackAwareStub:
+    """声明 feedback 形参的 stub：记录收到的 feedback，返回固定 BlockOutput。"""
+
+    def __init__(self):
+        self.received_feedback = "未调用"
+        self.received_targets = None
+
+    async def generate(self, *, outline_matrix, materials,
+                       regenerate_targets=None, emitter=None, feedback=None):
+        self.received_feedback = feedback
+        self.received_targets = regenerate_targets
+        return (
+            {bid: BlockOutput(block_id=bid, kind="tech", content=f"正文-{bid}")
+             for bid in outline_matrix},
+            list(regenerate_targets or []),
+        )
+
+
+class _LegacyStub:
+    """未声明 feedback 形参的老 stub：验证据签名探测的向后兼容降级。"""
+
+    def __init__(self):
+        self.called = False
+
+    async def generate(self, *, outline_matrix, materials,
+                       regenerate_targets=None, emitter=None):
+        self.called = True
+        return (
+            {bid: BlockOutput(block_id=bid, kind="tech", content=f"正文-{bid}")
+             for bid in outline_matrix},
+            list(regenerate_targets or []),
+        )
+
+
+def _refine_state():
+    issues = [{"severity": "critical", "point": "缺业绩证明"}]
+    return {
+        "thread_id": "tid",
+        "spec": _matrix_state("s1"),
+        "materials": {"matches": {}},
+        "review": {"feedback": {"s1": {"issues": issues, "scores": {
+            "tech": 50, "comp": 40}}}},
+        "proposal": {"blocks": {}, "regenerate_targets": ["s1"]},
+    }
+
+
+async def test_zhuge_liang_generate_passes_feedback_as_block_to_issues_map():
+    """review.feedback 必须以 {block_id: [issues]} 形状灌进 agent.generate。"""
+    state = _refine_state()
+    issues = [{"severity": "critical", "point": "缺业绩证明"}]
+    agent = _FeedbackAwareStub()
+
+    await nodes.zhuge_liang_generate_node(state, agent=agent)
+
+    assert agent.received_feedback == {"s1": issues}
+
+
+async def test_zhuge_liang_generate_without_feedback_state_passes_empty_map():
+    """state 里没有 feedback 时仍传（空 dict），不能传 None 让下游崩。"""
+    state = _refine_state()
+    del state["review"]
+    agent = _FeedbackAwareStub()
+
+    await nodes.zhuge_liang_generate_node(state, agent=agent)
+
+    assert agent.received_feedback == {}
+
+
+async def test_zhuge_liang_generate_legacy_agent_without_feedback_param_works():
+    """agent.generate 无 feedback 形参 → 不传该 kwarg，也不能报错。"""
+    state = _refine_state()
+    agent = _LegacyStub()
+
+    patch = await nodes.zhuge_liang_generate_node(state, agent=agent)
+
+    assert agent.called is True
+    assert patch["proposal"]["blocks"]["s1"]["content"] == "正文-s1"
+
+
+async def test_zhuge_liang_generate_writes_updated_blocks():
+    """patch 的 updated_blocks 只含本轮实际产出的 block（供 _run_review 收窄）。"""
+    state = {
+        "thread_id": "tid",
+        "spec": _matrix_state("s1", "s2"),
+        "materials": {"matches": {}},
+        "proposal": {
+            "blocks": {"s1": {"block_id": "s1", "kind": "tech", "content": "old",
+                              "outline": "", "sources": [], "needs_diagram": False}},
+            "regenerate_targets": ["s2"],
+        },
+    }
+    patch = await nodes.zhuge_liang_generate_node(state, agent=_LegacyStub())
+
+    assert patch["proposal"]["updated_blocks"] == ["s2"]
+
+
+async def test_zhuge_liang_generate_early_return_writes_empty_updated_blocks():
+    """全部已完成（resume）时早退分支必须写 updated_blocks=[]（falsy → 复审全部）。"""
+    state = {
+        "thread_id": "tid",
+        "spec": _matrix_state("s1"),
+        "materials": {"matches": {}},
+        "proposal": {
+            "blocks": {"s1": {"block_id": "s1", "kind": "tech", "content": "old",
+                              "outline": "", "sources": [], "needs_diagram": False}},
+        },
+    }
+    agent = _LegacyStub()
+    patch = await nodes.zhuge_liang_generate_node(state, agent=agent)
+
+    assert agent.called is False
+    assert patch["proposal"]["updated_blocks"] == []
+
+
+async def test_build_feedback_refine_at_max_iterations_refuses_regen():
+    """check_convergence 若被改坏、在上限当轮仍返回 refine，兜底拒绝回炉。"""
+    issues = [{"severity": "high", "point": "p", "suggestion": "s",
+               "needs_material": False, "material_query": ""}]
+    state = {
+        "review": {
+            "tech_findings": {"s1": _finding(50, issues)},
+            "compliance_findings": {"s1": _finding(40)},
+            "convergence": {"status": "refine", "unconverged_blocks": ["s1"]},
+        },
+        "proposal": {"blocks": {"s1": {}}},
+        "iteration": nodes.MAX_ITERATIONS,
+    }
+
+    patch = await nodes.build_feedback_node(state)
+
+    # 兜底改写 status，让 graph 的条件边直连闸门而非回炉
+    assert patch["review"]["convergence"]["status"] == "max_iterations"
+    assert "regenerate_targets" not in patch["proposal"]
+    assert "iteration" not in patch
+    # 反馈本身照常写出，人工终审仍能看到问题
+    assert len(patch["review"]["feedback"]["s1"]["issues"]) == 1
+    assert patch["errors"][0]["agent"] == "build_feedback"
+    assert patch["errors"][0]["retryable"] is False

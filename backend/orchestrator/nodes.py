@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Awaitable, Callable, Optional, Union
 
 from agents.bao_zheng import BaoZhengAgent
@@ -53,6 +54,19 @@ class WorkflowCancelled(Exception):
 def _check_cancel(state: WorkflowState) -> None:
     if state.get("cancel_requested"):
         raise WorkflowCancelled("user_cancel")
+
+
+# ─────────────────────────────────────────────
+# 协同闭环：收敛阈值与迭代上限（spec §5.1）
+# ─────────────────────────────────────────────
+
+REVIEW_SCORE_THRESHOLD = int(os.getenv("REVIEW_SCORE_THRESHOLD", "80"))
+MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "3"))
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ─────────────────────────────────────────────
@@ -425,6 +439,12 @@ async def zhuge_liang_generate_node(
     existing_blocks = dict(proposal.get("blocks") or {})
     regen_targets = list(proposal.get("regenerate_targets") or [])
 
+    feedback_state = (state.get("review") or {}).get("feedback") or {}
+    feedback: dict[str, list[dict]] = {
+        bid: list((f or {}).get("issues") or [])
+        for bid, f in feedback_state.items()
+    }
+
     if regen_targets:
         # 重生模式：把指定 block 从 existing 移除，让 agent 重跑
         target_for_agent: list[str] = [
@@ -448,35 +468,35 @@ async def zhuge_liang_generate_node(
         return {"proposal": {
             "blocks": existing_blocks,
             "regenerate_targets": [],
+            "updated_blocks": [],
         }}
 
     # 视图过滤：传给 agent 的 outline_matrix 仅含待生成 block
     sub_matrix = {bid: outline_matrix[bid] for bid in target_for_agent}
 
-    # 测试 stub agent 可能没声明 should_cancel 参数 → 用签名探测降级
+    # 测试 stub agent 可能没声明 should_cancel / feedback 参数 → 用签名探测降级
     import inspect as _inspect
     try:
         sig = _inspect.signature(agent.generate)
         supports_should_cancel = "should_cancel" in sig.parameters
+        supports_feedback = "feedback" in sig.parameters
     except (TypeError, ValueError):
         supports_should_cancel = False
+        supports_feedback = False
 
     bridge = _make_agent_emitter_bridge(emitter)
+    call_kwargs: dict = {
+        "outline_matrix": sub_matrix,
+        "materials": matches,
+        "regenerate_targets": target_for_agent if regen_targets else None,
+        "emitter": bridge,
+    }
+    if supports_feedback:
+        call_kwargs["feedback"] = feedback
     if supports_should_cancel:
-        new_blocks, _consumed = await agent.generate(
-            outline_matrix=sub_matrix,
-            materials=matches,
-            regenerate_targets=target_for_agent if regen_targets else None,
-            emitter=bridge,
-            should_cancel=should_cancel,
-        )
-    else:
-        new_blocks, _consumed = await agent.generate(
-            outline_matrix=sub_matrix,
-            materials=matches,
-            regenerate_targets=target_for_agent if regen_targets else None,
-            emitter=bridge,
-        )
+        call_kwargs["should_cancel"] = should_cancel
+
+    new_blocks, _consumed = await agent.generate(**call_kwargs)
 
     # 合并：重生覆盖已存在；正向只新增
     merged_blocks = dict(existing_blocks)
@@ -514,6 +534,7 @@ async def zhuge_liang_generate_node(
         "proposal": {
             "blocks": merged_blocks,
             "regenerate_targets": [],
+            "updated_blocks": list(new_blocks.keys()),
         },
     }
 
@@ -565,6 +586,13 @@ async def _run_review(
     blocks: dict[str, BlockOutput] = {
         bid: _dict_to_block_output(d) for bid, d in blocks_state.items()
     }
+    # 只复审本轮真正重跑过的 block：不只是省 token —— 同一段未改动的正文
+    # 重复评审会因 LLM 采样随机性给出不同分数，低分会被误判为未达标并触发
+    # 无意义的回炉，甚至在两轮之间振荡。老 checkpoint 无该字段时复审全部。
+    updated = proposal.get("updated_blocks")
+    if updated:
+        updated_set = set(updated)
+        blocks = {bid: blk for bid, blk in blocks.items() if bid in updated_set}
     outline_matrix = {
         bid: _dict_to_row(d)
         for bid, d in (spec.get("outline_matrix") or {}).items()
@@ -614,7 +642,14 @@ async def _run_review(
         except Exception as e:
             logger.warning(f"_run_review：finding 落库失败（{agent_name} / {e}），仅缓存 state")
 
-    return {"review": {finding_field: findings_dict}}
+    # 必须并入已有 findings，不能整体替换：review 的 reducer 是浅 merge，
+    # 返回 {"tech_findings": findings_dict} 会把未复审 block 的历史 finding 一并
+    # 抹掉。那样 check_convergence 读到缺失 block 的 score=0，误判未达标并再次
+    # 回炉，两个 block 交替被清空 —— 收敛判定来回振荡直到迭代上限。
+    existing = dict((state.get("review") or {}).get(finding_field) or {})
+    existing.update(findings_dict)
+
+    return {"review": {finding_field: existing}}
 
 
 # ─────────────────────────────────────────────
@@ -708,6 +743,231 @@ async def aggregate_review_node(
         "stage": "report_review",
         "review": {"report": report_dict},
     }
+
+
+# ─────────────────────────────────────────────
+# collect_gaps 节点：调度收集角色补料（spec §4.3）
+# ─────────────────────────────────────────────
+
+async def collect_gaps_node(
+    state: WorkflowState,
+    *,
+    agent: ShenKuoAgent,
+    emitter: EmitterArg = None,
+) -> WorkflowState:
+    """把补料请求交给沈括，新素材并回 materials.matches。
+
+    位于 zhuge_liang_generate **之前**，因此两个来源的请求
+    （编写主动要料 + build_feedback 的审核要料）都在下一轮生成前就位。
+
+    无请求时空操作，不写任何字段。
+    """
+    _check_cancel(state)
+
+    requests_by_block = (state.get("proposal") or {}).get("material_requests") or {}
+    if not requests_by_block:
+        return {}
+
+    materials = state.get("materials") or {}
+    chunks = materials.get("chunks") or []
+
+    # 无语料：清空请求直接放行（否则请求会累积到下一轮重复触发）
+    if not chunks:
+        return {"proposal": {"material_requests": {}}}
+
+    await _emit_frame(emitter, events.iteration_start(int(state.get("iteration") or 0)))
+    for block_id, reqs in requests_by_block.items():
+        for req in (reqs or []):
+            await _emit_frame(emitter, events.gaps_collecting(
+                block_id, req.get("query", ""),
+            ))
+
+    errors: list[dict] = []
+    try:
+        new_matches = await agent.retrieve_for(requests_by_block, chunks)
+    except Exception as e:
+        logger.warning(f"collect_gaps：补料检索失败，保留原 matches 继续：{e}")
+        new_matches = {}
+        errors.append({
+            "agent": "collect_gaps",
+            "message": f"补料检索失败：{e}",
+            "timestamp": _now_iso(),
+            "retryable": True,
+        })
+
+    existing = dict(materials.get("matches") or {})
+    merged: dict[str, list[dict]] = {}
+    for block_id, matches in new_matches.items():
+        old = list(existing.get(block_id) or [])
+        seen = {m.get("chunk_id") for m in old}
+        added = [m for m in matches if m.chunk_id not in seen]
+        if not added:
+            continue
+        merged[block_id] = old + [_match_to_dict(m) for m in added]
+        await _emit_frame(emitter, events.gaps_done(
+            block_id, len(added), len(merged[block_id]),
+        ))
+
+    patch: dict = {"proposal": {"material_requests": {}}}
+    # 关键：new_matches 为空时绝不能写 materials.matches —— _merge_dict 是浅合并，
+    # 写 {"matches": {}} 会把已有匹配全部清空。
+    if merged:
+        patch["materials"] = {"matches": merged}
+    if errors:
+        patch["errors"] = errors
+    return patch
+
+
+# ─────────────────────────────────────────────
+# check_convergence 节点：逐 block 收敛判定（spec §5.1）
+# ─────────────────────────────────────────────
+
+async def check_convergence_node(
+    state: WorkflowState,
+    *,
+    emitter: EmitterArg = None,
+) -> WorkflowState:
+    """纯判定：不调 LLM、不改业务数据，只写 review.convergence。"""
+    _check_cancel(state)
+
+    review = state.get("review") or {}
+    tech = review.get("tech_findings") or {}
+    comp = review.get("compliance_findings") or {}
+    iteration = int(state.get("iteration") or 0)
+
+    unconverged: list[str] = []
+    review_failed = False
+
+    for block_id in sorted(set(tech) | set(comp)):
+        t = tech.get(block_id) or {}
+        c = comp.get(block_id) or {}
+
+        # 评审本身失败是基础设施故障，不是内容问题 —— 回炉解决不了，
+        # 反而会烧光迭代次数。排除在未达标之外，直接交人工终审。
+        if t.get("error") or c.get("error"):
+            review_failed = True
+            continue
+
+        tech_score = int(t.get("score") or 0)
+        comp_score = int(c.get("score") or 0)
+        has_critical = any(
+            str(i.get("severity") or "").lower() == "critical"
+            for i in list(t.get("issues") or []) + list(c.get("issues") or [])
+        )
+
+        if (
+            tech_score < REVIEW_SCORE_THRESHOLD
+            or comp_score < REVIEW_SCORE_THRESHOLD
+            or has_critical
+        ):
+            unconverged.append(block_id)
+
+    if not unconverged:
+        status = "converged"
+        reason = "review_failed_ignored" if review_failed else ""
+    elif iteration >= MAX_ITERATIONS:
+        status = "max_iterations"
+        reason = f"已达迭代上限 {MAX_ITERATIONS} 轮"
+    else:
+        status = "refine"
+        reason = "存在未达标 block"
+
+    convergence = {
+        "status": status,
+        "unconverged_blocks": unconverged,
+        "reason": reason,
+        "iteration": iteration,
+        "review_failed": review_failed,
+    }
+    await _emit_frame(emitter, events.convergence(convergence))
+    return {"review": {"convergence": convergence}}
+
+
+# ─────────────────────────────────────────────
+# build_feedback 节点：把审核意见转译成两路（spec §4.4）
+# ─────────────────────────────────────────────
+
+async def build_feedback_node(
+    state: WorkflowState,
+    *,
+    emitter: EmitterArg = None,
+) -> WorkflowState:
+    """转译：给编写的修订指令 + 给收集的补料请求。纯转译，不调 LLM。
+
+    refine 模式：写全部四个字段（feedback / material_requests /
+                 regenerate_targets / iteration）。
+    max_iterations 模式：只写前两个，不回炉、不递增，
+                 由 graph 的条件边直连闸门 3（spec §5.3）。
+    """
+    _check_cancel(state)
+
+    review = state.get("review") or {}
+    tech = review.get("tech_findings") or {}
+    comp = review.get("compliance_findings") or {}
+    convergence = review.get("convergence") or {}
+    status = convergence.get("status", "")
+    targets = list(convergence.get("unconverged_blocks") or [])
+    iteration = int(state.get("iteration") or 0)
+
+    feedback: dict[str, dict] = {}
+    material_requests: dict[str, list[dict]] = {}
+
+    for block_id in targets:
+        t = tech.get(block_id) or {}
+        c = comp.get(block_id) or {}
+        issues = list(t.get("issues") or []) + list(c.get("issues") or [])
+
+        feedback[block_id] = {
+            "issues": issues,
+            "scores": {
+                "tech": int(t.get("score") or 0),
+                "comp": int(c.get("score") or 0),
+            },
+        }
+
+        reqs: list[dict] = []
+        for issue in issues:
+            if not issue.get("needs_material"):
+                continue
+            query = (issue.get("material_query") or "").strip() or \
+                    (issue.get("point") or "").strip()
+            if not query:
+                continue
+            reqs.append({"query": query, "reason": issue.get("point") or ""})
+        if reqs:
+            material_requests[block_id] = reqs
+
+    patch: dict = {
+        "review": {"feedback": feedback},
+        "proposal": {"material_requests": material_requests},
+        "errors": [],
+    }
+
+    if status == "refine":
+        if iteration >= MAX_ITERATIONS:
+            # 断言式兜底：check_convergence 的判定若被改坏，最坏也只是重复一轮，
+            # 不会无限回环。改写 status 让 graph 的 _route_feedback 直连闸门。
+            patch["review"]["convergence"] = {
+                **convergence,
+                "status": "max_iterations",
+                "reason": f"迭代已达上限 {MAX_ITERATIONS} 仍收到 refine，强制收敛",
+            }
+            patch["errors"].append({
+                "agent": "build_feedback",
+                "message": f"迭代已达上限 {MAX_ITERATIONS} 仍收到 refine，拒绝回炉",
+                "timestamp": _now_iso(),
+                "retryable": False,
+            })
+        else:
+            patch["proposal"]["regenerate_targets"] = targets
+            patch["iteration"] = iteration + 1
+
+    await _emit_frame(emitter, events.feedback_ready({
+        "targets": targets,
+        "material_request_count": sum(len(v) for v in material_requests.values()),
+        "iteration": iteration,
+    }))
+    return patch
 
 
 # ─────────────────────────────────────────────
@@ -828,4 +1088,7 @@ __all__ = [
     "wang_anshi_review_node",
     "bao_zheng_review_node",
     "aggregate_review_node",
+    "collect_gaps_node",
+    "check_convergence_node",
+    "build_feedback_node",
 ]
