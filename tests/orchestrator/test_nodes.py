@@ -652,6 +652,50 @@ async def test_collect_gaps_appends_without_overwriting():
     assert patch["proposal"]["material_requests"] == {}
 
 
+async def test_collect_gaps_keeps_matches_of_blocks_without_new_hits():
+    """只有部分 block 拿到新素材时，其余 block 的原有匹配必须存活。
+
+    上面那条用例只有 s1 一个 block，测不出跨 block 的擦除。而 materials 的
+    reducer 是浅合并（_merge_dict 走 out.update(patch)），所以 patch 会整体
+    替换 materials.matches —— 若 merged 只装新命中的 block，别的 block 素材
+    就被抹掉了。
+
+    这个场景在生产里很常见：build_feedback 只在 block 含 needs_material
+    issue 时才登记 material_requests，于是"分数低但问题不属于缺材料"的 block
+    会进回炉名单（regenerate_targets）却不进补料名单（material_requests），
+    结果它下一轮在零参考素材下重新生成 —— 正是补料闭环要防的事。
+
+    断言必须打在"合进 state 之后"的结果上：只看 patch 是看不出擦除的。
+    """
+    from infra.retrieval import Match
+    from orchestrator.state import _merge_dict
+
+    stub = _CollectGapsStub({"s1": [
+        Match(chunk_id=2, score=8.0, reason="新", hit_points=[]),
+    ]})
+    state = {
+        # 只有 s1 提了补料需求；s2 在回炉名单里但不缺材料
+        "proposal": {"material_requests": {"s1": [{"query": "q"}]}},
+        "materials": {
+            "chunks": [{"id": 1}, {"id": 2}],
+            "matches": {
+                "s1": [{"chunk_id": 1, "score": 5.0, "reason": "s1旧"}],
+                "s2": [{"chunk_id": 9, "score": 7.0, "reason": "s2原有素材"}],
+            },
+        },
+    }
+
+    patch = await nodes.collect_gaps_node(state, agent=stub)
+    merged_materials = _merge_dict(state["materials"], patch.get("materials") or {})
+
+    assert [m["chunk_id"] for m in merged_materials["matches"]["s1"]] == [1, 2]
+    # 关键断言：s2 没提补料需求，但它的素材不能被这次补料抹掉
+    assert "s2" in merged_materials["matches"], (
+        "s2 未提补料需求，其原有匹配被 collect_gaps 的浅合并擦除了"
+    )
+    assert merged_materials["matches"]["s2"][0]["reason"] == "s2原有素材"
+
+
 async def test_collect_gaps_does_not_wipe_matches_when_nothing_found():
     """补料返回空时不得写 materials.matches，否则会把原匹配清空。"""
     stub = _CollectGapsStub({})

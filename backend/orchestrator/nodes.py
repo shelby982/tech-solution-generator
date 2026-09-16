@@ -796,7 +796,14 @@ async def collect_gaps_node(
         })
 
     existing = dict(materials.get("matches") or {})
-    merged: dict[str, list[dict]] = {}
+    # 用 existing 打底，而不是只装新命中的 block：patch 会整体替换
+    # materials.matches（_merge_dict 是浅合并，不递归）。只装新命中项的话，
+    # 未提补料需求的 block 素材会被一并抹掉 —— 而这类 block 很常见：
+    # build_feedback 只在存在 needs_material issue 时才登记 material_requests，
+    # 于是"分数低但问题不属于缺材料"的 block 会进回炉名单却不进补料名单，
+    # 结果下一轮在零参考素材下重新生成。
+    merged: dict[str, list[dict]] = {bid: list(ms) for bid, ms in existing.items()}
+    changed = False
     for block_id, matches in new_matches.items():
         old = list(existing.get(block_id) or [])
         seen = {m.get("chunk_id") for m in old}
@@ -804,14 +811,16 @@ async def collect_gaps_node(
         if not added:
             continue
         merged[block_id] = old + [_match_to_dict(m) for m in added]
+        changed = True
         await _emit_frame(emitter, events.gaps_done(
             block_id, len(added), len(merged[block_id]),
         ))
 
     patch: dict = {"proposal": {"material_requests": {}}}
-    # 关键：new_matches 为空时绝不能写 materials.matches —— _merge_dict 是浅合并，
-    # 写 {"matches": {}} 会把已有匹配全部清空。
-    if merged:
+    # 关键：没有新命中时绝不能写 materials.matches —— _merge_dict 是浅合并。
+    # 此时 merged 与 existing 等值，写回去语义无害，但会让"没找到新素材"在
+    # state 上消失，且旧写法下写 {"matches": {}} 会直接清空全部已有匹配。
+    if changed:
         patch["materials"] = {"matches": merged}
     if errors:
         patch["errors"] = errors
