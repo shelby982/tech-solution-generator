@@ -108,6 +108,7 @@ class ZhugeLiangAgent:
         self,
         outline_matrix: dict[str, OutlineMatrixRow],
         materials: dict[str, list[Match]],
+        feedback: Optional[dict[str, list[dict]]] = None,
         regenerate_targets: Optional[list[str]] = None,
         emitter: Optional[EventCallback] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
@@ -164,6 +165,7 @@ class ZhugeLiangAgent:
                             block_id, row, matches,
                             configs, (rr_start + idx) % max(len(configs), 1),
                             emitter,
+                            feedback=(feedback or {}).get(block_id) or [],
                         )
                 except Exception as e:
                     logger.warning(f"诸葛亮：block {block_id} 生成失败：{e}")
@@ -253,6 +255,7 @@ class ZhugeLiangAgent:
         configs: list,
         rr_start: int,
         emitter: Optional[EventCallback],
+        feedback: Optional[list[dict]] = None,
     ) -> BlockOutput:
         """普通技术 block：先生成 outline，再流式生成正文。"""
         # 函数内 import 让单测可通过 monkeypatch infra.llm.* 直接覆盖
@@ -266,6 +269,10 @@ class ZhugeLiangAgent:
             configs, rr_start, block_dict, extra_context=extra_context,
         )
         needs_diagram = bool(_DIAGRAM_PLACEHOLDER_RE.search(outline or ""))
+
+        # 上一轮评审意见：转成可注入文本；为空则走首次生成路径（行为不变）
+        from agents.prompts import format_feedback_block
+        feedback_text = format_feedback_block(feedback)
 
         # 流式正文（chunks 入参为 dict 列表，与 dispatch_block_write 现有签名一致）
         # 把沈括 rerank 后的 reason + hit_points 拼成 content，作为参考素材片段
@@ -285,6 +292,7 @@ class ZhugeLiangAgent:
             requirement=row.requirement or "",
             chunks=chunks_for_write,
             target_words=self.target_words,
+            feedback_text=feedback_text,
         ):
             content_parts.append(token)
             await _emit(emitter, "token", {

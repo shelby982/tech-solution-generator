@@ -138,3 +138,43 @@ def test_review_prompts_request_material_fields():
     ):
         assert "needs_material" in prompt
         assert "material_query" in prompt
+
+
+def test_format_feedback_block_renders_issues():
+    """评审意见被格式化为带严重度的逐条清单。"""
+    from agents.prompts import format_feedback_block
+
+    issues = [
+        {"severity": "critical", "point": "缺业绩证明", "suggestion": "补充合同"},
+        {"severity": "low", "point": "表述冗余", "suggestion": "精简"},
+    ]
+
+    text = format_feedback_block(issues)
+
+    assert "上轮评审意见" in text
+    assert "CRITICAL" in text
+    assert "缺业绩证明" in text
+    assert "补充合同" in text
+
+
+def test_format_feedback_block_flags_material_issues():
+    """needs_material 的问题必须提示用占位符而不是编造数据。"""
+    from agents.prompts import format_feedback_block
+
+    issues = [{
+        "severity": "critical", "point": "缺型式试验报告",
+        "suggestion": "补充", "needs_material": True,
+    }]
+
+    text = format_feedback_block(issues)
+
+    assert "待补充" in text
+    assert "不要编造" in text
+
+
+def test_format_feedback_block_empty_returns_blank():
+    """空意见返回空串——调用方靠它判断是否走修订分支。"""
+    from agents.prompts import format_feedback_block
+
+    assert format_feedback_block([]) == ""
+    assert format_feedback_block(None) == ""

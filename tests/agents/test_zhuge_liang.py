@@ -246,7 +246,7 @@ async def test_generate_concurrent_blocks_isolated_on_single_failure(monkeypatch
         return "outline content for " + str(block.get("title"))
 
     async def fake_block_write(*, configs, rr_start_index, title, requirement,
-                               chunks, target_words):
+                               chunks, target_words, feedback_text=""):
         # 没在 outline 阶段失败的话，正文阶段也不应该失败
         if title == "FAIL_BLOCK_TITLE":
             raise RuntimeError("should never reach: outline already failed")
@@ -371,3 +371,87 @@ async def test_generate_tech_attaches_material_requests_from_outline(monkeypatch
     assert results["s1"].material_requests == [
         {"query": "配电柜型式试验报告", "reason": "写作大纲中的待补充占位符"},
     ]
+
+
+async def test_generate_passes_feedback_into_write_prompt(monkeypatch):
+    """feedback 中该 block 的意见被注入到正文生成的 prompt。"""
+    captured = {}
+
+    async def _fake_write(**kwargs):
+        captured.update(kwargs)
+        yield "正文"
+        return
+
+    async def _fake_outline(*a, **kw):
+        return "## 大纲"
+
+    class _Cfg:
+        provider = "openai"
+        model = "m"
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "generate_section_outline", _fake_outline)
+    monkeypatch.setattr(infra.llm, "dispatch_block_write", _fake_write)
+
+    agent = ZhugeLiangAgent(configs_provider=lambda: ([_Cfg()], 0))
+
+    async def _drain(gen):
+        async for _ in gen:
+            pass
+
+    await agent.generate(
+        outline_matrix={
+            "s1": OutlineMatrixRow(
+                block_id="s1", title="配电系统", requirement="要求",
+            ),
+        },
+        materials={"s1": []},
+        feedback={"s1": [{
+            "severity": "critical", "point": "缺业绩证明", "suggestion": "补充",
+        }]},
+    )
+
+    assert "上轮评审意见" in captured.get("feedback_text", "")
+    assert "缺业绩证明" in captured.get("feedback_text", "")
+
+
+async def test_generate_without_feedback_sends_empty_feedback_text(monkeypatch):
+    """本 block 无评审意见时 feedback_text 必须是空串——退回首次生成路径。
+
+    `format_feedback_block([]) == ""` 已由 test_prompts 单测覆盖，但"空 feedback
+    一路传到底仍为空串"这段挂接没有用例：把 _generate_tech 里的
+    `format_feedback_block(feedback)` 改成 `... or "【上轮评审意见…】"`（空也走
+    修订分支），上面所有用例仍然全绿，首次生成路径会静默变成修订路径。
+
+    同时覆盖 block 隔离：feedback 只给了 s2，s1 不应拿到别人的意见。
+    """
+    captured = {}
+
+    async def _fake_write(**kwargs):
+        captured.update(kwargs)
+        yield "正文"
+
+    async def _fake_outline(*a, **kw):
+        return "## 大纲"
+
+    class _Cfg:
+        provider = "openai"
+        model = "m"
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "generate_section_outline", _fake_outline)
+    monkeypatch.setattr(infra.llm, "dispatch_block_write", _fake_write)
+
+    agent = ZhugeLiangAgent(configs_provider=lambda: ([_Cfg()], 0))
+    matrix = {
+        "s1": OutlineMatrixRow(block_id="s1", title="配电系统", requirement="要求"),
+    }
+
+    for fb in (None, {"s2": [{"severity": "critical", "point": "别的 block 的意见"}]}):
+        captured.clear()
+        await agent.generate(
+            outline_matrix=matrix, materials={"s1": []}, feedback=fb,
+        )
+        assert captured.get("feedback_text") == "", (
+            f"feedback={fb!r} 时 s1 不应注入任何评审意见"
+        )

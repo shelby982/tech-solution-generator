@@ -357,6 +357,36 @@ def build_compliance_review_user(block: dict, matrix_row: dict) -> str:
     )
 
 
+# ─────────────────────────────────────────────
+# 协同闭环：评审意见 → 生成 prompt 的转译
+# ─────────────────────────────────────────────
+
+def format_feedback_block(issues: list[dict] | None) -> str:
+    """把上一轮评审意见格式化为可注入生成 prompt 的文本块。
+
+    issues: [{"severity","point","suggestion","needs_material","material_query"}]
+    空列表 / None 返回 "" —— 调用方靠空串判断是否走修订分支。
+    """
+    if not issues:
+        return ""
+
+    lines = ["【上轮评审意见（必须逐条修复）】"]
+    for i, it in enumerate(issues, 1):
+        severity = str(it.get("severity") or "medium").upper()
+        lines.append(f"{i}. [{severity}] {it.get('point') or ''}")
+        if it.get("suggestion"):
+            lines.append(f"   修改建议：{it['suggestion']}")
+        if it.get("needs_material"):
+            lines.append(
+                "   本条需外部材料支撑：【参考素材】中若仍无对应内容，"
+                "请用占位符 `【待补充：材料名称】` 标注，不要编造具体数据、证书编号或业绩。"
+            )
+
+    lines.append("")
+    lines.append("要求：逐条消除上述问题；已满足的项不要改动。")
+    return "\n".join(lines)
+
+
 __all__ = [
     "BIDDER_IDENTITY_RULE",
     "OUTLINE_EXTRACT_SYSTEM",
@@ -372,4 +402,5 @@ __all__ = [
     "build_tech_review_user",
     "COMPLIANCE_REVIEW_SYSTEM",
     "build_compliance_review_user",
+    "format_feedback_block",
 ]
