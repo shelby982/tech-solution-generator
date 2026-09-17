@@ -25,6 +25,7 @@ from services.block_store import (
     update_project,
     create_snapshot,
     list_blocks,
+    current_run_thread_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,8 @@ async def lock_project(project_id: int):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        blocks = await list_blocks(db, project_id)
+        tid = await current_run_thread_id(db, project_id)
+        blocks = await list_blocks(db, project_id, tid, fallback_all=True)
         snapshot_json = json.dumps(blocks, ensure_ascii=False)
         snapshot = await create_snapshot(
             db,

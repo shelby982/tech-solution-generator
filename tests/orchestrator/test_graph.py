@@ -26,6 +26,7 @@ from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
 from infra.retrieval import Match
 from orchestrator import graph as graph_mod
+from orchestrator import nodes
 from orchestrator.checkpointer import checkpointer_from_path
 from orchestrator.events import EventEmitter
 from orchestrator.graph import (
@@ -36,6 +37,7 @@ from orchestrator.graph import (
     NODE_AGGREGATE,
     NODE_COLLECT_GAPS,
     NODE_COMP_REVIEW,
+    NODE_EXTRACT,
     NODE_GENERATE,
     NODE_MATCH,
     NODE_OUTLINE_DRAFT,
@@ -43,6 +45,7 @@ from orchestrator.graph import (
     GraphDeps,
     build_graph,
 )
+from langgraph.graph import END
 
 
 _FRAME_RE = re.compile(r"^event: (?P<event>[^\n]+)\ndata: (?P<data>.+)\n\n$", re.S)
@@ -60,7 +63,7 @@ def _parse_frame(frame: str) -> tuple[str, dict]:
 
 @dataclass
 class _StubZhangHeng:
-    async def parse(self, file_source, *, suffix, filename, progress_callback=None):
+    async def parse(self, sources, *, progress_callback=None):
         return SpecParseResult(
             doc_id="d1", doc_title="规范书", doc_summary="摘要",
             toc=[
@@ -134,7 +137,7 @@ class _DelayingReviewer:
 
 
 async def _spec_loader(_pid: int):
-    return (b"x", ".pdf", "spec.pdf")
+    return [(b"x", ".pdf", "spec.pdf")]
 
 
 def _build_deps(*, zhuge=None, wang=None, bao=None) -> GraphDeps:
@@ -161,11 +164,12 @@ async def test_graph_pauses_at_outline_gate(tmp_path):
         await graph.ainvoke({"project_id": 1}, config=config)
 
         snap = await graph.aget_state(config)
-        # interrupt_after 配置在 GATE_OUTLINE，闸门已跑完，next 是下一个节点
-        assert snap.next == (NODE_MATCH,)
+        # interrupt_after 配置在 GATE_OUTLINE，闸门已跑完，next 是下一个节点。
+        # 闸门1 的下一个节点是 extract —— 停在闸门时 8 字段还没提炼（矩阵为空）。
+        assert snap.next == ("zhang_heng_extract",)
         assert snap.values.get("stage") == "outline_review"
         assert snap.values.get("spec", {}).get("doc_title") == "规范书"
-        assert "outline_matrix" in snap.values.get("spec", {})
+        assert snap.values.get("spec", {}).get("outline_matrix") == {}
 
 
 async def test_graph_pauses_at_each_gate_in_sequence(tmp_path):
@@ -178,9 +182,10 @@ async def test_graph_pauses_at_each_gate_in_sequence(tmp_path):
 
         await graph.ainvoke({"project_id": 1}, config=config)
         snap = await graph.aget_state(config)
-        assert snap.next == (NODE_MATCH,)
+        assert snap.next == ("zhang_heng_extract",)
         assert snap.values["stage"] == "outline_review"
 
+        # 放行闸门1：提炼 → 匹配 → 闸门2
         await graph.ainvoke(None, config=config)
         snap = await graph.aget_state(config)
         # 闭环落地后 gate2 的下一个节点是 collect_gaps（generate 前的补料空操作），
@@ -236,16 +241,17 @@ async def test_resume_after_close_continues_from_checkpoint(tmp_path):
         graph1 = build_graph(_build_deps(), checkpointer=saver1)
         await graph1.ainvoke({"project_id": 1}, config=config)
         snap = await graph1.aget_state(config)
-        assert snap.next == (NODE_MATCH,)
-        # 记录 outline_matrix 以便比对
-        matrix_before = snap.values["spec"]["outline_matrix"]
+        assert snap.next == ("zhang_heng_extract",)
+        # 记录目录以便比对 —— 闸门1 停在提炼之前，此时矩阵还是空的
+        toc_before = snap.values["spec"]["toc"]
 
     # 第二次打开同一文件，state 应被重新载入
     async with checkpointer_from_path(db) as saver2:
         graph2 = build_graph(_build_deps(), checkpointer=saver2)
         snap = await graph2.aget_state(config)
-        assert snap.next == (NODE_MATCH,)
-        assert snap.values["spec"]["outline_matrix"] == matrix_before
+        assert snap.next == ("zhang_heng_extract",)
+        assert snap.values["spec"]["toc"] == toc_before
+        assert snap.values["spec"]["outline_matrix"] == {}
         # 续跑：经 match 节点后落在 gate2 之后，等 collect_gaps → generate
         await graph2.ainvoke(None, config=config)
         snap = await graph2.aget_state(config)
@@ -559,16 +565,64 @@ def _edges(deps) -> set[tuple[str, str]]:
     return {(e.source, e.target) for e in compiled.get_graph().edges}
 
 
-def test_outline_draft_inserted_between_parse_and_extract():
-    """parse → outline_draft → extract：目录派生必须在正则解析之后、8 字段提炼之前。"""
+def test_outline_draft_flows_into_gate_before_extract():
+    """parse → outline_draft → 闸门1 → extract：目录派生完先停闸门，提炼留到放行后。
+
+    8 字段提炼是每个派生节点一次模型调用（N 次），目录却是用户要先看、先改的东西，
+    不该每次点「提炼大纲」都被提炼的账绑住。
+    """
     edges = _edges(_build_deps())
 
     assert ("zhang_heng_parse", NODE_OUTLINE_DRAFT) in edges
-    assert (NODE_OUTLINE_DRAFT, "zhang_heng_extract") in edges
-    # extract 仍直连闸门 1；parse 不再直连 extract（插节点后旧边必须断掉，
-    # 否则派生目录会被 extract 无视）
-    assert ("zhang_heng_extract", GATE_OUTLINE) in edges
+    assert (NODE_OUTLINE_DRAFT, GATE_OUTLINE) in edges
+    assert (GATE_OUTLINE, "zhang_heng_extract") in edges
+    assert ("zhang_heng_extract", NODE_MATCH) in edges
+    # 旧边必须断掉：派生目录若还直连 extract，点一次提炼就照样烧 N 次调用；
+    # extract 若还直连闸门 1，回路就绕开了闸门。
+    assert (NODE_OUTLINE_DRAFT, "zhang_heng_extract") not in edges
+    assert ("zhang_heng_extract", GATE_OUTLINE) not in edges
     assert ("zhang_heng_parse", "zhang_heng_extract") not in edges
+
+
+def test_extract_edge_ends_when_section_extract_disabled(monkeypatch):
+    """第二步关闭时（应用当前形态）：extract 直接收尾，不再进素材匹配。
+
+    匹配依赖提炼产出的矩阵，空矩阵匹配不出东西 —— 往下走只会得到一个空闸门 2，
+    用户点「继续匹配素材」会看到假结果。
+    """
+    monkeypatch.setattr(nodes, "ENABLE_SECTION_EXTRACT", False)
+
+    edges = _edges(_build_deps())
+
+    # 第一步（拆分章节目录）的拓扑不受影响
+    assert (NODE_OUTLINE_DRAFT, GATE_OUTLINE) in edges
+    assert (GATE_OUTLINE, NODE_EXTRACT) in edges
+    # 第二步关闭 → 收尾
+    assert (NODE_EXTRACT, END) in edges
+    assert (NODE_EXTRACT, NODE_MATCH) not in edges
+
+
+async def test_outline_gate_resume_ends_when_extract_disabled(tmp_path, monkeypatch):
+    """第二步关闭时放行闸门 1：图随即收尾 —— 不产矩阵，也不进素材匹配。"""
+    monkeypatch.setattr(nodes, "ENABLE_SECTION_EXTRACT", False)
+
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid"}}
+
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(_build_deps(), checkpointer=saver)
+
+        await graph.ainvoke({"project_id": 1}, config=config)
+        snap = await graph.aget_state(config)
+        # 第一步照常：目录已派生，停在闸门 1 等用户核对
+        assert snap.values["stage"] == "outline_review"
+        assert snap.values["spec"]["toc"]
+        assert snap.values["spec"]["outline_matrix"] == {}
+
+        await graph.ainvoke(None, config=config)
+        snap = await graph.aget_state(config)
+        assert snap.values["spec"]["outline_matrix"] == {}, "第二步关闭时不该产出矩阵"
+        assert snap.values["stage"] == "outline_review", "不该推进到闸门 2"
 
 
 def test_interrupt_after_set_unchanged_by_outline_draft():
@@ -593,7 +647,8 @@ async def test_outline_gate_emits_draft_frames_and_snapshot_fields(tmp_path):
             config=config,
         )
         snap = await graph.aget_state(config)
-        assert snap.next == (NODE_MATCH,)
+        # 闸门1 停在提炼之前
+        assert snap.next == ("zhang_heng_extract",)
 
     await emitter.aclose()
     frames = [_parse_frame(f) async for f in emitter.stream()]
@@ -611,4 +666,38 @@ async def test_outline_gate_emits_draft_frames_and_snapshot_fields(tmp_path):
     assert gate["snapshot"]["outline_instruction"] == "按评分项拆章"
     assert gate["snapshot"]["outline_revision"] == 1
     assert gate["snapshot"]["outline_error"] == "stub 未派生"
+    # 概述生成成功 → 无降级提示；这条断言同时守住「键始终存在」的契约。
+    assert gate["snapshot"]["doc_summary_error"] == ""
     assert [s["id"] for s in gate["snapshot"]["toc"]] == ["s1", "s2"]
+
+
+def test_outline_gate_snapshot_carries_doc_summary_error():
+    """概述生成失败时，闸门 1 快照要带上原因，前端才有东西提示。
+
+    直接单测快照函数：验证的是「挑哪些字段」这一层，不必为此改图桩。
+    """
+    snapshot = graph_mod._gate_snapshot(
+        {
+            "spec": {
+                "doc_title": "规范书",
+                "doc_summary": "",
+                "doc_summary_error": "模型返回空内容",
+                "toc": [],
+            },
+            "config": {},
+        },
+        "review_outline",
+    )
+
+    assert snapshot["doc_summary"] == ""
+    assert snapshot["doc_summary_error"] == "模型返回空内容"
+
+
+def test_outline_gate_snapshot_tolerates_missing_doc_summary_error():
+    """老 checkpoint 的 spec 里没有这个键，快照要退化成空串而不是 KeyError。"""
+    snapshot = graph_mod._gate_snapshot(
+        {"spec": {"doc_title": "规范书", "doc_summary": "摘要"}, "config": {}},
+        "review_outline",
+    )
+
+    assert snapshot["doc_summary_error"] == ""

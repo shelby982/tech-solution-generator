@@ -1,4 +1,4 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260916-loop4';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, isOrphanedRun, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260917-loop5';
 export {statusLabels, esc};
 export async function request(url, options) {
   const response = await fetch(url, options);
@@ -7,7 +7,7 @@ export async function request(url, options) {
   return data;
 }
 const params = new URLSearchParams(location.search);
-export const workspace = { projectId: params.get('projectId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false };
+export const workspace = { projectId: params.get('projectId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false };
 let timer, loading = false, lastProjection = null;
 const listeners = new Set();
 export function subscribe(callback) { listeners.add(callback); if (workspace.ready) callback(workspace); return () => listeners.delete(callback); }
@@ -43,14 +43,22 @@ function renderChrome() {
   }
   const state = workspace.state;
   const stage = state.stage || 'idle';
-  workspace.busy = activeStages.has(stage);
+  workspace.orphaned = isOrphanedRun(state);
+  // 中断的 run 已经没有东西在跑了，不能再算 busy —— 否则 refreshWorkspace 会永远每 4 秒轮询。
+  workspace.busy = activeStages.has(stage) && !workspace.orphaned;
   const round = Number(state.iteration || 0) + 1;
-  bar.querySelector('#ws-run-label').textContent = workspace.threadId ? `第 ${round} 轮 · ${stageLabels[stage] || stage}` : '开始准备方案';
-  bar.querySelector('#ws-run-detail').textContent = summary.total
+  bar.querySelector('#ws-run-label').textContent = workspace.threadId
+    ? `第 ${round} 轮 · ${stageLabels[stage] || stage}${workspace.orphaned ? '（已中断）' : ''}`
+    : '开始准备方案';
+  const stats = summary.total
     ? `正文 ${summary.written}/${summary.total} · 已通过 ${summary.counts.passed || 0} · 待处理 ${summary.needsAction}`
-    : '上传要求后确认大纲，可随时切换工作区';
+    : '';
+  bar.querySelector('#ws-run-detail').textContent = workspace.orphaned
+    ? `后端重启导致该任务中断，进度来自上次运行${stats ? ` · ${stats}` : ''}。可在「要求与大纲」页点「继续提炼」接着跑`
+    : (stats || '上传要求后确认大纲，可随时切换工作区');
   bar.querySelector('#ws-todo-link').href = workspaceUrl('review');
   bar.dataset.busy = String(workspace.busy);
+  bar.dataset.orphaned = String(workspace.orphaned);
 }
 export async function refreshWorkspace() {
   if (loading) return;
@@ -63,7 +71,9 @@ export async function refreshWorkspace() {
     const state = workspace.threadId ? await request(`/api/workflow/${encodeURIComponent(workspace.threadId)}/state`) : {};
     workspace.state = state;
     workspace.projectId = state.project_id || workspace.projectId;
-    const rows = workspace.projectId ? await request(`/api/projects/${workspace.projectId}/blocks`) : [];
+    const blocksUrl = `/api/projects/${workspace.projectId}/blocks`
+      + (workspace.threadId ? `?threadId=${encodeURIComponent(workspace.threadId)}` : '');
+    const rows = workspace.projectId ? await request(blocksUrl) : [];
     workspace.chapters = projectChapters(state, rows);
     workspace.ready = true;
     renderChrome();

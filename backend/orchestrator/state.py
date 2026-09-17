@@ -38,6 +38,7 @@ class SpecState(TypedDict, total=False):
     outline_matrix: dict[str, dict]    # block_id → OutlineMatrixRow.to_dict()
     outline_revision: int              # 目录版本号，由 outline_draft 节点自增；0 = 未派生
     outline_error: str                 # 目录派生降级原因，空串 = 模型派生成功
+    doc_summary_error: str             # 项目概述生成失败原因，空串 = 生成成功
 
 
 class MaterialsState(TypedDict, total=False):

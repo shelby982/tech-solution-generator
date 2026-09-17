@@ -68,8 +68,8 @@ export const api = {
   },
 
   blocks: {
-    list: (projectId) =>
-      fetch(`/api/projects/${projectId}/blocks`).then(r => r.json()),
+    list: (projectId, threadId) =>
+      fetch(`/api/projects/${projectId}/blocks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),
     clear: (projectId) =>
       fetch(`/api/projects/${projectId}/blocks`, { method: 'DELETE' }).then(r => r.json()),
     update: (id, content) =>

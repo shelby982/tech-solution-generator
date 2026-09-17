@@ -8,6 +8,7 @@ import aiosqlite
 from services.block_store import (
     get_block as _get_block,
     list_blocks as _list_blocks,
+    current_run_thread_id as _current_run_thread_id,
     update_block_content as _update_block_content,
     update_block_status as _update_block_status,
 )
@@ -31,7 +32,8 @@ class ProposalRepository:
 
     async def list_blocks(self, project_id: int) -> list[Block]:
         """读取 project 下所有 block，按 order_idx 排序。"""
-        rows = await _list_blocks(self.db, project_id)
+        tid = await _current_run_thread_id(self.db, project_id)
+        rows = await _list_blocks(self.db, project_id, tid, fallback_all=True)
         return [Block.from_row(r) for r in rows]
 
     async def get_block(self, db_id: int) -> Optional[Block]:

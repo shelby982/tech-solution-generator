@@ -246,14 +246,39 @@ def test_outline_draft_prompt_keeps_material_extension_point():
 
 
 def test_spec_digest_respects_budget():
+    """总长度（含标题行）必须落在预算内。"""
     from agents.prompts import build_spec_digest
     sections = [
         {"title": f"章节{i}", "content": "正文" * 500}
         for i in range(20)
     ]
     digest = build_spec_digest(sections, budget=2000)
-    assert len(digest) < 2000 + 100 * len(sections)  # 标题开销之外不超预算
+    assert len(digest) <= 2000
     assert "章节0" in digest
+
+
+def test_spec_digest_title_lines_count_against_budget():
+    """标题行不计预算时，上千个章节光标题就能把 prompt 撑爆（实测 5.9 万字符）。"""
+    from agents.prompts import build_spec_digest
+    sections = [
+        {"title": "很长的章节标题" * 4, "content": ""}
+        for _ in range(500)
+    ]
+
+    digest = build_spec_digest(sections, budget=2000)
+
+    assert len(digest) <= 2000
+    assert "因长度限制未列出" in digest   # 截断要显式告知模型
+
+
+def test_spec_digest_no_truncation_marker_when_all_fit():
+    from agents.prompts import build_spec_digest
+    digest = build_spec_digest([
+        {"title": "章节一", "content": "正文一"},
+        {"title": "章节二", "content": "正文二"},
+    ], budget=2000)
+    assert "未列出" not in digest
+    assert "章节一" in digest and "章节二" in digest
 
 
 def test_spec_digest_keeps_titles_for_empty_sections():
@@ -270,3 +295,142 @@ def test_spec_digest_handles_empty_input():
     from agents.prompts import build_spec_digest
     assert build_spec_digest([]) == ""
     assert build_spec_digest(None) == ""
+
+
+# ─────────────────────────────────────────────
+# build_spec_digest：选中 / 未选中分开处理
+# ─────────────────────────────────────────────
+
+def test_spec_digest_without_selected_key_is_unchanged():
+    """改造前的调用点不带 selected 键，输出必须逐字保持原样（无分组标题）。"""
+    from agents.prompts import build_spec_digest
+    digest = build_spec_digest([
+        {"title": "章节一", "content": "正文一"},
+        {"title": "章节二", "content": "正文二"},
+    ], budget=2000)
+
+    assert "已定位到的材料" not in digest
+    assert "文件的其余部分" not in digest
+    assert digest == "【章节一】\n正文一\n【章节二】\n正文二"
+
+
+def test_spec_digest_keeps_unselected_sections_as_titles_only():
+    """未选中的部分正文一律丢弃，只留标题。"""
+    from agents.prompts import build_spec_digest
+    digest = build_spec_digest([
+        {"title": "标包2：高可靠技术专题", "content": "评分标准正文", "selected": True},
+        {"title": "标包1：关键业务场景", "content": "无关正文甲", "selected": False},
+        {"title": "标包3：主数据管理", "content": "无关正文乙", "selected": False},
+    ], budget=2000, unselected_budget=500)
+
+    assert "评分标准正文" in digest
+    assert "标包1：关键业务场景" in digest and "标包3：主数据管理" in digest
+    assert "无关正文甲" not in digest
+    assert "无关正文乙" not in digest
+    # 两段有各自的小标题，模型才知道哪部分是重点
+    assert "已定位到的材料" in digest
+    assert "文件的其余部分" in digest
+    assert digest.index("已定位到的材料") < digest.index("文件的其余部分")
+
+
+def test_spec_digest_unselected_titles_have_their_own_budget():
+    """未选中标题不能把选中部分的正文挤出总预算（实测 379 章标题合计 7000+ 字符）。"""
+    from agents.prompts import (
+        OUTLINE_DRAFT_UNSELECTED_BUDGET,
+        build_spec_digest,
+    )
+    sections = [{"title": "标包2：目标", "content": "正文" * 300, "selected": True}]
+    sections += [
+        {"title": f"很长的无关章节标题{i}", "content": "无关" * 50, "selected": False}
+        for i in range(300)
+    ]
+
+    digest = build_spec_digest(sections, budget=2000, unselected_budget=300)
+
+    assert "正文" * 300 in digest                      # 选中段正文完整保留
+    assert "其余" in digest and "未列出" in digest      # 截断要显式告知
+    # 未选中部分受自己的子预算约束，不会吃掉选中段的配额
+    unselected_block = digest.split("文件的其余部分", 1)[1]
+    assert len(unselected_block) <= 300 + len("【文件的其余部分（仅列标题，不要据此展开章节）】")
+
+
+def test_spec_digest_unselected_only_truncates_when_needed():
+    from agents.prompts import build_spec_digest
+    digest = build_spec_digest([
+        {"title": "选中", "content": "正文", "selected": True},
+        {"title": "未选中", "content": "", "selected": False},
+    ], budget=2000, unselected_budget=1200)
+
+    assert "未选中" in digest
+    assert "未列出" not in digest
+
+
+# ─────────────────────────────────────────────
+# 检索范围兜底
+# ─────────────────────────────────────────────
+
+def test_scope_select_prompt_contains_mock_routing_keyword():
+    """mock 模式靠这个关键词路由；它必须排在最前 —— system prompt 含「评审」二字。"""
+    from agents.prompts import build_scope_select_user
+    user = build_scope_select_user("标包2", ["a.pdf"], ["第一章 总则"])
+    assert "圈定检索范围" in user
+
+
+def test_scope_select_prompt_carries_instruction_titles_and_files():
+    from agents.prompts import build_scope_select_user
+    user = build_scope_select_user(
+        instruction="用标包2的技术评分要求拆分",
+        file_names=["主招标文件.pdf", "技术招标文件.docx"],
+        section_titles=["第一章 总则", "2.2.4 技术评分标准"],
+    )
+
+    assert "用标包2的技术评分要求拆分" in user
+    assert "主招标文件.pdf" in user
+    assert "2.2.4 技术评分标准" in user
+    # 只要检索关键词，不让模型挑内容
+    assert "只输出 JSON 对象" in user
+
+
+def test_scope_select_prompt_truncates_titles():
+    from agents.prompts import SCOPE_SELECT_TITLES_BUDGET, build_scope_select_user
+    user = build_scope_select_user("要求", [], ["很长的标题" * 5000])
+    assert "很长的标题" * (SCOPE_SELECT_TITLES_BUDGET // 5 + 1) not in user
+
+
+def test_outline_draft_prompt_follows_material_structure_when_located():
+    """用户要的是「按评分要求中的每一点拆章」——定位到那部分后目录要复刻它的结构。"""
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(
+        instruction="按照评分要求中的每一点进行大纲拆分章节",
+        doc_summary="",
+        spec_digest="【已定位到的材料（请据此编排章节）】\n【标包2】\n技术评分标准：…",
+        follow_structure=True,
+    )
+
+    assert "严格按材料自身的结构拆分章节" in user
+    assert "各自对应一个章节" in user
+    # 规则要排在材料之前 —— 模型读材料时得带着这条规则读
+    assert user.index("严格按材料自身的结构拆分章节") < user.index("【要求文件章节目录与原文摘录】")
+
+
+def test_outline_draft_prompt_reorganizes_by_default():
+    """没定位到具体部分时维持原行为：由模型重新组织，不加结构约束。"""
+    from agents.prompts import build_outline_draft_user
+    user = build_outline_draft_user(
+        instruction="按评分项逐条拆章", doc_summary="", spec_digest="【一】正文",
+    )
+    assert "严格按材料自身的结构拆分章节" not in user
+
+
+def test_outline_draft_system_yields_to_user_structure_request():
+    """system 的「可响应性」会把标题推向「我方要写什么」，得给结构复刻留出例外。"""
+    from agents.prompts import OUTLINE_DRAFT_SYSTEM
+    assert "按材料自身结构拆分" in OUTLINE_DRAFT_SYSTEM
+
+
+def test_outline_draft_system_scopes_coverage_to_given_material():
+    """「要求文件中出现的」会把模型推向覆盖全文，收窄成「给定材料」才压得下节点数。"""
+    from agents.prompts import OUTLINE_DRAFT_SYSTEM
+    assert "给定材料" in OUTLINE_DRAFT_SYSTEM
+    assert "要求文件中出现的" not in OUTLINE_DRAFT_SYSTEM
+    assert "不要据此展开章节" in OUTLINE_DRAFT_SYSTEM

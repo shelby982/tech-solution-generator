@@ -11,6 +11,17 @@ export const stageLabels = {
   paused: '已暂停', aborted: '已作废',
 };
 export const activeStages = new Set(['parsing', 'matching', 'generating', 'reviewing']);
+
+// 后端重启会清空 runner 内存里的 _Run，但 SQLite 里的 checkpoint 还停在「跑了一半」的
+// stage 上，/state 照样返回一份看起来正常的快照。要同时满足两条才算孤儿：进程已经不认得
+// 这个 thread（alive === false），且图确实停在中途（stage 在 activeStages 里）。
+// 闸门停留态（outline_review / materials_review / report_review / paused）和终态
+// （done / aborted）都不在 activeStages 里，正常停等和已完成的 run 不会被误判。
+// alive 缺失（老后端 / 缓存未刷新）时一律当正常：宁可不说，也不能误报。
+export function isOrphanedRun(state = {}) {
+  if (state.alive !== false) return false;
+  return activeStages.has(state.stage);
+}
 export function projectChapters(state = {}, rows = []) {
   const proposal = state.proposal || {};
   const review = state.review || {};

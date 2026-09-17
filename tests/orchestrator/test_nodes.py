@@ -76,11 +76,11 @@ class _ZhangHengParseStub:
     def __init__(self):
         self.calls = []
 
-    async def parse(self, file_source, *, suffix, filename, progress_callback=None):
-        self.calls.append({"suffix": suffix, "filename": filename})
+    async def parse(self, sources, *, progress_callback=None):
+        self.calls.append(list(sources))
         return SpecParseResult(
             doc_id="d1",
-            doc_title="规范书",
+            doc_title="要求文件",
             doc_summary="摘要",
             toc=[
                 DomainSection(id="s1", level=1, title="技术方案",
@@ -94,7 +94,7 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
 
     async def loader(pid):
         assert pid == 99
-        return (io.BytesIO(b"PDF"), ".pdf", "spec.pdf")
+        return [(io.BytesIO(b"PDF"), ".pdf", "spec.pdf")]
 
     state = {"project_id": 99, "thread_id": "tid"}
     patch = await nodes.zhang_heng_parse_node(
@@ -104,13 +104,63 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
     assert patch["stage"] == "parsing"
     spec = patch["spec"]
     assert spec["doc_id"] == "d1"
-    assert spec["doc_title"] == "规范书"
+    assert spec["doc_title"] == "要求文件"
     assert spec["doc_summary"] == "摘要"
+    # 成功时不带降级原因，闸门 1 才会显示「无异常」。
+    assert spec["doc_summary_error"] == ""
     assert spec["toc"] == [{
         "id": "s1", "level": 1, "title": "技术方案",
         "raw_content": "原文", "special_marks": ["★"],
     }]
-    assert agent.calls == [{"suffix": ".pdf", "filename": "spec.pdf"}]
+    assert len(agent.calls) == 1 and len(agent.calls[0]) == 1
+    assert agent.calls[0][0][1:] == (".pdf", "spec.pdf")
+
+
+async def test_zhang_heng_parse_node_forwards_doc_summary_error():
+    """项目概述生成失败的原因必须一路带到 spec，闸门 1 才有东西可显示。"""
+    class _FailingStub(_ZhangHengParseStub):
+        async def parse(self, sources, *, progress_callback=None):
+            return SpecParseResult(
+                doc_id="d1",
+                doc_title="要求文件",
+                doc_summary="",
+                toc=[DomainSection(id="s1", level=1, title="技术方案",
+                                   raw_content="原文", special_marks=[])],
+                doc_summary_error="模型返回空内容",
+            )
+
+    async def loader(_pid):
+        return [(io.BytesIO(b"PDF"), ".pdf", "spec.pdf")]
+
+    patch = await nodes.zhang_heng_parse_node(
+        {"project_id": 99, "thread_id": "tid"},
+        agent=_FailingStub(),
+        spec_loader=loader,
+    )
+
+    spec = patch["spec"]
+    assert spec["doc_summary"] == ""
+    assert spec["doc_summary_error"] == "模型返回空内容"
+
+
+async def test_zhang_heng_parse_node_forwards_every_requirement_file():
+    """「应标要求」面板下传了几份，load 出来的几份都要交给张衡 —— 提炼不只看规范书。"""
+    agent = _ZhangHengParseStub()
+
+    async def loader(_pid):
+        return [
+            (io.BytesIO(b"PDF"), ".pdf", "招标文件.pdf"),
+            (io.BytesIO(b"XLSX"), ".docx", "评分表.docx"),
+        ]
+
+    patch = await nodes.zhang_heng_parse_node(
+        {"project_id": 99, "thread_id": "tid"}, agent=agent, spec_loader=loader,
+    )
+
+    assert [c[1:] for c in agent.calls[0]] == [
+        (".pdf", "招标文件.pdf"), (".docx", "评分表.docx"),
+    ]
+    assert patch["spec"]["toc"][0]["id"] == "s1"
 
 
 # ─────────────────────────────────────────────
@@ -1109,10 +1159,14 @@ async def test_outline_draft_node_syncs_placeholder_blocks(tmp_path, monkeypatch
     pid = cursor.lastrowid
     # 上一版目录：old-1 空占位（不在新 toc 里，应被清）、s9 已有正文（新 toc 里也没有，
     # 但宁可留脏也不删）
+    # 这些行属于**上一版 run**：本次 sync 只动自己 run 的行，所以它们既不参与
+    # 清理也不参与 upsert —— old-1 这个空占位在新语义下也留着（前端按当前 run
+    # 过滤，看不到它）。同 run 内的清理由 test_block_store 覆盖。
     for block_id, content in [("old-1", ""), ("s9", "已写好的正文")]:
         await conn.execute(
             "INSERT INTO blocks (project_id, block_id, kind, level, title,"
-            " content, order_idx) VALUES (?, ?, 'outline', 1, ?, ?, 0)",
+            " content, order_idx, run_thread_id)"
+            " VALUES (?, ?, 'outline', 1, ?, ?, 0, 'run-prev')",
             (pid, block_id, block_id, content),
         )
     await conn.commit()
@@ -1136,10 +1190,13 @@ async def test_outline_draft_node_syncs_placeholder_blocks(tmp_path, monkeypatch
     await conn.close()
 
     by_id = {r["block_id"]: r for r in rows}
-    # 目录外的空占位清掉了，有正文的留脏，新目录逐节建占位
-    assert set(by_id) == {"s1", "s2", "s9"}
+    # 新目录逐节建占位；上一版 run 的行（old-1 空占位、s9 有正文）原样留着 ——
+    # 本次 run 不碰别的 run 的行。
+    assert set(by_id) == {"s1", "s2", "old-1", "s9"}
     assert by_id["s1"]["title"] == "项目理解"
     assert by_id["s2"]["title"] == "技术响应"
+    assert by_id["s1"]["run_thread_id"] == state.get("thread_id")
+    assert by_id["old-1"]["run_thread_id"] == "run-prev"
     assert by_id["s9"]["content"] == "已写好的正文"
 
 

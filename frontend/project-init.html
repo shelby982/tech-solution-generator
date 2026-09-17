@@ -821,7 +821,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
             <span class="mat-index">03</span>
             <strong>提炼要求</strong>
           </div>
-          <p class="mat-sub">写给张衡的大纲拆分逻辑，留空则只依据规范书</p>
+          <p class="mat-sub">写给张衡的大纲拆分逻辑，留空则只依据上面上传的要求文件</p>
         </div>
         <div class="mat-divider"></div>
         <textarea id="outline-instruction" class="outline-instruction-input" rows="4"
@@ -934,8 +934,8 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
     </div>
 
     <script type="module">
-import { api } from './assets/api.js';
-import { buildOutlineTree } from './assets/workspace-model.mjs?v=20260916-loop4';
+import { api } from './assets/api.js?v=20260917-loop6';
+import { buildOutlineTree, isOrphanedRun } from './assets/workspace-model.mjs?v=20260917-loop5';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -994,6 +994,9 @@ const fileInputSrc = document.getElementById('file-input-src');
 let extractionState = 'idle'; // idle | extracting | done
 let totalBlocks = 0;
 let doneBlocks  = 0;
+// loadExistingBlocks 的 promise。它自己会写状态栏，而「中断提示」要在它之后写，
+// 否则会被它的「已解析 N 个章节」覆盖。
+let blocksReady = Promise.resolve();
 let matchedCount = 0; // 已匹配章节数（仅匹配阶段使用）
 const matchedIds = new Set();
 let currentReader = null;
@@ -2009,8 +2012,18 @@ function updateBlockCard(blockId, data) {
 
 // ── 加载已有 blocks ──
 async function loadExistingBlocks({ silent = false } = {}) {
-  const blocks = await api.blocks.list(projectId);
-  if (!blocks?.length) return;
+  // 这里自己解析 threadId（优先级同 boot 段：内存 → URL → sessionStorage），
+  // 因为 boot 里首次调用发生在 currentThreadId 赋值之前 —— 只读它会把 URL
+  // 指定的 run 丢掉，拿到服务端的「最新 run」。
+  const tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  const blocks = await api.blocks.list(projectId, tid);
+  if (!blocks?.length) {
+    // 库里没有任何章节：清掉列表与计数。早退会把上一次运行的残留视图（卡片、进度环、
+    // 状态栏）留在页面上，与「刷新后看到的样子」不一致。
+    resetWorkflowUi();
+    if (!silent) setStatusBar('idle', '', 0, 0, 0);
+    return;
+  }
   blocksList.innerHTML = '';
   blocksById.clear();
   blocksByOrder.length = 0;
@@ -2052,6 +2065,20 @@ async function loadExistingBlocks({ silent = false } = {}) {
   }
 }
 
+// 运行终止 / 断流后的唯一对齐手段：以数据库为准重绘，等价于用户手动刷新一次。
+// 运行期间页面上的章节来自 SSE 帧，库只在 parse / outline_draft 两处写入；两者不一致时
+// 只有重读库能把卡片、进度、状态栏一起拉回真实状态。否则卡片会永远停在最后一帧的样子
+// （最常见的是「提炼中…」+ 进度条卡在中途）。
+async function resyncFromDb() {
+  // 闸门期间不重绘：用户可能正在编辑目录，整版替换会丢掉改动（与 scheduleOutlineTree 同一约定）
+  if (extractionState === 'gate_outline' || extractionState === 'gate_materials') return;
+  try {
+    await loadExistingBlocks();
+  } catch (e) {
+    console.warn('[workflow] 从数据库重同步失败', e);
+  }
+}
+
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
@@ -2089,15 +2116,28 @@ async function recoverStreamAfterDrop() {
   const tid = currentThreadId || getThread(projectId);
   if (!tid) return;
   if (!RECOVERABLE_STAGES.has(currentStage) || streamRecoverCount >= MAX_STREAM_RECOVER) {
+    // 先把卡片/进度按库里的真实状态重绘（否则会一直停在最后一帧的「提炼中…」），
+    // 再用新计数把断流原因写上去 —— 两者都要，用户既要知道为什么，也要看到真实进度。
+    await resyncFromDb();
     setStatusBar('extracting',
       '事件流已断开：该任务不在本次服务运行中（后端可能已重启）。请刷新页面后重试。',
-      0, totalBlocks, doneBlocks);
+      totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
     return;
   }
   streamRecoverCount++;
   try {
-    await api.workflow.recover(tid); // 后端按 checkpoint 重建 _Run
-    attachStream(tid);               // emitter 是新的，必须重连才能收到后续帧
+    // 这里只重建 _Run + 重连，不动视图：调用方（startMatching）可能正在推进图，
+    // 按 state 去"恢复闸门视图"会和它抢状态。停住等帧的坑在 startExtraction 里判。
+    await api.workflow.recover(tid);
+    // 停在闸门 / 终态的 thread 恢复后不会再发任何帧（recover 只是把 _Run 重建回来，
+    // ainvoke(None) 是空跑）。照常 attachStream 等帧，页面就永远停在最后一帧的样子。
+    // 与 startExtraction 同一处理：按 state 判定，停在终态就直接以库为准重同步。
+    const settled = (await api.workflow.state(tid).catch(() => null))?.stage;
+    if (SETTLED_STAGES.has(settled)) {
+      await resyncFromDb();
+      return;
+    }
+    attachStream(tid); // emitter 是新的，必须重连才能收到后续帧
   } catch (e) {
     console.warn('[workflow] 断线恢复失败', e);
     setStatusBar('extracting',
@@ -2117,7 +2157,7 @@ function attachStream(threadId) {
       }
     },
     onParseProgress: (data) => {
-      const step = data?.step || '解析规范书';
+      const step = data?.step || '解析要求文件';
       const cur = data?.current ?? 0;
       const tot = data?.total ?? 0;
       // 仅在 parse_node 末尾显式发出的「解析完成」帧锁定总章节数。
@@ -2227,11 +2267,18 @@ function attachStream(threadId) {
       setStatusBar('extracting', `张衡提炼 ${doneBlocks}/${totalBlocks} 章节`, pct, totalBlocks, doneBlocks);
     },
     onOutlineDraftStart: (data) => {
-      // 模型正在派生应答目录：目录还没有内容，先把张衡的进度文案切上去
+      // 模型正在派生应答目录：目录还没有内容，先把张衡的进度文案切上去。
+      // 同时清掉旧卡片：本次 run 的行还没落库，读路径此刻仍会退回显示上一次 run
+      // 的内容（见 services/block_store.list_blocks 的 fallback_all），不清就会
+      // 出现「旧卡片 + 新进度文案」的错配。
+      blocksList.innerHTML = '';
+      blocksById.clear();
+      blocksByOrder.length = 0;
+      sidebarToc.innerHTML = '';
       draftRevision = Number(data?.revision) || draftRevision;
       const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
       setStatusBar('extracting', `张衡梳理应答目录${ver}…`, 0, totalBlocks, doneBlocks);
-      blocksEmpty.innerHTML = '<p>正在依据规范书与提炼要求梳理应答目录…</p>';
+      blocksEmpty.innerHTML = '<p>正在依据要求文件与提炼要求梳理应答目录…</p>';
       blocksEmpty.style.display = 'block';
     },
     onOutlineDraft: (data) => {
@@ -2261,7 +2308,8 @@ function attachStream(threadId) {
       buildToc(toc);
       updateSidebarProgress();
       const ver = draftRevision ? `第 ${draftRevision} 版` : '';
-      setStatusBar('extracting', `目录已更新${ver ? `（${ver}）` : ''}，正在提炼章节要求…`,
+      // 逐节提炼已移到闸门1 之后，此刻只有目录到手、什么都没在跑，不能写「正在提炼章节要求」
+      setStatusBar('extracting', `目录已更新${ver ? `（${ver}）` : ''}…`,
         0, totalBlocks, 0);
     },
     onMatchStart: (data) => {
@@ -2324,9 +2372,16 @@ function attachStream(threadId) {
         }
         restoreOutlineInstruction({ text: typeof snap.outline_instruction === 'string' ? snap.outline_instruction : '' });
         const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
+        // 两处降级各自独立：parse 的「项目概述」与 outline_draft 的「目录派生」
+        // 可能同时失败，所以并列提示，不二选一。
+        const degrades = [];
+        if (outlineError) degrades.push(`目录派生降级：${outlineError}`);
+        if (typeof snap.doc_summary_error === 'string' && snap.doc_summary_error) {
+          degrades.push(`项目概述缺失：${snap.doc_summary_error}`);
+        }
         setStatusBar('gate_outline',
-          outlineError
-            ? `大纲提炼完成${ver}；目录派生降级：${outlineError}`
+          degrades.length
+            ? `大纲提炼完成${ver}；${degrades.join('；')}`
             : `大纲提炼完成${ver}，请检查并编辑后继续匹配素材`,
           pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_materials') {
@@ -2356,12 +2411,48 @@ function attachStream(threadId) {
       currentThreadId = null;
       currentGate = null;
       btnExtract.disabled = false;
-      setStatusBar('idle', '', 0, 0, 0);
+      // 中止后卡片仍停在最后一帧（在被中止的那一节上显示「提炼中…」）。以库为准重绘，
+      // 库里还保留着中止前已落库的进度，正好就是刷新之后会看到的样子。
+      resyncFromDb();
     },
     onDone: (data) => {
       console.debug('[workflow] done', data);
+      // 运行结束但没进闸门（例如被后端中止 / 图跑到尽头）时同样要回读库，
+      // 否则页面停在运行期的帧上，只有手动刷新才会对齐。
+      resyncFromDb();
     },
   });
+}
+
+// 停在闸门 / 终态的 thread 不会自己再往下走：recover 只是把 _Run 重建回来（停在闸门时
+// ainvoke(None) 是空跑），后端不会再发任何帧。这时照常 attachStream 等帧，页面就永远停在
+// 「准备提炼…」。必须直接按 state 恢复视图。
+const SETTLED_STAGES = new Set(['outline_review', 'materials_review', 'report_review', 'done', 'paused', 'aborted']);
+
+async function restoreSettledThread(threadId, stage) {
+  if (stage === 'aborted') {
+    clearThread(projectId);
+    currentThreadId = null;
+    currentGate = null;
+    resetWorkflowUi();
+    setStatusBar('idle', '该任务已作废，请重新提炼大纲', 0, 0, 0);
+    return;
+  }
+  if (['report_review', 'done', 'paused'].includes(stage)) {
+    // 与 startMatching 的既有约定一致：这几个阶段不在本页完成
+    location.href = `/review?projectId=${projectId}&threadId=${encodeURIComponent(threadId)}`;
+    return;
+  }
+  setStage(stage); // 同时按 stage 切 outline / matching 视图并重绘进度条
+  await loadExistingBlocks({ silent: true });
+  const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
+  if (stage === 'outline_review') {
+    currentGate = 'review_outline';
+    setStatusBar('gate_outline', '已恢复上次进度：大纲已就绪，请检查确认后继续匹配素材', pct, totalBlocks, doneBlocks);
+  } else {
+    currentGate = 'review_materials';
+    setStatusBar('gate_materials', '已恢复上次进度：素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
+  }
 }
 
 async function startExtraction(forceRestart = false) {
@@ -2419,6 +2510,12 @@ async function startExtraction(forceRestart = false) {
       setThread(projectId, threadId);
     }
     currentThreadId = threadId;
+    // 已有 thread 可能停在上次运行的闸门 / 终态（recover 不改状态）—— 这时没有帧可等
+    const settled = (await api.workflow.state(threadId).catch(() => null))?.stage;
+    if (SETTLED_STAGES.has(settled)) {
+      await restoreSettledThread(threadId, settled);
+      return;
+    }
     attachStream(threadId);
   } catch (e) {
     console.error('[workflow] startExtraction 失败', e);
@@ -2469,7 +2566,8 @@ async function startMatching() {
     }
     if (stage === 'outline_review') {
       await api.workflow.resume(tid, 'approve', {});
-      setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
+      // 闸门 1 之后先跑逐节提炼再匹配，文案跟着走（状态早已是 extracting，无丢帧风险）
+      setStatusBar('extracting', '张衡提炼章节要求中…', 0, totalBlocks, doneBlocks);
     } else if (stage === 'materials_review') {
       // 已经停在闸门 2，按"重新匹配"语义把指针拨回 NODE_MATCH 之前
       // emitter 会重建，旧 SSE 连接收不到新事件 → 重连一次
@@ -2516,8 +2614,9 @@ async function cancelExtraction() {
   currentThreadId = null;
   currentGate = null;
   btnExtract.disabled = false;
-  const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
-  setStatusBar('paused', `已取消，已保留 ${doneBlocks}/${totalBlocks || doneBlocks} 个已提炼章节`, pct, totalBlocks || doneBlocks, doneBlocks);
+  // 用库里的计数，不用内存里的 doneBlocks/totalBlocks：中止时最后一节可能还没落库，
+  // 内存计数会比库里多，状态栏数字和刷新后看到的不一致。
+  await resyncFromDb();
 }
 
 async function confirmOutlineGate() {
@@ -2527,10 +2626,13 @@ async function confirmOutlineGate() {
   try {
     const matrix = collectOutlineEdits();
     freezeOutlineEdit();
+    // 必须在 resume 之前切状态：逐节提炼现在紧跟在闸门 1 之后跑，帧几乎与 resume
+    // 的响应同时到达。若此刻仍标着 gate_outline，updateBlockCard 会把这些帧当成
+    // "闸门期间后端重发的旧数据"丢掉，卡片就永远停在骨架占位。
+    setStatusBar('extracting', '张衡提炼章节要求中…', 0, totalBlocks, doneBlocks);
     await api.workflow.resume(currentThreadId, 'approve', {
       spec: { outline_matrix: matrix },
     });
-    setStatusBar('extracting', '沈括匹配素材中…', 0, totalBlocks, doneBlocks);
   } catch (e) {
     console.error('[workflow] resume(review_outline) 失败', e);
     if (btn) btn.disabled = false;
@@ -2794,13 +2896,14 @@ if (params.get('autoExtract') === '1') {
   statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel">取消提炼</button>`;
   statusActions.querySelector('#btn-cancel')?.addEventListener('click', cancelExtraction);
   btnExtract.disabled = true;
-  Promise.all([loadMaterials(), loadExistingBlocks(), loadModels()]).then(() => {
+  blocksReady = loadExistingBlocks();
+  Promise.all([loadMaterials(), blocksReady, loadModels()]).then(() => {
     // 稍等确保材料写入完成
     setTimeout(() => startExtraction(), 500);
   });
 } else {
   loadMaterials();
-  loadExistingBlocks();
+  blocksReady = loadExistingBlocks();
   loadModels();
   // 提炼要求：先按 localStorage 回填，闸门 1 快照到达后再以后端值覆盖空输入框
   restoreOutlineInstruction();
@@ -2850,22 +2953,37 @@ if (params.get('autoExtract') === '1') {
     // 无 thread：进度条已默认可见且所有 step 灰显，无需额外处理
     return;
   }
-  api.workflow.state(tid).then(s => {
+  api.workflow.state(tid).then(async s => {
     const stage = s?.stage;
-    // 仅当 stage 是真实进行中的工作流阶段时才覆盖前面 workflow-runs 设置的进度
-    if (stage && STAGE_MAP[stage]) {
-      setStage(stage);
-    } else if (stage === 'done' || stage === 'aborted') {
-      // 终态需要清掉过期 threadId
+    // 这里只清过期 threadId，**不再用它的 stage 覆盖视图**。
+    // sessionStorage 里这个 thread 可能是上一次停留的（比如上次已经匹配过素材），
+    // 它的 stage 比项目最新一次 run 更靠后，照它去 setStage 会把页面切成素材匹配视图，
+    // 而状态栏文案已经按当前视图写好了 —— 顶栏说「已提炼」、右栏是匹配面板，自相矛盾。
+    // 视图与进度一律以 workflow-runs[0]（项目最新一次 run）为准。
+    if (stage === 'done' || stage === 'aborted') {
       resetStageProgress();
       clearThread(projectId);
+      return;
     }
+    // 后端重启会清空 runner 内存里的 _Run，但 checkpoint 还停在「跑了一半」的 stage 上，
+    // 这个 run 已经没有任何东西在推进了（详见 isOrphanedRun）。而 loadExistingBlocks()
+    // 只会按库里的章节数写「已解析 N 个章节，可继续提炼」—— 中断被包装成了一份正常待办。
+    // 这里必须说清楚，并且给出路：继续提炼走 recover() 从检查点续跑。
+    if (!isOrphanedRun(s)) return;
+    await blocksReady;  // 等它先写完，否则提示会被它的文案盖掉
+    setStatusBar(
+      'paused',
+      '本次运行已中断（后端重启），章节进度来自上一次运行。点「继续提炼」接着跑，或「重新提炼」从头开始。',
+      totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0,
+      totalBlocks,
+      doneBlocks,
+    );
     // 其它情况（idle / 空 stage）保持 workflow-runs 兜底的进度，不主动清空
   }).catch(() => {
     // 后端无该 thread / 请求失败 → 不主动清空，保留 workflow-runs 的兜底
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260916-loop4"></script>
+  <script type="module" src="./assets/workspace.js?v=20260917-loop7"></script>
   </body>
 </html>

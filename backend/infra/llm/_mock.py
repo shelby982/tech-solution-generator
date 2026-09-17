@@ -66,6 +66,13 @@ _OUTLINE_DRAFT_FIXTURE: dict = {
 }
 
 
+# 「圈定检索范围」兜底：只给检索标识，不选内容
+_SCOPE_SELECT_FIXTURE = {
+    "files": [],
+    "keywords": ["标包2", "技术评分标准"],
+}
+
+
 # ─────────────────────────────────────────────
 # 路由
 # ─────────────────────────────────────────────
@@ -73,11 +80,14 @@ _OUTLINE_DRAFT_FIXTURE: dict = {
 def _select_fixture(system_prompt: str, user_prompt: str) -> str:
     """根据 prompt 关键词选择 fixture。
 
-    匹配优先级：目录派生 > 八项提炼 > 公文 > 评审 > 默认。
-    目录派生必须排在最前 —— 它的 system prompt 里含「评审要素」字样，
+    匹配优先级：圈定检索范围 > 目录派生 > 八项提炼 > 公文 > 评审 > 默认。
+    前两个必须排在「评审」之前 —— 它们的 prompt 里含「评审要素」字样，
     落到后面的「评审」分支会被错误路由成 _REVIEW_FIXTURE。
     """
     haystack = f"{system_prompt}\n{user_prompt}"
+
+    if "圈定检索范围" in haystack:
+        return json.dumps(_SCOPE_SELECT_FIXTURE, ensure_ascii=False)
 
     if "提炼应答文件目录" in haystack:
         return json.dumps(_OUTLINE_DRAFT_FIXTURE, ensure_ascii=False)

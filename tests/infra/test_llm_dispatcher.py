@@ -161,6 +161,84 @@ async def test_dispatch_outline_draft_json_under_mock(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_forwards_follow_structure(monkeypatch):
+    """payload 里的 follow_structure 必须走到 user prompt —— 定位命中时目录要复刻结构。"""
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    seen: dict = {}
+
+    async def _capture(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
+        seen["user"] = user
+        return '{"nodes": [{"level": 1, "title": "OK"}]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _capture)
+
+    await dispatch_outline_draft_json([_fake_config()], 0, {
+        "instruction": "按评分要求中的每一点拆章",
+        "spec_digest": "【已定位到的材料（请据此编排章节）】\n【标包2】\n技术评分标准",
+        "follow_structure": True,
+    })
+    assert "严格按材料自身的结构拆分章节" in seen["user"]
+
+    await dispatch_outline_draft_json([_fake_config()], 0, {
+        "instruction": "按评分项逐条拆章", "spec_digest": "【一】",
+    })
+    assert "严格按材料自身的结构拆分章节" not in seen["user"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_outline_draft_json_uses_enlarged_budget(monkeypatch):
+    """目录派生必须用放大后的预算与超时，并且空响应要抛出来。
+
+    推理模型实测会把 8000 token 全烧在思考上、正文一个字不吐（一次成功的调用
+    要 142 秒），沿用默认值就是必然失败。
+    """
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+    import infra.llm.dispatcher as dispatcher
+
+    seen: dict = {}
+
+    async def _capture(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
+        seen.update(max_tokens=max_tokens, timeout=timeout,
+                    raise_on_empty=raise_on_empty, call_site=call_site)
+        return '{"nodes": [{"level": 1, "title": "OK"}]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _capture)
+
+    await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
+
+    assert dispatcher.OUTLINE_DRAFT_MAX_TOKENS == 32000
+    assert dispatcher.OUTLINE_DRAFT_TIMEOUT == 300.0
+    assert seen["max_tokens"] == 32000
+    assert seen["timeout"] == 300.0
+    assert seen["raise_on_empty"] is True
+    # 用量记账靠这个标签归因：漏传就全记成空串，「花在哪条路径」就查不出来了
+    assert seen["call_site"] == "outline_draft"
+
+
+@pytest.mark.asyncio
+async def test_scope_select_keeps_default_budget(monkeypatch):
+    """其余调用点不受影响：仍走 60s 默认超时，空内容仍是回空串而不是抛异常。"""
+    from infra.llm import dispatch_scope_select_json
+    from infra.llm import clients
+
+    seen: dict = {}
+
+    async def _capture(config, system, user, max_tokens=0, timeout=60.0, raise_on_empty=False, call_site=""):
+        seen.update(timeout=timeout, raise_on_empty=raise_on_empty)
+        return '{"files": [], "keywords": ["标包2"]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _capture)
+
+    await dispatch_scope_select_json([_fake_config()], 0, {"instruction": "x"})
+
+    assert seen["timeout"] == 60.0
+    assert seen["raise_on_empty"] is False
+
+
+@pytest.mark.asyncio
 async def test_dispatch_outline_draft_json_raises_without_configs():
     from infra.llm import dispatch_outline_draft_json
 
@@ -177,7 +255,7 @@ async def test_dispatch_outline_draft_json_falls_back_to_next_config(monkeypatch
 
     calls = []
 
-    async def _gen(config, system, user, max_tokens=0):
+    async def _gen(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
         calls.append(config.model)
         if config.model == "bad":
             raise RuntimeError("第一个 API 挂了")
@@ -201,7 +279,7 @@ async def test_dispatch_outline_draft_json_raises_last_error_when_all_fail(monke
     from infra.llm import dispatch_outline_draft_json
     from infra.llm import clients
 
-    async def _always_fail(config, system, user, max_tokens=0):
+    async def _always_fail(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
         raise RuntimeError(f"{config.model} 挂了")
 
     monkeypatch.setattr(clients, "generate_oneshot_openai", _always_fail)
@@ -221,7 +299,7 @@ async def test_dispatch_outline_draft_json_rejects_non_nodes_output(monkeypatch)
     from infra.llm import dispatch_outline_draft_json
     from infra.llm import clients
 
-    async def _wrong_shape(config, system, user, max_tokens=0):
+    async def _wrong_shape(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
         return '{"chapters": [{"title": "错的字段"}]}'
 
     monkeypatch.setattr(clients, "generate_oneshot_openai", _wrong_shape)
@@ -230,13 +308,87 @@ async def test_dispatch_outline_draft_json_rejects_non_nodes_output(monkeypatch)
         await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
 
 
+# ─────────────────────────────────────────────
+# dispatch_scope_select_json：检索范围兜底
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dispatch_scope_select_json_under_mock(monkeypatch):
+    """mock 按「圈定检索范围」路由。该分支必须排在目录派生之前 ——
+    它的 system prompt 同样含「评审」二字，落到「评审」分支会走错 fixture。"""
+    from infra.llm import dispatch_scope_select_json
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+
+    obj = await dispatch_scope_select_json([_fake_config()], 0, {
+        "instruction": "按标包2 的技术评分要求拆分",
+        "file_names": ["主招标文件.pdf"],
+        "section_titles": ["第一章 总则"],
+    })
+
+    assert isinstance(obj["keywords"], list)
+    assert obj["keywords"]
+    assert "nodes" not in obj   # 没落到目录派生 fixture
+
+
+@pytest.mark.asyncio
+async def test_dispatch_scope_select_json_raises_without_configs():
+    from infra.llm import dispatch_scope_select_json
+
+    with pytest.raises(ValueError):
+        await dispatch_scope_select_json([], 0, {"instruction": "x"})
+
+
+@pytest.mark.asyncio
+async def test_dispatch_scope_select_json_falls_back_to_next_config(monkeypatch):
+    from infra.llm import dispatch_scope_select_json
+    from infra.llm import clients
+
+    calls = []
+
+    async def _gen(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
+        calls.append(config.model)
+        if config.model == "bad":
+            raise RuntimeError("第一个 API 挂了")
+        return '{"files": [], "keywords": ["标包2"]}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _gen)
+
+    good = _fake_config()
+    good.model = "good"
+    bad = _fake_config()
+    bad.model = "bad"
+
+    obj = await dispatch_scope_select_json([bad, good], 0, {"instruction": "x"})
+
+    assert calls == ["bad", "good"]
+    assert obj["keywords"] == ["标包2"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_scope_select_json_raises_last_error_when_all_fail(monkeypatch):
+    from infra.llm import dispatch_scope_select_json
+    from infra.llm import clients
+
+    async def _always_fail(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
+        raise RuntimeError(f"{config.model} 挂了")
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _always_fail)
+
+    a = _fake_config()
+    a.model = "a"
+
+    with pytest.raises(RuntimeError, match="a 挂了"):
+        await dispatch_scope_select_json([a], 0, {"instruction": "x"})
+
+
 @pytest.mark.asyncio
 async def test_dispatch_outline_draft_json_salvages_truncated_prefix(monkeypatch):
     """扁平数组格式的核心动机：被 max_tokens 截断后仍能抢救出完整前缀，部分成功。"""
     from infra.llm import dispatch_outline_draft_json
     from infra.llm import clients
 
-    async def _truncated(config, system, user, max_tokens=0):
+    async def _truncated(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
         # 最后一条写到一半就没了，外层 }]} 也没收尾
         return (
             '{"nodes": [{"level": 1, "title": "完整一"}, '
@@ -256,7 +408,7 @@ async def test_dispatch_outline_draft_json_fails_when_nothing_salvageable(monkey
     from infra.llm import dispatch_outline_draft_json
     from infra.llm import clients
 
-    async def _barely_started(config, system, user, max_tokens=0):
+    async def _barely_started(config, system, user, max_tokens=0, timeout=0, raise_on_empty=False, call_site=""):
         return '{"nodes": [{"level": 1, "tit'
 
     monkeypatch.setattr(clients, "generate_oneshot_openai", _barely_started)

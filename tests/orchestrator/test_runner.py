@@ -39,7 +39,7 @@ from orchestrator.runner import WorkflowRunner
 # ─────────────────────────────────────────────
 
 class _StubZhang:
-    async def parse(self, file_source, *, suffix, filename, progress_callback=None):
+    async def parse(self, sources, *, progress_callback=None):
         return SpecParseResult(
             doc_id="d1", doc_title="规范书", doc_summary="摘要",
             toc=[DomainSection(id="s1", level=1, title="技术方案",
@@ -87,7 +87,7 @@ class _StubReviewer:
 
 
 async def _spec_loader(_pid):
-    return (b"x", ".pdf", "spec.pdf")
+    return [(b"x", ".pdf", "spec.pdf")]
 
 
 def _deps_factory():
@@ -273,6 +273,11 @@ async def _ready_workspace(runner_env):
         await db.commit()
         for i, text in enumerate(["人工修订正文", "保护原文"], 1):
             await create_block(db, pid, f"s{i}", "content", 1, f"章节{i}", "", "", "r", "", "[]", i, content=text)
+        # workspace_action 按 run 归属取行，这些行要归到本次 run 才读得到
+        await db.execute(
+            "UPDATE blocks SET run_thread_id = ? WHERE project_id = ?", (tid, pid),
+        )
+        await db.commit()
     return runner, tid
 
 
@@ -408,10 +413,67 @@ async def test_redraft_outline_replaces_toc_and_bumps_revision(runner_env):
     assert zhang.draft_calls[1]["previous_titles"] == ["第1版第1章"]
 
 
+async def test_outline_gate_stops_before_extract(runner_env):
+    """点「提炼大纲」只拆目录：停在闸门1 时矩阵还是空的，放行后才提炼。"""
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["stage"] == "outline_review"
+    assert state["spec"]["toc"], "目录应已派生"
+    assert state["spec"]["outline_matrix"] == {}, "闸门1 之前不该跑逐节提炼"
+
+    # 放行（前端「进入匹配」走的就是这条）→ extract 才跑
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["stage"] == "materials_review"
+    assert state["spec"]["outline_matrix"], "放行后 extract 应已产出矩阵"
+
+
+async def test_rerun_match_skips_extract(runner_env, monkeypatch):
+    """「重新匹配」不得重跑逐节提炼。
+
+    图改成「闸门1 先于 extract」之后，rerun_match 的 as_node 必须跟着从 GATE_OUTLINE
+    挪到 NODE_EXTRACT —— 停在 GATE_OUTLINE 的 next 已经是 extract 了，再拨回去等于
+    每次重匹配白烧 N 次模型调用。
+    """
+    runner, pid, _ = runner_env
+    calls: list[int] = []
+    original = _StubZhang.extract
+
+    async def _counting_extract(self, toc, **kw):
+        calls.append(1)
+        return await original(self, toc, **kw)
+
+    monkeypatch.setattr(_StubZhang, "extract", _counting_extract)
+
+    tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+    assert calls == [], "闸门1 之前不该提炼"
+
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+    assert len(calls) == 1, "放行闸门1 时提炼一次"
+    assert (await runner.state(tid))["stage"] == "materials_review"
+
+    await runner.rerun_match(tid)
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["stage"] == "materials_review"
+    assert len(calls) == 1, "重新匹配不该重跑提炼"
+
+
 async def test_redraft_outline_clears_outline_matrix(runner_env):
     """目录换了，上一版的 8 字段要求必须整体清空，否则闸门 1 会显示错章节的要求。"""
     runner, pid, _ = runner_env
     tid = await runner.start(pid, config={})
+    await _wait_task(runner._runs[tid])
+    # 先放行一次让 extract 把矩阵填上 —— 新版图里闸门1 停在提炼之前
+    await runner.resume(tid, user_choice="approve")
     await _wait_task(runner._runs[tid])
     before = await runner.state(tid)
     assert before["spec"]["outline_matrix"], "首轮 extract 应已产出矩阵"
@@ -420,8 +482,8 @@ async def test_redraft_outline_clears_outline_matrix(runner_env):
     await _wait_task(runner._runs[tid])
 
     state = await runner.state(tid)
-    assert state["spec"]["outline_matrix"], "重出后 extract 会重建矩阵"
-    assert all(k.startswith("s") for k in state["spec"]["outline_matrix"])
+    assert state["stage"] == "outline_review", "重出后应回到闸门1 等用户确认"
+    assert state["spec"]["outline_matrix"] == {}, "上一版的要求必须清掉，否则会串章节"
 
 
 async def test_redraft_outline_keeps_source_toc(runner_env):
@@ -474,3 +536,93 @@ async def test_redraft_outline_rejects_while_running(runner_env):
             await runner.redraft_outline(tid, "并发调用")
     finally:
         runner._runs[tid].task.cancel()
+
+
+# ─────────────────────────────────────────────
+# 「应标要求」全量文件 → 大纲派生（真实张衡 + 真实 loader，mock LLM）
+# ─────────────────────────────────────────────
+
+def _two_section_docx(title: str):
+    """两份章节不同的最小 docx，用来验证多文档拼接。"""
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading(f"第一章 {title}", level=1)
+    doc.add_paragraph(f"{title}的正文说明。")
+    doc.add_heading(f"第二章 {title}细则", level=1)
+    doc.add_paragraph("细则内容。")
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+
+async def test_outline_derives_from_every_requirement_file(tmp_path, monkeypatch):
+    """项目里一份 role='spec' 都没有，只有主招标文件 + 评分表，仍要走到闸门 1。
+
+    改造前 spec_loader 只认 role='spec'，这种项目会在 parse 节点
+    抛 FileNotFoundError（「未上传规范书」）整条工作流出错。
+    """
+    import main as main_module
+    from agents.zhang_heng import ZhangHengAgent
+    from services.config_store import LLMConfig
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+
+    db_path = str(tmp_path / "multi_req.db")
+    data_dir = tmp_path / "data"
+    (data_dir / "uploads" / "1").mkdir(parents=True)
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    monkeypatch.setattr(main_module, "DATA_DIR", data_dir)
+
+    conn = await aiosqlite.connect(db_path)
+    conn.row_factory = aiosqlite.Row
+    await init_db(conn)
+    cursor = await conn.execute("INSERT INTO projects (name) VALUES (?)", ("多要求文件",))
+    project_id = cursor.lastrowid
+    for role, name in (("main_rfp", "招标文件.docx"), ("scoring", "评分表.docx")):
+        (data_dir / "uploads" / str(project_id) / name).write_bytes(
+            _two_section_docx(name).getvalue()
+        )
+        await conn.execute(
+            "INSERT INTO materials (project_id, filename, file_path, role) "
+            "VALUES (?, ?, ?, ?)",
+            (project_id, name, f"uploads/{project_id}/{name}", role),
+        )
+    await conn.commit()
+    await conn.close()
+
+    def _fake_configs():
+        return ([LLMConfig(
+            provider="openai", api_key="sk-fake",
+            base_url="https://example.invalid/v1", model="gpt-test",
+        )], 0)
+
+    def deps_factory():
+        return GraphDeps(
+            zhang_heng=ZhangHengAgent(configs_provider=_fake_configs),
+            shen_kuo=_StubShenKuo(),
+            zhuge_liang=_StubZhugeLiang(),
+            wang_anshi=_StubReviewer("wang_anshi"),
+            bao_zheng=_StubReviewer("bao_zheng"),
+            spec_loader=main_module._load_spec_for_project,
+        )
+
+    @asynccontextmanager
+    async def _saver():
+        async with checkpointer_from_path(db_path) as s:
+            yield s
+
+    runner = WorkflowRunner(deps_factory=deps_factory, checkpointer_provider=_saver)
+    tid = await runner.start(project_id, config={"outline_instruction": "按评分项拆章"})
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["stage"] == "outline_review"
+    # 两份要求文件的目录都进了 source_toc（各 2 章）
+    assert len(state["spec"]["source_toc"]) == 4
+    # 派生目录是模型产出（mock fixture 出 11 个节点），不是原目录的镜像
+    assert len(state["spec"]["toc"]) == 11
+    assert state["spec"]["outline_revision"] == 1

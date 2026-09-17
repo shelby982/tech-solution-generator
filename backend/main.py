@@ -6,6 +6,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,41 +43,69 @@ logger = logging.getLogger(__name__)
 
 
 # ── 生命周期 ──────────────────────────────────
+# 「应标要求」面板（frontend/project-init.html 的 01 区）允许上传的文件角色，
+# 与前端 reqRoles 对齐（requirement 是早期版本遗留的「主招标」写法）。
+# 提炼不再绑定技术规范书 —— 用户可能一份规范书都没有，只丢进来一份主招标文件
+# 或评分表，那就是本轮大纲唯一的依据。
+REQUIREMENT_ROLES = ("spec", "main_rfp", "requirement", "scoring", "evaluation")
+
+# 上传文件根目录。测试通过 monkeypatch 本常量指向 tmp_path，
+# 避免往真实 backend/data/ 下写文件（同 db.DB_PATH 的做法）。
+DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
 async def _load_spec_for_project(project_id: int):
-    """spec_loader：从 materials 表取最新一条 role='spec' 记录，
-    打开文件返回 (BytesIO, suffix, filename)。
+    """spec_loader：取「应标要求」面板下全部已上传文件，按上传顺序返回列表，
+    每项是 (BytesIO, suffix, filename)。
+
+    返回列表而非单份：提炼要求可能同时用到规范书 + 评分表 + 评审要素，
+    这些都要进大纲派生的输入。
+
+    单份文件在磁盘上缺失（DB 有记录但文件被清）只跳过该份并告警，
+    不让整条链路因为一份陈旧记录失败；一份都取不到才抛错。
 
     materials.file_path 形如 ``uploads/{pid}/{filename}``，相对于 backend/data/。
     """
     from io import BytesIO
-    from pathlib import Path
     from db import get_db
 
+    data_dir = DATA_DIR
+
+    placeholders = ",".join("?" * len(REQUIREMENT_ROLES))
     async with get_db() as conn:
         cursor = await conn.execute(
             "SELECT filename, file_path FROM materials "
-            "WHERE project_id = ? AND role = 'spec' "
-            "ORDER BY id DESC LIMIT 1",
-            (project_id,),
+            f"WHERE project_id = ? AND role IN ({placeholders}) "
+            "ORDER BY id ASC",
+            (project_id, *REQUIREMENT_ROLES),
         )
-        row = await cursor.fetchone()
-    if row is None:
-        raise FileNotFoundError(f"项目 {project_id} 未上传规范书")
-    filename = row["filename"]
-    rel_path = row["file_path"]
-    backend_dir = Path(__file__).resolve().parent
-    abs_path = backend_dir / "data" / rel_path
-    if not abs_path.exists():
-        # 兜底：相对工程根
-        candidate = backend_dir.parent / rel_path
-        if candidate.exists():
-            abs_path = candidate
-        else:
-            raise FileNotFoundError(f"规范书文件不存在：{abs_path}")
-    suffix = Path(filename).suffix.lower()
-    with open(abs_path, "rb") as f:
-        data = f.read()
-    return BytesIO(data), suffix, filename
+        rows = await cursor.fetchall()
+    if not rows:
+        raise FileNotFoundError(
+            f"项目 {project_id} 未上传要求文件（规范书 / 主招标文件 / 评分表 / 评审要素）"
+        )
+
+    sources = []
+    for row in rows:
+        filename = row["filename"]
+        rel_path = row["file_path"]
+        abs_path = data_dir / rel_path
+        if not abs_path.exists():
+            # 兜底：相对工程根
+            candidate = data_dir.parent / rel_path
+            if candidate.exists():
+                abs_path = candidate
+            else:
+                logger.warning(f"要求文件不存在，跳过：{abs_path}")
+                continue
+        suffix = Path(filename).suffix.lower()
+        with open(abs_path, "rb") as f:
+            data = f.read()
+        sources.append((BytesIO(data), suffix, filename))
+
+    if not sources:
+        raise FileNotFoundError(f"项目 {project_id} 的要求文件均不存在于磁盘，请重新上传")
+    return sources
 
 
 def _build_deps() -> GraphDeps:
@@ -107,6 +136,11 @@ async def lifespan(app: FastAPI):
     async with get_db() as conn:
         await init_db(conn)
     logger.info("SQLite 数据库已初始化")
+
+    # 装配 LLM 用量记账（llm_usage 表）。必须在 verify_all 之前：
+    # 之后所有真实调用都会落一条账，供「token 花在哪」按调用点/模型汇总。
+    from services import usage_store
+    usage_store.install()
 
     # 启动期验证所有 LLM 配置；不通过的会被标 verified=False，
     # round-robin 池会自动跳过，避免死配置 hang 流式生成。

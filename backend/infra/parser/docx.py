@@ -19,7 +19,7 @@ from .toc import (
     HEADING_PATTERNS,
     _TOC_STYLES, _MANUAL_TOC_MARKERS, _SPECIAL_MARK_RE,
     extract_special_marks, detect_level_from_numbering, clean_title,
-    _toc_style_to_level, _clean_toc_line,
+    _toc_style_to_level, _clean_toc_line, rows_to_markdown,
     _normalize_for_match, _extract_numbering_prefix, _text_similarity,
 )
 
@@ -31,27 +31,15 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 def _table_to_markdown(table) -> str:
-    """把 docx Table 序列化为 Markdown 表格。"""
-    rows: list[list[str]] = []
-    for row in table.rows:
-        cells = []
-        for cell in row.cells:
-            text = "\n".join(p.text for p in cell.paragraphs).strip()
-            text = text.replace("|", "\\|").replace("\n", "<br>")
-            cells.append(text or " ")
-        rows.append(cells)
+    """把 docx Table 序列化为 Markdown 表格。
 
-    if not rows:
-        return ""
-
-    n_cols = max(len(r) for r in rows)
-    rows = [r + [" "] * (n_cols - len(r)) for r in rows]
-
-    md_lines = ["| " + " | ".join(rows[0]) + " |",
-                "| " + " | ".join(["---"] * n_cols) + " |"]
-    for r in rows[1:]:
-        md_lines.append("| " + " | ".join(r) + " |")
-    return "\n".join(md_lines)
+    只负责把 docx 的 cell 结构摊平成二维文本，序列化本身交给
+    ``toc.rows_to_markdown`` —— pdf 路径要用同一份规则。
+    """
+    return rows_to_markdown([
+        ["\n".join(p.text for p in cell.paragraphs).strip() for cell in row.cells]
+        for row in table.rows
+    ])
 
 
 def _ocr_paragraph_images(paragraph, document) -> str:

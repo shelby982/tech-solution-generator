@@ -26,6 +26,8 @@ from services.block_store import (
     create_chunk,
     delete_material,
     list_chunks_by_materials,
+    list_blocks,
+    current_run_thread_id,
 )
 from infra.parser import parse_document
 from infra.retrieval import keyword_search as retrieve_chunks, build_bm25_index, assign_chunks_to_sections
@@ -274,7 +276,8 @@ async def map_sources(project_id: int):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        blocks = await _list_blocks(db, project_id)
+        tid = await current_run_thread_id(db, project_id)
+        blocks = await list_blocks(db, project_id, tid, fallback_all=True)
         chunks = await list_chunks_by_project(db, project_id)
 
         if not chunks:

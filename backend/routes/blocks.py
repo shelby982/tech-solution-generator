@@ -21,6 +21,7 @@ from db import get_db
 from services.block_store import (
     get_block, update_block_content, update_block_status,
     list_blocks, add_revision, update_block_requirement, list_revisions,
+    current_run_thread_id,
 )
 from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
 from infra.llm import dispatch_stream_generate
@@ -34,9 +35,16 @@ router = APIRouter(tags=["blocks"])
 # ── GET /api/projects/{id}/blocks ────────────────────────
 
 @router.get("/projects/{project_id}/blocks")
-async def get_project_blocks(project_id: int):
+async def get_project_blocks(project_id: int, threadId: str | None = None):
+    """取项目的 blocks。
+
+    默认只返回**当前（最新一次）workflow run** 写的行：``block_id`` 是位置派生
+    的，两次 run 的顶层 id 会撞车、行长期共存，不过滤就会把旧目录一起列出来。
+    从未跑过 run 的老项目退回返回全部行，避免页面突然全空。
+    """
     async with get_db() as db:
-        blocks = await list_blocks(db, project_id)
+        tid = threadId or await current_run_thread_id(db, project_id)
+        blocks = await list_blocks(db, project_id, tid, fallback_all=True)
     return JSONResponse(content=blocks)
 
 

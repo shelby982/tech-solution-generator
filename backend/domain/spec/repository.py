@@ -7,6 +7,7 @@ from services.block_store import (
     delete_blocks_by_project,
     get_project,
     list_blocks,
+    current_run_thread_id,
     update_project,
 )
 
@@ -88,7 +89,8 @@ class SpecRepository:
 
         sections 的 raw_content 留空（持久化时不存）；special_marks 同理留空。
         """
-        records = await list_blocks(self.db, project_id)
+        tid = await current_run_thread_id(self.db, project_id)
+        records = await list_blocks(self.db, project_id, tid, fallback_all=True)
         sections: list[Section] = []
         rows: list[OutlineMatrixRow] = []
         for rec in records:

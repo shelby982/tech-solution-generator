@@ -4,7 +4,11 @@ SQLite CRUD 封装 — 所有业务表的 async 操作。
 Row 对象通过 dict(row) 转为普通字典后返回。
 """
 
+import logging
+
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════
@@ -208,12 +212,57 @@ async def create_block(
 async def list_blocks(
     db: aiosqlite.Connection,
     project_id: int,
+    run_thread_id: str | None = None,
+    *,
+    fallback_all: bool = False,
 ) -> list[dict]:
-    cursor = await db.execute(
-        "SELECT * FROM blocks WHERE project_id = ? ORDER BY order_idx", (project_id,)
-    )
+    """按项目取 blocks，可选按 run 归属过滤。
+
+    - ``run_thread_id=None``：不过滤，等价改造前的行为。
+    - ``run_thread_id="<tid>"``：只取该次 run 写的行。
+
+    ``fallback_all=True`` 时，若该 run 在本项目一行都没有（老项目、或 run 还没
+    落库），退回返回全部行 —— 否则老项目页面会突然全空。
+
+    **``fallback_all`` 只允许读路径用**：写路径（sync_outline_placeholders、
+    extract 的跳过判断）必须严格，退回会拿到别的 run 的行，sync 会把它们误判成
+    自己的孤儿行删掉。
+
+    背景：``block_id`` 是位置派生的（parse 给 s1..sN，目录派生给 s1/s1.1），两次
+    run 的顶层 id 会撞车、行在同一个 project_id 下长期共存，所以需要这层归属过滤。
+    """
+    if run_thread_id is None:
+        cursor = await db.execute(
+            "SELECT * FROM blocks WHERE project_id = ? ORDER BY order_idx", (project_id,)
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT * FROM blocks
+                WHERE project_id = ?
+                  AND (run_thread_id = ?
+                       OR (? AND NOT EXISTS (
+                             SELECT 1 FROM blocks
+                              WHERE project_id = ? AND run_thread_id = ?)))
+                ORDER BY order_idx""",
+            (project_id, run_thread_id,
+             1 if fallback_all else 0, project_id, run_thread_id),
+        )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
+
+
+async def current_run_thread_id(
+    db: aiosqlite.Connection,
+    project_id: int,
+) -> str | None:
+    """本项目最新一次 workflow run 的 thread_id；一次都没跑过则返回 None。"""
+    cursor = await db.execute(
+        "SELECT thread_id FROM workflow_runs WHERE project_id = ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (project_id,),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row else None
 
 
 async def get_block(
@@ -284,6 +333,23 @@ async def update_block_source(
     await db.commit()
 
 
+def _is_same_section(row, title: str, level: int, order_idx: int) -> bool:
+    """旧行的坐标是否与新写入的完全一致 —— 一致才认为真的是同一节重跑。
+
+    block_id 是**位置派生**的（parse 给 s1..sN 流水号，派生目录给 s1/s1.1/…），
+    换个文件顺序、换一组文件，同一个 id 就指向另一节。坐标三者全同是「同一节」
+    唯一可用的判据，读不出来（NULL / 脏值）时按「不是同一节」处理，宁可清也不要串。
+    """
+    try:
+        return (
+            row["title"] == title
+            and int(row["level"]) == int(level)
+            and int(row["order_idx"]) == int(order_idx)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 async def upsert_outline_block(
     db: aiosqlite.Connection,
     project_id: int,
@@ -293,28 +359,50 @@ async def upsert_outline_block(
     title: str,
     order_idx: int,
     matrix: dict | None = None,
+    run_thread_id: str | None = None,
 ) -> dict:
-    """按 (project_id, block_id) upsert 大纲提炼结果。
+    """按 (project_id, block_id, run_thread_id) upsert 大纲提炼结果。
 
     - matrix=None：占位（解析阶段拿到 toc 后即可建空壳，让取消/刷新仍能看到）
     - matrix=dict：把 8 字段写入；status 升级为 'outline_done'
 
     title / level / order_idx 始终覆盖（解析端是权威源）。
+
+    run_thread_id：该行归属哪一次 workflow run。block_id 是位置派生的，两次 run
+    的顶层 id 会撞车 —— 带上归属，新 run 才不会改写上一次 run 的行。
     """
     cursor = await db.execute(
-        "SELECT id, status FROM blocks WHERE project_id = ? AND block_id = ?",
-        (project_id, block_id),
+        "SELECT id, status, title, level, order_idx FROM blocks "
+        "WHERE project_id = ? AND block_id = ? AND run_thread_id IS ?",
+        (project_id, block_id, run_thread_id),
     )
     row = await cursor.fetchone()
 
     if matrix is None:
         if row:
-            await db.execute(
-                """UPDATE blocks
-                   SET title = ?, level = ?, order_idx = ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
-                (title, level, order_idx, row["id"]),
-            )
+            if _is_same_section(row, title, level, order_idx):
+                await db.execute(
+                    """UPDATE blocks
+                       SET title = ?, level = ?, order_idx = ?, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (title, level, order_idx, row["id"]),
+                )
+            else:
+                # 同一个 block_id 换了节：旧行的 8 字段属于上一节，不清就会让新章节
+                # 顶着旧文档的应标要求显示（实测：目录里的「总则」挂着上一份 PDF
+                # 某章的 requirement）。content（正文）不动 —— 沿用
+                # sync_outline_placeholders 的约定，宁可留一条脏数据也不删用户内容。
+                await db.execute(
+                    """UPDATE blocks
+                       SET title = ?, level = ?, order_idx = ?,
+                           requirement = '', key_points = '', veto_items = '',
+                           bonus_items = '', score_items = '', evidence_required = '',
+                           constraint_level = 'recommended', indicators = '',
+                           score = '[]', status = 'empty',
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (title, level, order_idx, row["id"]),
+                )
             await db.commit()
             return await get_block(db, row["id"])
         cursor = await db.execute(
@@ -322,10 +410,10 @@ async def upsert_outline_block(
                (project_id, block_id, kind, level, title, domain, parent_title,
                 requirement, key_points, veto_items, bonus_items,
                 score_items, evidence_required, constraint_level, indicators,
-                score, source, order_idx, content, status)
+                score, source, order_idx, content, status, run_thread_id)
                VALUES (?, ?, 'content', ?, ?, ?, '', '', '', '', '', '', '',
-                       'recommended', '', '', '[]', ?, '', 'empty')""",
-            (project_id, block_id, level, title, title, order_idx),
+                       'recommended', '', '', '[]', ?, '', 'empty', ?)""",
+            (project_id, block_id, level, title, title, order_idx, run_thread_id),
         )
         await db.commit()
         return await get_block(db, cursor.lastrowid)
@@ -364,13 +452,13 @@ async def upsert_outline_block(
            (project_id, block_id, kind, level, title, domain, parent_title,
             requirement, key_points, veto_items, bonus_items,
             score_items, evidence_required, constraint_level, indicators,
-            score, source, order_idx, content, status)
+            score, source, order_idx, content, status, run_thread_id)
            VALUES (?, ?, 'content', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?,
-                   '', '[]', ?, '', 'outline_done')""",
+                   '', '[]', ?, '', 'outline_done', ?)""",
         (project_id, block_id, level, title, title,
          requirement, key_points, veto_items, bonus_items,
          score_items, evidence_required, constraint_level, indicators,
-         order_idx),
+         order_idx, run_thread_id),
     )
     await db.commit()
     return await get_block(db, cursor.lastrowid)
@@ -380,22 +468,29 @@ async def sync_outline_placeholders(
     db: aiosqlite.Connection,
     project_id: int,
     sections,
+    run_thread_id: str | None = None,
 ) -> dict:
     """把当前 toc 同步进 blocks 表：清理不在 toc 的孤儿行 + 逐节 upsert 占位。
 
     parse 与 outline_draft 各调一次（目录换版后 block_id 会整体变化）。
+
+    ``run_thread_id`` 限定同步范围：只清理、只 upsert 本次 run 的行。其他 run 的
+    行原样留着（前端按当前 run 过滤，历史行只是不显示）。**这里不做 fallback**：
+    退回拿到别的 run 的行会把它们当成本次 run 的孤儿行删掉。
 
     清理保护：**只删 content 为空的行**。目录重排后若该行已有正文，宁可留一条
     脏数据也不删用户内容。
 
     sections: 可迭代的 Section-like（需有 .id / .level / .title），顺序即 order_idx。
 
-    返回 ``{"removed": int, "created": int}``。
+    返回 ``{"removed": int, "created": int, "kept": int}``。``kept`` 是被保护下来
+    的孤儿行数（不在 toc 但有正文），仅供观测：这个数长期 > 0 说明目录换版后
+    有正文留在了错位的节上。
     """
     sections = list(sections)
     toc_ids = {sec.id for sec in sections}
 
-    existing = await list_blocks(db, project_id)
+    existing = await list_blocks(db, project_id, run_thread_id)
     stale_ids = [
         b.get("id") for b in existing
         if b.get("block_id") not in toc_ids and not (b.get("content") or "").strip()
@@ -404,6 +499,18 @@ async def sync_outline_placeholders(
         await db.execute("DELETE FROM blocks WHERE id = ?", (stale_pk,))
     if stale_ids:
         await db.commit()
+
+    kept = [
+        b for b in existing
+        if b.get("block_id") not in toc_ids and (b.get("content") or "").strip()
+    ]
+    if kept:
+        logger.info(
+            "sync_outline_placeholders：项目 %s 有 %d 个不在目录内的章节保留了正文（block_id=%s），未删除",
+            project_id,
+            len(kept),
+            ", ".join(str(b.get("block_id")) for b in kept[:10]),
+        )
 
     for idx, sec in enumerate(sections):
         await upsert_outline_block(
@@ -414,9 +521,10 @@ async def sync_outline_placeholders(
             title=sec.title or sec.id,
             order_idx=idx,
             matrix=None,
+            run_thread_id=run_thread_id,
         )
 
-    return {"removed": len(stale_ids), "created": len(sections)}
+    return {"removed": len(stale_ids), "created": len(sections), "kept": len(kept)}
 
 
 # ══════════════════════════════════════════════════

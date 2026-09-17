@@ -4,9 +4,9 @@
 
     START
       → zhang_heng_parse
-      → zhang_heng_outline_draft   # 依据规范书 + 用户提炼要求派生应答文件目录
-      → zhang_heng_extract
+      → zhang_heng_outline_draft   # ① 依据规范书 + 用户提炼要求拆分应答文件目录
       → gate_outline           # 闸门 1（interrupt_before）
+      → zhang_heng_extract     # ② 8 字段逐节提炼：闸门 1 放行后才跑
       → shen_kuo_match
       → gate_materials         # 闸门 2（interrupt_before）
       → zhuge_liang_generate
@@ -17,6 +17,10 @@
             approve      → END
             regen_blocks → zhuge_liang_generate
             abort        → ABORT
+
+「要求与大纲」分两步：① 拆分章节目录，② 逐节 8 字段提炼。**② 当前关闭**
+（``nodes.ENABLE_SECTION_EXTRACT=False``）：闸门 1 放行后 extract 直接收尾，
+match 及其下游保持注册但不可达 —— 匹配依赖提炼产出的矩阵，空矩阵匹配不出东西。
 
 闸门用 LangGraph 的 ``interrupt_before`` 实现：到达闸门节点前 graph 暂停，state 已
 经持久化；前端按 ``stage`` 跳到对应编辑器，提交后 routes 调
@@ -130,6 +134,9 @@ def _gate_snapshot(state: WorkflowState, gate_name: str) -> dict:
             ),
             "outline_revision": int(spec.get("outline_revision") or 0),
             "outline_error": str(spec.get("outline_error") or ""),
+            # 项目概述生成失败的原因。失败时 doc_summary 是空串，后续每次章节
+            # 生成都会少这段全局上下文，必须让用户在闸门 1 就看到。
+            "doc_summary_error": str(spec.get("doc_summary_error") or ""),
         }
     if gate_name == "review_materials":
         return {
@@ -299,9 +306,17 @@ def build_graph(
     # ── 边 ───────────────────────────────────────
     builder.add_edge(START, NODE_PARSE)
     builder.add_edge(NODE_PARSE, NODE_OUTLINE_DRAFT)
-    builder.add_edge(NODE_OUTLINE_DRAFT, NODE_EXTRACT)
-    builder.add_edge(NODE_EXTRACT, GATE_OUTLINE)
-    builder.add_edge(GATE_OUTLINE, NODE_MATCH)
+    # 派生目录后**直接停闸门1**，逐节 8 字段提炼（每个派生节点一次模型调用）留到
+    # 闸门1 放行后再跑。目录是用户要先看、先改的东西，不该每次都被提炼的账绑住。
+    builder.add_edge(NODE_OUTLINE_DRAFT, GATE_OUTLINE)
+    builder.add_edge(GATE_OUTLINE, NODE_EXTRACT)
+    # 第二步（逐节提炼）关闭时 extract 直接收尾：匹配依赖它产出的矩阵，空矩阵
+    # 匹配不出东西，往下走只会得到一个空闸门 2。开关与节点行为同源于
+    # nodes.ENABLE_SECTION_EXTRACT，由它统一切换，避免两处各改一遍、漏掉一边。
+    if nodes.ENABLE_SECTION_EXTRACT:
+        builder.add_edge(NODE_EXTRACT, NODE_MATCH)
+    else:
+        builder.add_edge(NODE_EXTRACT, END)
     builder.add_edge(NODE_MATCH, GATE_MATERIALS)
     builder.add_edge(GATE_MATERIALS, NODE_COLLECT_GAPS)
     builder.add_edge(NODE_COLLECT_GAPS, NODE_GENERATE)

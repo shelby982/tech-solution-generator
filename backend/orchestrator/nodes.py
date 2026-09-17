@@ -120,8 +120,9 @@ def _make_agent_emitter_bridge(
 # 张衡 parse 节点
 # ─────────────────────────────────────────────
 
-# 文件源加载回调（routes 在 start 时注入）：返回 (binary_io, suffix, filename)
-SpecLoader = Callable[[int], Awaitable[tuple[Any, str, str]]]
+# 文件源加载回调（routes 在 start 时注入）：返回 [(binary_io, suffix, filename), ...]
+# 列表 = 「应标要求」面板下的全部文件，提炼不绑定技术规范书。
+SpecLoader = Callable[[int], Awaitable[list[tuple[Any, str, str]]]]
 
 
 async def zhang_heng_parse_node(
@@ -131,7 +132,7 @@ async def zhang_heng_parse_node(
     spec_loader: SpecLoader,
     emitter: EmitterArg = None,
 ) -> WorkflowState:
-    """张衡 parse：读规范书文件 → 解析 toc + doc_summary。
+    """张衡 parse：读「应标要求」全部文件 → 解析 toc + doc_summary。
 
     state 写入：``stage="parsing"``，``spec.{doc_id, doc_title, doc_summary, toc}``。
     """
@@ -140,7 +141,7 @@ async def zhang_heng_parse_node(
     _check_cancel(state)
 
     project_id = state["project_id"]
-    file_source, suffix, filename = await spec_loader(project_id)
+    sources = await spec_loader(project_id)
 
     loop = asyncio.get_running_loop()
 
@@ -158,9 +159,7 @@ async def zhang_heng_parse_node(
             return
 
     parsed = await agent.parse(
-        file_source,
-        suffix=suffix,
-        filename=filename,
+        sources,
         progress_callback=_sync_progress,
     )
 
@@ -179,7 +178,9 @@ async def zhang_heng_parse_node(
         from services.block_store import sync_outline_placeholders
 
         async with get_db() as db:
-            stats = await sync_outline_placeholders(db, project_id, parsed.toc)
+            stats = await sync_outline_placeholders(
+                db, project_id, parsed.toc, run_thread_id=state.get("thread_id"),
+            )
         if stats["removed"]:
             logger.info(f"parse_node：清理 {stats['removed']} 条遗留 block（项目 {project_id}）")
     except Exception as e:
@@ -192,6 +193,7 @@ async def zhang_heng_parse_node(
             "doc_id": parsed.doc_id,
             "doc_title": parsed.doc_title,
             "doc_summary": parsed.doc_summary,
+            "doc_summary_error": parsed.doc_summary_error,
             # source_toc：正则解析出的规范书原始目录，只读、供 outline_draft 做 grounding。
             # toc 会在 outline_draft 节点被模型派生的应答目录整体替换。
             "source_toc": toc_dicts,
@@ -260,6 +262,7 @@ async def zhang_heng_outline_draft_node(
             async with get_db() as db:
                 stats = await sync_outline_placeholders(
                     db, int(project_id), result.sections,
+                    run_thread_id=state.get("thread_id"),
                 )
             if stats["removed"]:
                 logger.info(
@@ -291,6 +294,15 @@ async def zhang_heng_outline_draft_node(
 # 张衡 extract 节点
 # ─────────────────────────────────────────────
 
+# 「要求与大纲」分两步：① 按提炼要求拆分章节目录，② 逐节 8 字段提炼。
+# 第二步暂时关闭，只做第一步 —— 目录结构还在反复调整，提炼出的矩阵随时作废，
+# 而提炼是每个章节一次模型调用（一份 400+ 章的文档就是 400+ 次）。
+#
+# 恢复第二步：把这个常量改回 True 即可，graph.py 里 NODE_EXTRACT 的出边会跟着
+# 从 END 切回 NODE_MATCH，不必两处各改一遍。
+ENABLE_SECTION_EXTRACT = False
+
+
 async def zhang_heng_extract_node(
     state: WorkflowState,
     *,
@@ -300,8 +312,16 @@ async def zhang_heng_extract_node(
     """张衡 extract：8 字段提炼，逐章节流式推 outline_extract 事件。
 
     state 写入：``spec.outline_matrix``。
+
+    第二步暂时关闭（见 ``ENABLE_SECTION_EXTRACT``）：关闭时本节点只清空矩阵并
+    立刻返回，闸门 1 放行后图随即收尾，不再往下走到素材匹配 —— 匹配依赖这里
+    产出的矩阵，空矩阵匹配不出东西。
     """
     _check_cancel(state)
+
+    if not ENABLE_SECTION_EXTRACT:
+        logger.info("extract 跳过：当前只做「按提炼要求拆分章节目录」")
+        return {"spec": {"outline_matrix": {}}}
 
     spec = state.get("spec") or {}
     toc_raw = spec.get("toc") or []
@@ -321,7 +341,9 @@ async def zhang_heng_extract_node(
             from services.block_store import list_blocks
 
             async with get_db() as db:
-                existing = await list_blocks(db, int(project_id))
+                existing = await list_blocks(
+                    db, int(project_id), run_thread_id=state.get("thread_id"),
+                )
             for b in existing:
                 if (b.get("status") == "outline_done") and (b.get("key_points") or b.get("requirement")):
                     skip_ids.add(str(b.get("block_id")))
@@ -375,6 +397,7 @@ async def zhang_heng_extract_node(
                         title=row.title or section.title or section.id,
                         order_idx=section_order.get(section.id, 0),
                         matrix=row_dict,
+                        run_thread_id=state.get("thread_id"),
                     )
             except Exception as e:
                 logger.warning(f"extract_node：block 落库失败（{section.id} / {e}），仅缓存到 state")
@@ -593,7 +616,10 @@ async def zhuge_liang_generate_node(
         from db import get_db
         from services.block_store import list_blocks, update_block_content, add_revision, list_revisions
         async with get_db() as db:
-            db_blocks = {b["block_id"]: b for b in await list_blocks(db, state["project_id"])}
+            db_rows = await list_blocks(
+                db, state["project_id"], run_thread_id=state.get("thread_id"),
+            )
+            db_blocks = {b["block_id"]: b for b in db_rows}
             for bid, output in new_blocks.items():
                 row = db_blocks.get(bid)
                 if row is None or row.get("content") == output.content:

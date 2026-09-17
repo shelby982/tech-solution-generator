@@ -18,12 +18,14 @@ from agents.prompts import (
     LETTER_SYSTEM,
     OUTLINE_DRAFT_SYSTEM,
     OUTLINE_EXTRACT_SYSTEM,
+    SCOPE_SELECT_SYSTEM,
     SECTION_OUTLINE_SYSTEM,
     TONE_SYSTEM_PROMPTS,
     build_letter_user,
     build_outline_draft_user,
     build_outline_extract_user,
     build_section_outline_user,
+    build_scope_select_user,
 )
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
@@ -32,6 +34,19 @@ from .json_utils import extract_json_object as _extract_json_object
 from .json_utils import salvage_nodes_array as _salvage_nodes_array
 
 logger = logging.getLogger(__name__)
+
+# 目录派生的输出预算 = 思考 token + 正文 token。deepseek-v4-pro 这类推理模型
+# 实测会把 8000 全部烧在思考上、正文一个字不吐（finish_reason=length、content
+# 为空），所以给足预算，并把客户端超时放到容得下一次长思考的量级 —— 实测一次
+# 成功的调用要 142 秒，60 秒的默认超时连失败原因都截断。
+OUTLINE_DRAFT_MAX_TOKENS = 32000
+OUTLINE_DRAFT_TIMEOUT = 300.0
+
+# 章节提炼的预算同样是「思考 + 正文」。比目录派生小一档（单章节矩阵的正文远短于
+# 整份目录），但 4000 对推理模型实测不够：deepseek-v4-pro 把 4000 全烧在思考上，
+# finish_reason=length、content 为空，章节矩阵直接落成空占位。
+OUTLINE_EXTRACT_MAX_TOKENS = 16000
+OUTLINE_EXTRACT_TIMEOUT = 180.0
 
 
 # ─────────────────────────────────────────────
@@ -122,9 +137,13 @@ async def _generate_doc_summary(
     )
 
     if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-        return await clients.generate_oneshot_openai(config, system_prompt, user_prompt, max_tokens=2000)
+        return await clients.generate_oneshot_openai(
+            config, system_prompt, user_prompt, max_tokens=2000, call_site="doc_summary",
+        )
     elif config.provider == "claude":
-        return await clients.generate_oneshot_claude(config, system_prompt, user_prompt, max_tokens=2000)
+        return await clients.generate_oneshot_claude(
+            config, system_prompt, user_prompt, max_tokens=2000, call_site="doc_summary",
+        )
     else:
         raise ValueError(f"不支持的 provider：{config.provider}")
 
@@ -210,10 +229,10 @@ async def _stream_generate(
         )
 
     if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-        async for token in clients.stream_openai(config, system_prompt, user_prompt):
+        async for token in clients.stream_openai(config, system_prompt, user_prompt, call_site="stream_generate"):
             yield token
     elif config.provider == "claude":
-        async for token in clients.stream_claude(config, system_prompt, user_prompt):
+        async for token in clients.stream_claude(config, system_prompt, user_prompt, call_site="stream_generate"):
             yield token
     else:
         raise ValueError(f"不支持的 provider：{config.provider}")
@@ -311,6 +330,8 @@ async def dispatch_outline_draft_json(
 
     payload 字段（全部可选，缺省空串）：
         instruction / doc_summary / spec_digest / previous_outline / material_digest
+    follow_structure 为真时（提炼要求点名的那一部分已定位到），要求模型复刻材料
+    自身的结构拆章节，而不是重新组织。
 
     从 rr_start_index 起轮询 + fallback，全部失败时上抛最后一个异常（由节点兜底）。
     模型输出不是合法 JSON 对象时同样抛 ValueError，走同一条降级路径。
@@ -325,6 +346,7 @@ async def dispatch_outline_draft_json(
         spec_digest=payload.get("spec_digest", "") or "",
         previous_outline=payload.get("previous_outline", "") or "",
         material_digest=payload.get("material_digest", "") or "",
+        follow_structure=bool(payload.get("follow_structure")),
     )
 
     last_error: Exception | None = None
@@ -334,11 +356,21 @@ async def dispatch_outline_draft_json(
             logger.info(f"使用 API [{config.provider}/{config.model}] 派生应答文件目录")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 result = await clients.generate_oneshot_openai(
-                    config, OUTLINE_DRAFT_SYSTEM, user, max_tokens=8000,
+                    config, OUTLINE_DRAFT_SYSTEM, user,
+                    max_tokens=OUTLINE_DRAFT_MAX_TOKENS,
+                    timeout=OUTLINE_DRAFT_TIMEOUT,
+                    # 空内容在这里是「名字」清楚的失败，别让它退化成
+                    # 「未找到 JSON 起始 {」这种指不出原因的错
+                    raise_on_empty=True,
+                    call_site="outline_draft",
                 )
             else:
                 result = await clients.generate_oneshot_claude(
-                    config, OUTLINE_DRAFT_SYSTEM, user, max_tokens=8000,
+                    config, OUTLINE_DRAFT_SYSTEM, user,
+                    max_tokens=OUTLINE_DRAFT_MAX_TOKENS,
+                    timeout=OUTLINE_DRAFT_TIMEOUT,
+                    raise_on_empty=True,
+                    call_site="outline_draft",
                 )
             try:
                 obj = _extract_json_object(result)
@@ -359,6 +391,61 @@ async def dispatch_outline_draft_json(
             last_error = e
             logger.warning(
                 f"API [{config.provider}/{config.model}] 目录派生失败，"
+                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+            )
+
+    raise last_error  # type: ignore[misc]
+
+
+async def dispatch_scope_select_json(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    payload: dict,
+) -> dict:
+    """把口语化的提炼要求翻译成文档里的字面检索标识，返回解析后的 JSON 对象。
+
+    只在确定性定位全空时才调（见 ``agents.zhang_heng.draft_outline``）——用户明明
+    点名了文件里的某一部分（「标包2」），但按字面哪儿都认不出来。模型只做「换个
+    说法」这一件事，输出几十 token，结果可复现。
+
+    payload 字段（全部可选）：
+        instruction / file_names / section_titles
+
+    从 rr_start_index 起轮询 + fallback，全部失败时上抛最后一个异常（由调用方兜底）。
+    """
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先添加模型配置")
+
+    user = build_scope_select_user(
+        instruction=payload.get("instruction", "") or "",
+        file_names=payload.get("file_names") or [],
+        section_titles=payload.get("section_titles") or [],
+    )
+
+    last_error: Exception | None = None
+    for i in range(n):
+        config = configs[(rr_start_index + i) % n]
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 圈定检索范围")
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await clients.generate_oneshot_openai(
+                    config, SCOPE_SELECT_SYSTEM, user, max_tokens=500,
+                    call_site="scope_select",
+                )
+            else:
+                result = await clients.generate_oneshot_claude(
+                    config, SCOPE_SELECT_SYSTEM, user, max_tokens=500,
+                    call_site="scope_select",
+                )
+            obj = _extract_json_object(result)
+            if not isinstance(obj, dict):
+                raise ValueError("模型输出不是 JSON 对象")
+            return obj
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 圈定检索范围失败，"
                 f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
             )
 
@@ -493,9 +580,23 @@ async def _extract_one_section(
         try:
             logger.info(f"提炼章节「{title}」，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-                result = await clients.generate_oneshot_openai(config, OUTLINE_EXTRACT_SYSTEM, user, max_tokens=4000)
+                result = await clients.generate_oneshot_openai(
+                    config, OUTLINE_EXTRACT_SYSTEM, user,
+                    max_tokens=OUTLINE_EXTRACT_MAX_TOKENS,
+                    timeout=OUTLINE_EXTRACT_TIMEOUT,
+                    # 空内容在这里是「名字」清楚的失败，别让它退化成
+                    # 「未找到 JSON 起始 {」这种指不出原因的错
+                    raise_on_empty=True,
+                    call_site="outline_extract",
+                )
             else:
-                result = await clients.generate_oneshot_claude(config, OUTLINE_EXTRACT_SYSTEM, user, max_tokens=4000)
+                result = await clients.generate_oneshot_claude(
+                    config, OUTLINE_EXTRACT_SYSTEM, user,
+                    max_tokens=OUTLINE_EXTRACT_MAX_TOKENS,
+                    timeout=OUTLINE_EXTRACT_TIMEOUT,
+                    raise_on_empty=True,
+                    call_site="outline_extract",
+                )
 
             obj = _extract_json_object(result)
             return {
@@ -553,9 +654,11 @@ async def generate_section_outline(
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 return await clients.generate_oneshot_openai(
                     config, SECTION_OUTLINE_SYSTEM, user_prompt, max_tokens=2500,
+                    call_site="section_outline",
                 )
             return await clients.generate_oneshot_claude(
                 config, SECTION_OUTLINE_SYSTEM, user_prompt, max_tokens=2500,
+                call_site="section_outline",
             )
         except Exception as e:
             last_error = e
@@ -594,9 +697,11 @@ async def generate_letter_content(
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 return await clients.generate_oneshot_openai(
                     config, LETTER_SYSTEM, user_prompt, max_tokens=2500,
+                    call_site="letter",
                 )
             return await clients.generate_oneshot_claude(
                 config, LETTER_SYSTEM, user_prompt, max_tokens=2500,
+                call_site="letter",
             )
         except Exception as e:
             last_error = e

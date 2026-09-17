@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     score       TEXT,
     source      TEXT,
     order_idx   INTEGER,
+    run_thread_id TEXT,
     status      TEXT DEFAULT 'empty',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -119,6 +120,26 @@ CREATE INDEX IF NOT EXISTS idx_reviews_thread_block ON reviews(thread_id, block_
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_project ON workflow_runs(project_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_project ON blocks(project_id);
 CREATE INDEX IF NOT EXISTS idx_block_revisions_block ON block_revisions(block_id);
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_site              TEXT NOT NULL DEFAULT '',
+    provider               TEXT NOT NULL DEFAULT '',
+    model                  TEXT NOT NULL DEFAULT '',
+    streaming              INTEGER NOT NULL DEFAULT 0,
+    input_tokens           INTEGER,
+    output_tokens          INTEGER,
+    cache_read_tokens      INTEGER,
+    cache_creation_tokens  INTEGER,
+    total_tokens           INTEGER,
+    ok                     INTEGER NOT NULL DEFAULT 1,
+    error                  TEXT DEFAULT '',
+    latency_ms             INTEGER,
+    created_at             DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_site ON llm_usage(call_site, model);
 """
 
 
@@ -129,8 +150,11 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # 迁移已有数据库：添加新列（如果不存在）
     cursor = await conn.execute("PRAGMA table_info(blocks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
+    # run_thread_id：该行属于哪一次 workflow run。老库的行留 NULL（不回填），
+    # 读路径在「该 run 一行都没有」时退回显示全部行，见 block_store.list_blocks。
     for col in ("key_points", "veto_items", "bonus_items",
-                "score_items", "evidence_required", "constraint_level", "indicators"):
+                "score_items", "evidence_required", "constraint_level", "indicators",
+                "run_thread_id"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     cursor = await conn.execute("PRAGMA table_info(materials)")
@@ -143,6 +167,11 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     existing_cols = {row[1] for row in await cursor.fetchall()}
     if "target_pages" not in existing_cols:
         await conn.execute("ALTER TABLE projects ADD COLUMN target_pages INTEGER")
+    # 索引建在加列之后：老库的 blocks 表先执行上面的 ALTER 才有 run_thread_id，
+    # 放进 _DDL 会在老库上引用了尚不存在的列而直接报错。
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_blocks_project_run ON blocks(project_id, run_thread_id)"
+    )
     await conn.commit()
 
 

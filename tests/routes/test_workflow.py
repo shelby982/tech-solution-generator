@@ -227,6 +227,21 @@ async def test_state_ok(client, runner):
     body = r.json()
     assert body["stage"] == "idle"
     assert body["thread_id"] == "tid-1"
+    assert body["alive"] is True
+
+
+async def test_state_reports_alive_false_for_unknown_thread(client, runner):
+    """进程不认得这个 thread（典型场景：后端重启，内存里的 _runs 丢了）。
+
+    stage 仍然照常返回——正是这个组合让前端能认出「孤儿 run」：快照看着正常，
+    但已经没有东西在跑了。
+    """
+    workflow_routes.set_runner(runner)
+    r = await client.get("/api/workflow/missing/state")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stage"] == "idle"
+    assert body["alive"] is False
 
 
 async def test_stream_ok(client, runner):

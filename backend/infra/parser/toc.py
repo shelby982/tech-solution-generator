@@ -91,6 +91,43 @@ class Block:
 
 
 # ─────────────────────────────────────────────
+# 表格序列化
+# ─────────────────────────────────────────────
+
+def rows_to_markdown(rows: list[list[Optional[str]]]) -> str:
+    """把二维单元格序列化为 Markdown 表格。
+
+    docx 与 pdf 两条解析路径共用，两边的表格必须产出一致的文本 —— 下游是按
+    同一套规则消费的。docx 侧原本自己实现了一份（见 ``docx._table_to_markdown``），
+    行为与本函数逐字一致。
+
+    单元格内的换行转 ``<br>``、竖线转义，空单元格写一个空格：Markdown 的行
+    必须凑齐列数，空串会让两个 ``|`` 直接挨上，下游按 ``|`` 切列时错位。
+    """
+    if not rows:
+        return ""
+
+    cells_rows: list[list[str]] = []
+    for row in rows:
+        cells = []
+        for cell in row:
+            text = (cell or "").replace("|", "\\|").replace("\n", "<br>")
+            cells.append(text or " ")
+        cells_rows.append(cells)
+
+    n_cols = max(len(r) for r in cells_rows)
+    cells_rows = [r + [" "] * (n_cols - len(r)) for r in cells_rows]
+
+    md_lines = [
+        "| " + " | ".join(cells_rows[0]) + " |",
+        "| " + " | ".join(["---"] * n_cols) + " |",
+    ]
+    for r in cells_rows[1:]:
+        md_lines.append("| " + " | ".join(r) + " |")
+    return "\n".join(md_lines)
+
+
+# ─────────────────────────────────────────────
 # 特殊标记
 # ─────────────────────────────────────────────
 
@@ -122,6 +159,14 @@ HEADING_PATTERNS: list[tuple[int, re.Pattern]] = [
 ]
 
 
+# 章节号长相：每段 1~2 位。用来把表格里的数量（「2320.48 否」）
+# 和真正的二级章节号（「1.1 项目背景」）分开——前者整数部分常有 3 位以上。
+_SECTION_NUMBER_RE = re.compile(r'^\d{1,2}\.\d{1,3}(?:\.\d{1,3})*')
+
+# 列表项常见的收尾：以这些标点结束的多半是正文枚举，不是标题。
+_LIST_ITEM_TAIL = "；;。，,：:"
+
+
 def detect_level_from_numbering(text: str) -> Optional[int]:
     text = text.strip()
     for level, pattern in HEADING_PATTERNS:
@@ -134,8 +179,27 @@ def detect_level_from_numbering(text: str) -> Optional[int]:
             remainder = text[m.end():].strip()
             if len(remainder) > 20:
                 return None
+            # 空标题、以及以顿挫/句号收尾的枚举项，都不是标题
+            if not remainder or remainder[-1] in _LIST_ITEM_TAIL:
+                return None
+        if level == 4 and not _looks_like_section_number(m.group(0)):
+            return None
         return level
     return None
+
+
+def _looks_like_section_number(prefix: str) -> bool:
+    """判断匹配到的编号前缀是不是「章节号」。
+
+    非十进制编号（①②、「（1）」等）按原样放行；
+    纯数字开头的要求长得像 1.1 / 3.2.1，否则就是表格里的数值。
+
+    只认 ASCII 数字：``"①".isdigit()`` 是 True（Unicode 数字类），
+    用 isdigit 会把「①概述」误判成十进制编号。
+    """
+    if not prefix or prefix[0] not in "0123456789":
+        return True
+    return bool(_SECTION_NUMBER_RE.match(prefix))
 
 
 def clean_title(text: str) -> str:

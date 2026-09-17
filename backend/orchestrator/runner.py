@@ -180,7 +180,9 @@ class WorkflowRunner:
             if not ids or any(bid not in matrix for bid in ids):
                 raise ValueError("请选择当前工作流中的有效章节")
             async with get_db() as db:
-                rows = await list_blocks(db, state["project_id"])
+                rows = await list_blocks(
+                    db, state["project_id"], run_thread_id=state.get("thread_id"),
+                )
                 chunks = await list_chunks_with_filename(db, state["project_id"])
             db_map = {b["block_id"]: b for b in rows}
             proposal = state.get("proposal") or {}
@@ -228,15 +230,17 @@ class WorkflowRunner:
             run.task = asyncio.create_task(self._resume_until_pause(run, {}), name=f"wf-{thread_id}-{action}")
 
     async def rerun_match(self, thread_id: str) -> None:
-        """重新触发素材匹配：把 thread 状态指针拨回 GATE_OUTLINE 节点，再 ainvoke 让 graph
+        """重新触发素材匹配：把 thread 状态指针拨回 NODE_EXTRACT 节点，再 ainvoke 让 graph
         重新跑 shen_kuo_match → gate_materials。
 
         典型场景：用户已停在 gate_materials 状态点击「素材匹配」，希望沈括按当前已有 outline
         重新匹配（无需再走 parse / extract）。
 
         实现：
-        - aupdate_state(as_node=GATE_OUTLINE) 让 LangGraph 把这次 update 视作 GATE_OUTLINE 节点
+        - aupdate_state(as_node=NODE_EXTRACT) 让 LangGraph 把这次 update 视作 NODE_EXTRACT 节点
           的产物 → next 自动指向 NODE_MATCH（按图边推断）。
+          **不能用 GATE_OUTLINE**：图改成「闸门1 先于 extract」之后，GATE_OUTLINE 的 next 是
+          NODE_EXTRACT，那样每次重匹配都要白烧 N 次逐节提炼。
         - 顺便把 materials.matches 清空，避免旧匹配混入。
         """
         run = self._runs.get(thread_id)
@@ -312,18 +316,18 @@ class WorkflowRunner:
         )
 
     async def _rerun_match_until_pause(self, run: _Run) -> None:
-        """rerun_match 的后台 task：as_node=GATE_OUTLINE 后 ainvoke 走 match → gate_materials。"""
-        from orchestrator.graph import GATE_OUTLINE
+        """rerun_match 的后台 task：as_node=NODE_EXTRACT 后 ainvoke 走 match → gate_materials。"""
+        from orchestrator.graph import NODE_EXTRACT
 
         try:
             config = {"configurable": {"thread_id": run.thread_id}}
             async with self._checkpointer_provider() as saver:
                 graph = self._build(saver, run.emitter, thread_id=run.thread_id)
-                # 清掉旧 matches，并把指针拨回 GATE_OUTLINE 之后（next = match_node）
+                # 清掉旧 matches，并把指针拨回 NODE_EXTRACT 之后（next = match_node）
                 await graph.aupdate_state(
                     config,
                     {"materials": {"matches": {}}, "user_choice": "approve"},
-                    as_node=GATE_OUTLINE,
+                    as_node=NODE_EXTRACT,
                 )
                 await graph.ainvoke(None, config=config)
             await self._sync_stage(run.thread_id, graph_done=False)

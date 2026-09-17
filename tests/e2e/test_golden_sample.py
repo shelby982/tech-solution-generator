@@ -116,7 +116,7 @@ async def test_golden_sample_e2e(tmp_path):
     _log("project + materials seeded")
 
     async def spec_loader(project_id):
-        return BytesIO(spec_data), ".docx", "sample_spec.docx"
+        return [(BytesIO(spec_data), ".docx", "sample_spec.docx")]
 
     def deps_factory():
         return GraphDeps(

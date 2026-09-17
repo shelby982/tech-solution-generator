@@ -2349,8 +2349,8 @@
     <script type="module">
       import { GenerateSession } from './assets/generate-session.js';
       import { initContextPanel } from './assets/context-panel.js';
-      import { api } from './assets/api.js';
-      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20260916-loop4';
+      import { api } from './assets/api.js?v=20260917-loop6';
+      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20260917-loop7';
       initContextPanel();
 
       const params = new URLSearchParams(location.search);
@@ -2592,7 +2592,7 @@
       // 进入页面时拉一次 blocks 看是否已有内容
       (async () => {
         try {
-          const list = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+          const list = await fetch(`/api/projects/${projectId}/blocks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json());
           if (Array.isArray(list)) {
             _generatedCount = list.filter(b => b?.content && String(b.content).trim()).length;
             _refreshGoReviewBtn();
@@ -2697,7 +2697,7 @@
             // 仅当 graph 后台 task 真的还在跑时才自动开流；否则只展示已生成的内容，
             // 避免"已生成完毕的项目重新进入工作台时，UI 进入批量进度条状态"的误导。
             try {
-              const dbBlocks = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+              const dbBlocks = await fetch(`/api/projects/${projectId}/blocks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json());
               const list = Array.isArray(dbBlocks) ? dbBlocks : [];
               const contentBlocks = list.filter(b => Number(b.level) >= 2 || b.kind !== 'heading');
               const empty = contentBlocks.filter(b => !(b.content && String(b.content).trim()));
@@ -4478,7 +4478,7 @@
         const batchCustomReq = (window.__promptTextareas?.custom || '').trim();
         const targetWords = parseInt(document.getElementById('ced-wordlimit')?.value) || 800;
 
-        const blocks = await fetch(`/api/projects/${projectId}/blocks`).then(r => r.json());
+        const blocks = await fetch(`/api/projects/${projectId}/blocks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json());
         const contentBlocks = blocks.filter(b => !(b.content && b.content.trim()));
         let done = 0;
         if (batchMeta) batchMeta.textContent = `0 / ${contentBlocks.length}`;
@@ -5238,6 +5238,6 @@
       })();
     })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260916-loop4"></script>
+  <script type="module" src="./assets/workspace.js?v=20260917-loop7"></script>
   </body>
 </html>

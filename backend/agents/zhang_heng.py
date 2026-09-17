@@ -39,6 +39,33 @@ class SpecParseResult:
     doc_title: str
     doc_summary: str
     toc: list[DomainSection]
+    # 项目概述生成失败的原因（空串 = 成功）。摘要生成当前已停用（见 parse），
+    # 所以恒为空串；字段与它的消费方（state、闸门 1）保留不动 —— 恢复摘要时
+    # 不该还要回头改这条链路。
+    doc_summary_error: str = ""
+
+
+# ─────────────────────────────────────────────
+# parse：多文件进度
+# ─────────────────────────────────────────────
+
+def _label_progress(
+    callback: Optional[Callable[[str, int, int], None]],
+    filename: str,
+    idx: int,
+    total: int,
+) -> Optional[Callable[[str, int, int], None]]:
+    """给单份文件的解析进度加上「第几份 / 共几份 + 文件名」前缀。
+
+    单份时不加前缀，保持改造前的进度文案不变。
+    """
+    if callback is None or total <= 1:
+        return callback
+
+    def _wrapped(step: str, current: int, total_steps: int) -> None:
+        callback(f"[{idx}/{total}] {filename} · {step}", current, total_steps)
+
+    return _wrapped
 
 
 # ─────────────────────────────────────────────
@@ -157,66 +184,83 @@ class ZhangHengAgent:
 
     async def parse(
         self,
-        file_source: Union[str, BinaryIO],
+        sources: list[tuple[Union[str, BinaryIO], str, str]],
         *,
-        suffix: str = "",
-        filename: str = "",
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
     ) -> SpecParseResult:
-        """解析规范书文件。
+        """解析「应标要求」面板下的全部文件（规范书 / 主招标文件 / 评分表 / 评审要素）。
 
-        - 调 infra.parser.parse_document 拿到 ParsedDocument
-        - 调 infra.llm.dispatch_doc_summary 生成 doc_summary（失败留空，不抛）
+        sources: ``[(file_source, suffix, filename), ...]``，按上传顺序。
+
+        多份文件的目录**按顺序拼接**成一份 source_toc，供后续 outline_draft 做
+        grounding 与降级兜底。
+
+        - 调 infra.parser.parse_document 拿到 ParsedDocument（逐份）
         - 把 infra.parser.Section → domain.spec.Section
+        - doc_summary 当前不生成（恒为空串），原因见下方注释
         """
         import asyncio
 
-        from infra.llm import dispatch_doc_summary
         from infra.parser import parse_document
 
-        # parse_document 是同步且耗时（解析 docx/pdf）。直接 await 会阻塞事件循环，
-        # 导致 SSE emitter 的 stream() 在解析期间一帧都吐不出。扔到后台线程跑。
-        parsed = await asyncio.to_thread(
-            parse_document,
-            file_source,
-            suffix=suffix,
-            filename=filename,
-            progress_callback=progress_callback,
-        )
+        if not sources:
+            raise ValueError("没有可解析的要求文件")
 
-        # infra Section → domain Section
-        toc: list[DomainSection] = [
-            DomainSection(
-                id=s.id,
-                level=s.level,
-                title=s.title,
-                raw_content=s.raw_content,
-                special_marks=list(s.special_marks),
-            )
-            for s in parsed.sections
-        ]
+        docs = []
+        for idx, (file_source, suffix, filename) in enumerate(sources, start=1):
+            # parse_document 是同步且耗时（解析 docx/pdf）。直接 await 会阻塞事件循环，
+            # 导致 SSE emitter 的 stream() 在解析期间一帧都吐不出。扔到后台线程跑。
+            docs.append(await asyncio.to_thread(
+                parse_document,
+                file_source,
+                suffix=suffix,
+                filename=filename,
+                progress_callback=_label_progress(
+                    progress_callback, filename, idx, len(sources),
+                ),
+            ))
 
-        # 生成 doc_summary（输入是各 section 的 title + content）
+        # infra Section → domain Section。
+        # 每份文档的 section id 都是 s1..sN，直接拼接会撞车，所以按拼接后的
+        # 顺序重新编号 —— source_toc 的 id 只用于 grounding 的位置索引与占位行，
+        # 重新编号不影响任何下游语义。
+        toc: list[DomainSection] = []
+        doc_titles: list[str] = []
+        for doc in docs:
+            if doc.title:
+                doc_titles.append(doc.title)
+            for s in doc.sections:
+                toc.append(DomainSection(
+                    id=f"s{len(toc) + 1}",
+                    level=s.level,
+                    title=s.title,
+                    raw_content=s.raw_content,
+                    special_marks=list(s.special_marks),
+                ))
+
+        # 摘要生成暂时停用（2026-09-17）。
+        #
+        # 用 deepseek-v4-pro 这类推理模型时这一步**必然**返回空：摘要走
+        # dispatcher._generate_doc_summary，实参是 max_tokens=2000，而推理模型的
+        # max_tokens 是「思考 + 正文」之和 —— 2000 连思考都写不完，正文一个字不吐。
+        # 跑一次只换来一条「模型返回空内容」的降级提示和一次无谓的等待。
+        #
+        # 跳过它不改变任何下游输入：doc_summary 本来就会是空串，目录派生
+        # （见本类 draft_outline 的 payload）与单章节正文生成
+        # （dispatcher.dispatch_stream_generate 的 doc_summary 形参）拿到的都是空值，
+        # 两条路径对空串都已有分支。
+        #
+        # 恢复：把 infra.llm.dispatch_doc_summary 的调用接回来，**并同时**给它足够的
+        # max_tokens（或改用非推理模型），否则接回来的只是那条降级提示。
         doc_summary = ""
-        configs, rr_start = self._configs_provider()
-        if configs and toc:
-            sections_for_summary = [
-                {"title": s.title, "content": s.raw_content}
-                for s in toc
-            ]
-            try:
-                doc_summary = await dispatch_doc_summary(
-                    configs, rr_start, sections_for_summary,
-                )
-            except Exception as e:
-                logger.warning(f"张衡：doc_summary 生成失败，留空：{e}")
-                doc_summary = ""
+        doc_summary_error = ""
 
         return SpecParseResult(
-            doc_id=parsed.doc_id,
-            doc_title=parsed.title,
+            doc_id=docs[0].doc_id,
+            doc_title="、".join(doc_titles),
             doc_summary=doc_summary,
             toc=toc,
+            doc_summary_error=doc_summary_error,
         )
 
     # ── draft_outline ──────────────────────────
@@ -242,11 +286,11 @@ class ZhangHengAgent:
 
         if not source_toc:
             return OutlineDraftResult(
-                sections=[], degraded=True, error="规范书目录为空，无法派生应答目录",
+                sections=[], degraded=True, error="要求文件目录为空，无法派生应答目录",
             )
 
         def _fallback(reason: str) -> OutlineDraftResult:
-            logger.warning(f"张衡：目录派生降级（{reason}），沿用规范书原始目录")
+            logger.warning(f"张衡：目录派生降级（{reason}），沿用要求文件原始目录")
             return OutlineDraftResult(
                 sections=[DomainSection(**s.to_dict()) for s in source_toc],
                 degraded=True,
@@ -255,14 +299,24 @@ class ZhangHengAgent:
 
         configs, rr_start = self._configs_provider()
         if not configs:
-            return _fallback("未配置模型，沿用规范书目录")
+            return _fallback("未配置模型，沿用要求文件原目录")
+
+        # 先按提炼要求定位「用文件的哪一部分」，再拿这部分去派生。
+        # 整份文件灌进去时，招标公告/资格要求/合同范本会把真正要的章节挤出预算。
+        flat = [
+            {"title": s.title, "content": s.raw_content, "level": s.level}
+            for s in source_toc
+        ]
+        digest_sections, follow_structure = await self._locate_for_digest(
+            flat, instruction, configs, rr_start,
+        )
 
         payload = {
             "instruction": instruction,
             "doc_summary": doc_summary,
-            "spec_digest": build_spec_digest(
-                [{"title": s.title, "content": s.raw_content} for s in source_toc],
-            ),
+            "spec_digest": build_spec_digest(digest_sections),
+            # 定位到了用户点名的那一部分 → 目录按那部分自身的结构拆，不重新组织
+            "follow_structure": follow_structure,
             "previous_outline": (
                 _render_toc_text(previous_toc) if previous_toc else ""
             ),
@@ -294,6 +348,92 @@ class ZhangHengAgent:
             degraded=False,
             error="；".join(warnings),
         )
+
+    async def _locate_for_digest(
+        self,
+        flat: list[dict],
+        instruction: str,
+        configs: list,
+        rr_start: int,
+    ) -> tuple[list[dict], bool]:
+        """挑出进 digest 的材料：命中区段带正文，其余只留标题。
+
+        返回 ``(digest 条目, 是否定位到了用户点名的那一部分)``。第二个值为真时，
+        调用方要求模型**按那部分自身的结构**拆章节 —— 用户说的「按照评分要求中的
+        每一点进行大纲拆分章节」，指的就是复刻这一部分的结构。
+
+        三条路径，逐级退化，任何一步失败都不会让内容凭空消失：
+
+        1. **区段定位**（确定性）：要求里点名了标包/标的/标段时，按文档里的同类
+           锚点整段切出。实测一份 164 页采购文件里标包2 的评分标准只占 7.3%，
+           章级检索命中不了（那些章节的标题里一个「标包2」都没有）。
+        2. **模型兜底**：有范围标识却找不到锚点时，让模型把口语化说法翻成字面
+           关键词，拿回来重跑一次路径 1。
+        3. **章级定位**：上面都不成，退回 ``locate_sections`` —— 与改造前一致。
+           这条路只是「挑出相关章节」，没定位到用户点名的部分，结构仍由模型组织。
+        """
+        from infra.retrieval.locate import locate_sections
+        from infra.retrieval.segment import extract_scope_tokens, locate_segments
+
+        segments = locate_segments(flat, instruction)
+
+        # 只有「用户确实点了范围、却哪儿都认不出」才值得多花一次模型调用；
+        # 要求里压根没有范围标识时（「按评分项逐条拆章」），模型也无从下手。
+        if segments is None and extract_scope_tokens(instruction):
+            keyword = await self._model_scope_keyword(
+                instruction, [s["title"] for s in flat], configs, rr_start,
+            )
+            if keyword:
+                segments = locate_segments(flat, keyword)
+
+        if segments is not None:
+            return (
+                [
+                    {"title": s.title, "content": s.content, "selected": s.selected}
+                    for s in segments
+                ],
+                True,
+            )
+
+        located = locate_sections(flat, instruction)
+        return (
+            [
+                {"title": flat[i]["title"], "content": flat[i]["content"]}
+                for i in located
+            ],
+            False,
+        )
+
+    async def _model_scope_keyword(
+        self,
+        instruction: str,
+        titles: list[str],
+        configs: list,
+        rr_start: int,
+    ) -> str:
+        """兜底：让模型把要求里的说法换成文档里的字面标识。失败返回空串。"""
+        import infra.llm
+
+        try:
+            obj = await infra.llm.dispatch_scope_select_json(configs, rr_start, {
+                "instruction": instruction,
+                # 文件名没传到这一层（SpecLoader 元组里才有），只给章节标题
+                "file_names": [],
+                "section_titles": titles,
+            })
+        except Exception as e:
+            logger.warning(f"张衡：检索范围兜底失败，退回章级定位：{e}")
+            return ""
+
+        keywords = [
+            str(k).strip()
+            for k in (obj.get("keywords") or [])
+            if isinstance(k, (str, int, float)) and str(k).strip()
+        ]
+        if not keywords:
+            return ""
+        logger.info(f"张衡：模型圈定的检索关键词 {keywords}")
+        return " ".join(keywords)
 
     # ── extract ────────────────────────────────
 

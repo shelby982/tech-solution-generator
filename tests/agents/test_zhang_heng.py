@@ -55,7 +55,7 @@ async def test_parse_returns_domain_sections(monkeypatch):
     agent = ZhangHengAgent(configs_provider=_fake_configs)
 
     result = await agent.parse(
-        _build_minimal_docx(), suffix=".docx", filename="test.docx",
+        [(_build_minimal_docx(), ".docx", "test.docx")],
     )
 
     assert isinstance(result, SpecParseResult)
@@ -64,23 +64,64 @@ async def test_parse_returns_domain_sections(monkeypatch):
     assert "项目概述" in result.toc[0].title
     # ★ 标记应在 special_marks 中
     assert "★" in result.toc[1].special_marks
-    # mock 模式下 doc_summary 由 mock 兜底返回非空字符串
-    assert isinstance(result.doc_summary, str)
-    assert result.doc_summary  # 非空
+    # 摘要已停用（见 test_parse_does_not_call_doc_summary），恒为空串
+    assert result.doc_summary == ""
 
 
 @pytest.mark.asyncio
-async def test_parse_when_no_configs_leaves_doc_summary_empty(monkeypatch):
-    """无 LLM 配置时 doc_summary 留空，不抛错。"""
+async def test_parse_does_not_call_doc_summary(monkeypatch):
+    """摘要生成已停用：parse 不再调 dispatch_doc_summary。
+
+    推理型模型在 max_tokens=2000 下必然返回空（预算连思考都不够），跑一次只换来
+    一条用户无法处置的降级提示。恢复时这条用例会失败 —— 这是有意的：接回调用必须
+    同时给它足够的预算，否则接回来的只是那条提示。
+    """
+    monkeypatch.setenv("LLM_MODE", "mock")
+    import infra.llm
+
+    called = []
+
+    async def _spy(*args, **kwargs):
+        called.append(1)
+        return "不该被调用的摘要"
+
+    monkeypatch.setattr(infra.llm, "dispatch_doc_summary", _spy)
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+
+    result = await agent.parse([(_build_minimal_docx(), ".docx", "test.docx")])
+
+    assert called == []
+    assert result.doc_summary == ""
+    # 是「停用」不是「失败」，所以不记 error：别在闸门 1 上吓用户
+    assert result.doc_summary_error == ""
+    assert len(result.toc) == 2
+
+
+@pytest.mark.asyncio
+async def test_parse_merges_multiple_requirement_files(monkeypatch):
+    """多份要求文件的目录按上传顺序拼接，id 连续重编号（各文档原生 id 都是 s1..sN，会撞车）。"""
     monkeypatch.setenv("LLM_MODE", "mock")
     agent = ZhangHengAgent(configs_provider=lambda: ([], 0))
 
-    result = await agent.parse(
-        _build_minimal_docx(), suffix=".docx", filename="test.docx",
-    )
+    result = await agent.parse([
+        (_build_minimal_docx(), ".docx", "招标文件.docx"),
+        (_build_minimal_docx(), ".docx", "评分表.docx"),
+    ])
 
-    assert result.doc_summary == ""
-    assert len(result.toc) == 2
+    assert len(result.toc) == 4
+    assert [s.id for s in result.toc] == ["s1", "s2", "s3", "s4"]
+    # 两份文档的标题拼在一起（fixture 两份同名，所以是两个「第一章 项目概述」）
+    assert result.doc_title.count("、") == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_without_sources_raises(monkeypatch):
+    """没有任何要求文件时明确抛错，而不是静默产出一份空目录。"""
+    monkeypatch.setenv("LLM_MODE", "mock")
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+
+    with pytest.raises(ValueError):
+        await agent.parse([])
 
 
 # ─────────────────────────────────────────────
@@ -262,6 +303,208 @@ async def test_draft_outline_degrades_when_too_few_top_level(monkeypatch):
 
     assert result.degraded is True
     assert "结构不完整" in result.error
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_locates_by_instruction_before_digest(monkeypatch):
+    """提炼要求指向哪一部分，进 prompt 的就是那一部分 —— 不是整份文件。
+
+    实测场景：164 页采购文件解析出 300+ 章，用户要求「按照标包2的技术评分要求
+    拆分章节」，但整份文件灌进去时封面/招标公告/合同范本先把 8000 字预算占满。
+    """
+    captured: dict = {}
+
+    async def _capture(configs, rr_start, payload):
+        captured.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "项目理解"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 1, "title": "服务保障"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _capture)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = (
+        [DomainSection(id=f"s{i}", level=1, title=f"第{i}页",
+                       raw_content="招标人：广东电网有限责任公司")
+         for i in range(1, 200)]
+        + [DomainSection(id="s200", level=1, title="标包2 技术评分要求",
+                         raw_content="评分因素：技术方案完整性、团队经验、实施计划")]
+    )
+
+    await agent.draft_outline(source, instruction="按照标包2的技术评分要求拆分章节")
+
+    digest = captured["spec_digest"]
+    assert "标包2 技术评分要求" in digest
+    assert "评分因素：技术方案完整性" in digest
+    # 噪声章节不该跟着进 prompt
+    assert "招标人：广东电网有限责任公司" not in digest
+    # 这份语料里没有文档锚点，走的是章级定位 → 没定位到「对应部分」，结构不锁死
+    assert captured["follow_structure"] is False
+
+
+def _anchored_source() -> list[DomainSection]:
+    """仿真实采购文件：公告/须知在前，标包1/2/3 的评审标准夹在中间，合同范本在后。"""
+    return [
+        DomainSection(id="s1", level=1, title="招标公告",
+                      raw_content="招标人：某某电网有限责任公司\n招标文件（标准文件范本）"),
+        DomainSection(id="s2", level=1, title="投标人须知",
+                      raw_content="投标人应当具备下列条件…"),
+        DomainSection(id="s3", level=1, title="评审标准", raw_content="\n".join([
+            "下列评审标准适用的标的/标包：标包1：关键业务场景研究与验证标包",
+            "标包1 的商务要求：具备相关资质",
+            "下列评审标准适用的标的/标包：标包2：高可靠技术专题研究与验证标包",
+            "技术评分标准：技术方案、项目管理、实施方案、交付成果、服务团队",
+            "下列评审标准适用的标的/标包：标包3：主数据管理研究及全过程技术管控标包",
+            "标包3 的商务要求：具备相关业绩",
+        ])),
+        DomainSection(id="s4", level=1, title="合同范本", raw_content="合同条款范本"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_keeps_only_selected_segment_body_in_digest(monkeypatch):
+    """定位到标包2 时：只有标包2 的正文进 prompt，其余段落只留标题。
+
+    实测一份 164 页采购文件里标包2 的评分标准只占 7.3%，章级检索命中不了它
+    （那 34 个章节的标题里一个「标包2」都没有），只能按文档锚点整段切。
+    """
+    captured: dict = {}
+
+    async def _capture(configs, rr_start, payload):
+        captured.update(payload)
+        return {"nodes": [{"level": 1, "title": t} for t in ("项目理解", "技术响应", "服务保障")]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _capture)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    await agent.draft_outline(
+        _anchored_source(),
+        instruction="按照主招标文件中的标包2的技术评分要求的点进行大纲拆分章节",
+    )
+
+    # 定位到了用户点名的那一部分 → 目录要按这部分自身的结构拆
+    assert captured["follow_structure"] is True
+
+    digest = captured["spec_digest"]
+    # 选中段的正文进来了
+    assert "技术评分标准：技术方案、项目管理" in digest
+    # 其它标包只留标题，正文不进 —— 这就是省 token 的地方
+    assert "标包1：关键业务场景研究与验证标包" in digest
+    assert "标包1 的商务要求：具备相关资质" not in digest
+    assert "标包3 的商务要求：具备相关业绩" not in digest
+    # 文档开头的公告/须知整段丢掉（它们连标题都不该占预算）
+    assert "招标人：某某电网有限责任公司" not in digest
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_grounds_from_unselected_content(monkeypatch):
+    """「未选中」只影响 digest 里给模型看什么，不影响 grounding 从哪取料。
+
+    这是整个设计能成立的关键：标包2 之外的材料（比如另一份没写标包号的
+    技术招标文件）仍然能被 BM25 挂回派生的章节，extract 的 8 字段提炼不缺输入。
+    """
+    async def _tree(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "标包1 的商务要求"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 1, "title": "服务保障"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _tree)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    result = await agent.draft_outline(
+        _anchored_source(),
+        instruction="按照主招标文件中的标包2的技术评分要求的点进行大纲拆分章节",
+    )
+
+    by_title = {s.title: s for s in result.sections}
+    assert "具备相关资质" in by_title["标包1 的商务要求"].raw_content
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_skips_scope_model_without_scope_token(monkeypatch):
+    """要求里没有范围标识（「按评分项逐条拆章」）时不调模型 —— 无从下手。"""
+    seen_payload: list = []
+
+    async def _capture_kw(configs, rr_start, payload):
+        seen_payload.append(payload)
+        return {"files": [], "keywords": ["标包2"]}
+
+    async def _tree(configs, rr_start, payload):
+        return {"nodes": [{"level": 1, "title": t} for t in ("A", "B", "C")]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_scope_select_json", _capture_kw)
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _tree)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    await agent.draft_outline(_anchored_source(), instruction="按评分项逐条拆章")
+
+    assert seen_payload == []
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_scope_model_fallback_runs_once(monkeypatch):
+    """点了范围却找不到锚点（文档换了个说法）时才兜底一次，且把标题给模型。"""
+    seen_payload: list = []
+
+    async def _capture_kw(configs, rr_start, payload):
+        seen_payload.append(payload)
+        return {"files": [], "keywords": ["标包2"]}
+
+    async def _tree(configs, rr_start, payload):
+        return {"nodes": [{"level": 1, "title": t} for t in ("A", "B", "C")]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_scope_select_json", _capture_kw)
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _tree)
+
+    # 文档里只有「第四包」这类别的写法，锚点族认不出
+    source = [
+        DomainSection(id="s1", level=1, title=f"第{i}页",
+                      raw_content="招标人：某某公司") for i in range(20)
+    ]
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    await agent.draft_outline(source, instruction="按照标包2的要求拆分章节")
+
+    assert len(seen_payload) == 1
+    assert "第0页" in seen_payload[0]["section_titles"]
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_keeps_full_digest_without_instruction(monkeypatch):
+    """没写提炼要求时定位退化为全量，行为与改造前一致。"""
+    captured: dict = {}
+
+    async def _capture(configs, rr_start, payload):
+        captured.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "项目理解"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 1, "title": "服务保障"},
+        ]}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _capture)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="甲章节", raw_content="甲正文"),
+        DomainSection(id="s2", level=1, title="乙章节", raw_content="乙正文"),
+    ]
+
+    await agent.draft_outline(source, instruction="")
+
+    assert "甲章节" in captured["spec_digest"]
+    assert "乙章节" in captured["spec_digest"]
+    # 没定位到用户点名的部分 → 结构仍由模型自己组织
+    assert captured["follow_structure"] is False
 
 
 @pytest.mark.asyncio

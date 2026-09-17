@@ -121,7 +121,7 @@ async def regen(thread_id: str, req: RegenReq):
 
 @router.post("/{thread_id}/rerun-match")
 async def rerun_match(thread_id: str):
-    """重新触发素材匹配：把状态拨回 GATE_OUTLINE 后 → graph 自动跑 match → gate_materials。"""
+    """重新触发素材匹配：把状态拨回 NODE_EXTRACT 后 → graph 自动跑 match → gate_materials。"""
     runner = get_runner()
     try:
         await runner.rerun_match(thread_id)
@@ -198,7 +198,14 @@ async def state(thread_id: str):
     runner = get_runner()
     snap = await runner.state(thread_id)
     from orchestrator.nodes import REVIEW_SCORE_THRESHOLD
-    return JSONResponse({**snap, "ui": {"review_threshold": REVIEW_SCORE_THRESHOLD}})
+    # runner.state() 只读 checkpoint：后端重启后 _runs 内存清空，但 checkpoint 还停在
+    # 「跑了一半」的 stage 上，快照看起来仍然正常。前端要靠 alive 才能区分「正常停在闸门」
+    # 和「进程已经不认得这个 thread 了」——否则页面会把中断的 run 当成待继续的任务。
+    return JSONResponse({
+        **snap,
+        "alive": runner.has_run(thread_id),
+        "ui": {"review_threshold": REVIEW_SCORE_THRESHOLD},
+    })
 
 
 @router.get("/{thread_id}/stream")

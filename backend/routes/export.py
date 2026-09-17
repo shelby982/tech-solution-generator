@@ -19,6 +19,7 @@ from db import get_db
 from services.block_store import (
     get_project,
     list_blocks,
+    current_run_thread_id,
     get_snapshot,
     create_snapshot,
     add_revision,
@@ -82,7 +83,8 @@ async def get_diff(project_id: int):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        current_blocks = await list_blocks(db, project_id)
+        tid = await current_run_thread_id(db, project_id)
+        current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
 
         if not project.get("base_snapshot_id"):
             added = [{"block_id": b["block_id"], "title": b.get("title"), "content": b.get("content")}
@@ -111,7 +113,8 @@ async def apply_diff(project_id: int, body: DiffApplyRequest):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        current_blocks = await list_blocks(db, project_id)
+        tid = await current_run_thread_id(db, project_id)
+        current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
         current_map = {b["block_id"]: b for b in current_blocks}
 
         base_map: dict[str, dict] = {}
@@ -159,7 +162,8 @@ async def export_docx(project_id: int):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        all_blocks = await list_blocks(db, project_id)
+        tid = await current_run_thread_id(db, project_id)
+        all_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
 
     sections_data = [
         {

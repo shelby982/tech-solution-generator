@@ -3,7 +3,7 @@ infra/llm 公开 API：
 - LLMConfig / OPENAI_COMPATIBLE_PROVIDERS（从 services.config_store 转出）
 - verify_api_key
 - dispatch_stream_generate / dispatch_doc_summary / dispatch_outline_json / dispatch_block_write
-- dispatch_outline_draft_json
+- dispatch_outline_draft_json / dispatch_scope_select_json
 - generate_section_outline / generate_letter_content
 - is_letter_section / LETTER_KEYWORDS
 
@@ -19,6 +19,7 @@ from .dispatcher import (
     dispatch_doc_summary,
     dispatch_outline_draft_json,
     dispatch_outline_json,
+    dispatch_scope_select_json,
     dispatch_stream_generate,
     generate_letter_content,
     generate_section_outline,
@@ -35,6 +36,7 @@ __all__ = [
     "dispatch_doc_summary",
     "dispatch_outline_draft_json",
     "dispatch_outline_json",
+    "dispatch_scope_select_json",
     "dispatch_block_write",
     "generate_section_outline",
     "generate_letter_content",

@@ -105,18 +105,26 @@ def build_outline_extract_user(
 # 张衡：应答文件目录派生
 # ─────────────────────────────────────────────
 
-# 规范书章节正文进入 prompt 的总预算（字符）。加权分配算法同
+# 要求文件章节正文进入 prompt 的总预算（字符）。加权分配算法同
 # ``dispatcher._generate_doc_summary``，遍历时用剩余预算限制单章配额。
 OUTLINE_DRAFT_SPEC_BUDGET = 8000
+# 「未选中」部分的独立子预算（字符）。定位于某一部分时，其余部分只列标题、不列正文；
+# 单给一份子预算，免得它们的标题把选中部分的正文挤出总预算。
+OUTLINE_DRAFT_UNSELECTED_BUDGET = 1200
+# build_spec_digest 里给「以下 N 个章节未列出」那行留的字符数
+_TRUNCATION_MARKER_RESERVE = 40
 # 用户提炼要求进 prompt 的预算（字符），置顶且标注为最高优先级。
 OUTLINE_DRAFT_INSTRUCTION_BUDGET = 1000
 
 OUTLINE_DRAFT_SYSTEM = (
-    "你是资深的投标文件编制专家，擅长依据招标文件与规范书，为投标人编排应答文件的章节目录。\n"
-    "你的任务不是复述招标文件的目录，而是**站在投标人的角度，重新组织出一份应答文件应有的目录结构**。\n"
+    "你是资深的投标文件编制专家，擅长依据用户提供的要求文件（招标文件 / 技术规范书 / "
+    "评分表 / 评审要素），为投标人编排应答文件的章节目录。\n"
+    "你的任务不是复述要求文件的目录，而是**站在投标人的角度，重新组织出一份应答文件应有的目录结构**。\n"
     "编排原则：\n"
-    "1. 覆盖性：招标文件与规范书中出现的技术要求、评分项、评审要素，都应在目录中找到明确的落点章节；\n"
-    "2. 可响应性：章节标题应当指向「我方要写什么」，而不是「招标方提了什么」；\n"
+    "1. 覆盖性：**给定材料中**出现的技术要求、评分项、评审要素，都应在目录中找到明确的落点章节；"
+    "材料被分成两部分时，以标注为「已定位到的材料」的那部分为准，标注为「文件的其余部分」的条目仅供了解文档全貌，不要据此展开章节；\n"
+    "2. 可响应性：章节标题应当指向「我方要写什么」，而不是「招标方提了什么」"
+    "（用户在 user prompt 中要求「按材料自身结构拆分」时不适用，以用户要求为准）；\n"
     "3. 层次性：一级章节为大的应答板块，其下按需拆分二级、三级，最多四级；避免只有一层或层级过深；\n"
     "4. 用户优先：用户给出的提炼要求与拆分逻辑具有最高优先级，与之冲突时以用户要求为准；\n"
     "5. 可读性：标题简洁明确，不用「关于……的说明」这类冗余前缀，不加序号（序号由系统生成）。\n"
@@ -124,14 +132,47 @@ OUTLINE_DRAFT_SYSTEM = (
 )
 
 
-def build_spec_digest(sections: list[dict], budget: int = OUTLINE_DRAFT_SPEC_BUDGET) -> str:
-    """把规范书章节列表压成带预算的摘要文本。
+_SELECTED_HEADER = "【已定位到的材料（请据此编排章节）】"
+_UNSELECTED_HEADER = "【文件的其余部分（仅列标题，不要据此展开章节）】"
 
-    按内容长度加权分配字符配额（每章至少 100 字），遍历时用剩余预算限制单章
-    配额，使总长度自然落在 ``budget`` 内。
 
-    sections: [{"title": str, "content": str}, ...]
+def build_spec_digest(
+    sections: list[dict],
+    budget: int = OUTLINE_DRAFT_SPEC_BUDGET,
+    unselected_budget: int = OUTLINE_DRAFT_UNSELECTED_BUDGET,
+) -> str:
+    """把要求文件章节列表压成带预算的摘要文本。
+
+    按内容长度加权分配字符配额（每章至少 100 字），遍历时用剩余预算限制单章配额。
+
+    **标题行同样计入预算。** 招投标文件动辄上千个章节，只算正文不算标题的话
+    预算形同虚设：实测一份 1785 章的采购文件，正文被限在 8000 字，光标题行
+    就额外输出了 5.9 万字符，prompt 直接撑爆。预算耗尽即停止列出，并在末尾
+    标注被截断的章节数，免得模型把「列出来的这些」误当成全部目录。
+
+    条目带 ``selected: False`` 时（提炼要求点名了文件里的某一部分，见
+    ``infra.retrieval.segment``），正文不进 prompt，只在该部分自己的
+    ``unselected_budget`` 里占一行标题。没有未选中条目时（含改造前的全部调用点）
+    输出与旧实现逐字一致。
+
+    sections: [{"title": str, "content": str, "selected": bool}, ...]
     """
+    entries = list(sections or [])
+    unselected = [s for s in entries if not s.get("selected", True)]
+    if not unselected:
+        return _digest_selected(entries, budget)
+
+    selected = [s for s in entries if s.get("selected", True)]
+    selected_budget = max(0, budget - len(_SELECTED_HEADER) - 2)
+    titles_budget = max(0, unselected_budget - len(_UNSELECTED_HEADER) - 2)
+    return "\n\n".join([
+        _SELECTED_HEADER + "\n" + _digest_selected(selected, selected_budget),
+        _UNSELECTED_HEADER + "\n" + _digest_titles(unselected, titles_budget),
+    ])
+
+
+def _digest_selected(sections: list[dict], budget: int) -> str:
+    """选中部分：标题 + 按长度加权分配的正文配额。"""
     entries = [
         (s, len(s.get("content") or ""))
         for s in (sections or [])
@@ -140,19 +181,72 @@ def build_spec_digest(sections: list[dict], budget: int = OUTLINE_DRAFT_SPEC_BUD
 
     remaining = budget
     parts: list[str] = []
+    listed = 0
+
+    def _take(text: str, *, reserve: int = 0) -> bool:
+        """按 join 之后的实际占用扣预算（+1 是分隔换行），放得下才收。
+
+        reserve 是不许动用的余量 —— 列章节时给末尾的截断提示留位，
+        否则提示行会因为预算被章节吃光而写不出去。
+        """
+        nonlocal remaining
+        cost = len(text) + 1
+        if cost + reserve > remaining:
+            return False
+        remaining -= cost
+        parts.append(text)
+        return True
+
     for sec, content_len in entries:
         title = sec.get("title") or ""
         content = sec.get("content") or ""
-        if not content or remaining <= 0:
-            parts.append(f"【{title}】")
+        if not _take(f"【{title}】", reserve=_TRUNCATION_MARKER_RESERVE):
+            break
+        listed += 1
+        if not content:
             continue
         quota = max(100, int(budget * content_len / total_len))
-        quota = min(quota, remaining)
-        snippet = content[:quota]
-        parts.append(f"【{title}】\n{snippet}")
-        remaining -= len(snippet)
+        quota = min(quota, remaining - _TRUNCATION_MARKER_RESERVE)
+        if quota <= 0:
+            continue
+        _take(content[:quota], reserve=_TRUNCATION_MARKER_RESERVE)
 
-    return "\n\n".join(parts)
+    truncated = len(entries) - listed
+    if truncated:
+        _take(f"【……以下 {truncated} 个章节因长度限制未列出】")
+
+    return "\n".join(parts)
+
+
+def _digest_titles(sections: list[dict], budget: int) -> str:
+    """未选中部分：只列标题，正文一律丢弃。"""
+    parts: list[str] = []
+    remaining = budget
+    for sec in sections or []:
+        line = f"【{sec.get('title') or ''}】"
+        if len(line) + 1 + _TRUNCATION_MARKER_RESERVE > remaining:
+            break
+        remaining -= len(line) + 1
+        parts.append(line)
+
+    truncated = len(sections or []) - len(parts)
+    if truncated:
+        parts.append(f"【……其余 {truncated} 个部分因长度限制未列出】")
+    return "\n".join(parts)
+
+
+# 提炼要求点名的那一部分已经定位到时，追加的拆分规则。
+# 定位成功意味着「材料就是用户要的那一块」，此时目录应当**复刻材料自身的结构**，
+# 而不是让模型重新组织 —— 后者会把「按评分要求中的每一点拆章」拆成自己想的一套板块。
+FOLLOW_STRUCTURE_RULE = (
+    "【最高优先级：严格按材料自身的结构拆分章节】\n"
+    "上面【已定位到的材料】就是用户的提炼要求点名的那一部分，请在它的基础上拆章节，"
+    "**忠实还原这部分自身的组织结构**：\n"
+    "1. 材料里每一个评分因素 / 评审项 / 编号条目，各自对应一个章节，一条都不要漏、彼此不要合并；\n"
+    "2. 章节名称取自材料原文（如「技术方案」「项目管理」），并保持它们在材料中的先后顺序；\n"
+    "3. 只拆材料里真实存在的结构，不要另行增设材料未涉及的一级板块；\n"
+    "4. 材料自身有层级时（如「评分因素 → 详细评审项」），按同样的层级拆成多级章节。"
+)
 
 
 def build_outline_draft_user(
@@ -161,10 +255,14 @@ def build_outline_draft_user(
     spec_digest: str,
     previous_outline: str = "",
     material_digest: str = "",
+    follow_structure: bool = False,
 ) -> str:
     """构造应答文件目录派生的 user prompt。
 
     instruction 置顶并标注为最高优先级，截断至 ``OUTLINE_DRAFT_INSTRUCTION_BUDGET``。
+    follow_structure 在提炼要求点名的那一部分已被定位到（``spec_digest`` 里带
+    「已定位到的材料」）时为真，追加 ``FOLLOW_STRUCTURE_RULE``，让目录复刻该部分
+    自身的结构而不是重新组织。
     previous_outline 非空时（整版重出场景）告诉模型在上一版基础上调整，保证迭代有连续性。
     material_digest 当前恒为空串 —— 本轮不读素材，保留形参作为下一轮的扩展点。
 
@@ -183,9 +281,13 @@ def build_outline_draft_user(
         )
 
     if doc_summary:
-        parts.append(f"【规范书项目概述】\n{doc_summary.strip()}")
+        parts.append(f"【要求文件项目概述】\n{doc_summary.strip()}")
 
-    parts.append(f"【规范书章节目录与原文摘录】\n{spec_digest}")
+    if follow_structure:
+        # 紧挨着材料放，模型读材料时是带着这条规则读的
+        parts.append(FOLLOW_STRUCTURE_RULE)
+
+    parts.append(f"【要求文件章节目录与原文摘录】\n{spec_digest}")
 
     if material_digest:
         parts.append(f"【原始素材摘录】\n{material_digest}")
@@ -212,6 +314,49 @@ def build_outline_draft_user(
         "- title：章节标题，不带序号、不带「第X章」前缀。\n\n"
         "要求：一级章节 3-12 个为宜；总节点数不超过 120 个；按应答文件的阅读顺序排列。\n"
         '只输出 JSON 对象，格式：{"nodes":[...]}'
+    )
+
+
+# ─────────────────────────────────────────────
+# 张衡：检索范围兜底（确定性定位全空时才调）
+# ─────────────────────────────────────────────
+
+# 章节标题进 prompt 的预算（字符）
+SCOPE_SELECT_TITLES_BUDGET = 2000
+
+SCOPE_SELECT_SYSTEM = (
+    "你是招投标文档的检索专家。用户用口语描述了他要的是要求文件的哪一部分，"
+    "但按字面没能定位到。请把它翻译成文档里可能原样出现的字面标识。\n"
+    "你只需要给出**检索关键词**，不需要挑选或复述内容。\n"
+    "只输出合法 JSON 对象，不包含任何额外说明或 markdown 代码块。"
+)
+
+
+def build_scope_select_user(
+    instruction: str,
+    file_names: list[str],
+    section_titles: list[str],
+) -> str:
+    """构造「圈定检索范围」的 user prompt。
+
+    返回的字符串末尾必须包含关键短语 '圈定检索范围'，以便 mock 模式按关键词路由；
+    该分支要排在 ``_select_fixture`` 最前面 —— 本 system prompt 含「评审」二字，
+    落到后面的「评审」分支会走错 fixture。
+    """
+    files_block = "\n".join(f"- {n}" for n in (file_names or [])) or "（未提供）"
+    titles = "、".join(t for t in (section_titles or []) if t)
+    titles = titles[:SCOPE_SELECT_TITLES_BUDGET] or "（未提供）"
+    instruction = (instruction or "").strip()[:OUTLINE_DRAFT_INSTRUCTION_BUDGET]
+
+    return (
+        f"【用户的提炼要求】\n{instruction}\n\n"
+        f"【要求文件】\n{files_block}\n\n"
+        f"【文件里的章节标题】\n{titles}\n\n"
+        "请判断用户要的是哪份文件的哪一部分，输出用于检索的字面标识：\n"
+        "- files：命中的文件名（可多个），没有把握时给空数组；\n"
+        "- keywords：文档里可能原样出现的标识词（如「标包2」「技术评分标准」），可多个。\n\n"
+        '只输出 JSON 对象，格式：{"files":[...],"keywords":[...]}\n'
+        "圈定检索范围"
     )
 
 
