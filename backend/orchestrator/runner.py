@@ -136,6 +136,10 @@ class WorkflowRunner:
         if run is None:
             run = _Run(thread_id, EventEmitter())
             self._runs[thread_id] = run
+        elif run.emitter._closed:
+            # 上一段流已收尾（graph 跑完时 aclose 过）。复用它的话 emit 会被静默丢弃，
+            # 前端一帧都收不到、只能刷新读库才看到结果 —— 续跑前换一份。
+            run.emitter = EventEmitter()
         patch: dict = dict(edits or {})
         if current.get("stage") == "report_review" and user_choice == "approve":
             patch["stage"] = "done"
@@ -315,6 +319,37 @@ class WorkflowRunner:
             name=f"wf-{thread_id}-redraft-outline",
         )
 
+    async def confirm_outline(self, thread_id: str, matrix: dict) -> None:
+        """「确认内容大纲及要求」：把用户在提炼结果上的编辑写回。
+
+        两处都要写，读者不同：
+        - ``blocks`` 表：页面 / 工作台显示的权威数据。
+        - 图里的 ``spec.outline_matrix``：素材匹配读的是它（``shen_kuo_match_node``
+          从 state 取矩阵），不写回就会拿旧值去匹配。
+
+        与闸门 ``resume`` 的区别：此时图已收尾（extract 的出边默认收尾到 END），
+        没有下一跳可跑，所以只 ``aupdate_state`` 不 ``ainvoke``。
+        """
+        from services.block_store import update_outline_fields
+
+        state = await self.state(thread_id)
+        if not state or not state.get("project_id"):
+            raise KeyError(thread_id)
+
+        project_id = int(state["project_id"])
+        async with get_db() as db:
+            for block_id, row in matrix.items():
+                await update_outline_fields(
+                    db, project_id, block_id, row, run_thread_id=thread_id,
+                )
+
+        async with self._checkpointer_provider() as saver:
+            graph = self._build(saver, None, thread_id=thread_id)
+            await graph.aupdate_state(
+                {"configurable": {"thread_id": thread_id}},
+                {"spec": {"outline_matrix": matrix}},
+            )
+
     async def _rerun_match_until_pause(self, run: _Run) -> None:
         """rerun_match 的后台 task：as_node=NODE_EXTRACT 后 ainvoke 走 match → gate_materials。"""
         from orchestrator.graph import NODE_EXTRACT
@@ -323,10 +358,16 @@ class WorkflowRunner:
             config = {"configurable": {"thread_id": run.thread_id}}
             async with self._checkpointer_provider() as saver:
                 graph = self._build(saver, run.emitter, thread_id=run.thread_id)
-                # 清掉旧 matches，并把指针拨回 NODE_EXTRACT 之后（next = match_node）
+                # 清掉旧 matches，并把指针拨回 NODE_EXTRACT 之后（next = match_node）。
+                # match_requested 是 extract 出边条件边的开关：置真才继续往 match 走，
+                # 否则提炼跑完就收尾停在「要求与大纲」。
                 await graph.aupdate_state(
                     config,
-                    {"materials": {"matches": {}}, "user_choice": "approve"},
+                    {
+                        "materials": {"matches": {}},
+                        "user_choice": "approve",
+                        "match_requested": True,
+                    },
                     as_node=NODE_EXTRACT,
                 )
                 await graph.ainvoke(None, config=config)

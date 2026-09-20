@@ -148,6 +148,9 @@ class WorkflowState(TypedDict, total=False):
     stage: StageLiteral
     user_choice: UserChoiceLiteral
     cancel_requested: bool
+    # 素材匹配的显式触发标志：extract 跑完只有它为真才接 match。
+    # 提炼与匹配分属两个视图（要求与大纲 / 素材库），匹配由后者手动触发。
+    match_requested: bool
     iteration: int                     # 协同闭环迭代轮次，首轮为 0
 
     # ── 各 agent 产出 ────────────────────────────

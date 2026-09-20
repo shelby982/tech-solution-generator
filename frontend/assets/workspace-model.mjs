@@ -5,7 +5,7 @@ export const statusLabels = {
   unreviewed: '待评审', historical: '历史评审待核对', error: '评审异常',
 };
 export const stageLabels = {
-  idle: '等待上传要求', parsing: '解析要求中', outline_review: '待确认大纲',
+  idle: '等待上传要求', parsing: '解析要求中', outline_review: '待确认目录',
   matching: '匹配素材中', materials_review: '待确认素材', generating: '撰写 / 修订中',
   reviewing: '评审中', report_review: '等待人工检查', done: '本次运行已结束',
   paused: '已暂停', aborted: '已作废',

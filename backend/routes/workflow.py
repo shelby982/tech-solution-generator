@@ -77,6 +77,11 @@ class RedraftOutlineReq(BaseModel):
     instruction: str = Field(default="", max_length=10000)
 
 
+class ConfirmOutlineReq(BaseModel):
+    """block_id → 该章节的 8 字段编辑（前端 collectOutlineEdits 的产物）。"""
+    matrix: dict[str, dict] = Field(default_factory=dict)
+
+
 @router.post("/{thread_id}/workspace-action")
 async def workspace_action(thread_id: str, req: WorkspaceActionReq):
     try:
@@ -141,6 +146,19 @@ async def redraft_outline(thread_id: str, req: RedraftOutlineReq | None = None):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "redrafting_outline"})
+
+
+@router.post("/{thread_id}/confirm-outline")
+async def confirm_outline(thread_id: str, req: ConfirmOutlineReq):
+    """「确认内容大纲及要求」：把提炼结果上的编辑写回 blocks 表与图里的矩阵。"""
+    runner = get_runner()
+    try:
+        await runner.confirm_outline(thread_id, req.matrix)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    return JSONResponse({
+        "thread_id": thread_id, "status": "confirmed", "blocks": len(req.matrix),
+    })
 
 
 @router.post("/{thread_id}/pause")

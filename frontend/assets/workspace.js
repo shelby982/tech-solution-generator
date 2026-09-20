@@ -1,4 +1,4 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, isOrphanedRun, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260917-loop5';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, isOrphanedRun, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260918-loop8';
 export {statusLabels, esc};
 export async function request(url, options) {
   const response = await fetch(url, options);

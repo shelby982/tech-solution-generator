@@ -18,8 +18,9 @@
             regen_blocks → zhuge_liang_generate
             abort        → ABORT
 
-「要求与大纲」分两步：① 拆分章节目录，② 逐节 8 字段提炼。**② 当前关闭**
-（``nodes.ENABLE_SECTION_EXTRACT=False``）：闸门 1 放行后 extract 直接收尾，
+「要求与大纲」分两步：① 拆分章节目录，② 逐节 8 字段提炼。**② 挂在闸门 1 之后**
+（``nodes.ENABLE_SECTION_EXTRACT=True``）：用户点了「确认目录，开始提炼要点」才跑，
+目录本身先给人看、给人改，不被提炼的账绑住。关掉该开关则 extract 直接收尾，
 match 及其下游保持注册但不可达 —— 匹配依赖提炼产出的矩阵，空矩阵匹配不出东西。
 
 闸门用 LangGraph 的 ``interrupt_before`` 实现：到达闸门节点前 graph 暂停，state 已
@@ -207,6 +208,13 @@ def _route_after_report(state: WorkflowState) -> str:
 # 主入口
 # ─────────────────────────────────────────────
 
+# 提炼跑完是否自动接素材匹配。
+# False（生产默认）：停在「要求与大纲」，等素材库的「素材匹配」按钮显式触发。
+# True：自动接上匹配，供端到端测试一次跑完整条图（与 ENABLE_SECTION_EXTRACT 同模式，
+#       由 tests/orchestrator/conftest.py 统一覆盖）。
+AUTO_MATCH_AFTER_EXTRACT = False
+
+
 def build_graph(
     deps: GraphDeps,
     *,
@@ -310,13 +318,23 @@ def build_graph(
     # 闸门1 放行后再跑。目录是用户要先看、先改的东西，不该每次都被提炼的账绑住。
     builder.add_edge(NODE_OUTLINE_DRAFT, GATE_OUTLINE)
     builder.add_edge(GATE_OUTLINE, NODE_EXTRACT)
-    # 第二步（逐节提炼）关闭时 extract 直接收尾：匹配依赖它产出的矩阵，空矩阵
-    # 匹配不出东西，往下走只会得到一个空闸门 2。开关与节点行为同源于
-    # nodes.ENABLE_SECTION_EXTRACT，由它统一切换，避免两处各改一遍、漏掉一边。
-    if nodes.ENABLE_SECTION_EXTRACT:
-        builder.add_edge(NODE_EXTRACT, NODE_MATCH)
-    else:
-        builder.add_edge(NODE_EXTRACT, END)
+    # 提炼跑完**默认收尾**，停在「要求与大纲」：素材匹配是另一个视图（素材库）里的
+    # 动作，由那边的「素材匹配」按钮显式触发 —— rerun_match 把 match_requested 置真
+    # 后从本节点续跑。不自动接匹配，是因为自动续跑会把用户从「要求与大纲」直接带进
+    # 素材库、再一路带到闸门 2，用户还没机会核对提炼结果。
+    # ENABLE_SECTION_EXTRACT=False 时同样收尾：匹配依赖它产出的矩阵，空矩阵匹配不出东西。
+    def _after_extract(state: WorkflowState) -> str:
+        if not nodes.ENABLE_SECTION_EXTRACT:
+            return END
+        if AUTO_MATCH_AFTER_EXTRACT or state.get("match_requested"):
+            return NODE_MATCH
+        return END
+
+    builder.add_conditional_edges(
+        NODE_EXTRACT,
+        _after_extract,
+        {NODE_MATCH: NODE_MATCH, END: END},
+    )
     builder.add_edge(NODE_MATCH, GATE_MATERIALS)
     builder.add_edge(GATE_MATERIALS, NODE_COLLECT_GAPS)
     builder.add_edge(NODE_COLLECT_GAPS, NODE_GENERATE)

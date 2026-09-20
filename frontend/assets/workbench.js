@@ -1,4 +1,4 @@
-import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260917-loop7';
+import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260918-loop8';
 const nav = document.querySelector('.doc-outline');
 let selectedId = new URLSearchParams(location.search).get('blockId');
 let limit = 150, initialSelection = false;

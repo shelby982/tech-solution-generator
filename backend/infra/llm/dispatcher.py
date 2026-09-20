@@ -503,16 +503,18 @@ async def dispatch_outline_json(
     sections: list[dict],
     *,
     on_start: Optional[Callable[[int], Awaitable[None] | None]] = None,
+    concurrency: int = 1,
 ):
     """
-    按文档原始章节并发提炼响应矩阵（8 字段），**按完成顺序**逐章 yield。
+    按文档原始章节提炼响应矩阵（8 字段），默认**严格按目录顺序**逐章 yield。
 
-    并发上限 5；每章节内部仍按"轮询 + Fallback"试遍所有 config，起点按 idx 散开。
+    ``concurrency`` 默认 1 = 串行：前端能自上而下看到「提炼中 → 已完成」，
+    不被先完成的章节打乱顺序。调大则并发执行、按完成顺序 yield（快，但顺序会跳）。
 
-    yield 顺序为完成顺序（先完成先 yield），每个 item 自带 ``idx``，调用方据此回填到 toc。
-    这样可以让前端实时看到任一章节先完成先显示，而不是被慢章节阻塞批量刷新。
+    每章节内部仍按"轮询 + Fallback"试遍所有 config，起点按 idx 散开。
+    每个 item 自带 ``idx``，调用方据此回填到 toc。
 
-    on_start: 可选，章节真正开始处理前回调一次（拿到信号量 + 调 LLM 前），
+    on_start: 可选，章节真正开始处理前回调一次（调 LLM 前），
               用于让前端把对应卡片切换到"提炼中"骨架屏。
 
     sections: [{"title": str, "content": str, "special_marks": str (optional),
@@ -527,20 +529,30 @@ async def dispatch_outline_json(
     if n == 0:
         raise ValueError("未配置任何 API，请先添加模型配置")
 
-    sem = asyncio.Semaphore(5)
+    async def _run_one(idx: int, sec: dict) -> dict:
+        if on_start is not None:
+            try:
+                rv = on_start(idx)
+                if inspect.isawaitable(rv):
+                    await rv
+            except Exception as e:
+                logger.warning(f"dispatch_outline_json on_start 回调失败：{e}")
+        result = await _extract_one_section(idx, sec, configs, rr_start_index, n)
+        result["idx"] = idx
+        return result
+
+    if concurrency <= 1:
+        # 严格按目录自上而下逐节提炼：前端才能一路看到「提炼中 → 已完成」，
+        # 不被先完成的章节打乱顺序。代价是总耗时 ≈ 章节数 × 单节耗时。
+        for i, sec in enumerate(sections):
+            yield await _run_one(i, sec)
+        return
+
+    sem = asyncio.Semaphore(concurrency)
 
     async def _worker(idx: int, sec: dict) -> dict:
         async with sem:
-            if on_start is not None:
-                try:
-                    rv = on_start(idx)
-                    if inspect.isawaitable(rv):
-                        await rv
-                except Exception as e:
-                    logger.warning(f"dispatch_outline_json on_start 回调失败：{e}")
-            result = await _extract_one_section(idx, sec, configs, rr_start_index, n)
-            result["idx"] = idx
-            return result
+            return await _run_one(idx, sec)
 
     tasks = [asyncio.create_task(_worker(i, s)) for i, s in enumerate(sections)]
     pending = set(tasks)

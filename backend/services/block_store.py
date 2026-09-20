@@ -702,3 +702,43 @@ async def update_block_requirement(db, block_id_int: int, requirement: str) -> d
     )
     await db.commit()
     return await get_block(db, block_id_int)
+
+
+async def update_outline_fields(
+    db,
+    project_id: int,
+    block_id: str,
+    matrix: dict,
+    run_thread_id: str | None = None,
+) -> int:
+    """只更新提炼出来的 8 字段，不动 title / level / order_idx / content。
+
+    用于「确认内容大纲及要求」：用户在提炼结果上改完，把编辑写回。
+    ``constraint_level`` 用 COALESCE 兜底 —— 前端表单不提交它，缺省时保持原值
+    而不是被覆写成默认值。
+
+    返回受影响行数（0 表示该 run 下没有这个 block_id）。
+    """
+    cursor = await db.execute(
+        """UPDATE blocks
+              SET requirement = ?, key_points = ?, veto_items = ?, bonus_items = ?,
+                  score_items = ?, evidence_required = ?, indicators = ?,
+                  constraint_level = COALESCE(?, constraint_level),
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE project_id = ? AND block_id = ? AND run_thread_id IS ?""",
+        (
+            matrix.get("requirement") or "",
+            matrix.get("key_points") or "",
+            matrix.get("veto_items") or "",
+            matrix.get("bonus_items") or "",
+            matrix.get("score_items") or "",
+            matrix.get("evidence_required") or "",
+            matrix.get("indicators") or "",
+            matrix.get("constraint_level"),
+            project_id,
+            block_id,
+            run_thread_id,
+        ),
+    )
+    await db.commit()
+    return cursor.rowcount

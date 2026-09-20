@@ -295,12 +295,11 @@ async def zhang_heng_outline_draft_node(
 # ─────────────────────────────────────────────
 
 # 「要求与大纲」分两步：① 按提炼要求拆分章节目录，② 逐节 8 字段提炼。
-# 第二步暂时关闭，只做第一步 —— 目录结构还在反复调整，提炼出的矩阵随时作废，
-# 而提炼是每个章节一次模型调用（一份 400+ 章的文档就是 400+ 次）。
+# 第二步由闸门 1 的「确认目录，开始提炼要点」触发，用户认可目录结构后才付提炼的账
+# —— 提炼是每个章节一次模型调用（一份 400+ 章的文档就是 400+ 次），目录还得先让人改。
 #
-# 恢复第二步：把这个常量改回 True 即可，graph.py 里 NODE_EXTRACT 的出边会跟着
-# 从 END 切回 NODE_MATCH，不必两处各改一遍。
-ENABLE_SECTION_EXTRACT = False
+# 关闭本开关：NODE_EXTRACT 出边自动从 NODE_MATCH 切回 END，闸门 1 放行后图直接收尾。
+ENABLE_SECTION_EXTRACT = True
 
 
 async def zhang_heng_extract_node(
@@ -413,7 +412,10 @@ async def zhang_heng_extract_node(
                 block_id=block_id, title=row.title, matrix=row_dict,
             ))
 
-    return {"spec": {"outline_matrix": matrix_dict}}
+    # 清掉匹配触发标志：extract 的出边是条件边，读它决定要不要接 match。走到这里
+    # 说明用户只要求提炼，收尾停在「要求与大纲」；素材匹配由素材库的「素材匹配」
+    # 按钮（rerun_match 重新置真）触发。
+    return {"spec": {"outline_matrix": matrix_dict}, "match_requested": False}
 
 
 # ─────────────────────────────────────────────

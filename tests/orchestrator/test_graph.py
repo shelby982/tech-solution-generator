@@ -584,22 +584,33 @@ def test_outline_draft_flows_into_gate_before_extract():
     assert ("zhang_heng_parse", "zhang_heng_extract") not in edges
 
 
-def test_extract_edge_ends_when_section_extract_disabled(monkeypatch):
-    """第二步关闭时（应用当前形态）：extract 直接收尾，不再进素材匹配。
+async def test_extract_ends_without_auto_match(tmp_path, monkeypatch):
+    """默认形态：提炼跑完收尾停在「要求与大纲」，不自动进素材匹配。
 
-    匹配依赖提炼产出的矩阵，空矩阵匹配不出东西 —— 往下走只会得到一个空闸门 2，
-    用户点「继续匹配素材」会看到假结果。
+    匹配是素材库视图里的动作，要用户点「素材匹配」才触发 —— 自动接上会把用户从
+    要求与大纲一路带进闸门 2，还没机会核对提炼结果。
+
+    这里只能验行为，验不了拓扑：extract 的出边是条件边，
+    ``get_graph().edges`` 会把条件边的所有可能目标都列出来，
+    ``(extract, MATCH) not in edges`` 恒为假。
     """
-    monkeypatch.setattr(nodes, "ENABLE_SECTION_EXTRACT", False)
+    monkeypatch.setattr(graph_mod, "AUTO_MATCH_AFTER_EXTRACT", False)
 
-    edges = _edges(_build_deps())
+    db = str(tmp_path / "wf.db")
+    config = {"configurable": {"thread_id": "tid"}}
 
-    # 第一步（拆分章节目录）的拓扑不受影响
-    assert (NODE_OUTLINE_DRAFT, GATE_OUTLINE) in edges
-    assert (GATE_OUTLINE, NODE_EXTRACT) in edges
-    # 第二步关闭 → 收尾
-    assert (NODE_EXTRACT, END) in edges
-    assert (NODE_EXTRACT, NODE_MATCH) not in edges
+    async with checkpointer_from_path(db) as saver:
+        graph = build_graph(_build_deps(), checkpointer=saver)
+
+        await graph.ainvoke({"project_id": 1}, config=config)
+        assert (await graph.aget_state(config)).values["stage"] == "outline_review"
+
+        # 闸门 1 放行：提炼跑完即收尾 —— 矩阵有了、匹配没跑、停在原地
+        await graph.ainvoke(None, config=config)
+        values = (await graph.aget_state(config)).values
+        assert values["spec"]["outline_matrix"], "提炼结果要落进 state"
+        assert not (values.get("materials") or {}).get("matches"), "不该自动跑匹配"
+        assert values["stage"] == "outline_review", "不该推进到闸门 2"
 
 
 async def test_outline_gate_resume_ends_when_extract_disabled(tmp_path, monkeypatch):

@@ -434,149 +434,10 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   display: flex; flex-direction: column;
 }
 
-/* 章节卡片左右布局：左侧四项 + 右侧匹配素材 */
+/* 章节卡片：7 个字段单栏铺开 */
 .block-card-body {
   display: grid;
-  grid-template-columns: 1fr 280px;
-}
-.block-card-body > .block-card-grid { border-right: 1px solid var(--line); }
-.block-card-matched {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-2, #f9f9f7);
-  min-height: 0;
-}
-.block-card-matched-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-  font-size: 11.5px; font-weight: 700;
-  color: var(--text);
-  letter-spacing: 0.3px;
-}
-.block-card-matched-header .count {
-  font-size: 10.5px; font-weight: 600;
-  color: var(--muted);
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  padding: 1px 7px; border-radius: 999px;
-  font-family: 'SF Mono', ui-monospace, monospace;
-}
-.block-card-matched-list {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 10px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-.block-card-matched-empty {
-  padding: 24px 14px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.6;
-}
-.bcm-card {
-  position: relative;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.12s, opacity 0.12s, background 0.12s;
-}
-.bcm-card:hover { border-color: var(--text); }
-.bcm-keep {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 1;
-  cursor: pointer;
-  padding: 4px;
-  display: inline-flex;
-  align-items: center;
-}
-.bcm-keep-cb {
-  cursor: pointer;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: #2563eb;
-}
-.bcm-card.removed {
-  opacity: 0.45;
-  background: var(--bg-2);
-}
-.bcm-card.removed .bcm-card-name {
-  text-decoration: line-through;
-}
-.bcm-card-head {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 10px 5px;
-}
-.bcm-card-ext {
-  font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
-  padding: 2px 6px; border-radius: 4px; flex: none;
-}
-.bcm-card-name {
-  flex: 1; font-size: 11.5px; font-weight: 600; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.bcm-card-chunk {
-  font-size: 9.5px; font-family: 'SF Mono', ui-monospace, monospace;
-  color: var(--muted); flex: none;
-}
-.bcm-card-body {
-  padding: 0 10px 8px;
-  font-size: 11.5px; color: var(--text);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* 编辑弹窗（复用 workbench 样式） */
-.edit-modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.35);
-  z-index: 9999;
-  display: grid; place-items: center;
-  padding: 32px;
-}
-.edit-modal {
-  width: min(800px, 92vw);
-  max-height: 80vh;
-  background: var(--panel, #fff);
-  border-radius: 14px;
-  box-shadow: 0 20px 60px -20px rgba(0,0,0,0.35);
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
-.edit-modal-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-2, #f9f9f7);
-}
-.edit-modal-title {
-  flex: 1; font-size: 13.5px; font-weight: 700;
-  color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.edit-modal-close {
-  all: unset; cursor: pointer;
-  width: 26px; height: 26px; border-radius: 6px;
-  display: grid; place-items: center;
-  font-size: 18px; color: var(--muted); flex: none;
-}
-.edit-modal-close:hover { background: var(--bg-2); color: var(--text); }
-.edit-modal-body {
-  flex: 1; overflow-y: auto;
-  padding: 18px 20px;
-  font-size: 14px; color: var(--text);
-  line-height: 1.8;
-  white-space: pre-wrap; word-break: break-word;
+  grid-template-columns: 1fr;
 }
 .block-field {
   padding: 12px 16px;
@@ -829,7 +690,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
       </div>
     </div>
     <div class="materials-footer">
-      <button class="btn-extract" id="btn-extract" type="button">✦ 提炼大纲</button>
+      <button class="btn-extract" id="btn-extract" type="button">✦ 拆分应答目录</button>
       <p class="extract-hint">依据应标要求生成章节结构，原始素材用于补充各模块内容</p>
     </div>
   </aside>
@@ -860,7 +721,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
     </div>
     <div class="blocks-scroll" id="blocks-scroll">
       <div class="blocks-empty" id="blocks-empty">
-        <p>上传应标文件后点击「提炼大纲」开始</p>
+        <p>上传应标文件后点击「拆分应答目录」开始</p>
       </div>
       <div class="blocks-list" id="blocks-list"></div>
     </div>
@@ -934,8 +795,8 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
     </div>
 
     <script type="module">
-import { api } from './assets/api.js?v=20260917-loop6';
-import { buildOutlineTree, isOrphanedRun } from './assets/workspace-model.mjs?v=20260917-loop5';
+import { api } from './assets/api.js?v=20260918-loop8';
+import { buildOutlineTree, isOrphanedRun } from './assets/workspace-model.mjs?v=20260918-loop8';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -1025,7 +886,7 @@ let currentStage = (() => {
 const blocksByOrder = []; // 按 outline_extract 顺序累积，给 confirm 用
 const blocksById = new Map();
 
-// ── 视图模式：outline（提炼大纲） / matching（素材匹配） ──
+// ── 视图模式：outline（拆分应答目录） / matching（素材匹配） ──
 // 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
 // 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
 // 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
@@ -1044,8 +905,9 @@ function applyPageView() {
     // generating / reviewing / report_review 等：不属于 project-init 视图，但兜底回 outline
     auto = 'outline';
   } else {
-    // 没 backend stage（新项目）：用本地大纲完成度决定
-    auto = (totalBlocks > 0 && doneBlocks >= totalBlocks) ? 'matching' : 'outline';
+    // 没 backend stage（新项目）：停在「要求与大纲」。素材匹配是素材库视图里的动作，
+    // 由那边的「素材匹配」按钮触发，不按提炼完成度自动切过去。
+    auto = 'outline';
   }
   const view = pageViewOverride || auto;
   document.body.dataset.view = view;
@@ -1057,7 +919,7 @@ function applyPageView() {
       btn.innerHTML = '✦ 素材匹配';
       hint.textContent = '为每个章节匹配最相关的原始素材片段';
     } else {
-      btn.innerHTML = '✦ 提炼大纲';
+      btn.innerHTML = '✦ 拆分应答目录';
       hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
     }
   }
@@ -1067,6 +929,22 @@ function applyPageView() {
   }
   // view 切换会改变 PAGE_STAGE → 顶部进度条 active 跟着切
   if (typeof renderStageBar === 'function') renderStageBar();
+}
+
+// 切视图：只改视图，不触发任何后端动作。
+function switchView(view, statusLabel) {
+  pageViewOverride = view;
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('view', view);
+    history.replaceState({}, '', url);
+  } catch {}
+  applyPageView();
+  if (statusLabel) {
+    // 状态栏按钮组按 view 选（见 setStatusBar 的 done 分支），切完视图要重绘一次
+    const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
+    setStatusBar(extractionState || 'done', statusLabel, pct, totalBlocks, doneBlocks);
+  }
 }
 
 const THREAD_KEY = (pid) => `workflow:${pid}`;
@@ -1573,8 +1451,8 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   } else if (state === 'gate_outline') {
     statusActions.innerHTML = `
       <button class="btn-status-secondary" id="btn-cancel">取消</button>
-      <button class="btn-status-secondary" id="btn-redraft-outline">重新提炼大纲</button>
-      <button class="btn-status-primary" id="btn-confirm-outline">确认大纲，继续匹配素材</button>`;
+      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
+      <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`;
     document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
     document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
     document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
@@ -1587,8 +1465,8 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     document.getElementById('btn-confirm-materials').addEventListener('click', confirmMaterialsGate);
     freezeOutlineEdit();
   } else if (state === 'done') {
-    // 文案随当前视图变：outline 视图下是「重新提炼 / 进入匹配」，
-    // matching 视图下是「重新匹配 / 进入撰写」。
+    // 文案随当前视图变：outline 视图是「要点提炼完、等确认内容大纲」，
+    // matching 视图是「素材匹配完、等进入撰写」。
     const isMatchingView = document.body.dataset.view === 'matching';
     if (isMatchingView) {
       statusActions.innerHTML = `
@@ -1598,14 +1476,16 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       // 与 gate_materials 状态的「确认素材，进入撰写」按钮逻辑保持一致：
       // 先 resume('approve') 推 graph 进 generate，再跳 workbench。
       document.getElementById('btn-confirm').addEventListener('click', confirmMaterialsGate);
+      freezeOutlineEdit();
     } else {
       statusActions.innerHTML = `
         <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
-        <button class="btn-status-primary" id="btn-to-matching">进入匹配</button>`;
+        <button class="btn-status-primary" id="btn-to-matching">确认内容大纲及要求</button>`;
       document.getElementById('btn-reextract').addEventListener('click', () => startExtraction(true));
-      document.getElementById('btn-to-matching').addEventListener('click', () => startMatching());
+      document.getElementById('btn-to-matching').addEventListener('click', confirmOutlineContent);
+      // 确认前允许修改：这份提炼结果正是用户要审的内容，只读就没法改
+      makeOutlineEditable();
     }
-    freezeOutlineEdit();
   } else if (state === 'paused') {
     const isMatchingView = document.body.dataset.view === 'matching';
     if (isMatchingView) {
@@ -1684,82 +1564,6 @@ function markTocDone(blockId) {
 }
 
 // ── 模块卡片 ──
-const FILE_BADGE_PALETTE = {
-  PDF:  { bg:'#fdecec', fg:'#b3261e' },
-  DOCX: { bg:'#e8efff', fg:'#1f4ed8' },
-  DOC:  { bg:'#e8efff', fg:'#1f4ed8' },
-  PPTX: { bg:'#fff1e0', fg:'#a35b00' },
-  PPT:  { bg:'#fff1e0', fg:'#a35b00' },
-};
-
-function renderMatchedHtml(sources) {
-  if (!sources || !sources.length) {
-    return `<div class="block-card-matched-empty">暂无匹配素材</div>`;
-  }
-  return `<div class="block-card-matched-list">${sources.map((s, i) => {
-    const filename = s.filename || '素材 #' + s.material_id;
-    const ext = (filename.split('.').pop() || '').toUpperCase();
-    const pal = FILE_BADGE_PALETTE[ext] || { bg:'#eee', fg:'#444' };
-    const content = (s.content || '').trim();
-    const payload = encodeURIComponent(JSON.stringify({ filename, chunk_index: s.chunk_index, content }));
-    const chunkId = s.chunk_id ?? s.id ?? `${s.material_id}-${s.chunk_index}`;
-    return `<div class="bcm-card" data-bcm-payload="${payload}" data-chunk-id="${escapeHtml(String(chunkId))}">
-      <label class="bcm-keep" title="勾选 = 保留素材，取消勾选 = 在闸门 2 提交时剔除">
-        <input type="checkbox" class="bcm-keep-cb" checked aria-label="保留该素材" />
-      </label>
-      <div class="bcm-card-head">
-        <span class="bcm-card-ext" style="background:${pal.bg};color:${pal.fg};">${escapeHtml(ext)}</span>
-        <span class="bcm-card-name" title="${escapeHtml(filename)}">${escapeHtml(filename)}</span>
-        <span class="bcm-card-chunk">#${s.chunk_index}</span>
-      </div>
-      <div class="bcm-card-body">${escapeHtml(content)}</div>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-// 点击匹配卡片 → 弹窗展示完整内容
-document.addEventListener('click', e => {
-  if (e.target.closest('.bcm-keep') || e.target.matches('.bcm-keep-cb')) return; // checkbox 不触发弹窗
-  const card = e.target.closest('.bcm-card');
-  if (!card || !card.dataset.bcmPayload) return;
-  let data;
-  try { data = JSON.parse(decodeURIComponent(card.dataset.bcmPayload)); } catch { return; }
-  openBcmModal(data);
-});
-
-// checkbox 切换 → 给卡片加视觉提示
-document.addEventListener('change', e => {
-  const cb = e.target.matches?.('.bcm-keep-cb') ? e.target : null;
-  if (!cb) return;
-  const card = cb.closest('.bcm-card');
-  if (!card) return;
-  card.classList.toggle('removed', !cb.checked);
-});
-
-function openBcmModal({ filename, chunk_index, content }) {
-  const overlay = document.createElement('div');
-  overlay.className = 'edit-modal-overlay';
-  overlay.innerHTML = `<div class="edit-modal">
-    <div class="edit-modal-header">
-      <span class="edit-modal-title">${escapeHtml(filename)} · #${chunk_index}</span>
-      <button type="button" class="edit-modal-close" title="关闭">×</button>
-    </div>
-    <div class="edit-modal-body">${escapeHtml(content)}</div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.querySelector('.edit-modal-close').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-}
-
-function parseSource(block) {
-  // 优先用 SSE 事件直接带的 matched_sources 数组
-  if (Array.isArray(block.matched_sources)) return block.matched_sources;
-  try {
-    const arr = JSON.parse(block.source || '[]');
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
 // 一行目录摘要（row 副标题）：要求为空时整行隐藏
 function firstLine(text) {
   const s = String(text ?? '').split('\n').map(l => l.trim()).filter(Boolean);
@@ -1774,7 +1578,6 @@ function renderBlockCard(block, status = 'pending') {
   const el = document.createElement('div');
   el.className = 'block-card';
   el.dataset.blockId = blockId;
-  const sources = parseSource(block);
   const badgeText = BADGE_TEXT[status] || status;
   el.innerHTML = `
     <div class="block-card-header">
@@ -1793,13 +1596,6 @@ function renderBlockCard(block, status = 'pending') {
         ${renderField('☆ 评分项', block.score_items, 'score')}
         ${renderField('证明材料', block.evidence_required, '')}
         ${renderField('量化指标', block.indicators, '')}
-      </div>
-      <div class="block-card-matched">
-        <div class="block-card-matched-header">
-          匹配素材
-          <span class="count">${sources.length}</span>
-        </div>
-        ${renderMatchedHtml(sources)}
       </div>
     </div>`;
 
@@ -1997,16 +1793,6 @@ function updateBlockCard(blockId, data) {
     return `<div class="block-field"><div class="block-field-label ${clss[i]}">${lbl}</div>${content}</div>`;
   }).join('');
 
-  // 更新匹配素材
-  const sources = data.matched_sources || [];
-  const matchedWrap = card.querySelector('.block-card-matched');
-  if (matchedWrap) {
-    const cnt = matchedWrap.querySelector('.count');
-    if (cnt) cnt.textContent = sources.length;
-    const oldList = matchedWrap.querySelector('.block-card-matched-list, .block-card-matched-empty');
-    if (oldList) oldList.remove();
-    matchedWrap.insertAdjacentHTML('beforeend', renderMatchedHtml(sources));
-  }
   syncOutlineRow(blockId);
 }
 
@@ -2059,8 +1845,11 @@ async function loadExistingBlocks({ silent = false } = {}) {
       const tipDone = isMatching ? `已保留 ${doneBlocks}/${totalBlocks} 个已匹配章节` : `已保留 ${doneBlocks}/${totalBlocks} 个已提炼章节`;
       setStatusBar('paused', tipDone, pct, totalBlocks, doneBlocks);
     }
-  } else if (totalBlocks > 0) {
-    // 已解析章节但全部未提炼（解析后立即取消）：让用户能继续 / 重新提炼
+  } else if (totalBlocks > 0 && currentStage !== 'outline_review') {
+    // 已解析章节但一节都没提炼。**排除闸门 1**：目录已拆好、等用户确认，这是正常
+    // 等待态而非中断 —— 写「可继续提炼」会把用户从「先确认目录」引偏，paused 的
+    // 按钮组也会盖掉闸门的「确认目录，开始提炼要点」。闸门的文案由 boot /
+    // onGateOpen / restoreSettledThread 负责。
     setStatusBar('paused', `已解析 ${totalBlocks} 个章节，可继续提炼`, 0, totalBlocks, 0);
   }
 }
@@ -2082,7 +1871,7 @@ async function resyncFromDb() {
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
-  blocksEmpty.innerHTML = '<p>上传应标文件后点击「提炼大纲」开始</p>';
+  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
   blocksEmpty.style.display = 'block';
   sidebarToc.innerHTML = '';
   totalBlocks = 0; doneBlocks = 0;
@@ -2287,7 +2076,7 @@ function attachStream(threadId) {
       resetWorkflowUi();
       draftRevision = Number(data?.revision) || draftRevision;
       outlineError = String(data?.error || '');
-      blocksEmpty.innerHTML = '<p>上传应标文件后点击「提炼大纲」开始</p>';
+      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
       blocksEmpty.style.display = toc.length ? 'none' : 'block';
       toc.forEach(sec => {
         const block = {
@@ -2313,23 +2102,11 @@ function attachStream(threadId) {
         0, totalBlocks, 0);
     },
     onMatchStart: (data) => {
-      // 单 block 开始匹配：右侧"匹配素材"区切骨架屏 + 自动滚动聚焦
+      // 单 block 开始匹配：进度条切动画 + 自动滚动聚焦
       const blockId = data?.block_id;
       if (!blockId) return;
       const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
       if (!card) return;
-      const matchedWrap = card.querySelector('.block-card-matched');
-      if (matchedWrap) {
-        const cnt = matchedWrap.querySelector('.count');
-        if (cnt) cnt.textContent = '...';
-        const oldList = matchedWrap.querySelector('.block-card-matched-list, .block-card-matched-empty');
-        if (oldList) oldList.remove();
-        const skeleton = document.createElement('div');
-        skeleton.className = 'block-card-matched-empty';
-        skeleton.style.opacity = '0.6';
-        skeleton.textContent = '匹配中…';
-        matchedWrap.appendChild(skeleton);
-      }
       const prog = card.querySelector('.block-card-progress');
       if (prog) prog.classList.add('active');
       if (!document.querySelector('.block-card.scroll-locked')) {
@@ -2341,11 +2118,6 @@ function attachStream(threadId) {
     onMatchProgress: (data) => {
       const blockId = data?.block_id;
       if (!blockId) return;
-      const matches = Array.isArray(data.matches) ? data.matches : [];
-      const existing = blocksById.get(blockId) || {};
-      existing.matched_sources = matches;
-      blocksById.set(blockId, existing);
-      updateBlockCard(blockId, { ...existing, matched_sources: matches });
       // 关掉进度条动画
       const card = document.querySelector(`.block-card[data-block-id="${blockId}"]`);
       const prog = card?.querySelector('.block-card-progress');
@@ -2382,7 +2154,7 @@ function attachStream(threadId) {
         setStatusBar('gate_outline',
           degrades.length
             ? `大纲提炼完成${ver}；${degrades.join('；')}`
-            : `大纲提炼完成${ver}，请检查并编辑后继续匹配素材`,
+            : `大纲提炼完成${ver}，请检查并编辑后开始提炼要点`,
           pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_materials') {
         setStatusBar('gate_materials', '素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
@@ -2435,7 +2207,7 @@ async function restoreSettledThread(threadId, stage) {
     currentThreadId = null;
     currentGate = null;
     resetWorkflowUi();
-    setStatusBar('idle', '该任务已作废，请重新提炼大纲', 0, 0, 0);
+    setStatusBar('idle', '该任务已作废，请重新拆分应答目录', 0, 0, 0);
     return;
   }
   if (['report_review', 'done', 'paused'].includes(stage)) {
@@ -2448,7 +2220,7 @@ async function restoreSettledThread(threadId, stage) {
   const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
   if (stage === 'outline_review') {
     currentGate = 'review_outline';
-    setStatusBar('gate_outline', '已恢复上次进度：大纲已就绪，请检查确认后继续匹配素材', pct, totalBlocks, doneBlocks);
+    setStatusBar('gate_outline', '已恢复上次进度：大纲已就绪，请检查确认后开始提炼要点', pct, totalBlocks, doneBlocks);
   } else {
     currentGate = 'review_materials';
     setStatusBar('gate_materials', '已恢复上次进度：素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
@@ -2525,11 +2297,11 @@ async function startExtraction(forceRestart = false) {
 }
 
 async function startMatching() {
-  // 「素材匹配」按钮：根据当前 thread / stage 决定推进路径，绝不重新跑 parse/extract。
-  // - 没 thread：start 一个新 thread（仅在没 outline 时才会发生），等到 stage=outline_review
-  //   后 resume('approve') 进入 match。
-  // - stage=outline_review：直接 resume('approve') → graph 跑 match。
-  // - stage=materials_review：rerun-match 端点把指针拨回 GATE_OUTLINE 后续 → match 重跑。
+  // 「素材匹配」按钮（素材库视图）：根据当前 thread / stage 决定推进路径，
+  // 绝不重新跑 parse/extract。
+  // - stage=outline_review：闸门 1 还没放行，切回「要求与大纲」让用户先提炼。
+  // - stage=materials_review：rerun-match 端点把指针拨回 NODE_EXTRACT 之后 → match 重跑。
+  // - 没 thread：新起一个 thread 跑到闸门 1，同上送回「要求与大纲」。
   // - 其它 stage：报错并让按钮可重试。
   btnExtract.disabled = true;
   matchedIds.clear();
@@ -2565,9 +2337,13 @@ async function startMatching() {
       attachStream(tid);
     }
     if (stage === 'outline_review') {
-      await api.workflow.resume(tid, 'approve', {});
-      // 闸门 1 之后先跑逐节提炼再匹配，文案跟着走（状态早已是 extracting，无丢帧风险）
-      setStatusBar('extracting', '张衡提炼章节要求中…', 0, totalBlocks, doneBlocks);
+      // 闸门 1 还没放行。匹配依赖提炼产出的矩阵，不能在这儿代放闸门 —— 那会让
+      // 「素材匹配」按钮顺手烧掉 N 次提炼调用，用户还看不到提炼结果。送回
+      // 「要求与大纲」，走「确认目录，开始提炼要点」。
+      btnExtract.disabled = false;
+      switchView('outline');
+      setStatusBar('gate_outline', '请先在「要求与大纲」确认目录并提炼要点', 0, totalBlocks, doneBlocks);
+      return;
     } else if (stage === 'materials_review') {
       // 已经停在闸门 2，按"重新匹配"语义把指针拨回 NODE_MATCH 之前
       // emitter 会重建，旧 SSE 连接收不到新事件 → 重连一次
@@ -2633,6 +2409,10 @@ async function confirmOutlineGate() {
     await api.workflow.resume(currentThreadId, 'approve', {
       spec: { outline_matrix: matrix },
     });
+    // 后端可能已经换了一份 emitter（服务重启后 _runs 被清空，或上一段流收尾时
+    // aclose 过）—— 旧 SSE 连接收不到任何提炼帧，卡片会停在骨架屏、等刷新读库
+    // 才更新。attachStream 内部先 close 再建，直接续上当前 emitter。
+    attachStream(currentThreadId);
   } catch (e) {
     console.error('[workflow] resume(review_outline) 失败', e);
     if (btn) btn.disabled = false;
@@ -2765,16 +2545,35 @@ function collectOutlineEdits() {
   return matrix;
 }
 
+// 「确认内容大纲及要求」：把用户在提炼结果上的编辑提交，再进素材库。
+// 图此时已收尾，所以走 confirm-outline 端点写回（blocks 表 + 图里的矩阵）——
+// 不能复用闸门 resume，那条路会 ainvoke 继续往下跑。
+async function confirmOutlineContent() {
+  const tid = currentThreadId || getThread(projectId);
+  const btn = document.getElementById('btn-to-matching');
+  if (btn) btn.disabled = true;
+  try {
+    const matrix = collectOutlineEdits();
+    if (tid && Object.keys(matrix).length) {
+      await api.workflow.confirmOutline(tid, matrix);
+    }
+    freezeOutlineEdit();
+    switchView('matching', '点下方「素材匹配」开始匹配');
+  } catch (e) {
+    console.error('[workflow] confirmOutline 失败', e);
+    // setStatusBar 会重建按钮组，失败后用户能直接重试
+    setStatusBar('done', `确认失败：${e?.message || e}`, 100, totalBlocks, doneBlocks);
+  }
+}
+
 async function confirmMaterialsGate() {
   if (!currentThreadId) return;
   const btn = document.getElementById('btn-confirm-materials');
   if (btn) btn.disabled = true;
   try {
-    const matches = collectMaterialEdits();
     const tid = currentThreadId;
-    await api.workflow.resume(currentThreadId, 'approve', {
-      materials: { matches },
-    });
+    // 本页已移除匹配素材栏，不再做素材剔除：不带 materials 提交，保留沈括匹配到的全部素材。
+    await api.workflow.resume(currentThreadId, 'approve');
     // runner.resume 是 fire-and-forget：HTTP 200 时后端 task 仍未把 user_choice
     // 落到 checkpoint。这里等 user_choice='approve' 写盘后再跳，否则 workbench
     // 拿到 stage='materials_review' + user_choice='' 会跳回 project-init（ping-pong）。
@@ -2800,31 +2599,6 @@ async function waitForGateCommitted(tid, expected, timeoutMs) {
     } catch {}
     await new Promise(r => setTimeout(r, 150));
   }
-}
-
-// 收集闸门 2 的素材剔除结果：返回 { block_id: [filtered matched_sources...] }
-function collectMaterialEdits() {
-  const matches = {};
-  document.querySelectorAll('.block-card').forEach(card => {
-    const blockId = card.dataset.blockId;
-    if (!blockId) return;
-    const stored = blocksById.get(blockId);
-    const allSources = stored?.matched_sources || [];
-    if (!allSources.length) return;
-    const keptIds = new Set();
-    card.querySelectorAll('.bcm-card').forEach(cardEl => {
-      const cb = cardEl.querySelector('.bcm-keep-cb');
-      if (!cb || !cb.checked) return;
-      const cid = cardEl.dataset.chunkId;
-      if (cid) keptIds.add(String(cid));
-    });
-    const filtered = allSources.filter(s => {
-      const cid = s.chunk_id ?? s.id ?? `${s.material_id}-${s.chunk_index}`;
-      return keptIds.has(String(cid));
-    });
-    matches[blockId] = filtered;
-  });
-  return matches;
 }
 
 async function confirmOutline() {
@@ -2861,9 +2635,17 @@ fileInputSrc.addEventListener('change', () => {
   if (f) uploadFile(f, 'source', btnAddSrc);
 });
 btnExtract.addEventListener('click', () => {
-  // 视图为 matching 时按钮承担「素材匹配」职责，否则维持「提炼大纲」
+  // 视图为 matching 时按钮承担「素材匹配」职责
   if (document.body.dataset.view === 'matching') {
     startMatching();
+    return;
+  }
+  // 「拆分应答目录」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
+  // interrupt_before 的闸门继续往下 —— 停在闸门 2 的线程会被直接带进生成。
+  // 已有章节 = 之前拆分过，本次点击的语义是「重新拆分」（redraft 跳过 parse，
+  // 只重跑张衡的目录派生）；没有章节才是首次拆分。
+  if (totalBlocks > 0) {
+    redraftOutline();
   } else {
     startExtraction();
   }
@@ -2969,7 +2751,16 @@ if (params.get('autoExtract') === '1') {
     // 这个 run 已经没有任何东西在推进了（详见 isOrphanedRun）。而 loadExistingBlocks()
     // 只会按库里的章节数写「已解析 N 个章节，可继续提炼」—— 中断被包装成了一份正常待办。
     // 这里必须说清楚，并且给出路：继续提炼走 recover() 从检查点续跑。
-    if (!isOrphanedRun(s)) return;
+    // 正常停在闸门 1：loadExistingBlocks 只会按数据写「已解析 N 个章节」（那是给中断
+    // 场景的文案），这里补回闸门自己的按钮组 —— 先确认目录，再开始提炼。
+    if (!isOrphanedRun(s)) {
+      if (s?.stage === 'outline_review') {
+        await blocksReady;
+        currentGate = 'review_outline';
+        setStatusBar('gate_outline', '目录已拆分，请检查并确认后开始提炼要点', 0, totalBlocks, doneBlocks);
+      }
+      return;
+    }
     await blocksReady;  // 等它先写完，否则提示会被它的文案盖掉
     setStatusBar(
       'paused',
@@ -2984,6 +2775,6 @@ if (params.get('autoExtract') === '1') {
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260917-loop7"></script>
+  <script type="module" src="./assets/workspace.js?v=20260918-loop8"></script>
   </body>
 </html>

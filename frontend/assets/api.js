@@ -153,6 +153,14 @@ export const api = {
     rerunMatch: (threadId) =>
       fetch(`/api/workflow/${threadId}/rerun-match`, { method: 'POST' }).then(r => r.json()),
 
+    // 确认内容大纲及要求：把提炼结果上的编辑写回（blocks 表 + 图里的矩阵）
+    confirmOutline: (threadId, matrix) =>
+      fetch(`/api/workflow/${threadId}/confirm-outline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matrix }),
+      }).then(r => r.json()),
+
     // 整版重出应答目录：换一份提炼要求，跳过 parse 只重跑目录派生
     redraftOutline: (threadId, instruction = '') =>
       fetch(`/api/workflow/${threadId}/redraft-outline`, {
