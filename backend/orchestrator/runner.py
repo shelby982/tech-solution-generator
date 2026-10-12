@@ -127,11 +127,23 @@ class WorkflowRunner:
     # ── 公共 API ──────────────────────────────
 
     async def start(self, project_id: int, config: dict) -> str:
-        """启动新工作流，返回 thread_id。后台 task 跑到第一个闸门后等续跑指令。"""
+        """启动新工作流，返回 thread_id。后台 task 跑到第一个闸门后等续跑指令。
+
+        **新 run 开始时清掉旧 run 的 blocks**：用户换掉要求文件之后，旧目录就是无效
+        数据（不会再被用到），留着只会让页面上两套目录混着显示。清理发生在这里而不是
+        前端，是为了不依赖某个按钮是否被点到 —— 只要开了新 run，项目里就只剩一套。
+        """
         thread_id = str(uuid.uuid4())
         async with get_db() as db:
             repo = WorkflowRunRepository(db)
             await repo.create(thread_id, project_id, stage="idle")
+            from services.block_store import purge_blocks_except_run
+
+            dropped = await purge_blocks_except_run(db, project_id, keep_thread_id=None)
+            if dropped:
+                logger.info(
+                    f"runner: 项目 {project_id} 新建 run，清理旧 run 的 {dropped} 条 blocks"
+                )
 
         run = _Run(thread_id, EventEmitter())
         self._runs[thread_id] = run

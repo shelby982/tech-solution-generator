@@ -293,18 +293,29 @@ async def list_project_materials(project_id: int):
 
 @router.delete("/materials/{material_id}")
 async def delete_material_route(material_id: int):
-    """从项目里移除材料（**软删**：保留库记录与磁盘文件）。
+    """删除指定材料（库记录 + 盘上文件）。
 
-    以前这里是真删（库 + 盘一起清），于是"删旧文件、传新文件"会把上一次运行的
-    文件来源一并抹掉：旧 checkpoint 还记着那批文件，但已经取不回来，
-    "重新拆分目录"只能拿旧解析结果糊弄 —— 用户看到的就是"点了没反应 / 还是旧目录"。
-    现在只打 ``deleted_at``：界面与提炼看不到它，旧 run 重跑派生仍能按 id 取回。
+    取舍说明：上一版曾改成"软删保留历史"（怕旧 run 取不回自己的文件），
+    但用户口径明确 —— **旧版本文件产生的数据是无效数据，后续不会再用到**。
+    现在换文件走"新 run 清旧 blocks"（``purge_blocks_except_run``），
+    旧材料不再有被旧 run 取回的需要，所以这里真删，不留垃圾。
     """
+    file_path = ""
     async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT file_path FROM materials WHERE id = ?", (material_id,)
+        )
+        row = await cursor.fetchone()
+        file_path = (row["file_path"] if row else "") or ""
         deleted = await delete_material(db, material_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="材料不存在或已移除")
-    return JSONResponse(content={"ok": True, "soft_deleted": True})
+        raise HTTPException(status_code=404, detail="材料不存在")
+    if file_path:
+        try:
+            _abs_upload_path(file_path).unlink(missing_ok=True)
+        except Exception as e:      # 删盘失败不影响接口结果：库已经不指向它了
+            logging.getLogger(__name__).warning(f"删除材料文件失败（{file_path}）：{e}")
+    return JSONResponse(content={"ok": True})
 
 
 @router.patch("/materials/{material_id}")

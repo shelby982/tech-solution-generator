@@ -123,41 +123,21 @@ async def list_materials(
     project_id: int,
 ) -> list[dict]:
     cursor = await db.execute(
-        f"SELECT * FROM materials WHERE project_id = ? AND deleted_at IS NULL "
-        f"ORDER BY {ROLE_PRIORITY_SQL}",
+        f"SELECT * FROM materials WHERE project_id = ? ORDER BY {ROLE_PRIORITY_SQL}",
         (project_id,)
     )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 
 
-async def soft_delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
-    """软删材料：只打时间戳，**不动磁盘文件**。
-
-    为什么不再真删：旧 run 的 checkpoint 里还留着它的 ``material_ids`` /
-    ``source_toc``，真删会让那批文件彻底找不回来 —— "重新上传"于是变成
-    "顺手毁掉上一次运行"。软删后：
-    - 界面/提炼不再看到它（查询过滤 deleted_at IS NULL）；
-    - 旧 run 重跑派生仍能按 id 把文件取回来。
-    磁盘清理交给单独的保留策略（暂不自动删）。
-    """
-    cursor = await db.execute(
-        "UPDATE materials SET deleted_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND deleted_at IS NULL",
-        (material_id,),
-    )
-    await db.commit()
-    return cursor.rowcount > 0
-
-
 async def list_materials_by_ids(
     db: aiosqlite.Connection,
     material_ids: list[int],
 ) -> list[dict]:
-    """按 id 取材料（含已软删的）。
+    """按 id 取材料。
 
-    给"重跑派生"用：那次运行用过的文件必须原样取回，**与当前项目材料表无关** ——
-    否则用户换过文件之后，重拆会拿错原料（这正是"重新上传影响旧数据"的根源）。
+    给"按 run 绑定的文件集"用：``spec.material_ids`` 记着那次运行用了哪几份文件，
+    需要时能精确定位到它们，而不是"项目当前的全部材料"。
     """
     ids = [int(i) for i in (material_ids or [])]
     if not ids:
@@ -171,12 +151,21 @@ async def list_materials_by_ids(
 
 
 async def delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
-    """兼容入口：现在等价于软删（见 ``soft_delete_material``）。
+    """真删材料记录（磁盘文件由路由一并清）。
 
-    保留这个名字是因为调用点多，且**语义确实变了**：不再真删、不再动磁盘。
-    真删会让旧 run 的文件来源消失，而"重新上传"不该毁掉上一次运行。
+    与上一版的取舍：曾经改成"软删保留历史"，但用户口径明确 ——
+    **旧版本文件产生的数据是无效数据**，后续不会再被用到，留着没有意义。
+    现在配合 ``purge_blocks_except_run``：换文件时新 run 会清掉旧 run 的 blocks，
+    所以旧材料也没有"被旧 run 按 id 取回"的需要了，真删即可。
+
+    ``soft_delete_material`` 仍保留（软删能力本身有价值：需要保留历史时可用）。
     """
-    return await soft_delete_material(db, material_id)
+    cursor = await db.execute("SELECT id FROM materials WHERE id = ?", (material_id,))
+    if await cursor.fetchone() is None:
+        return False
+    await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+    await db.commit()
+    return True
 
 
 async def update_material_parsed(
@@ -305,6 +294,31 @@ async def list_blocks(
         )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
+
+
+async def purge_blocks_except_run(
+    db: aiosqlite.Connection,
+    project_id: int,
+    keep_thread_id: str | None,
+) -> int:
+    """清掉项目里**不属于当前 run** 的 blocks，返回删除条数。
+
+    为什么需要：用户换掉要求文件之后，旧目录的数据就是**无效数据**（不会再用到），
+    留着只会有两个坏处 —— ① 页面上两套目录混着显示，用户不知道信哪个；
+    ② 每次读路径都要靠 run_thread_id 过滤去躲它。新 run 开始时直接清掉最省事。
+    """
+    if keep_thread_id:
+        cursor = await db.execute(
+            "DELETE FROM blocks WHERE project_id = ? "
+            "AND (run_thread_id IS NULL OR run_thread_id != ?)",
+            (project_id, keep_thread_id),
+        )
+    else:
+        cursor = await db.execute(
+            "DELETE FROM blocks WHERE project_id = ?", (project_id,)
+        )
+    await db.commit()
+    return cursor.rowcount or 0
 
 
 async def current_run_thread_id(

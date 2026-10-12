@@ -169,15 +169,6 @@ async def init_db(conn: aiosqlite.Connection) -> None:
                 "error", "error_kind"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
-    # materials.deleted_at：**软删**。以前是真删（库记录 + 磁盘文件一起没），
-    # 于是"重新上传文件"会把旧 run 的文件来源抹掉：旧 checkpoint 的 source_toc 还在，
-    # 但材料表里已经找不到那批文件 —— 重新拆分只能拿旧解析结果糊弄，用户看到的就是
-    # "点了没反应 / 还是旧目录"。软删后旧 run 仍能按 material_ids 找回自己的那批文件。
-    cursor = await conn.execute("PRAGMA table_info(materials)")
-    existing_cols = {row[1] for row in await cursor.fetchall()}
-    if "deleted_at" not in existing_cols:
-        await conn.execute("ALTER TABLE materials ADD COLUMN deleted_at DATETIME")
-
     # material_chunks.page：出处页码（PDF 有；Word 无页码概念，留 0）
     cursor = await conn.execute("PRAGMA table_info(material_chunks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}

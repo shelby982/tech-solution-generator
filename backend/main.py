@@ -92,7 +92,6 @@ async def _load_spec_for_project(project_id: int, *, with_ids: bool = False,
                 # 保证「界面看到的顺序」=「派生用的顺序」。
                 "SELECT id, filename, file_path FROM materials "
                 f"WHERE project_id = ? AND role IN ({placeholders}) "
-                f"AND deleted_at IS NULL "
                 f"ORDER BY {ROLE_PRIORITY_SQL}",
                 (project_id, *REQUIREMENT_ROLES),
             )
