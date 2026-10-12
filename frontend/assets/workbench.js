@@ -1,6 +1,6 @@
-import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260921-dedupe';
+import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260921-roles';
 // 章节状态/依据徽标与「素材库」共用一份投影（同一棵目录树，四个环节都一样）
-import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20260921-dedupe';
+import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20260921-roles';
 const nav = document.querySelector('.doc-outline');
 let selectedId = new URLSearchParams(location.search).get('blockId');
 let limit = 150, initialSelection = false;
