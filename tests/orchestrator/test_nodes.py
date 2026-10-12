@@ -1436,3 +1436,35 @@ async def test_shen_kuo_match_node_keeps_human_locked_evidence():
     assert rows[0]["by"] == "human" and rows[0]["locked"] is True
     assert rows[0]["item_ids"] == ["s1#E1"]
     assert [r["chunk_id"] for r in rows] == [1, 2], "人工挂接的也要保留，且不重复归属同一段"
+
+
+@pytest.mark.asyncio
+async def test_outline_draft_passes_category_to_dispatcher(monkeypatch):
+    """派生节点要把「评分类别」带进 payload（否则 prompt 里的约束不会被触发）。"""
+    from agents.zhang_heng import ZhangHengAgent
+    from domain.spec import Section
+    import infra.llm
+
+    captured = {}
+
+    async def _fake_draft(configs, rr_start, payload):
+        captured.update(payload)
+        # 一级章节至少 3 个（MIN_TOP_LEVEL_NODES，否则派生节点会判结构不完整）
+        return {"nodes": [{"level": 1, "title": "技术条款差异性"},
+                          {"level": 1, "title": "对项目的理解"},
+                          {"level": 1, "title": "技术方案"}], "warnings": []}
+
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _fake_draft)
+
+    async def _no_locate(flat, instruction, configs, rr):
+        return ([{"title": "材料", "content": "x"}], False, "")
+
+    agent = ZhangHengAgent(configs_provider=lambda: ([object()], 0))
+    monkeypatch.setattr(agent, "_locate_for_digest", _no_locate)
+
+    await agent.draft_outline(
+        [Section(id="s1", level=1, title="技术方案", raw_content="材料正文")],
+        instruction="按照技术招标文件中标包二的技术评分点，拆解评分点",
+    )
+
+    assert captured.get("category") == "tech"

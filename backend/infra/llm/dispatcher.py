@@ -482,6 +482,7 @@ async def dispatch_outline_draft_json(
         previous_outline=payload.get("previous_outline", "") or "",
         material_digest=payload.get("material_digest", "") or "",
         follow_structure=bool(payload.get("follow_structure")),
+        category=payload.get("category", "") or "",
     )
 
     last_error: Exception | None = None

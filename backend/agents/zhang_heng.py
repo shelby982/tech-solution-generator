@@ -377,10 +377,15 @@ class ZhangHengAgent:
             flat, instruction, configs, rr_start,
         )
 
+        # 用户在要求里点名了评分类别（技术/商务/报价/其他）时带进 prompt：
+        # 定位到的包级段里商务排在技术之前，不给显式约束模型会照 digest 开头组织。
+        from infra.retrieval.segment import extract_category
+
         payload = {
             "instruction": instruction,
             "doc_summary": doc_summary,
             "spec_digest": build_spec_digest(digest_sections),
+            "category": extract_category(instruction),
             # 定位到了用户点名的那一部分 → 目录按那部分自身的结构拆，不重新组织
             "follow_structure": follow_structure,
             "previous_outline": (

@@ -154,6 +154,9 @@ _TRUNCATION_MARKER_RESERVE = 40
 # 用户提炼要求进 prompt 的预算（字符），置顶且标注为最高优先级。
 OUTLINE_DRAFT_INSTRUCTION_BUDGET = 1000
 
+# 评分类别 → 中文（与 infra.retrieval.segment 的取值一致）
+_CATEGORY_CN = {"tech": "技术", "commerce": "商务", "price": "报价", "other": "其他"}
+
 OUTLINE_DRAFT_SYSTEM = (
     "你是资深的投标文件编制专家，擅长依据用户提供的要求文件（招标文件 / 技术规范书 / "
     "评分表 / 评审要素），为投标人编排应答文件的章节目录。\n"
@@ -318,6 +321,20 @@ FOLLOW_STRUCTURE_RULE = (
 )
 
 
+# 用户点名了评分类别（如「标包2 的**技术**评分点」）时追加的约束。
+# 为什么必须显式说：定位到的包级段里，商务评分标准在**文档顺序上排在技术之前**
+# （同一节表格连着），digest 因此以商务开头，模型照开头组织 → 目录全是商务项
+# （实测连续两次：58 节、99 节，开头都是「商务评分标准应答」）。
+# 光靠"按类别排序材料"改不动这件事 —— 约束得进 prompt。
+_CATEGORY_CONSTRAINT_TMPL = (
+    "【评分类别约束 —— 本次只做「{cn}」类】\n"
+    "材料里可能同时给出商务、技术、报价等多类评分标准（同一张表里连着）。\n"
+    "本次**只按「{cn}」类评分标准拆章节**：其他类别的评分因素不要单独成章"
+    "（它们不在本次范围内）。\n"
+    "若某章既涉及{cn}又涉及其他类，以{cn}为准组织。"
+)
+
+
 def build_outline_draft_user(
     instruction: str,
     doc_summary: str,
@@ -325,6 +342,7 @@ def build_outline_draft_user(
     previous_outline: str = "",
     material_digest: str = "",
     follow_structure: bool = False,
+    category: str = "",
 ) -> str:
     """构造应答文件目录派生的 user prompt。
 
@@ -348,6 +366,9 @@ def build_outline_draft_user(
             "【用户的提炼要求与拆分逻辑 —— 最高优先级，与之冲突时以本节为准】\n"
             f"{instruction}"
         )
+
+    if category:
+        parts.append(_CATEGORY_CONSTRAINT_TMPL.format(cn=_CATEGORY_CN.get(category, category)))
 
     if doc_summary:
         parts.append(f"【要求文件项目概述】\n{doc_summary.strip()}")

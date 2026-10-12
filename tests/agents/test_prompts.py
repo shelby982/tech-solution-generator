@@ -434,3 +434,27 @@ def test_outline_draft_system_scopes_coverage_to_given_material():
     assert "给定材料" in OUTLINE_DRAFT_SYSTEM
     assert "要求文件中出现的" not in OUTLINE_DRAFT_SYSTEM
     assert "不要据此展开章节" in OUTLINE_DRAFT_SYSTEM
+
+
+def test_outline_draft_prompt_carries_category_constraint():
+    """用户点名评分类别时，prompt 必须带显式约束。
+
+    实测：定位到的**包级段**里商务评分标准在文档顺序上排在技术之前（同一节表格连着），
+    digest 因此以商务开头 —— 模型照开头组织，连续两次输出 58 节 / 99 节商务目录。
+    材料侧怎么排序都改不动这件事，约束必须进 prompt。
+    """
+    from agents.prompts import build_outline_draft_user
+
+    ins = "按照技术招标文件中标包二的技术评分点和对应技术规范书，拆解评分点，输出应答目录"
+    user = build_outline_draft_user(instruction=ins, doc_summary="", spec_digest="材料",
+                                    category="tech")
+
+    assert "评分类别约束" in user
+    assert "只做「技术」类" in user
+    assert "其他类别的评分因素不要单独成章" in user
+    # 约束要排在材料**之前**（材料才是把模型带偏的东西）
+    assert user.index("评分类别约束") < user.index("材料")
+
+    # 没点名类别时不追加，行为与改造前一致
+    plain = build_outline_draft_user(instruction="按评分点拆章", doc_summary="", spec_digest="材料")
+    assert "评分类别约束" not in plain
