@@ -1126,7 +1126,7 @@ import { api } from './assets/api.js?v=20260921-dedupe';
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './assets/workspace.js?v=20260921-roles';
+       } from './assets/workspace.js?v=20260913-fixbtn';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -1140,7 +1140,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './assets/workspace-model.mjs?v=20260921-roles';
+       } from './assets/workspace-model.mjs?v=20260913-fixbtn';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -1842,6 +1842,21 @@ function syncHeaderStageLabel(state) {
   } catch (e) { /* 顶栏只是展示，失败不影响主流程 */ }
 }
 
+// 状态栏按钮的"当前渲染签名"。为什么要它：`setStatusBar` 在 SSE 帧与轮询里被频繁
+// 调用，每次都会 `statusActions.innerHTML = ''` 重建按钮 —— 用户按下的那一瞬间节点
+// 可能已被替换，click 落在**已移除的节点**上，表现就是"点了完全没反应"。
+// 同签名时只更新文案，不动按钮节点。
+let statusActionsKey = '';
+
+function setStatusActions(key, html, bind) {
+  if (key === statusActionsKey && statusActions.innerHTML) {
+    return;      // 同一组按钮：保留现有节点与监听器
+  }
+  statusActionsKey = key;
+  statusActions.innerHTML = html;
+  if (bind) bind();
+}
+
 function setStatusBar(state, label, pct, totalB, doneB) {
   extractionState = state;
   statusBar.dataset.state = state;
@@ -1857,74 +1872,85 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   }
   if (state === 'idle') {
     progressTrack.style.display = 'none';
+    statusActionsKey = '';
     statusActions.innerHTML = '';
     return;
   }
   progressTrack.style.display = 'block';
   progressBar.style.width = pct + '%';
   statusPct.textContent = `${doneB}/${totalB} 模块 · ${pct}%`;
-  statusActions.innerHTML = '';
+  // 注意：**不要**在这里无条件清空按钮。清空 = 每次 setStatusBar 都重建节点，
+  // 用户按下的瞬间节点可能刚被替换 → click 落在已移除的节点上，"点了没反应"。
+  // 各分支用 setStatusActions(签名, html, bind) 渲染，同签名时只留现有节点。
   if (state === 'extracting') {
-    statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel"
-      title="取消在**当前章节**跑完后生效（正在进行的这一次模型调用不会被打断）">取消</button>`;
-    document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+    setStatusActions('extracting',
+      `<button class="btn-status-secondary" id="btn-cancel"
+        title="取消在**当前章节**跑完后生效（正在进行的这一次模型调用不会被打断）">取消</button>`,
+      () => document.getElementById('btn-cancel').addEventListener('click', cancelExtraction));
   } else if (state === 'gate_outline') {
-    statusActions.innerHTML = `
+    setStatusActions('gate_outline', `
       <button class="btn-status-secondary" id="btn-cancel">取消</button>
       <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
-      <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`;
-    document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
-    document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
-    document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
+      <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`, () => {
+      document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
+      document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
+      document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
+    });
     // 闸门 1 只审**目录结构**（增删改/上下移/缩进走每行的「编辑」按钮）；8 字段此刻
     // 还没提炼，没有可编辑内容 —— 这里不再 makeOutlineEditable()，否则只是空转。
     freezeOutlineEdit();
   } else if (state === 'gate_materials') {
-    statusActions.innerHTML = `
+    setStatusActions('gate_materials', `
       <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
-      <button class="btn-status-primary" id="btn-confirm-materials">确认素材，进入撰写</button>`;
-    document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
-    document.getElementById('btn-confirm-materials').addEventListener('click', confirmMaterialsGate);
+      <button class="btn-status-primary" id="btn-confirm-materials">确认素材，进入撰写</button>`, () => {
+      document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
+      document.getElementById('btn-confirm-materials').addEventListener('click', confirmMaterialsGate);
+    });
     freezeOutlineEdit();
   } else if (state === 'done') {
     // 文案随当前视图变：outline 视图是「要点提炼完、等确认内容大纲」，
     // matching 视图是「素材匹配完、等进入撰写」。
     const isMatchingView = document.body.dataset.view === 'matching';
     if (isMatchingView) {
-      statusActions.innerHTML = `
+      setStatusActions('done_matching', `
         <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
-        <button class="btn-status-primary" id="btn-confirm">进入撰写</button>`;
-      document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
-      // 与 gate_materials 状态的「确认素材，进入撰写」按钮逻辑保持一致：
-      // 先 resume('approve') 推 graph 进 generate，再跳 workbench。
-      document.getElementById('btn-confirm').addEventListener('click', confirmMaterialsGate);
+        <button class="btn-status-primary" id="btn-confirm">进入撰写</button>`, () => {
+        // 与 gate_materials 状态的「确认素材，进入撰写」按钮逻辑保持一致：
+        // 先 resume('approve') 推 graph 进 generate，再跳 workbench。
+        document.getElementById('btn-confirm').addEventListener('click', confirmMaterialsGate);
+      });
       freezeOutlineEdit();
     } else {
-      statusActions.innerHTML = `
+      setStatusActions('done_outline', `
         <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
-        <button class="btn-status-primary" id="btn-to-matching">确认内容大纲及要求</button>`;
-      document.getElementById('btn-reextract').addEventListener('click', () => confirmReextract());
-      document.getElementById('btn-to-matching').addEventListener('click', confirmOutlineContent);
+        <button class="btn-status-primary" id="btn-to-matching">确认内容大纲及要求</button>`, () => {
+        document.getElementById('btn-reextract').addEventListener('click', () => confirmReextract());
+        document.getElementById('btn-to-matching').addEventListener('click', confirmOutlineContent);
+      });
       // 确认前允许修改：这份提炼结果正是用户要审的内容，只读就没法改
       makeOutlineEditable();
     }
   } else if (state === 'failed') {
     // 硬失败（如目录派生失败）：不是「等一会就好」，给明确的重试入口。
     // 线程保留 —— 要求文件已经解析好，重出目录复用的是同一个 thread 的 checkpoint。
-    statusActions.innerHTML = `
+    setStatusActions('failed', `
       <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
-      <button class="btn-status-primary" id="btn-restart-run">从头重新提炼</button>`;
-    document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
-    document.getElementById('btn-restart-run').addEventListener('click', () => startExtraction(true));
+      <button class="btn-status-primary" id="btn-restart-run">从头重新提炼</button>`, () => {
+      // 这里以前绑的是 btn-reextract —— 该分支根本没有这个 id，getElementById 返回 null，
+      // 于是「从头重新提炼」点了**必然没反应**（用户报的"点了没反应"之一）。
+      document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
+      document.getElementById('btn-restart-run').addEventListener('click', () => startExtraction(true));
+    });
     freezeOutlineEdit();
   } else if (state === 'paused') {
     const isMatchingView = document.body.dataset.view === 'matching';
     if (isMatchingView) {
-      statusActions.innerHTML = `
+      setStatusActions('paused_matching', `
         <button class="btn-status-secondary" id="btn-rematch">重新匹配</button>
-        <button class="btn-status-primary" id="btn-resume-match">继续匹配</button>`;
-      document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
-      document.getElementById('btn-resume-match').addEventListener('click', () => startMatching());
+        <button class="btn-status-primary" id="btn-resume-match">继续匹配</button>`, () => {
+        document.getElementById('btn-rematch').addEventListener('click', () => startMatching());
+        document.getElementById('btn-resume-match').addEventListener('click', () => startMatching());
+      });
     } else {
       // 「提炼到一半」的按钮组：此时**不该**再出现「确认目录，开始提炼要点」——
       // 目录早就确认过了，用户要做的是把剩下的章节接着提炼（只补剩余、不重复调用），
@@ -1932,7 +1958,7 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       // 这个状态下已经没有在跑的东西，所以不再放取消。
       const remain = Math.max((totalBlocks || 0) - (doneBlocks || 0), 0);
       const redraftGate = redraftAllowedByStage();
-      statusActions.innerHTML = `
+      setStatusActions('paused_outline', `
         <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
         <button class="btn-status-secondary" id="btn-redraft-outline"
           ${redraftGate.ok ? '' : 'disabled'}
@@ -1940,11 +1966,12 @@ function setStatusBar(state, label, pct, totalB, doneB) {
                                : '本次运行已过闸门，目录不能再改；请用「重新提炼」'}">重新拆分目录</button>
         <button class="btn-status-primary" id="btn-resume-extract"
           title="只提炼还没做的章节；已完成的章节不会重复调用模型">继续提炼${
-          remain ? `（${remain} 节）` : ''}</button>`;
-      document.getElementById('btn-reextract').addEventListener('click', confirmReextract);
-      document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
-      // 继续提炼 = resume 同一条 run（跳过已完成的章节），不是重新起一条
-      document.getElementById('btn-resume-extract').addEventListener('click', continueExtraction);
+          remain ? `（${remain} 节）` : ''}</button>`, () => {
+        document.getElementById('btn-reextract').addEventListener('click', confirmReextract);
+        document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
+        // 继续提炼 = resume 同一条 run（跳过已完成的章节），不是重新起一条
+        document.getElementById('btn-resume-extract').addEventListener('click', continueExtraction);
+      });
     }
     freezeOutlineEdit();
   }
@@ -4034,9 +4061,56 @@ async function startExtraction(forceRestart = false) {
     }
     attachStream(threadId);
   } catch (e) {
+    // 以前这里只 console.error + 清状态栏 ——「重新提炼」失败时页面上**零提示**，
+    // 用户看到的就是"点了没反应"（实测：abort 之后没有任何后续请求，blocks 也没清，
+    // 页面上却什么都不说）。失败必须说清原因与下一步。
     console.error('[workflow] startExtraction 失败', e);
-    setStatusBar('idle', '', 0, 0, 0);
     setExtractDisabled(false);
+    const msg = (e && (e.message || e.detail)) || String(e || '未知错误');
+    const canFallback = !!(currentThreadId || getThread(projectId));
+    statusActions.innerHTML = canFallback
+      ? `<button class="btn-status-primary" id="btn-force-restart">重新提炼（强制新建运行）</button>`
+      : '';
+    const btnForce = document.getElementById('btn-force-restart');
+    if (btnForce) btnForce.addEventListener('click', () => forceRestartRun());
+    setStatusBar('idle',
+      `重新提炼失败：${msg}。` +
+      (canFallback ? '可点「重新提炼（强制新建运行）」重试。' : '请刷新页面后重试。'),
+      0, 0, 0);
+  }
+}
+
+/**
+ * 强制新建运行：不依赖 sessionStorage 里的旧 thread，直接把当前 thread 作废后走 start。
+ *
+ * 为什么单独留一条：正常「重新提炼」会先 abort 旧 run 再新建；一旦 abort 之后
+ * 任何一步失败（网络、5xx、页面里的异常），用户就被卡在"旧目录 + 无提示"，
+ * 实测连续点 25 次「重新拆分目录」也没用（它不重跑解析）。这条路径把每一步的
+ * 失败都报出来，并且**先建新 run 再谈其它**。
+ */
+async function forceRestartRun() {
+  const tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  setExtractDisabled(true);
+  setStatusBar('extracting', '正在新建运行（重新解析全部要求文件）…', 0, 0, 0);
+  try {
+    if (tid) { try { await api.workflow.abort(tid); } catch {} }
+    clearThread(projectId);
+    currentThreadId = null;
+    try { await api.blocks.clear(projectId); } catch (e) { console.warn('clear blocks failed', e); }
+    const resp = await api.workflow.start(projectId, {
+      model: selectedModel,
+      outline_instruction: readOutlineInstruction(),
+    });
+    const newTid = resp && resp.thread_id;
+    if (!newTid) throw new Error(`start 未返回 thread_id：${JSON.stringify(resp).slice(0, 200)}`);
+    setThread(projectId, newTid);
+    currentThreadId = newTid;
+    attachStream(newTid);
+    setStatusBar('extracting', '已新建运行，正在解析要求文件…', 0, 0, 0);
+  } catch (e) {
+    console.error('[workflow] forceRestartRun 失败', e);
+    setExtractDisabled(false);
+    setStatusBar('idle', `新建运行失败：${(e && (e.message || e.detail)) || e}`, 0, 0, 0);
   }
 }
 
@@ -4648,6 +4722,16 @@ async function uploadFile(file, role, btn) {
   sync();
 })();
 
+// 调试/自救入口：页面上的按钮若因状态判断被隐藏或事件未绑定，可在控制台直接调用。
+// （实测出现过"按钮在、点了没反应"，与控制台自查相比，直接给入口更快定位。）
+window.dsv = {
+  reextract: () => startExtraction(true),      // 重新提炼（重新解析全部要求文件）
+  forceRestart: () => forceRestartRun(),       // 强制新建运行（不依赖旧 thread）
+  redraft: () => redraftOutline(),             // 重新拆分目录
+  state: () => ({ extractionState, currentThreadId, totalBlocks, doneBlocks,
+                  thread: getThread(projectId) }),
+};
+
 // ── 事件绑定 ──
 btnAddReq.addEventListener('click', () => fileInputReq.click());
 btnAddSrc.addEventListener('click', () => fileInputSrc.click());
@@ -4861,6 +4945,6 @@ bindMatchDetailActions();
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260921-roles"></script>
+  <script type="module" src="./assets/workspace.js?v=20260913-fixbtn"></script>
   </body>
 </html>
