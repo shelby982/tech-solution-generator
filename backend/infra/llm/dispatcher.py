@@ -354,44 +354,71 @@ async def dispatch_stream_generate(
     """
     从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
 
-    Fallback 策略：
-    - 仅在首个 token 到达之前发生的错误才 fallback（连接失败、认证失败等）
-    - 一旦开始 yield token，说明流已建立，此时的错误由外层重试逻辑处理，
-      避免将已发送的 token 与新一轮生成内容混在一起造成重复。
-    全部 API 均在首 token 前失败时，上抛最后一个异常。
+    Fallback 策略（2026-10-12 改）：
+    - 每条配置的流**先缓冲整段、成功收尾后才 yield**，因此"已吐一半被截断"也能安全换配置
+      重试，不必把半截正文交给调用方。实测 background：deepseek-v4-pro 单次应答 140s+，
+      会在 120s 处被掐断并**静默**落库半截正文（方案 §1.2 的"静默截断"）。
+      旧语义是"一旦开始 yield 就不再 fallback"，代价就是半截内容只能将错就错。
+    - 流被截断（``errors.StreamTruncatedError``：无 ``finish_reason`` 或顶到 max_tokens）
+      按可重试处理，换下一条配置（通常是更快/更稳的档）重生成整节。
+    - 全部配置都失败时：若最后一轮是**截断**且已有正文，记 warning 后仍把这段交出去
+      （半截正文对用户仍有价值，人工可续写），而不是抛错丢掉已花的钱；
+      其余情况上抛最后一个异常。
+    - 代价：调用方不再"边说边看"。自动路径本就是整节写完后落库，工作台手动路径走的是
+      ``dispatch_stream_generate`` 之外的直连，不受影响。
     """
     n = len(configs)
     if n == 0:
         raise ValueError("未配置任何 API，请先在「设置」中添加配置")
 
     last_error: Exception | None = None
+    best_partial: tuple[str, str] = ("", "")   # (部分正文, 截断原因)
     # 跳过冷却中的坏配置（余额不足/Key 无效等）：否则一个不可用的配置会被后面
     # 每个小节反复重试。全部冷却时 usable 为空 → 直接快速失败并给出聚合原因。
     usable = errors.available_configs(configs, rr_start_index)
     for i, config in enumerate(usable):
-        started = False  # 是否已开始 yield token
+        buf: list[str] = []
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
             async for token in _stream_generate(
                 config, section_title, original_content, target_words,
                 doc_summary, extra_prompt, doc_template, tone, max_words,
             ):
-                started = True
+                buf.append(token)
+            # 正常收尾：这时才把整段交出去
+            for token in buf:
                 yield token
-            return  # 成功，退出
+            return
+        except errors.StreamTruncatedError as e:
+            text = "".join(buf)
+            if len(text) > len(best_partial[0]):
+                best_partial = (text, str(e))
+            last_error = e
+            kind = errors.KIND_RETRYABLE
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 流被截断"
+                f"（已有 {len(text)} 字）：{e}"
+                f"{'，换下一条配置重生成整节' if i < len(usable) - 1 else ''}"
+            )
         except Exception as e:
-            if started:
-                # 流已开始，不能 fallback（前端已收到部分内容），直接上抛
-                raise
             last_error = e
             kind = errors.note_failure(config, e)
             logger.warning(
-                f"API [{config.provider}/{config.model}] 连接失败"
+                f"API [{config.provider}/{config.model}] 生成失败"
                 f"（{errors.describe_error(e)}），"
                 f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )
             if errors.blocks_chain(kind):
                 break
+
+    if best_partial[0]:
+        # 全部配置都截断了：交出最长的一段并说清楚，不静默、也不白花钱
+        logger.warning(
+            f"章节「{section_title}」所有配置均被截断，交出 {len(best_partial[0])} 字"
+            f"（{best_partial[1]}）；内容可能不完整，建议重生成"
+        )
+        yield best_partial[0]
+        return
 
     raise errors.exhausted_error(configs, last_error)
 

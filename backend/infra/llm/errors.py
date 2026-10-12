@@ -37,6 +37,27 @@ KIND_REQUEST_ERROR = "request_error"
 # 瞬态故障：超时 / 限流 / 5xx / 连接失败 / 未知 → 换下一条配置重试
 KIND_RETRYABLE = "retryable"
 
+
+class StreamTruncatedError(RuntimeError):
+    """流式响应**没有正常结束**：连接被掐断，或整段只把思考 token 发完就被长度截断。
+
+    为什么必须显式化（实测 2026-10-12，deepseek-v4-pro，同一 prompt 连续 3 次）：
+    145.8s / 0 字、120.7s / 1518 字、138.5s / 764 字 —— 后两次正文断在半句，
+    **但没有任何异常**，于是半截正文被当成正常产出落库、还记了一次成功调用。
+    根因是 OpenAI 流只在收尾帧给 ``finish_reason``，而已有实现不读它：
+    流无论怎么结束都按"成功"结账。
+
+    归入 retryable：换一条配置（或同一配置重发）正是该做的事。
+    """
+
+    kind = KIND_RETRYABLE
+
+
+def stream_truncated_error(reason: str) -> StreamTruncatedError:
+    """构造带统一措辞的截断异常（便于日志与测试断言同一文案）。"""
+    return StreamTruncatedError(f"流式响应未正常结束：{reason}")
+
+
 _KIND_BY_STATUS = {
     400: KIND_REQUEST_ERROR,
     401: KIND_CONFIG_UNUSABLE,

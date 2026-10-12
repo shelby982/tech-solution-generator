@@ -14,7 +14,7 @@ from typing import AsyncIterator
 
 from services.config_store import LLMConfig
 
-from . import _mock, usage
+from . import _mock, errors, usage
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,12 @@ _VERIFY_PROMPT = "Reply with the single word: ok"
 
 # 流式 chunk 级超时（秒），可通过环境变量 LLM_CHUNK_TIMEOUT 覆盖
 CHUNK_TIMEOUT = float(os.getenv("LLM_CHUNK_TIMEOUT", "30"))
+
+# 流式请求的**总**超时（秒）。原为硬编码 120s —— 实测思考型模型（deepseek-v4-pro）
+# 一次 1,900 字左右的应答要 140s+，正好撞在 120s 上被掐断，且表现为"正文断在半句、
+# 无任何报错"。这里放宽到 600s 并允许配置；chunk 级超时（30s 无数据）仍然独立生效，
+# 因此放宽总超时不会拖长"连接卡死"的失败发现时间。
+STREAM_TIMEOUT = float(os.getenv("LLM_STREAM_TIMEOUT", "600"))
 
 # 流式正文的输出上限。原为硬编码 4096，实测正文经常顶到它被硬截断（章节断在半句），
 # 因为应标正文按长度分档要 1,600–2,400 汉字，而思考型模型还要额外占 reasoning 预算。
@@ -33,6 +39,24 @@ STREAM_MAX_TOKENS = int(os.getenv("LLM_STREAM_MAX_TOKENS", "8192"))
 
 def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
+
+
+def _truncation_reason(finish_reason, emitted_chars: int) -> str:
+    """流正常结束后，判断它是否其实**没正常结束**。返回原因字符串，正常则返回 ""。
+
+    实测（2026-10-12，deepseek-v4-pro 同一 prompt 三次）：145.8s/0 字、120.7s/1518 字、
+    138.5s/764 字，后两次正文断在半句却**零异常**。所以"流走完了"不等于"生成完了"，
+    必须看收尾原因：
+
+    - ``length``：顶到 ``max_tokens``（思考 token 也会计入），正文被腰斩；
+    - 没有任何 ``finish_reason``：连接被中途掐断（含总超时把流截断），
+      只在**已经吐过正文**时判定 —— 否则会把"模型确实无话可说"误报成故障。
+    """
+    if finish_reason == "length":
+        return f"达到 max_tokens 上限被截断（已输出 {emitted_chars} 字）"
+    if finish_reason is None and emitted_chars > 0:
+        return f"连接在收尾前断开，未收到 finish_reason（已输出 {emitted_chars} 字）"
+    return ""
 
 
 def _openai_usage_fields(response) -> dict:
@@ -381,7 +405,10 @@ async def stream_openai(
     client = AsyncOpenAI(
         api_key=config.api_key,
         base_url=config.base_url,
-        timeout=120.0,
+        timeout=STREAM_TIMEOUT,
+        # 关掉 SDK 内部重试：重试由 dispatcher 的跨配置 fallback 统一负责，
+        # 否则一次超时会被 SDK 静默重发 2 次（重复计费、且把超时放大 3 倍）。
+        max_retries=0,
     )
     started = time.monotonic()
     messages = [
@@ -415,18 +442,34 @@ async def stream_openai(
             raise
 
     fields: dict = {}
+    finish_reason = None      # 只在收尾帧出现；缺它 = 流被中途掐断
+    emitted_chars = 0
     try:
         async for chunk in _iter_with_chunk_timeout(stream, "OpenAI", CHUNK_TIMEOUT):
             # include_usage 的末帧只带 usage、choices 为空
             if getattr(chunk, "usage", None) is not None:
                 fields = _openai_usage_fields(chunk)
-            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            if getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason
+            delta = choice.delta.content if getattr(choice, "delta", None) else None
             if delta is not None:
+                emitted_chars += len(delta)
                 yield delta
     except Exception as e:
         await _emit_usage(config, call_site, streaming=True, fields=fields,
                           ok=False, error=str(e), started=started)
         raise
+
+    # 流结束但没给出正常收尾原因 → 这是一次**被掐断**的生成。
+    # 以前这里无条件记 ok=True，于是半截正文（甚至 0 字）被当成正常产出落库。
+    reason = _truncation_reason(finish_reason, emitted_chars)
+    if reason:
+        await _emit_usage(config, call_site, streaming=True, fields=fields,
+                          ok=False, error=reason, started=started)
+        raise errors.stream_truncated_error(reason)
 
     await _emit_usage(config, call_site, streaming=True, fields=fields,
                       ok=True, error="", started=started)
@@ -449,7 +492,8 @@ async def stream_claude(
     client = anthropic.AsyncAnthropic(
         api_key=config.api_key,
         base_url=config.base_url if config.base_url != "https://api.anthropic.com" else None,
-        timeout=120.0,
+        timeout=STREAM_TIMEOUT,
+        max_retries=0,   # 重试统一由 dispatcher 的跨配置 fallback 负责
     )
     started = time.monotonic()
     fields: dict = {}

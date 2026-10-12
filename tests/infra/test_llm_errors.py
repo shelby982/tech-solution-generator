@@ -227,3 +227,180 @@ async def test_empty_response_error_is_not_treated_as_unusable(monkeypatch):
 
     assert errors.is_available(cfg) is True
     assert "空内容" in row["error"] or "失败" in row["error"]
+
+
+# ─────────────────────────────────────────────
+# 流式截断：不能静默当成功（实测 2026-10-12）
+# ─────────────────────────────────────────────
+
+def test_truncation_reason_flags_length_and_missing_finish_reason():
+    """`length` 与「有正文但无 finish_reason」都判定为截断；正常收尾不误报。"""
+    from infra.llm.clients import _truncation_reason
+
+    assert "max_tokens" in _truncation_reason("length", 1200)
+    assert "finish_reason" in _truncation_reason(None, 1518)
+    # 正常收尾
+    assert _truncation_reason("stop", 1200) == ""
+    # 模型确实无话可说（0 字且无 finish_reason）不误报成故障
+    assert _truncation_reason(None, 0) == ""
+
+
+def test_stream_truncated_error_is_retryable_not_config_unusable():
+    """截断要换配置重试（retryable），而不是把 key 拉黑。"""
+    exc = errors.stream_truncated_error("连接在收尾前断开")
+
+    assert isinstance(exc, errors.StreamTruncatedError)
+    assert errors.classify_error(exc) == errors.KIND_RETRYABLE
+    assert errors.is_retryable(errors.KIND_RETRYABLE) is True
+    assert errors.blocks_chain(errors.KIND_RETRYABLE) is False
+    assert errors.is_available(_cfg()) is True
+
+
+class _Delta:
+    def __init__(self, content):
+        self.content = content
+
+
+class _Choice:
+    def __init__(self, content=None, finish_reason=None):
+        self.delta = _Delta(content)
+        self.finish_reason = finish_reason
+
+
+class _Chunk:
+    def __init__(self, content=None, finish_reason=None, usage=None):
+        self.choices = [_Choice(content, finish_reason)] if content is not None or finish_reason else []
+        self.usage = usage
+
+
+class _FakeStream:
+    """按脚本产出 chunk 的异步迭代器（模拟 openai 流式响应）。"""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+
+async def _drain_stream_openai(monkeypatch, chunks):
+    """跑一遍 stream_openai，返回 (收到的正文, 抛出的异常或 None)。"""
+    from infra.llm import clients
+
+    monkeypatch.delenv("LLM_MODE", raising=False)
+
+    class _Completions:
+        async def create(self, **kw):
+            return _FakeStream(chunks)
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Client:
+        def __init__(self, **kw):
+            self.chat = _Chat()
+
+    import openai
+    monkeypatch.setattr(openai, "AsyncOpenAI", _Client)
+    monkeypatch.setattr(clients, "_emit_usage", lambda *a, **k: _noop())
+
+    text, err = [], None
+    try:
+        async for t in clients.stream_openai(_cfg(), "sys", "user", call_site="stream_generate"):
+            text.append(t)
+    except Exception as e:      # noqa: BLE001 — 测试就是要拿到异常
+        err = e
+    return "".join(text), err
+
+
+async def _noop():
+    return None
+
+
+@pytest.mark.asyncio
+async def test_stream_openai_raises_when_finish_reason_missing(monkeypatch):
+    """有正文但收尾帧缺 finish_reason → 抛截断异常，而不是静默算成功。"""
+    chunks = [_Chunk("正文前半段。"), _Chunk("正文后半段")]   # 流结束但始终没有 stop
+    text, err = await _drain_stream_openai(monkeypatch, chunks)
+
+    assert isinstance(err, errors.StreamTruncatedError)
+    assert "finish_reason" in str(err)
+    assert text == "正文前半段。正文后半段"   # 已吐出的内容仍被调用方收到
+
+
+@pytest.mark.asyncio
+async def test_stream_openai_raises_when_hitting_max_tokens(monkeypatch):
+    """finish_reason='length' → 抛截断异常（顶到 max_tokens，正文被腰斩）。"""
+    chunks = [_Chunk("半截正文"), _Chunk(None, finish_reason="length")]
+    _text, err = await _drain_stream_openai(monkeypatch, chunks)
+
+    assert isinstance(err, errors.StreamTruncatedError)
+    assert "max_tokens" in str(err)
+
+
+@pytest.mark.asyncio
+async def test_stream_openai_ok_on_normal_stop(monkeypatch):
+    """正常收尾（finish_reason='stop'）不抛错。"""
+    chunks = [_Chunk("完整正文"), _Chunk(None, finish_reason="stop")]
+    text, err = await _drain_stream_openai(monkeypatch, chunks)
+
+    assert err is None
+    assert text == "完整正文"
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_falls_back_to_next_config_on_truncation(monkeypatch):
+    """被截断时换下一条配置**重生成整节**，且不把半截内容重复交出。"""
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    slow, fast = _cfg(model="slow-model"), _cfg(model="fast-model")
+    calls = []
+
+    async def fake_stream(config, *a, **kw):
+        calls.append(config.model)
+        if config.model == "slow-model":
+            yield "半截正文"
+            raise errors.stream_truncated_error("连接在收尾前断开")
+        for tok in ("完整", "正文"):
+            yield tok
+
+    monkeypatch.setattr(dispatcher, "_stream_generate", fake_stream)
+
+    out = []
+    async for tok in dispatcher.dispatch_stream_generate(
+        [slow, fast], 0, "章节", "", extra_prompt="【本章应答要求】\nR1 要求\n",
+    ):
+        out.append(tok)
+
+    assert calls == ["slow-model", "fast-model"]
+    # 半截内容不得混进最终结果（缓冲后用完整那版覆盖）
+    assert "".join(out) == "完整正文"
+    assert "半截" not in "".join(out)
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_yields_best_partial_when_all_truncated(monkeypatch):
+    """全部配置都截断时，交出最长的一段并记 warning —— 不抛错丢掉已花的钱。"""
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    a, b = _cfg(model="m-a"), _cfg(model="m-b")
+
+    async def fake_stream(config, *a, **kw):
+        if config.model == "m-a":
+            yield "短"
+        else:
+            yield "长一些的半截正文"
+        raise errors.stream_truncated_error("连接在收尾前断开")
+
+    monkeypatch.setattr(dispatcher, "_stream_generate", fake_stream)
+
+    out = []
+    async for tok in dispatcher.dispatch_stream_generate(
+        [a, b], 0, "章节", "", extra_prompt="【本章应答要求】\nR1 要求\n",
+    ):
+        out.append(tok)
+
+    assert "".join(out) == "长一些的半截正文"
