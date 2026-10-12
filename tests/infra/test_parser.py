@@ -32,7 +32,7 @@ def test_extract_special_marks_no_marks():
 def test_detect_level_from_numbering_all_levels():
     """级别约定：章=1、节=2、一、/（一）=2、十进制按**点分段数**、（）=3、①=4。
 
-    旧实现把 ``1.1 子项`` 判成 4 级（模式写的是 ``^\d+\.\d+`` 却挂在 4 级上），
+    旧实现把 ``1.1 子项`` 判成 4 级（模式写的是 ``^\\d+\\.\\d+`` 却挂在 4 级上），
     而 ``1.1.1`` 反而判不出 —— 同一文档里层级自相矛盾且出现跳级。
     """
     assert detect_level_from_numbering("一、概述") == 2
@@ -470,3 +470,85 @@ def test_extract_numbering_prefix_covers_all_families():
     assert _extract_numbering_prefix("①概述") == "①"
     assert _extract_numbering_prefix("没有编号的标题") == ""
     assert _extract_numbering_prefix("2320.48 否") == ""
+
+
+# ─────────────────────────────────────────────
+# 样式优先：有 Heading 样式时不得用编号兜底（实测技术规范书）
+# ─────────────────────────────────────────────
+#
+# 背景：技术规范书《4_高可靠技术专题研究与验证-技术招标文件.docx》没有 TOC，
+# 走「按 block 扫描标题」路径。文档里真标题全部带 Heading 样式，而正文里有大量
+# `1、投标方应标时…` / `一、投标方应…` / `（一）子任务1：…` 这类**枚举项**。
+# 编号兜底把它们升格成章节后：117 节里 62 节正文为空，正文被切碎、层级错乱。
+
+def test_numbering_fallback_is_disabled_when_heading_styles_exist():
+    """有 Heading 样式时，编号不再单独决定标题（避免把列表项当章节）。"""
+    from infra.parser.docx import _get_heading_level
+
+    # 样式存在 → 编号不兜底
+    assert _get_heading_level("Normal", "1、投标方应标时，必须向招标方提供人员名单", has_styles=True) is None
+    assert _get_heading_level("Normal", "一、投标方应…", has_styles=True) is None
+    assert _get_heading_level("Body Text Indent", "3、遵守国家法律和政府有关条例开展；", has_styles=True) is None
+    # 样式在场时，显式 Heading 仍然照常
+    assert _get_heading_level("Heading 3", "概述", has_styles=True) == 3
+    assert _get_heading_level("Heading 2", "总则", has_styles=True) == 2
+
+    # 无样式文档（如 PDF 转出的纯文本）→ 编号兜底保留，行为与改造前一致
+    assert _get_heading_level("Normal", "一、概述", has_styles=False) == 2
+    assert _get_heading_level("Normal", "1.1 项目背景", has_styles=False) == 2
+
+
+def test_heading_style_detection_covers_bilingual_names():
+    """Heading 样式名要覆盖中英双语与有/无空格的四种写法。"""
+    from infra.parser.docx import _is_heading_style
+
+    for name in ("Heading 1", "heading1", "标题 2", "标题3", "Heading 6", "标题 6"):
+        assert _is_heading_style(name) is True, name
+    for name in ("Normal", "Body Text", "正文缩进1", "", "Heading 9"):
+        assert _is_heading_style(name) is False, name
+
+
+_REAL_SPEC = (
+    "/Users/jianghe/work/软研工作/项目支撑/广东电网/营销系统升级/一期招投标/"
+    "广东电网营销一体化(1)/广东电网营销一体化招标文件/招标文件下载2026-06-23-083630/"
+    "数智营销一体化平台关键业务场景与高可靠技术研究及验证标的/"
+    "高可靠技术专题研究与验证标包/4_高可靠技术专题研究与验证-技术招标文件.docx"
+)
+
+
+@pytest.mark.skipif(
+    not __import__("os").path.exists(_REAL_SPEC),
+    reason="真实技术规范书不在本机（夹具为本机专有）",
+)
+def test_real_spec_book_structure_is_not_fragmented():
+    """真实技术规范书：结构 = 标题样式数，正文不得被枚举项切碎。
+
+    修复前：117 节 / 62 节正文为空 / 63 个「1、」开头的伪标题。
+    修复后：54 节（= 文档 Heading 段落数）/ 空正文降到个位数 / 无伪标题。
+    这里用**结构不变量**断言，不钉死具体数字，避免文件微调就误报。
+    """
+    from infra.parser import parse_document
+
+    doc = parse_document(_REAL_SPEC)
+    sections = doc.sections
+
+    # 1) 不应出现「1、xxx」这类**列表项**被当成章节标题。
+    #    注意排除 `1.4.1组织保证` —— 那是合法章节号（点分段数即级别），不是列表项。
+    def _is_list_item_title(title: str) -> bool:
+        m = __import__("re").match(r"^\s*(\d{1,2})\s*、\s*\S", title or "")
+        return m is not None
+
+    pseudo = [s for s in sections if _is_list_item_title(s.title or "")]
+    assert pseudo == [], f"列表项被判成标题：{[s.title for s in pseudo][:5]}"
+
+    # 2) 空正文节占比应显著低于修复前的 53%
+    empty = [s for s in sections if not (s.raw_content or "").strip()]
+    assert len(empty) / len(sections) < 0.30, f"空正文章节仍占 {len(empty)}/{len(sections)}"
+
+    # 3) 技术规范书的核心内容必须作为正文保住
+    joined = "\n".join(s.raw_content or "" for s in sections)
+    for must in ("工作项3：研究营销管理系统专项安全方案",
+                 "信创适配研究及验证", "项目交付项", "人员要求"):
+        assert must in "\n".join(s.title or "" for s in sections) or must in joined, must
+    # 工作项正文（技术要求的实体内容）不得丢
+    assert "安全架构设计模板" in joined

@@ -441,6 +441,10 @@ def _parse_docx_by_heading_scan(
     if progress_callback:
         progress_callback("扫描章节标题...", 0, -1)
 
+    # 先确认这份文档到底有没有用 Heading 样式：有则编号只作补充（严格守卫），
+    # 没有才允许编号兜底当结构（宽松，与 PDF 路径一致）。
+    has_styles = any(_is_heading_style(b.style or "") for b in blocks if b.kind == "paragraph")
+
     heading_indices: list[tuple[int, int, str, list[str]]] = []
     for i, block in enumerate(blocks):
         if block.kind != "paragraph":
@@ -449,7 +453,7 @@ def _parse_docx_by_heading_scan(
         if not raw_text:
             continue
         marks, text = extract_special_marks(raw_text)
-        level = _get_heading_level(block.style or "", text)
+        level = _get_heading_level(block.style or "", text, has_styles=has_styles)
         if level is not None:
             heading_indices.append((i, level, text, marks))
 
@@ -498,21 +502,39 @@ def _parse_docx_by_heading_scan(
     return ParsedDocument(doc_id, doc_title, sections)
 
 
-def _get_heading_level(style_name: str, text: str) -> Optional[int]:
+# 显式标题样式名（Word 中英双语）。文档里存在这类样式时，编号只作补充。
+_HEADING_STYLE_NAMES = {
+    f"{base} {i}": i for i in range(1, 7) for base in ("heading", "标题")
+} | {f"{base}{i}": i for i in range(1, 7) for base in ("heading", "标题")}
+
+
+def _is_heading_style(style_name: str) -> bool:
+    """样式名是不是显式标题样式（Heading N / 标题 N）。"""
+    return style_name.lower().strip() in _HEADING_STYLE_NAMES
+
+
+def _get_heading_level(style_name: str, text: str, *, has_styles: bool = True) -> Optional[int]:
+    """标题级别：显式 Heading 样式优先；无样式信息时才用编号兜底。
+
+    ``has_styles``：该文档里是否存在**真正的 Heading 样式段落**。为 True 时编号只在
+    样式之外起补充作用，并走严格守卫 —— 否则文档里的正文枚举项（``1、投标方应…``、
+    ``一、投标方应…``）会被整批升格成章节，把正文切碎。实测技术规范书
+    《4_高可靠专题研究与验证-技术招标文件.docx》：117 节里 62 节正文为空，
+    就是这些枚举项造成的。PDF 与无样式文档仍走默认宽松判据。
+    """
     s = style_name.lower().strip()
-    heading_map = {
-        "heading 1": 1, "heading1": 1, "标题 1": 1, "标题1": 1,
-        "heading 2": 2, "heading2": 2, "标题 2": 2, "标题2": 2,
-        "heading 3": 3, "heading3": 3, "标题 3": 3, "标题3": 3,
-        "heading 4": 4, "heading4": 4, "标题 4": 4, "标题4": 4,
-        "heading 5": 5, "heading5": 5, "标题 5": 5, "标题5": 5,
-        "heading 6": 6, "heading6": 6, "标题 6": 6, "标题6": 6,
-    }
-    for key, level in heading_map.items():
+    for key, level in _HEADING_STYLE_NAMES.items():
         if s == key.lower():
             return level
 
+    if has_styles:
+        # 有 Heading 样式时**不用编号兜底**：实测该技术规范书的真标题全部带样式，
+        # 而 ``1、投标方应…``/``一、…``/``（一）子任务…`` 这类编号**全是正文枚举项**，
+        # 用编号兜底会把它们升格成章节、把正文切碎（117 节里 62 节正文为空）。
+        return None
+
     if len(text) < 40:
+        # 无样式信息（纯文本型 docx）→ 宽松兜底，行为与 PDF 路径一致
         numbering_level = detect_level_from_numbering(text)
         if numbering_level is not None:
             return numbering_level

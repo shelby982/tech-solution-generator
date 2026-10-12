@@ -173,14 +173,26 @@ _CIRCLED_RE = re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰
 # 列表项常见的收尾：以这些标点结束的多半是正文枚举，不是标题。
 _LIST_ITEM_TAIL = "；;。，,：:"
 
+# 标题的最长字符数。超过它基本是正文段落或长列表项。
+# 实测（技术规范书《4_高可靠技术专题研究与验证-技术招标文件.docx》）：
+# 「26、《广东电网有限责任公司信息系统并网管理业务指导书》」这类**标准清单项**
+# 被当成标题吃进结构，导致 117 节里 62 节正文为空、正文被切碎。
+_HEADING_MAX_CHARS = 30
 
-def detect_level_from_numbering(text: str) -> Optional[int]:
+
+def detect_level_from_numbering(text: str, *, strict: bool = False) -> Optional[int]:
     """按编号判章节级别。判不出返回 None（由调用方走字号兜底）。
 
     级别约定（同一份文档内自洽；文档顺序仍是层级的最终权威，见 normalize_nodes）：
     ``第X章/篇/部``=1、``第X节``=2、``1.``=1、``1.1``=2、``1.1.1``=3、``1.1.1.1``=4、
     ``一、``/``（一）``=2、``（1）``=3、``①``=4。判不出前缀里的数字是否为章节号时
     （表格数值）一律 None。
+
+    ``strict``：**有样式信息可用时**（docx 的 Heading 样式）启用。此时编号只能作为
+    样式的补充，不能反过来把正文列表项升格成章节 —— 实测技术规范书
+    《4_高可靠专题研究与验证-技术招标文件.docx》里 117 节有 62 节正文为空，
+    全部源于 ``1、``/``一、`` 开头的**列表项**被判成标题（该文档的真标题都带
+    Heading 样式）。PDF 无样式信息，仍走默认的宽松判据。
     """
     text = text.strip()
     if not text:
@@ -196,28 +208,43 @@ def detect_level_from_numbering(text: str) -> Optional[int]:
     ):
         m = pattern.match(text)
         if m:
-            return level if _passes_heading_guards(text, m.end(), level) else None
+            return level if _passes_heading_guards(text, m.end(), level, strict=strict) else None
 
     m = _DECIMAL_NUMBER_RE.match(text)
     if m:
         # 点分段数即级别；``1.`` 结尾的点号属于编号本身，级别算 1
         level = min(4, m.group(1).count(".") + 1)
-        return level if _passes_heading_guards(text, m.end(), level) else None
+        return level if _passes_heading_guards(text, m.end(), level, strict=strict) else None
     return None
 
 
-def _passes_heading_guards(text: str, prefix_end: int, level: int) -> bool:
-    """深层编号与空正文的过滤：列表项常以统一编号开头，不是章节标题。
+def _passes_heading_guards(text: str, prefix_end: int, level: int, *, strict: bool = False) -> bool:
+    """编号前置的可行性守卫：排除"看着像编号、其实是正文枚举"的行。
 
-    - ``level >= 3`` 时去前缀后通常 ≤ 20 字；超过视为正文枚举。
-    - 去前缀后为空、或以顿挫/句号收尾的枚举项，也不是标题。
+    默认（宽松，PDF 用）：沿用原有深层守卫 —— ``level >= 3`` 时才查长度与收尾标点。
+    实测两份材料都靠它维持既有行为（``一、项目概况`` 这类表格标题必须能成节）。
+
+    ``strict=True``（docx 有 Heading 样式时用）额外收紧，判据都从实测归纳且对真标题零误伤：
+    - 整行超过 ``_HEADING_MAX_CHARS`` 基本是正文/长列表项（标准清单尤其明显）；
+    - ``一、`` 这类中文顿号编号按惯例是**枚举项**，不作为编号兜底依据。
     """
-    if level < 3:
-        return True
     remainder = text[prefix_end:].strip()
-    if len(remainder) > 20:
+    if not remainder:
         return False
-    if not remainder or remainder[-1] in _LIST_ITEM_TAIL:
+    if not strict:
+        # 宽松（PDF / 无样式文档）：沿用原有深层守卫。**不查收尾标点** ——
+        # 招标文件的章节标题常自带句号（「2.6 标的清单及分包情况：」），
+        # 按标点过滤会整节消失（实测 2.6 标的清单被吃掉，477 → 380 节）。
+        if level < 3:
+            return True
+        if len(remainder) > 20:
+            return False
+        return remainder[-1] not in _LIST_ITEM_TAIL
+    # 严格（有 Heading 样式的 docx 在无样式段落上误用时才会走到；正常已由
+    # 「样式优先」把关，此处保留作为兜底）
+    if len(text) > _HEADING_MAX_CHARS:
+        return False
+    if level == 2 and _CN_COMMA_RE.match(text):
         return False
     return True
 
