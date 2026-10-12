@@ -147,3 +147,87 @@ def test_prunes_indicator_lines_that_restate_score_bands():
     assert res["pruned_indicators"] == ["方案可行性得分档位：8-12分、0分（没有内容不得分）",
                                         "方案可行性+方案先进性总分：30分"]
     assert row.indicators == "不少于35人\n交付周期90天"
+
+
+# ─────────────────────────────────────────────
+# 动作与档位混写：切走档位、保留动作（实测项目 18 s2 / s2.2.8）
+# ─────────────────────────────────────────────
+
+def test_split_banded_line_keeps_action_and_moves_bands():
+    """「动作要求 + 多档评分规则」混写行：动作句留下，档位整段搬走。
+
+    实测背景：这类行含义务动词（应/须），被 is_informative 的"保护动作句"逻辑留下，
+    于是整段档位规则继续留在 requirement —— 写手看到后去**复述档位**（实测 11 次）。
+    """
+    from domain.spec.field_normalize import split_banded_line
+
+    line = (
+        "1. 方案可行性：技术方案应遵循数字化转型顶层设计，方案总体架构设计合理，"
+        "技术方案可行（对应8-12分档）；基本符合数字化转型顶层设计、总体架构设计比较合理、"
+        "技术方案较可行（对应5-7分档）；避免方案设计理解不够准确（对应1-4分档）；没有内容不得分。"
+    )
+    action, banded = split_banded_line(line)
+
+    # 动作句必须留下（撰写阶段的主抓手）
+    assert "技术方案应遵循数字化转型顶层设计" in action
+    assert "对应8-12分档" not in action
+    # 档位文本搬走，且保留各档数字（信息不丢）
+    assert "对应8-12分档" in banded
+    assert "对应5-7分档" in banded
+    assert "没有内容不得分" in banded
+
+
+def test_split_banded_line_returns_none_for_single_award_sentence():
+    """单次给分的动作句不是档位规则（「须整体成文并完整提交，无内容则不得分」）。"""
+    from domain.spec.field_normalize import split_banded_line
+
+    assert split_banded_line("4. 实施方案须整体成文并完整提交，无内容则不得分。") is None
+    assert split_banded_line("5. 投标文件中必须有相应章节内容，没有内容的不得分。") is None
+
+
+def test_split_banded_line_moves_pure_conditional_band_rules():
+    """纯条件档位行（以「若」开头、没有动作）整行搬走。"""
+    from domain.spec.field_normalize import split_banded_line
+
+    line = ("若投标响应度一般，存在非实质性负偏差或未作响应的情况，"
+            "但总体上满足招标技术要求，对应一般档，得1-5分。")
+    # 该行没有 ≥2 次给分陈述 → 交给 is_informative / 其他规则，这里返回 None 是对的
+    assert split_banded_line(line) is None
+
+    multi = ("若响应度较高，完全满足要求，得7-10分；若响应度良好，得6分；未作响应不得分。")
+    action, banded = split_banded_line(multi)
+    assert action == ""                 # 条件行没有动作可留
+    assert banded == multi
+
+
+def test_normalize_row_fields_splits_mixed_line_end_to_end():
+    """整行归一化：requirement 不再含档位规则，score_items 收到档位文本。"""
+    from domain.spec.field_normalize import normalize_row_fields
+
+    row = {
+        "requirement": (
+            "1. 方案可行性：技术方案应遵循数字化转型顶层设计，方案总体架构设计合理，"
+            "技术方案可行（对应8-12分档）；基本符合顶层设计（对应5-7分档）；"
+            "设计不够合理（对应1-4分档）；没有内容不得分。"
+        ),
+        "score_items": "方案可行性 10分",
+        "indicators": "",
+    }
+    normalize_row_fields(row)
+
+    assert "对应8-12分档" not in row["requirement"]
+    assert "技术方案应遵循数字化转型顶层设计" in row["requirement"]
+    assert "对应8-12分档" in row["score_items"]
+    assert "方案可行性 10分" in row["score_items"]      # 原有评分项不丢
+
+
+def test_normalize_row_fields_never_empties_requirement():
+    """整章 requirement 都是档位规则时原样保留（主字段不能空）。"""
+    from domain.spec.field_normalize import normalize_row_fields
+
+    all_bands = ("若响应度较高，得7-10分；若响应度良好，得6分；若响应度一般，得1-5分；"
+                 "未作响应不得分。")
+    row = {"requirement": all_bands, "score_items": "", "indicators": ""}
+    normalize_row_fields(row)
+
+    assert row["requirement"].strip() != ""

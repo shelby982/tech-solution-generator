@@ -28,6 +28,22 @@ _DEDUPE_STRIP_RE = re.compile(r"\s+|评分项|评审项|条款")
 _BAND_HINT_RE = re.compile(r"档位|总分|满分|得分|评分|分值")
 _NUM_RE = re.compile(r"\d+(?:\.\d+)?")
 
+# 「一次给分/定档陈述」的最小单位。用于识别**混写行**（实测项目 18 的 s2 / s2.2.8）：
+#   `1. 方案可行性：技术方案应遵循数字化转型顶层设计…（对应8-12分档）；基本符合…（对应5-7分档）；…`
+# 一行里既有"我方要做什么"（应遵循顶层设计），又有整段多档评分规则。
+# 只按 `is_informative` 判定搬不动它 —— 行内有义务动词，被"保护"逻辑留下，
+# 于是整段档位规则继续留在 requirement 里，写手就会去复述档位（实测：评分档位复述 11 次）。
+_AWARD_SEG_RE = re.compile(
+    r"得\s*\d+(?:\s*[-~—至]\s*\d+)?\s*分|不得分|"
+    r"可获[^，,；;]{0,6}档|降为[^，,；;]{0,6}档|"
+    r"对应\s*\d+(?:\s*[-~—至]\s*\d+)?\s*分档|满分\s*\d+\s*分"
+)
+# 一段里出现 ≥2 次给分陈述才判定为"评分口径为主"（单次给分常夹在动作句中，
+# 例如「…必须整体成文并完整提交，无内容则不得分」—— 那是要求，不是档位规则）
+_MIN_AWARD_SEGS = 2
+# 头段以条件词开头 = 没有动作要求，整行都是评分规则
+_COND_START_RE = re.compile(r"^(?:若|如果|如|倘若|当)")
+
 
 def _numbers(text: str) -> set[str]:
     """行里的数字集合。**排除 0**：「0分（没有内容不得分）」是档位的下界，
@@ -41,6 +57,30 @@ def _dedupe_key(text: str) -> str:
     return _DEDUPE_STRIP_RE.sub("", str(text or ""))
 
 
+def split_banded_line(line: str) -> tuple[str, str] | None:
+    """把「动作要求 + 多档评分规则」的混写行切成 (要保留的动作句, 搬去 score_items 的档位文本)。
+
+    不是混写行 → 返回 ``None``。返回 ``("", 整行)`` 表示整行都是评分规则（没有动作可留）。
+
+    为什么需要它：``is_informative`` 对含义务动词的行一律判为"要回应的事项"（那是为了让
+    「投标响应须完全满足招标技术要求」这类动作句不被搬走，实测必要）。但**动作与档位混写**
+    的行因此整段留在 requirement 里，档位规则照样被写手看到并复述。这里按"给分陈述的密度"
+    区分：一段里 ≥2 次给分/定档才认定为评分口径为主，然后**只切走档位部分、保留动作句**。
+    """
+    if len(_AWARD_SEG_RE.findall(line)) < _MIN_AWARD_SEGS:
+        return None
+    first = _AWARD_SEG_RE.search(line)
+    head = line[:first.start()]
+    # 回退到最后一个子句边界，避免把动作句切在半句上
+    cut = max(head.rfind("；"), head.rfind(";"), head.rfind("，"), head.rfind(","))
+    if cut <= 0:
+        return ("", line)
+    action = head[:cut].strip(" \t，,；;。:：")
+    if not action or _COND_START_RE.match(action):
+        return ("", line)          # 头段只是条件（"若…"）→ 没有动作，整行搬走
+    return (action, line[cut + 1:].strip())
+
+
 def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
 
@@ -50,15 +90,30 @@ def split_scoring_clauses(requirement: str) -> tuple[str, list[str]]:
 
     保守规则：
     - 只按行判定（不拆句子，避免把"投标方应避免负偏差，否则评分降为一般档"这类
-      带动作的句子搬走）；
+      带动作的句子整条搬走）；
+    - **混写行只切走档位部分**（``split_banded_line``）：动作句必须留在 requirement，
+      它是撰写阶段的主抓手；
     - 若**所有**行都是评分口径，则原样保留（宁可不搬，也不能把 requirement 清空 ——
       8 字段里 requirement 是章节的主字段，清空会让匹配与撰写都没有抓手）。
     """
     lines = _lines(requirement)
     if not lines:
         return str(requirement or ""), []
-    scoring = [ln for ln in lines if is_informative("requirement", ln)]
-    keep = [ln for ln in lines if ln not in scoring]
+    keep: list[str] = []
+    scoring: list[str] = []
+    for ln in lines:
+        if is_informative("requirement", ln):
+            scoring.append(ln)
+            continue
+        mixed = split_banded_line(ln)
+        if mixed is None:
+            keep.append(ln)
+            continue
+        action, banded = mixed
+        if banded:
+            scoring.append(banded)
+        if action:
+            keep.append(action)
     if not keep:
         return str(requirement or ""), []
     return "\n".join(keep), scoring
