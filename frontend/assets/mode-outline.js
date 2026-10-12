@@ -73,6 +73,12 @@ const progressBar   = document.getElementById('progress-bar');
 const statusPct     = document.getElementById('status-pct');
 const statusActions = document.getElementById('status-actions');
 const blocksList  = document.getElementById('blocks-list');
+// 「原始目录 vs 应答目录」的提示条样式（见 warnIfOutlineNotDerived）
+document.head.insertAdjacentHTML('beforeend', `<style>
+.raw-toc-warn{display:flex;flex-direction:column;gap:4px;margin:8px 12px;padding:10px 12px;
+  background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;color:#92400e;font-size:12.5px;line-height:1.5}
+.raw-toc-warn strong{font-size:13px}
+</style>`);
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
@@ -2230,12 +2236,42 @@ document.addEventListener('keydown', (e) => {
 
 
 // ── 加载已有 blocks ──
+/**
+ * 目录**尚未派生**时把话说清楚。
+ *
+ * 实测（项目 19 run efe2ac4c）：那次运行在 **parsing 阶段被 abort**，parse 已经把
+ * 531 个**招标文件原始目录**写成占位 blocks（"1.招标条件 / 2.项目概况…"），
+ * 而派生目录还没跑。页面却把这批占位当成"应答目录"显示，还邀请用户
+ * 「确认目录，开始提炼要点」—— 一旦确认就会去提炼 531 个原始章节。
+ *
+ * 判据用后端预检的 `has_outline`（= outline_revision 有没有值），比在前端
+ * 比对 source_toc 与 toc 更可靠。
+ */
+async function warnIfOutlineNotDerived(tid) {
+  if (!tid || !blocksList) return;
+  let chk = null;
+  try { chk = await api.workflow.redraftCheck(tid); } catch { return; }
+  const stale = document.getElementById('raw-toc-warn');
+  if (!chk || chk.has_outline || !chk.source_sections) { stale?.remove(); return; }
+  if (stale) return;                       // 已经提示过，不重复插
+  const box = document.createElement('div');
+  box.id = 'raw-toc-warn';
+  box.className = 'raw-toc-warn';
+  box.innerHTML = `
+    <strong>当前显示的是招标文件原始目录（${chk.source_sections} 节），应答目录还没有派生。</strong>
+    <span>那次运行在解析阶段就中断了。请点上方「重新拆分目录」按已解析的内容派生应答目录；
+          确认目录前不要直接开始提炼。</span>`;
+  blocksList.parentElement?.insertBefore(box, blocksList);
+}
+
 async function loadExistingBlocks({ silent = false, keepSelection = false } = {}) {
   // 这里自己解析 threadId（优先级同 boot 段：内存 → URL → sessionStorage），
   // 因为 boot 里首次调用发生在 currentThreadId 赋值之前 —— 只读它会把 URL
   // 指定的 run 丢掉，拿到服务端的「最新 run」。
   const tid = currentThreadId || params.get('threadId') || getThread(projectId);
   const blocks = await api.blocks.list(projectId, tid);
+  // 目录可能还没派生（运行在解析阶段中断）——先把这件事告诉用户，再谈其它
+  warnIfOutlineNotDerived(tid);
   if (!blocks?.length) {
     // 库里没有任何章节：清掉列表与计数。早退会把上一次运行的残留视图（卡片、进度环、
     // 状态栏）留在页面上，与「刷新后看到的样子」不一致。

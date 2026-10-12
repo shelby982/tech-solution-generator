@@ -417,6 +417,17 @@ class WorkflowRunner:
             current = {r["filename"] for r in await cursor.fetchall()}
         return recorded_files != current
 
+    def _is_running(self, thread_id: str) -> bool:
+        """这条 run 的后台 task 是否还在跑。
+
+        判"能不能重拆"用它而不是 stage：stage 是**上次落盘**的快照，abort 之后
+        还会停在 parsing/outline_review 上（实测 efe2ac4c: stage=parsing 但其实早已
+        被 abort）。真正决定能不能重拆的是"还有没有东西在动"。
+        """
+        run = self._runs.get(thread_id)
+        task = getattr(run, "task", None) if run else None
+        return bool(task and not task.done())
+
     async def redraft_check(self, thread_id: str) -> dict:
         """重出目录前的预检：告诉前端"现在能不能重拆、不能的话该做什么"。
 
@@ -430,8 +441,17 @@ class WorkflowRunner:
         reasons: list[str] = []
         if await self._requirement_files_changed(state):
             reasons.append("requirement_files_changed")
-        if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
-            reasons.append("stage_not_at_gate")
+
+        # 判据从"阶段"改成"**是否还在跑** + **有没有解析结果**"。
+        # 为什么改：实测 run efe2ac4c 在 **parsing 阶段被 abort**，checkpoint 里
+        # stage='parsing'、source_toc=531、但 outline_revision=None —— 派生目录从未跑过。
+        # 旧判据把这个 run 归为"已推进到撰写/评审之后"，既**说错了原因**，又**挡住了唯一
+        # 能救的路径**：重拆本来就是从 source_toc 派生应答目录，正是这时该做的事。
+        running = self._is_running(thread_id)
+        if running:
+            reasons.append("run_in_progress")
+        elif not (state.get("spec") or {}).get("source_toc"):
+            reasons.append("no_source_toc")
 
         if "requirement_files_changed" in reasons:
             message = (
@@ -439,18 +459,26 @@ class WorkflowRunner:
                 "的结果生成的，「重新拆分目录」带不上新文件。\n"
                 "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
             )
-        elif "stage_not_at_gate" in reasons:
+        elif "run_in_progress" in reasons:
+            message = "当前运行还在跑（解析 / 派生进行中），等它停下来再重新拆分目录。"
+        elif "no_source_toc" in reasons:
             message = (
-                "当前运行已推进到「撰写/评审」之后，目录不能再改（改了正文就对不上了）。\n"
+                "这次运行还没有可用的解析结果（要求文件没解析出来或解析中断）。\n"
                 "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
             )
         else:
             message = ""
+        spec = state.get("spec") or {}
         return {
             "allowed": not reasons,
             "reasons": reasons,
             "message": message,
             "stage": state.get("stage"),
+            # 目录是否**已派生**：False 表示 blocks 里躺的是 parse 写的原始目录占位
+            # （实测 531 条「1.招标条件 / 2.项目概况…」被页面当成应答目录显示）。
+            # 前端据此提示"这是招标文件原始目录、尚未派生"，而不是让人去确认它。
+            "has_outline": bool(spec.get("outline_revision")),
+            "source_sections": len(spec.get("source_toc") or []),
         }
 
     async def redraft_outline(self, thread_id: str, instruction: str) -> None:
@@ -493,8 +521,13 @@ class WorkflowRunner:
                 "的结果生成的，「重新拆分目录」带不上新文件。\n"
                 "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
             )
+        if self._is_running(thread_id):
+            raise ValueError("当前运行还在跑（解析 / 派生进行中），等它停下来再重新拆分目录。")
 
-        if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
+        # 保留原来的"阶段"限制：已经进到生成/评审之后，改目录会让正文对不上。
+        # 但 parsing / aborted 放行 —— 那时还没有派生目录，重拆正是唯一出路。
+        if state.get("stage") not in {"outline_review", "materials_review", "paused",
+                                      "failed", "parsing", "aborted", "idle"}:
             # 说清「为什么不行」与「该怎么办」。原来只写"请在…闸门处重出目录"，
             # 而 run 跑到 done 之后根本回不到那个闸门（实测用户点了 3 次，每次都只拿到
             # 这句话、无从下手）。而且**改要求文件本身也不能靠重出目录** ——

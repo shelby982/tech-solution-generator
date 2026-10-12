@@ -1373,7 +1373,10 @@ async def test_redraft_check_reports_reason_and_action(runner_env, monkeypatch):
     state = {
         "project_id": project_id,
         "stage": "outline_review",
-        "spec": {"material_sig": "spec:旧.docx:1"},
+        # source_toc 是"有解析结果"的凭据：重拆就是从它派生应答目录。
+        # 没有它就不该放行（见 no_source_toc 分支）。
+        "spec": {"material_sig": "spec:旧.docx:1",
+                 "source_toc": [{"title": "招标文件", "source_file": "旧.docx"}]},
     }
     monkeypatch.setattr(runner, "state", _state_stub(state))
     monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:新.docx:2"))
@@ -1383,10 +1386,73 @@ async def test_redraft_check_reports_reason_and_action(runner_env, monkeypatch):
     assert "requirement_files_changed" in result["reasons"]
     assert "重新提炼" in result["message"]      # 指导下一步，而不是只说"不许"
 
-    # 原料一致 + 停在闸门 → 放行
+    # 原料一致 + 有解析结果 → 放行
     monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:旧.docx:1"))
     ok = await runner.redraft_check("tid-c")
     assert ok["allowed"] is True and ok["message"] == ""
+
+
+async def test_redraft_check_allows_when_aborted_during_parsing(runner_env, monkeypatch):
+    """在 **parsing 阶段被 abort** 的 run 必须允许重拆。
+
+    实测（项目 19 run efe2ac4c）：checkpoint stage='parsing'、source_toc=531 节，
+    但 outline_revision=None —— 派生目录从未跑过，而 blocks 里躺的是 parse 写的
+    **原始目录占位**（1.招标条件 / 2.项目概况…），页面于是把招标文件原始目录
+    当成"应答目录"显示给用户。
+
+    旧判据按 stage 判定，把这个 run 归为"已推进到撰写/评审之后"，既说错原因，
+    又**挡住唯一能救的路径** —— 重拆本来就是从 source_toc 派生应答目录。
+    """
+    import orchestrator.nodes as nodes
+
+    runner, project_id, _ = runner_env
+    state = {
+        "project_id": project_id,
+        "stage": "parsing",                       # abort 后就停在解析阶段
+        "spec": {
+            "material_sig": "spec:同一批.docx:1",
+            "source_toc": [{"title": "1.招标条件", "source_file": "同一批.docx"}],
+            "toc": [{"title": "1.招标条件"}],       # parse 写的原始目录占位
+            "outline_revision": None,             # 派生从没跑过
+        },
+    }
+    monkeypatch.setattr(runner, "state", _state_stub(state))
+    monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:同一批.docx:1"))
+
+    result = await runner.redraft_check("tid-parsing")
+    assert result["allowed"] is True, result
+    assert result["reasons"] == []
+    assert result["message"] == ""
+
+    # 真的能跑起来（不是只放行但不干活）
+    await runner.redraft_outline("tid-parsing", "")
+    await _wait_task(runner._runs["tid-parsing"])
+
+
+async def test_redraft_check_blocks_when_run_still_running(runner_env, monkeypatch):
+    """还在跑的 run 不能重拆 —— 判据是"有没有东西在动"，不是 stage。"""
+    import orchestrator.nodes as nodes
+
+    runner, project_id, _ = runner_env
+    state = {
+        "project_id": project_id,
+        "stage": "parsing",
+        "spec": {"material_sig": "spec:x:1", "source_toc": [{"title": "x"}]},
+    }
+    monkeypatch.setattr(runner, "state", _state_stub(state))
+    monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:x:1"))
+
+    class _AliveTask:
+        def done(self): return False
+
+    class _AliveRun:
+        task = _AliveTask()
+
+    runner._runs["tid-running"] = _AliveRun()
+    result = await runner.redraft_check("tid-running")
+    assert result["allowed"] is False
+    assert "run_in_progress" in result["reasons"]
+    assert "还在跑" in result["message"]
 
 
 def _state_stub(value):
