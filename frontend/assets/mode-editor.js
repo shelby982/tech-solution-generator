@@ -3,6 +3,8 @@
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
 import { GenerateSession } from './generate-session.js';
+// 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261013-3mode';
 import { initContextPanel } from './context-panel.js';
 import { api } from './api.js?v=20261013-noconfirm';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20260921-roles';
@@ -2442,7 +2444,8 @@ function escapeHtml(s) {
 
 // 用 SSE 数据增量构建左侧大纲
 function renderExtractOutline(sections) {
-  const outlineNav = document.querySelector('.doc-outline');
+  // 共享宿主：归一后左栏只有一棵树（#blocks-list 由 mode-dispatch 搬进编辑器左栏）
+  const outlineNav = document.getElementById('blocks-list') || document.querySelector('.doc-outline');
   const progressBadge = document.getElementById('outline-progress-badge');
   const progressText = document.getElementById('outline-progress-text');
   const progressBar = document.getElementById('outline-progress-bar');
@@ -2453,58 +2456,50 @@ function renderExtractOutline(sections) {
   document.getElementById('editor-empty-hint').style.display = 'none';
   document.getElementById('editor-workspace').style.display = 'flex';
 
-  let currentChildren = null;
-  // 缓存 block 占位（按 block_id 索引）
-  window.__extractBlockMap = new Map();
-
   // 规整化 level：找到全局最小值，平移成 1（处理"文档没有标题1，从标题2/3 起步"的情况）
   const rawLevels = sections.map(s => inferOutlineLevel(s));
   const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
   const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
 
-  sections.forEach((s, idx) => {
+  // 归一后的建树：交给共享组件（嵌套 .ot-node），不再本模块手拼
+  // `.outline-group` / `.outline-heading` / `.doc-outline-item` 三套标记。
+  const nodes = sections.map((sec, idx) => {
     const blockIdStr = `outline-${idx}`;
-    const title = s.title || '（无标题）';
-    const level = normalize(rawLevels[idx]);
+    return {
+      block_id: blockIdStr,
+      level: normalize(inferOutlineLevel(sec)),
+      title: sec.title || '（无标题）',
+      _idx: idx,
+    };
+  });
+  window.__extractBlockMap = new Map(nodes.map(n => [n.block_id, {
+    id: 0, block_id: n.block_id, title: n.title, kind: 'content', level: 1,
+    requirement: '', key_points: '', veto_items: '', bonus_items: '',
+    source: '[]', content: '', _pending: true,
+  }]));
 
-    if (level === 1) {
-      const group = document.createElement('div');
-      group.className = 'outline-group';
-      const headingBtn = document.createElement('button');
-      headingBtn.type = 'button';
-      headingBtn.className = 'doc-outline-heading';
-      headingBtn.innerHTML = `<span class="outline-chevron">›</span><span class="outline-item-label">${escapeHtml(title)}</span>`;
-      headingBtn.addEventListener('click', () => group.classList.toggle('collapsed'));
-      group.appendChild(headingBtn);
-      currentChildren = document.createElement('div');
-      currentChildren.className = 'outline-children';
-      group.appendChild(currentChildren);
-      outlineNav.appendChild(group);
-    } else {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = `doc-outline-item level-${level}`;
-      item.dataset.blockIdStr = blockIdStr;
-      item.dataset.idx = idx;
-      item.innerHTML = `<span class="outline-item-bullet"></span><span class="outline-item-label">${escapeHtml(title)}</span><span class="outline-item-dot"></span>`;
-      item.addEventListener('click', () => {
-        const block = window.__extractBlockMap.get(blockIdStr);
-        if (!block) return;
-        outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
-        if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
-      });
-      (currentChildren || outlineNav).appendChild(item);
-      window.__extractBlockMap.set(blockIdStr, { id: 0, block_id: blockIdStr, title, kind: 'content', level: 1, requirement:'', key_points:'', veto_items:'', bonus_items:'', source:'[]', content:'', _pending: true });
-    }
+  renderChapterTree(outlineNav, nodes, {
+    makeNode: (n) => chapterNode(n, {
+      showEdit: false, showSub: false,
+      selectedClass: 'active', rowSelectedClass: 'active',
+      rowClasses: ['doc-outline-item', `level-${n.level}`],
+      rowData: { idx: n._idx },
+      titleClass: 'outline-item-label',
+      appendHtml: '<span class="outline-item-bullet"></span><span class="outline-item-dot"></span>',
+    }).node,
   });
 
-  // 进度统计：总数只计 content 级章节（规整后 level >= 2）
-  const contentSections = sections.filter((s, i) => normalize(rawLevels[i]) >= 2);
-  window.__extractTotalSections = contentSections.length;
-  if (progressBadge) progressBadge.textContent = contentSections.length;
-  if (progressText) progressText.textContent = `0 / ${contentSections.length}`;
-  if (progressBar) progressBar.style.width = '0%';
+  // 点击行 = 选中章节（回调与原实现一致）
+  outlineNav.querySelectorAll('.doc-outline-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const block = window.__extractBlockMap.get(item.dataset.blockIdStr);
+      if (!block) return;
+      outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+      if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
+    });
+  });
+
 }
 
 function markOutlineDone(blockIdStr, blockData) {

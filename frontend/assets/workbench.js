@@ -1,7 +1,16 @@
 import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260921-roles';
 // 章节状态/依据徽标与「素材库」共用一份投影（同一棵目录树，四个环节都一样）
 import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20260921-roles';
-const nav = document.querySelector('.doc-outline');
+// 左栏章节树：**三个模式共用一份**行标记（2026-10-13 归一）。
+// 此前编辑器侧自己拼 `.doc-outline-item`、大纲侧拼 `.ot-row`，是两套实现；
+// 数据投影本就共用（workspace-model），这里把标记也收敛掉。
+// 行上仍保留 `doc-outline-item` 类与 data-block-id 属性，兼容 mode-editor.js 里
+// 既有的 10 处选择器（改动面最小化）。
+import {chapterNode, renderChapterTree, chapterBadgesHtml} from './chapter-tree.mjs?v=20261013-3mode';
+// 左栏树的**唯一宿主**：由 mode-dispatch 在模式切换时把 #blocks-list 搬到当前模式的
+// 左栏位置。归一前这里是 `.doc-outline`，与大纲侧 `#blocks-list` 各渲一棵（实测
+// .ot-node 有 120 个 = 两棵各 60）。动态解析而不是加载时捕获，就是为了让宿主可搬。
+const hostEl = () => document.getElementById('blocks-list') || document.querySelector('.doc-outline');
 let selectedId = new URLSearchParams(location.search).get('blockId');
 let limit = 150, initialSelection = false;
 // 搜索框放进共用的 .chap-search 槽位（与「素材库」同位置同尺寸）
@@ -54,40 +63,65 @@ function selectChapter(id) {
   selectedId=id;initialSelection=true;
   renderEditorTopbar(b);
   const url=new URL(location.href);url.searchParams.set('blockId',id);history.replaceState(null,'',url);
-  nav.querySelectorAll('[data-block-id-str]').forEach(el=>el.classList.toggle('active',el.dataset.blockIdStr===id));
+  hostEl().querySelectorAll('[data-block-id-str]').forEach(el=>el.classList.toggle('active',el.dataset.blockIdStr===id));
   renderContext();
 }
+let outlineIndex = new Map();
+
+/** 编辑器侧的徽标：依据数来自 evidence，覆盖数来自本阶段拉到的应答条目。
+ *  **拼装**交给共享的 chapterBadgesHtml —— 状态文案（chapterStage/CHAPTER_STAGE_LABELS）
+ *  同源，避免两边各写一套后漂移（历史上漂过 "#undefined"）。 */
+function editorBadges(b) {
+  const evs = parseEvidence(b);
+  const items = ((window.__responseItems || {})[String(b.block_id)] || []).filter(it => !it.informative);
+  const covered = new Set(evs.flatMap(e => e.item_ids || []));
+  const coverage = items.length
+    ? { covered: items.filter(it => covered.has(it.item_id)).length, total: items.length }
+    : null;
+  // 编辑器看的是**撰写状态**（待撰写/待补料/待复审…），与筛选 chips 同一套词表；
+  // 不传 label 会退化成提炼词表，与 chips 对不上。
+  return chapterBadgesHtml(b, { evidenceCount: evs.length, coverage, status: b.status, label: statusLabels[b.status] });
+}
+
 function renderOutline() {
   window.__extractBlockMap=new Map(workspace.chapters.map(b=>[b.block_id,editableBlock(b)]));
   window.__allBlocks=[...window.__extractBlockMap.values()];
   const q=search.value.toLowerCase().trim();
   const list=workspace.chapters.filter(b=>(!q||`${b.title} ${b.issues.map(i=>i.point).join(' ')}`.toLowerCase().includes(q)) && (filterMode==='all'||(filterMode==='attention'?['material','revise','stale','error','historical','unreviewed'].includes(b.status):b.status===filterMode)));
   renderChips();
-  nav.innerHTML=list.slice(0,limit).map(b=>{
-    // 行内三件套与「素材库」**同序同款**：状态 → 依据 N → 覆盖 x/y。
-    // 依据数用共享投影（chapterBadges），覆盖数用与素材库同一份 response-items
-    // （workbench.html 的 renderReqBar 拉取后挂到 window.__responseItems）。
-    const evs=parseEvidence(b);
-    const evBadge=(chapterBadges(b,{evidenceCount:evs.length}).find(x=>x.kind==='evidence')||{}).text||'';
-    const items=((window.__responseItems||{})[String(b.block_id)]||[]).filter(it=>!it.informative);
-    const covered=new Set(evs.flatMap(e=>e.item_ids||[]));
-    const cov=items.length?`${items.filter(it=>covered.has(it.item_id)).length}/${items.length}`:'';
-    const reviewErr=b.reviewError?` title="评审未完成：${esc(b.reviewError)}"`:'';
-    return `<button type="button" class="doc-outline-item level-${Math.min(4,Number(b.level)||1)}${b.block_id===selectedId?' active':''}" data-block-id-str="${esc(b.block_id)}" data-block-id="${esc(b.db_id || '')}" title="${esc(b.title)}"${reviewErr}><span class="outline-item-label">${esc(b.title)}</span><span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span>${evBadge?`<span class="chap-badge evidence">${evBadge}</span>`:''}${cov?`<span class="chap-badge" title="要回应的事项里已有依据的条数">${cov}</span>`:''}<span class="outline-item-dot" hidden></span></button>`;
-  }).join('')||'<p class="ws-muted" style="padding:12px">暂无符合条件的章节</p>';
-  if(list.length>limit){const more=document.createElement('button');more.className='ws-button';more.textContent=`显示更多（${limit}/${list.length}）`;more.onclick=()=>{limit+=150;renderOutline();};nav.append(more);}
+  // 嵌套树（与大两侧一致）：改造前这里是"扁平 + level-N 缩进 + .outline-group 分组"，
+  // 统一后缩进/折叠/祖先可见性只有一套语义。
+  outlineIndex = renderChapterTree(hostEl(), list, {
+    makeNode: (b) => chapterNode(b, {
+      selected: b.block_id === selectedId,
+      showEdit: false,           // 撰写时不改目录结构
+      showSub: false,            // 行内摘要让位给标题
+      selectedClass: 'active',   // mode-editor.js 按 .doc-outline-item.active 定位
+      rowSelectedClass: 'active',
+      rowClasses: ['doc-outline-item', `level-${Math.min(4, Number(b.level) || 1)}`],
+      rowData: { blockId: b.db_id || '' },
+      titleClass: 'outline-item-label',
+      appendHtml: '<span class="outline-item-dot" hidden></span>',
+      badgesHtml: editorBadges(b),
+    }).node,
+    emptyHtml: '<p class="ws-muted" style="padding:12px">暂无符合条件的章节</p>',
+  });
+  if(list.length>limit){const more=document.createElement('button');more.className='ws-button';more.textContent=`显示更多（${limit}/${list.length}）`;more.onclick=()=>{limit+=150;renderOutline();};hostEl().append(more);}
   document.getElementById('outline-progress-badge').textContent=workspace.chapters.length;
   const n=workspace.chapters.filter(b=>b.content.trim()).length;
   document.getElementById('outline-progress-text').textContent=`${n} / ${workspace.chapters.length}`;
   document.getElementById('outline-progress-bar').style.width=`${workspace.chapters.length?n/workspace.chapters.length*100:0}%`;
 }
-nav.addEventListener('click',e=>{const item=e.target.closest('[data-block-id-str]');if(item)selectChapter(item.dataset.blockIdStr);});
+
+hostEl().addEventListener('click',e=>{const item=e.target.closest('[data-block-id-str]');if(item)selectChapter(item.dataset.blockIdStr);});
 
 // 展开/收起全部（与「素材库」目录栏头的同名按钮同职责）
+// 展开/收起全部：归一后树是嵌套的 .ot-node（不再是扁平的 .outline-group），
+// 与「要求与大纲 / 素材库」同一套折叠语义（open 类）。
 document.getElementById('btn-outline-expand-all')?.addEventListener('click', (e) => {
-  const groups=[...nav.querySelectorAll('.outline-group')];
-  const anyOpen=groups.some(g=>!g.classList.contains('collapsed'));
-  groups.forEach(g=>g.classList.toggle('collapsed', anyOpen));
+  const nodes=[...hostEl().querySelectorAll('.ot-node')];
+  const anyOpen=nodes.some(n=>n.classList.contains('open'));
+  nodes.forEach(n=>n.classList.toggle('open', !anyOpen));
   e.currentTarget.textContent = anyOpen ? '展开全部' : '收起全部';
 });
 
@@ -152,3 +186,7 @@ subscribe(()=>{
 window.__loadBlocks=refreshWorkspace;
 window.addEventListener('block:done',()=>refreshWorkspace());
 window.addEventListener('workspace:editor-ready',()=>{if(workspace.ready&&!initialSelection){const b=workspace.chapters.find(b=>b.block_id===selectedId)||workspace.chapters[0];if(b)selectChapter(b.block_id);}});
+
+
+// 三模式合并：模式切换时由 mode-dispatch 调用（只在编辑器模式下渲染共享宿主）。
+window.__renderEditorTree = renderOutline;

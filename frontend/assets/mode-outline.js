@@ -73,6 +73,10 @@ const progressBar   = document.getElementById('progress-bar');
 const statusPct     = document.getElementById('status-pct');
 const statusActions = document.getElementById('status-actions');
 const blocksList  = document.getElementById('blocks-list');
+// 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
+// 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
+// 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-3mode';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -959,23 +963,16 @@ function renderBlockCard(block, status = 'pending') {
 
   // 目录树节点：row 一行摘要（始终可见）+ 卡片（默认折叠）。
   // 卡片仍是 .block-card[data-block-id]，闸门 1 的编辑工具按原契约定位它。
-  const node = document.createElement('div');
-  node.className = 'ot-node';
-  node.dataset.blockId = blockId;
-  node.dataset.level = String(
-    Number.isFinite(block.level) ? Math.max(1, Math.min(4, block.level))
-                                 : inferTocLevel(block)
-  );
-  const row = document.createElement('header');
-  row.className = 'ot-row';
-  row.innerHTML = `
-    <span class="ot-chevron">›</span>
-    <span class="ot-title" title="${escapeHtml(block.title)}">${escapeHtml(block.title)}</span>
-    <span class="ot-sub">${escapeHtml(firstLine(block.requirement))}</span>
-    ${chapterBadgesHtml(block, status)}
-    <span class="ot-actions">
-      <button class="ot-act ot-edit-toggle" title="编辑本节点（新增 / 改名 / 移动 / 删除）">编辑</button>
-    </span>`;
+  // 行标记来自共享组件（与「方案编辑」同一份）。level 仍用本模块的推断兜底：
+  // 老数据里 block.level 可能缺失，inferTocLevel 按标题编号推。
+  const level = Number.isFinite(block.level)
+    ? Math.max(1, Math.min(4, block.level))
+    : inferTocLevel(block);
+  const { node, row } = chapterNode({ ...block, level }, {
+    sub: firstLine(block.requirement),
+    badgesHtml: chapterBadgesHtml(block, status),
+    showEdit: true,
+  });
   row.addEventListener('click', (e) => {
     // 结构编辑按钮不能触发折叠/展开，否则点一下按钮顺带把卡片收起
     if (e.target.closest('.ot-act')) return;
@@ -988,7 +985,6 @@ function renderBlockCard(block, status = 'pending') {
     e.stopPropagation();
     if (e.target.closest('.ot-edit-toggle')) toggleOutlineEditMode(blockId);
   });
-  node.appendChild(row);
   node.appendChild(el);
 
   const host = blocksList.querySelector('.outline-tree') || blocksList;
@@ -1085,26 +1081,15 @@ let sourceMaterialCount = 0;     // 素材池里有几份原始素材（空状�
 // 状态文案来自 workspace-model 的 chapterBadges（与筛选、覆盖矩阵、撰写页同一份判定）；
 // 但**提炼中是瞬态**，SSE 帧比 blocks 行更新得快，所以那一档以入参 status 为准。
 // 类名沿用 `block-status-badge {status} ot-badge`：setBlockBadge/updateBlockCard 按它找节点。
+// 本模块只负责**取数**（依据数 / 条目覆盖来自各自的缓存），拼装交给共享实现，
+// 于是「要求与大纲 / 素材库 / 方案编辑」三处的徽标标记只有一份。
 function chapterBadgesHtml(block, status = 'pending') {
   const id = String(block?.block_id ?? block?.id ?? '');
   // 索引在 loadExistingBlocks 后半段才建好，首屏先按 block 自身解析一份：
   // 否则「依据 N」要等下一次重绘才出现（实测刷完页面第一眼看不到依据数）。
   const n = chapterEvidence[id] ? chapterEvidence[id].total : parseEvidence(block).length;
-  const cov = chapterCoverage(id);
-  const stage = status === 'extracting' ? 'extracting' : chapterStage(block, { evidenceCount: n });
-  const label = status === 'extracting' ? '提炼中'
-              : status === 'error' ? '提炼失败'
-              : (CHAPTER_STAGE_LABELS[stage] || status);
-  const tip = `依据 ${n} 条 · 状态：${label}`;
-  // 条目覆盖：有依据才显示（`覆盖 2/7`）。0 条依据时用黄色点出"还没找到素材"，
-  // 但没有依据的条目本身不阻断撰写，所以只是提示色、不是错误色。
-  const covHtml = cov.total
-    ? `<span class="ot-cov ${cov.covered === cov.total ? 'full' : cov.covered ? '' : 'zero'}"
-             title="本章 ${cov.total} 条应答要求，已有依据 ${cov.covered} 条">${cov.covered}/${cov.total}</span>`
-    : '';
-  return `<span class="block-status-badge ${status} ot-badge" title="${escapeHtml(tip)}">${label}</span>`
-       + (n > 0 ? `<span class="ot-ev" title="${escapeHtml(tip)}">依据 ${n}</span>` : '')
-       + covHtml;
+  const coverage = chapterCoverage(id);
+  return sharedBadgesHtml(block, { evidenceCount: n, coverage, status });
 }
 
 // 条目覆盖 {blockId: {covered, total}}：优先用后端总览（它按"条目 id 是否存在"去重），
@@ -3879,3 +3864,13 @@ document.addEventListener('workspace:mode', (e) => {
   pageViewOverride = m;
   applyPageView();
 });
+
+
+// 三模式合并：模式切回「要求与大纲 / 素材库」时由 mode-dispatch 调用。
+// 共享宿主 #blocks-list 被搬回来之后，需要按当前模式重画一遍（行/卡片/徽标）。
+window.__reloadOutlineTree = () => {
+  if (document.body.dataset.view === 'editor') return;   // 编辑器模式下由对方渲染
+  try { loadExistingBlocks({ silent: true, keepSelection: true }); } catch (err) {
+    console.warn('[outline] 模式切换重绘失败', err);
+  }
+};
