@@ -357,7 +357,17 @@ class WorkflowRunner:
         # failed 也允许重出：目录派生失败后，重试派生是用户唯一的自救入口
         # （source_toc 在 checkpoint 里，重新派发不需要重解析要求文件）。
         if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
-            raise ValueError("请在「要求与大纲」闸门处重出目录")
+            # 说清「为什么不行」与「该怎么办」。原来只写"请在…闸门处重出目录"，
+            # 而 run 跑到 done 之后根本回不到那个闸门（实测用户点了 3 次，每次都只拿到
+            # 这句话、无从下手）。而且**改要求文件本身也不能靠重出目录** ——
+            # 重出只重跑"目录派生"，用的是 checkpoint 里的 spec.source_toc（新上传的
+            # 要求文件不在里面）；要让新文件参与派生必须重跑"解析"，即新起一次运行。
+            raise ValueError(
+                "当前运行已推进到「撰写/评审」之后，目录不能再改（改了正文就对不上了）。\n"
+                "另：如果刚上传了新的要求文件（如技术规范书），「重新拆分目录」也不会带上它 —— "
+                "它只重跑目录派生，原料是上一次解析的结果。\n"
+                "请点「重新提炼」：会新建一次运行并**重新解析全部要求文件**。"
+            )
 
         # 旧 emitter 可能已 close（前次 stream 已结束），重建一份让新 stream 收事件
         run.emitter = EventEmitter()

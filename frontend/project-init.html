@@ -1931,9 +1931,13 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       // 或者改目录 / 从头再来（这两条才是要付代价的路径）。运行中才有「取消」，
       // 这个状态下已经没有在跑的东西，所以不再放取消。
       const remain = Math.max((totalBlocks || 0) - (doneBlocks || 0), 0);
+      const redraftGate = redraftAllowedByStage();
       statusActions.innerHTML = `
         <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
-        <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
+        <button class="btn-status-secondary" id="btn-redraft-outline"
+          ${redraftGate.ok ? '' : 'disabled'}
+          title="${redraftGate.ok ? '换一版提炼要求重新派生目录'
+                               : '本次运行已过闸门，目录不能再改；请用「重新提炼」'}">重新拆分目录</button>
         <button class="btn-status-primary" id="btn-resume-extract"
           title="只提炼还没做的章节；已完成的章节不会重复调用模型">继续提炼${
           remain ? `（${remain} 节）` : ''}</button>`;
@@ -4403,6 +4407,21 @@ instructionInput()?.addEventListener('input', () => {
 
 // 闸门 1：换一份提炼要求，让张衡整版重出目录。
 // 刻意不走 startExtraction(true) —— 那条路会 abort + 重跑 parse（几百页 PDF 再 OCR 一遍）。
+// 目录重出只在**闸门处**成立。run 推进到更后阶段后目录不能再改（改了正文就对不上），
+// 后端会 409 拒绝 —— 但只把这句话显示出来，用户点几次都一样，无从下手（实测点了 3 次）。
+// 所以这里先按 stage 判定，界面上直接禁掉并说明原因与替代路径。
+const REDRAFT_ALLOWED_STAGES = new Set(['outline_review', 'materials_review', 'paused', 'failed']);
+function redraftAllowedByStage() {
+  const st = currentStage || '';
+  if (!st) return { ok: true };
+  if (REDRAFT_ALLOWED_STAGES.has(st)) return { ok: true };
+  return {
+    ok: false,
+    reason: '本次运行已推进到「撰写/评审」之后，目录不能再改（改了正文就对不上）。\n' +
+            '若刚上传了新的要求文件（如技术规范书），请点「重新提炼」—— 会新建一次运行并重新解析全部要求文件。',
+  };
+}
+
 async function redraftOutline() {
   // 已经提炼过一部分时先讲清代价：重出目录 = 换一版 block_id，已提炼的内容不再对应
   // （等于要重新提炼）。想改标题/顺序/层级应该用每行的「编辑」，想接着提炼用「继续提炼」。
@@ -4438,7 +4457,18 @@ async function redraftOutline() {
     if (await recoverFromDeadThread(e)) return;   // 已作废/线程未知 → 切到可用运行或提示新建
     attachStream(tid);
     const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
-    setStatusBar('gate_outline', `重出目录失败：${e?.message || e}`, pct, totalBlocks, doneBlocks);
+    const msg = String(e?.message || e || '');
+    // 后端因"已过闸门"拒绝 → 这是**终态**，不再重绘「重新拆分目录」（点了还是失败）。
+    // 明确指向唯一有效路径：重新提炼（会重新解析要求文件）。
+    if (msg.includes('重新提炼') || !redraftAllowedByStage().ok) {
+      setStatusBar('done', `目录不能再改：${msg}`, pct, totalBlocks, doneBlocks);
+      statusActions.innerHTML =
+        `<button class="btn-status-primary" id="btn-reextract-now">重新提炼（重新解析要求文件）</button>`;
+      document.getElementById('btn-reextract-now')
+        .addEventListener('click', () => confirmReextract());
+      return;
+    }
+    setStatusBar('gate_outline', `重出目录失败：${msg}`, pct, totalBlocks, doneBlocks);
   }
 }
 

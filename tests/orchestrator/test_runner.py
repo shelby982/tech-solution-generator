@@ -521,7 +521,9 @@ async def test_redraft_outline_rejects_wrong_stage(runner_env):
             {"configurable": {"thread_id": tid}}, {"stage": "generating"},
         )
 
-    with pytest.raises(ValueError, match="要求与大纲"):
+    # 报错必须能指导下一步：说清"目录不能再改"并指向「重新提炼」
+    # （改要求文件不靠重出目录 —— 重出只重跑派生，用的是 checkpoint 里的 source_toc）
+    with pytest.raises(ValueError, match="重新提炼"):
         await runner.redraft_outline(tid, "来不及了")
 
 
@@ -863,7 +865,7 @@ async def test_redraft_outline_allowed_on_failed_stage(runner_env, monkeypatch):
         return {"project_id": project_id, "stage": "generating", "spec": {}}
 
     monkeypatch.setattr(runner, "state", _generating)
-    with pytest.raises(ValueError, match="闸门处重出目录"):
+    with pytest.raises(ValueError, match="重新提炼"):
         await runner.redraft_outline("tid-x", "")
 
     async def _failed(_tid):
