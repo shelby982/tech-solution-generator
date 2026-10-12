@@ -176,15 +176,14 @@ def test_build_write_requirement_block_expands_all_eight_fields():
         assert f"{tag} " in block, f"缺少条目标号 {tag}"
         assert text in block, f"缺少条目原文：{text}"
 
-    # 否决项/评分项/加分项/指标被前置为"必须显式回应"
-    assert "必须逐条显式回应" in block
-    critical_at = block.index("必须逐条显式回应")
-    assert block.index("V1 ") > critical_at
-    assert block.index("S1 ") > critical_at
-    assert block.index("B1 ") > critical_at
-    assert block.index("I1 ") > critical_at
-    # 评分口径要标注"不要复述档位"，避免把评委打分规则抄进正文
-    assert "不要复述档位" in block
+    # 否决项被前置为"必须先逐条写明满足"，评分/量化口径单独成块且**不要求逐条复述**
+    assert "否决项必须先逐条写明我方如何满足" in block
+    assert block.index("V1 ") > block.index("否决项必须先逐条写明我方如何满足")
+    # 评分口径不做成编号题号去"回应评分规则"：实测把它列成"必须回应"会让模型抄打分档位
+    assert "不要逐条复述档位或分值" in block
+    assert "以下是要回应的事项，逐条作答" in block
+    # 评分项不应出现在"要回应的事项"分组里
+    assert block.index("S1 ") < block.index("以下是要回应的事项")
 
 
 def test_build_write_requirement_block_without_items_degrades_to_requirement():

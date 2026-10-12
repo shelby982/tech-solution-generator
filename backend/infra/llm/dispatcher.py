@@ -643,20 +643,34 @@ def build_write_requirement_block(
     if not tagged:
         return legacy
 
-    critical = [(t, l) for t, l, c in tagged if c]
+    # 三类分组呈现（实测驱动的口径）：
+    # ① 否决项 = 必须显式回应的硬约束 → 保留编号，逐条写明满足
+    # ② 评分口径/量化档位 = 评委打分依据 → **不做成编号题号**，否则模型会去"回应评分规则"
+    #    本身（实测把「优良档7-10分…」抄进正文），改成说明块，只提取"该拿哪一档"
+    # ③ 要回应的事项（要求/建议/证明材料）= 逐条作答
+    veto = [(t, l) for t, l, c in tagged if c and t.startswith("V")]
+    scoring = [(t, l) for t, l, c in tagged if c and not t.startswith("V")]
     rest = [(t, l) for t, l, c in tagged if not c]
 
     head = "【本章应答要求】（逐条回应下列每一条，编号即题号）\n"
     if text and text.replace("\n", "").strip() not in "".join(l for _, l, _ in tagged).replace("\n", ""):
         # requirement 原文里有条目化没覆盖到的内容（拆条丢句）时兜底附上，不静默丢要求
         head += f"要求原文：{text}\n"
-    if critical:
+    if veto:
         head += (
-            "以下条目**必须逐条显式回应**，遗漏即扣分或废标（否决项必须写明满足，"
-            "评分项必须写明如何拿分，加分项必须写明我方具备，量化指标必须给出具体数值）：\n"
-            + "\n".join(l for _, l in critical)
-            + "\n其余条目：\n"
+            "以下**否决项必须先逐条写明我方如何满足**，否则投标无效：\n"
+            + "\n".join(l for _, l in veto)
+            + "\n"
         )
+    if scoring:
+        head += (
+            "以下是评分与量化口径（说明性，**不要逐条复述档位或分值**）："
+            "按其中的要求把正文写到对应档位，量化指标必须在正文给出具体数值。\n"
+            + "\n".join(l for _, l in scoring)
+            + "\n"
+        )
+    if rest:
+        head += "以下是要回应的事项，逐条作答：\n"
     block = head + "\n".join(l for _, l in rest) + "\n"
     if len(block) > max_chars:
         block = block[:max_chars] + "\n…（本条要求过长，已截断，按上述要点响应）\n"
