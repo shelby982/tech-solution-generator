@@ -45,6 +45,33 @@ _DOC_HEAD = "（文档开头）"
 # 而带进整份正文 —— 那种情况确实是用户点名的文件，但把标题与文件名分开更不容易误判。
 _NO_ANCHOR = "（无匹配锚点）"
 
+# ── 评分类别筛选 ──────────────────────────────
+# 用户常写「标包2 的**技术**评分点」，而范围词只表达了"哪个标包"。
+# 不加这一层，标包 2 的商务评审要素与技术评审要素会一起被选中，且**按文档顺序**
+# 商务在前 → 模型据此组织出商务目录（实测：用户要技术评分点，出来 58 节全是商务项）。
+# 只认这四类，且需与范围定位同现才生效。
+_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
+    "tech": ("技术评分标准", "技术评审要素", "技术标"),
+    "commerce": ("商务评分标准", "商务评审要素", "商务标"),
+    "price": ("投标报价评分标准", "报价评分", "价格评分"),
+    "other": ("其他因素评分标准",),
+}
+_CATEGORY_WORDS = {"tech": "技术", "commerce": "商务", "price": "报价", "other": "其他"}
+
+
+def extract_category(instruction: str) -> str:
+    """从提炼要求里抽「评分类别」：tech / commerce / price / other，抽不到返回 ""。
+
+    「技术招标文件」这类**文件名**不算类别选择（用户在说材料名），所以先把
+    「XX文件」形式剥掉再判断，避免把"按技术招标文件拆"误判成"只要技术类"。
+    """
+    text = instruction or ""
+    text = re.sub(r"[\u4e00-\u9fffA-Za-z0-9（）()]*文件", " ", text)
+    for key, word in _CATEGORY_WORDS.items():
+        if word in text:
+            return key
+    return ""
+
 _CN_DIGIT = {
     "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
     "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
@@ -239,18 +266,46 @@ def _cut(full: str) -> list[Segment]:
 def select_segments(
     segments: list[Segment],
     scope_tokens: list[tuple[str, str]],
+    category: str = "",
 ) -> list[Segment]:
-    """挑出编号匹配的段。先按「同前缀词 + 同编号」精确匹配，不中再放宽到只比编号。"""
+    """挑出编号匹配的段。先按「同前缀词 + 同编号」精确匹配，不中再放宽到只比编号。
+
+    ``category``（tech/commerce/price/other）：用户在要求里点明了评分类别时，
+    只保留标题或正文命中该类别的段。标包级锚点切出来的段常同时覆盖商务与技术
+    （同一节表格连着），不筛就按文档顺序把商务排前面，模型会据此组织出商务目录。
+    """
     def _tokens_of(seg: Segment) -> list[tuple[str, str]]:
         return extract_scope_tokens(seg.title)
 
     wanted = set(scope_tokens)
     picked = [s for s in segments if wanted & set(_tokens_of(s))]
-    if picked:
-        return picked
+    if not picked:
+        wanted_numbers = {n for _, n in scope_tokens}
+        picked = [s for s in segments if wanted_numbers & {n for _, n in _tokens_of(s)}]
 
-    wanted_numbers = {n for _, n in scope_tokens}
-    return [s for s in segments if wanted_numbers & {n for _, n in _tokens_of(s)}]
+    if category and category in _CATEGORY_HINTS:
+        # 按类别**排序**而不是过滤。过滤会误伤：真正含"技术评分标准"的那段，标题
+        # 只有「标包2：…」（包级锚点切出来的），标题里根本没有类别词 —— 一筛就把它
+        # 连同技术规范书一起丢掉（实测只剩 1024 字的评审要素材料）。
+        # 排序则保住全部候选，只把命中该类别的排前面；digest 的预算优先给靠前的段，
+        # 于是商务材料不再占住预算大头。
+        labeled = [
+            (
+                any(w in (s.title or "") for w in _CATEGORY_HINTS[category]),
+                any(w in (s.content or "") for w in _CATEGORY_HINTS[category]),
+                s,
+            )
+            for s in picked
+        ]
+        if any(t or c for t, c, _ in labeled):
+            labeled.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            logger.info(
+                "评分类别「%s」：%d 段中标题命中 %d、正文命中 %d（命中者优先占预算）",
+                _CATEGORY_WORDS.get(category, category), len(picked),
+                sum(1 for t, _, _ in labeled if t), sum(1 for _, c, _ in labeled if c),
+            )
+            return [s for _, _, s in labeled]
+    return picked
 
 
 def diagnose_scope_miss(sections: list[dict], instruction: str) -> str:
@@ -292,7 +347,7 @@ def locate_segments(
         logger.info("提炼要求里有范围标识，但文档没有同类锚点，退回章级定位")
         return None
 
-    picked = select_segments(segments, scope_tokens)
+    picked = select_segments(segments, scope_tokens, extract_category(instruction))
     if not picked:
         logger.info(f"文档锚点里没有 {scope_tokens} 对应的区段，退回章级定位")
         return None
@@ -309,6 +364,7 @@ def locate_segments(
 
 
 __all__ = [
+    "extract_category",
     "Segment",
     "diagnose_scope_miss",
     "extract_scope_tokens",

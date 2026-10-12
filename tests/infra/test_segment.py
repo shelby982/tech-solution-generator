@@ -328,3 +328,47 @@ def test_diagnose_scope_miss_says_number_mismatch_when_anchors_exist():
         "按照标包2的技术评分要求拆分章节",
     )
     assert "对不上" in reason and "标包2" in reason
+
+
+# ─────────────────────────────────────────────
+# 评分类别：标包级定位会把商务与技术一起选中
+# ─────────────────────────────────────────────
+
+def test_extract_category_ignores_filenames():
+    """「技术招标文件」是**材料名**，不是"只要技术类"的选择。
+
+    实测：用户写「按照技术招标文件中标包二的技术评分点…」，若把文件名当类别依据，
+    会得到与"按商务标拆"相同的行为，等于类别识别失效。
+    """
+    from infra.retrieval.segment import extract_category
+
+    assert extract_category("按照技术招标文件中标包二的技术评分点，拆解评分点") == "tech"
+    assert extract_category("按技术招标文件拆目录") == ""          # 只有文件名
+    assert extract_category("按照标包二商务评分标准拆解") == "commerce"
+    assert extract_category("按标包2报价评分拆分") == "price"
+    assert extract_category("按评分点逐条拆章") == ""
+
+
+def test_category_orders_segments_without_dropping_key_material():
+    """按类别排序，但**不能把关键材料过滤掉**。
+
+    实测踩到的两种错法：
+    1. 不排序 → 标包 2 的商务评审要素先出现，模型据此组织出 58 节商务目录；
+    2. 直接按类别过滤 → 真正含"技术评分标准"的那段标题只有「标包2：…」（包级锚点
+       切出来的），标题里没有类别词，一筛就把它连同技术规范书一起丢掉（只剩 1024 字）。
+    所以这里断言：命中类别的段排在前面，且**所有候选段都还在**。
+    """
+    from infra.retrieval.segment import Segment, select_segments
+
+    segs = [
+        Segment(title="标包2：某标包", content="商务评分标准 …技术评分标准…"),
+        Segment(title="标包 2：某标包 商务评审要素相关材料", content="财务状况"),
+        Segment(title="标包 2：某标包 技术评审要素相关材料", content="工作项1 技术方案"),
+        Segment(title="标包3：别的标包", content="无关"),
+    ]
+    picked = select_segments(segs, [("标包", "2")], category="tech")
+
+    assert len(picked) == 3, "候选段一个都不能少（过滤会误伤包级段）"
+    assert {s.title for s in picked} == {s.title for s in segs[:3]}
+    # 标题命中「技术」的排最前
+    assert picked[0].title.endswith("技术评审要素相关材料")

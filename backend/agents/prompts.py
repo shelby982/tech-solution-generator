@@ -174,6 +174,24 @@ _SELECTED_HEADER = "【已定位到的材料（请据此编排章节）】"
 _UNSELECTED_HEADER = "【文件的其余部分（仅列标题，不要据此展开章节）】"
 
 
+# 「关键材料」的保底预算（每段）。为什么要保底：原先按内容长度**等比例**分配，
+# 长评分表只拿到约 1/4（实测 27,816 字的评分标准只得 ~2,400 字，技术评分点全被截掉），
+# 而"按评分点拆章"恰恰要求评分表完整。这类材料的价值与长度**不成反比**，必须整段给。
+_KEY_MATERIAL_RESERVE = 6000
+
+
+def _is_key_material(sec: dict) -> bool:
+    """是不是「按评分点拆章」不可或缺的材料：评分表 / 技术规范书。
+
+    判据用内容特征而不是标题 —— 包级锚点切出来的段标题只有「标包2：…」。
+    """
+    text = f"{sec.get('title') or ''}\n{(sec.get('content') or '')[:4000]}"
+    return any(k in text for k in (
+        "评分因素", "详细评审项", "评分标准", "技术评分标准", "商务评分标准",
+        "技术规范书", "技术招标文件", "评审要素",
+    ))
+
+
 def build_spec_digest(
     sections: list[dict],
     budget: int = OUTLINE_DRAFT_SPEC_BUDGET,
@@ -235,6 +253,13 @@ def _digest_selected(sections: list[dict], budget: int) -> str:
         parts.append(text)
         return True
 
+    # 关键材料（评分表 / 技术规范书）先各留一份保底额度：按长度等比例分配会把它截掉，
+    # 而它正是"按评分点拆章"的依据。其余段仍按长度等比例分享剩余预算。
+    key_entries = [sec for sec, _ in entries if _is_key_material(sec)]
+    key_reserved = min(sum(_KEY_MATERIAL_RESERVE for _ in key_entries), budget // 2)
+    per_key_reserve = (key_reserved // len(key_entries)) if key_entries else 0
+    key_seen = 0
+
     for sec, content_len in entries:
         title = sec.get("title") or ""
         content = sec.get("content") or ""
@@ -243,7 +268,13 @@ def _digest_selected(sections: list[dict], budget: int) -> str:
         listed += 1
         if not content:
             continue
-        quota = max(100, int(budget * content_len / total_len))
+        if _is_key_material(sec):
+            key_seen += 1
+            quota = max(_KEY_MATERIAL_RESERVE, per_key_reserve)
+            if key_seen == len(key_entries):
+                quota += key_reserved - per_key_reserve * len(key_entries)
+        else:
+            quota = max(100, int(budget * content_len / total_len))
         quota = min(quota, remaining - _TRUNCATION_MARKER_RESERVE)
         if quota <= 0:
             continue

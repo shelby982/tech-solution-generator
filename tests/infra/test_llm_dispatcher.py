@@ -683,3 +683,51 @@ async def test_extract_skips_empty_content_without_calling_model(monkeypatch):
     assert called["n"] == 0, "空内容不该调用模型"
     assert results[0]["requirement"] == ""
     assert "没有可提炼的原文" in results[0]["error"]
+
+
+# ─────────────────────────────────────────────
+# digest 预算：关键材料必须完整（不能按长度等比例截掉）
+# ─────────────────────────────────────────────
+
+def test_digest_reserves_budget_for_scoring_table():
+    """评分表/技术规范书这类关键材料要**整段保留**，不参与"按长度等比例"分配。
+
+    实测：27,816 字的评分标准在 8,000 字预算下只拿到约 2,400 字（按 content_len/total_len
+    算出来的配额），而"按评分点拆章"恰恰要求评分表完整 —— 技术评分点全被截在配额之外，
+    于是模型看不到评分点，只能按别的材料组织目录。
+    """
+    from agents.prompts import build_spec_digest
+
+    from agents.prompts import _KEY_MATERIAL_RESERVE
+
+    scoring_table = "评分因素 详细评审项 详细评审分项要素 分值\n" + "\n".join(
+        f"| 2.2.4 | 技术评分标准 | {i} | 技术条款差异性 | 得分8-12分 |" for i in range(200)
+    )
+    sections = [
+        {"title": "评标办法", "content": scoring_table, "selected": True},
+        # 一堆小章节，总长度远超预算，把等比例分配的份额挤走
+        *[{"title": f"琐碎章节{i}", "content": "无关内容" * 40, "selected": True} for i in range(60)],
+    ]
+    digest = build_spec_digest(sections, budget=8000)
+
+    # 保留量应接近保底额度（等比例分配下这段只能拿到 budget×表长/总长 ≈ 1/5）。
+    # 末尾额度会被剩余预算截一点，所以只断言"达到保底的八成以上"。
+    kept = len([l for l in digest.splitlines() if "技术评分标准" in l])
+    kept_chars = sum(len(l) for l in digest.splitlines() if "技术评分标准" in l)
+    assert kept_chars >= _KEY_MATERIAL_RESERVE * 0.8, (
+        f"评分表只保留了 {kept} 行 / {kept_chars} 字，远低于保底额度 {_KEY_MATERIAL_RESERVE}"
+    )
+
+
+def test_digest_non_key_material_still_budgeted():
+    """普通章节仍按预算分配，不会因为关键材料保底而无限膨胀。"""
+    from agents.prompts import build_spec_digest
+
+    sections = [
+        {"title": "评标办法", "content": "评分因素 详细评审项 " + "x" * 40000, "selected": True},
+        {"title": "普通章节", "content": "y" * 40000, "selected": True},
+    ]
+    digest = build_spec_digest(sections, budget=8000)
+
+    assert len(digest) <= 8000 + 200, f"digest 超预算：{len(digest)}"
+    assert "普通章节" in digest
