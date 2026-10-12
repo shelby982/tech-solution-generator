@@ -185,7 +185,50 @@ def named_files_in(instruction: str, file_names: list[str]) -> list[str]:
         stem = clean.rsplit(".", 1)[0] if "." in clean else clean
         if clean in text or (len(stem) >= 2 and stem in text):
             picked.append(name)
+            continue
+        # 两个方向的匹配 + 文件名**片段**匹配。
+        # 为什么必须补：实测要求里写「技术招标文件」，而文件名是
+        # `4_高可靠技术专题研究与验证-技术招标文件.docx` —— 旧实现只判 `stem in text`
+        # （整段主干要出现在要求里），这种"用户用简称点名文件"的情况一律认不出来，
+        # 于是那份**技术规范书的正文一个字都没进 digest**（只作为未选中标题列了一行），
+        # 目录自然体现不出规范书里的结合点（用户实测反馈的问题①）。
+        if _file_aliases(stem) & set(_text_grams(text)):
+            picked.append(name)
     return picked
+
+
+# 常见称谓 → 文件名里可能出现的片段。用户嘴里的「技术规范书」在这套文件里叫
+# 「技术招标文件」，光比字面永远对不上。
+_FILE_LABEL_ALIASES = {
+    "技术规范书": ("技术规范书", "技术招标文件", "技术需求书", "规范书", "技术文件"),
+    "规范书": ("技术规范书", "技术招标文件", "规范书"),
+    "技术招标文件": ("技术招标文件", "技术规范书", "技术文件"),
+    "评分表": ("评分表", "评分标准", "评审要素", "打分表"),
+    "评分标准": ("评分标准", "评分表", "评审要素"),
+    "评审要素": ("评审要素", "评审标准", "评分标准"),
+    "招标文件": ("招标文件", "采购文件", "主招标"),
+}
+
+
+def _file_aliases(stem: str) -> set[str]:
+    """文件名主干 → 可能的称谓集合（含按分隔符切出的片段）。"""
+    parts = {p for p in re.split(r"[_\-.·、\s（）()【】\[\]]+", stem) if len(p) >= 3}
+    out = set(parts)
+    for part in list(parts):
+        out |= set(_FILE_LABEL_ALIASES.get(part, ()))
+    # 整条主干也作为一种"称谓"，便于反向命中
+    out.add(stem)
+    return out
+
+
+def _text_grams(text: str) -> set[str]:
+    """要求文本里出现过哪些「称谓」：直接扫别名表，避免昂贵的子串枚举。"""
+    hits = set()
+    for label, aliases in _FILE_LABEL_ALIASES.items():
+        for a in (label, *aliases):
+            if a and a in text:
+                hits.add(a)
+    return hits
 
 
 class RequirementParseError(RuntimeError):
@@ -388,8 +431,14 @@ class ZhangHengAgent:
             "category": extract_category(instruction),
             # 定位到了用户点名的那一部分 → 目录按那部分自身的结构拆，不重新组织
             "follow_structure": follow_structure,
+            # 只在**没有**要按材料自身结构复刻时，才把上一版目录喂回去（迭代微调场景）。
+            # 为什么：follow_structure=True 时依据是材料本身，而上一版目录是**派生结果**，
+            # 很可能正是用户不满意的粗糙版；喂回去会把旧结构固化 ——
+            # 实测：把 digest 从 8k 扩到 33k、补了粒度规则后重出，17 节标题**逐个不变**，
+            # 就是因为 prompt 里那句「请在此基础上按上面的要求调整」。
             "previous_outline": (
-                _render_toc_text(previous_toc) if previous_toc else ""
+                _render_toc_text(previous_toc)
+                if (previous_toc and not follow_structure) else ""
             ),
             # 本轮不读素材；保留该键作为下一轮接入素材的扩展点。
             "material_digest": "",
@@ -467,13 +516,30 @@ class ZhangHengAgent:
 
         # 先看要求里是否**点名了文件**（「按评分表拆」）——这是确定性的，不用调模型。
         named = named_files_in(instruction, known_files)
-        if segments is None and named:
+        if named:
             scoped = [s for s in flat if s.get("source_file") in named]
             if scoped:
+                # 用户同时点名了**评分点**与**技术规范书**时，两者都要进材料，
+                # 不能二选一：实测「按照技术招标文件中标包 2技术评分点和对应技术规范书…」
+                # 走旧逻辑只吃到了评分表那段，规范书 22895 字正文一个字没进 digest ——
+                # 目录因此体现不出规范书里的结合点（用户反馈的问题①）。
+                named_text = "\n".join(s.get("content") or "" for s in scoped)
+                # 顺序：先评分点所在区段（它定义目录骨架），再规范书正文（提供结合点）。
+                entries: list[dict] = []
+                for seg in (segments or []):
+                    if seg.content and seg.content[:200] in named_text:
+                        continue          # 该段属于点名文件，下面按章节正文统一给
+                    entries.append({"title": seg.title, "content": seg.content,
+                                    "selected": seg.selected})
+                entries.extend(
+                    {"title": s["title"], "content": s["content"], "selected": True}
+                    for s in scoped
+                )
+                extra = "；并叠加了评分点所在区段" if segments else ""
                 return (
-                    [{"title": s["title"], "content": s["content"]} for s in scoped],
+                    entries,
                     True,
-                    f"已按文件名定位到：{'、'.join(named)}",
+                    f"已按文件名定位到：{'、'.join(named)}{extra}",
                 )
 
         # 只有「用户确实点了范围、却哪儿都认不出」才值得多花一次模型调用；
