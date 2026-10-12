@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './assets/api.js?v=20261013-noconfirm';
+import { api } from './api.js?v=20261013-noconfirm';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './assets/workspace.js?v=20261013-noconfirm';
+       } from './workspace.js?v=20261013-noconfirm';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './assets/workspace-model.mjs?v=20261013-noconfirm';
+       } from './workspace-model.mjs?v=20261013-noconfirm';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -138,6 +138,11 @@ function applyPageView() {
     // 由那边的「素材匹配」按钮触发，不按提炼完成度自动切过去。
     auto = 'outline';
   }
+  // 三模式合并（2026-10-13）：body[data-view] 的所有权归 mode-dispatch.js，
+  // 本模块只负责 outline / matching 两模式之间的自动推导。
+  // 实测问题：请求 ?view=editor 时，这里会按 backend stage 把 view 改回 outline ——
+  // 两个模块抢同一个属性，编辑器模式根本进不去。
+  if (document.body.dataset.view === 'editor' || _viewParam === 'editor') return;
   const view = pageViewOverride || auto;
   document.body.dataset.view = view;
   if (typeof refreshStructureEditable === 'function') refreshStructureEditable();
@@ -3862,3 +3867,15 @@ bindMatchDetailActions();
   });
 })();
     
+
+// 模式切换：从编辑器切回「要求与大纲 / 素材库」时，重新按 stage 推导一次视图
+// （编辑器模式下上面是提前返回的，这里补上）。
+document.addEventListener('workspace:mode', (e) => {
+  const m = e.detail && e.detail.mode;
+  if (!m || m === 'editor') return;
+  // 调度层是视图选择的**唯一发起者**：这里必须同步 pageViewOverride，
+  // 否则 applyPageView() 会按 backend stage 把刚切的模式改回去
+  // （实测：点「素材库」后 view 仍是 outline）。
+  pageViewOverride = m;
+  applyPageView();
+});

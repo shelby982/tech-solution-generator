@@ -71,8 +71,17 @@ function renderChrome() {
   const nav = document.getElementById('workspace-nav');
   if (!nav) return;
   const summary = summarize(workspace.chapters);
-  nav.innerHTML = [['outline','要求与大纲'],['matching','素材库'],['editor','方案编辑'],['review','质量检查']].map(([key,label]) =>
-    `<a href="${esc(workspaceUrl(key))}" ${currentView() === key ? 'aria-current="page"' : ''}>${label}${key === 'review' && summary.needsAction ? `<span class="ws-count">${summary.needsAction}</span>` : ''}</a>`).join('');
+  // 合并页（一个页面承载三个模式，body[data-modes] 里有 editor）：导航必须**原地切换**，
+  // 不能再跳到 /project-init、/workbench —— 那样就又回到"整页跳转 + 丢选中章节"的老样子。
+  // 判定放在这里而不是各页面，因为导航的渲染权本来就属于本模块（它还渲染状态条）。
+  const inPlace = (document.body.dataset.modes || '').includes('editor');
+  nav.innerHTML = [['outline','要求与大纲'],['matching','素材库'],['editor','方案编辑'],['review','质量检查']].map(([key,label]) => {
+    const jump = !inPlace || key === 'review';
+    const href = jump ? esc(workspaceUrl(key)) : '#';
+    const modeAttr = jump ? '' : ` data-mode="${key}"`;
+    const active = currentView() === key ? 'aria-current="page"' : '';
+    return `<a href="${href}"${modeAttr} ${active}>${label}${key === 'review' && summary.needsAction ? `<span class="ws-count">${summary.needsAction}</span>` : ''}</a>`;
+  }).join('');
   let bar = document.getElementById('workspace-status');
   if (!bar) {
     bar = document.createElement('section'); bar.id = 'workspace-status'; bar.className = 'ws-status';

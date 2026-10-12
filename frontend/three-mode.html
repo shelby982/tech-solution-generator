@@ -3156,6 +3156,35 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .btn-go-review-top:disabled { opacity: 0.4; cursor: not-allowed; }
     
+  /* ── 三模式可见性（2026-10-13 合并）──────────────────────────────
+     同一页面承载三个模式，靠 body[data-view] 决定露出哪一块。
+     编辑器的 chrome（头部动作条 / 编辑器区 / 素材抽屉）只在 editor 模式可见。 */
+  #generation-done-banner,
+  #extract-action-bar,
+  #extract-progress-bar,
+  .ws-editor-layout,
+  .mat-drawer-wb { display: none; }
+
+  body[data-view="editor"] #generation-done-banner:not([hidden]),
+  body[data-view="editor"] #extract-action-bar:not(.hidden),
+  body[data-view="editor"] #extract-progress-bar:not(.hidden) { display: flex; }
+  /* 行内 style="display:flex" 会压过类规则，所以非 editor 模式必须加 !important */
+  body:not([data-view="editor"]) .ws-editor-layout { display: none !important; }
+  body[data-view="editor"] .ws-editor-layout { display: flex; }
+  body[data-view="editor"] .mat-drawer-wb:not([hidden]) { display: flex; }
+  body[data-view="editor"] #btn-go-review-top { display: inline-flex; }
+  body:not([data-view="editor"]) #btn-go-review-top { display: none; }
+
+  /* 编辑器模式下收起「要求与大纲 / 素材库」的专用 chrome。
+     ⚠️ 必须连 `.init-layout` 这个外层 section 一起隐藏：它本身是 flex 子项且会占满高度，
+     只隐藏它内部的材料面板/章节树的话，编辑器布局会拿到 **0 高度**（实测截图整片空白）。 */
+  body[data-view="editor"] .init-materials-panel,
+  body[data-view="editor"] .extract-status-bar,
+  body[data-view="editor"] .init-main,
+  body[data-view="editor"] .init-layout { display: none; }
+  /* 编辑器布局在纵向 shell 里撑满剩余高度 */
+  body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
+
 </style>
   <link rel="stylesheet" href="./assets/workspace.css?v=20260916-loop4" />
   </head>
@@ -3166,6 +3195,9 @@ body[data-view="matching"] .match-detail { display: block; }
           <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
           <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
+            <!-- 编辑器模式的「进入评审」：由 mode-editor.js 控制 disabled。
+                 合并前它在 workbench 的 header 里，这里并入同一处 actions。 -->
+            <button type="button" id="btn-go-review-top" class="btn-go-review-top" disabled>进入评审 →</button>
             <div class="model-selector-wrap">
               <button class="model-selector-btn" id="model-selector-btn">
                 <span class="model-dot"></span>
@@ -3187,6 +3219,32 @@ body[data-view="matching"] .match-detail { display: block; }
             </div>
           </div>
         </header>
+
+
+        <!-- 撰写完成 banner（stage 切到 reviewing/report_review/done 时显示） -->
+        <div id="generation-done-banner" hidden>
+          <span class="banner-text">材料撰写已完成，可进入评审确认</span>
+          <button class="btn-go-review" type="button">进入评审 →</button>
+        </div>
+
+        <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
+        <div class="extract-action-bar hidden" id="extract-action-bar">
+          <span class="extract-action-label">大纲提炼</span>
+          <button type="button" class="extract-action-btn" id="btn-start-extract">提炼</button>
+        </div>
+
+        <!-- 提炼进度条（autoExtract 模式显示） -->
+        <div class="extract-progress-bar hidden" id="extract-progress-bar">
+          <span class="extract-progress-spinner" id="extract-spinner"></span>
+          <span class="extract-progress-label">提炼大纲</span>
+          <div class="extract-progress-track">
+            <div class="extract-progress-fill" id="extract-progress-fill"></div>
+          </div>
+          <span class="extract-progress-pct" id="extract-progress-pct">0%</span>
+          <span class="extract-progress-stage" id="extract-progress-stage">0/0</span>
+          <button type="button" class="extract-cancel-btn" id="extract-cancel-btn">取消</button>
+        </div>
+
 
         <section class="init-layout">
   <!-- 左侧材料面板 -->
@@ -3302,6 +3360,54 @@ body[data-view="matching"] .match-detail { display: block; }
 </section>
 
   <!-- ═══ 模式③ 方案编辑（原 workbench.html 的 editor-pane + 素材抽屉，三模式合并时并入）═══ -->
+  <div class="ws-editor-layout" style="display:flex; flex:1; min-height:0; overflow:hidden; position:relative;">
+          <aside class="outline-pane" aria-label="文档大纲">
+            <!-- 收起后只剩这一条竖栏（含展开按钮），编辑区占满剩余宽度 -->
+            <div class="outline-collapsed-rail">
+              <button type="button" class="mw-btn" id="btn-expand-outline" title="展开目录">»</button>
+            </div>
+            <!-- 栏头与「素材库」的 .match-tree-head 同构：标题+计数 / 展开全部 / 收起目录 -->
+            <div class="chap-head">
+              <span class="chap-head-title">章节目录 <b id="outline-progress-badge">—</b></span>
+              <span class="chap-head-actions">
+                <button type="button" class="chap-btn" id="btn-outline-expand-all">展开全部</button>
+                <button type="button" class="chap-btn icon" id="btn-collapse-outline"
+                        title="收起目录（编辑区占满整个宽度）">«</button>
+              </span>
+            </div>
+            <div class="chap-chips" role="tablist" aria-label="筛选章节"></div>
+            <div class="chap-search" id="ws-search-slot"></div>
+            <nav class="doc-outline" aria-label="章节导航"></nav>
+            <div class="outline-progress-wrap">
+              <div class="outline-progress-footer">
+                <span class="outline-progress-label">撰写进度</span>
+                <span class="outline-progress-count" id="outline-progress-text">—</span>
+              </div>
+              <div class="outline-progress-track"><div class="outline-progress-bar" id="outline-progress-bar"></div></div>
+              <button type="button" class="outline-batch-gen-btn" id="btn-batch-generate">生成未写章节</button>
+              <div class="outline-batch-status hidden" id="outline-batch-status">
+                <div class="outline-batch-row">
+                  <span class="outline-batch-current" id="outline-batch-current">准备中…</span>
+                  <button type="button" class="outline-batch-cancel" id="btn-batch-cancel">暂停</button>
+                </div>
+                <div class="outline-batch-track"><div class="outline-batch-bar" id="outline-batch-bar"></div></div>
+                <div class="outline-batch-meta" id="outline-batch-meta">0 / 0</div>
+              </div>
+              <div style="position:relative;">
+                <span class="inline-model-tag" id="batch-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="batch-model-label">Sonnet 4.6</span></span>
+                <div class="model-dropdown" id="batch-model-dropdown">
+                  <div class="model-dropdown-header">生成模型</div>
+                  <div class="model-list" id="batch-model-list"></div>
+                  <div class="model-dropdown-footer">
+                    <button class="btn-add-config" type="button" data-open-api-modal>
+                      <span class="btn-add-config-left"><span class="btn-add-config-plus">＋</span><span>添加 API 配置</span></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
           <main class="editor-pane" aria-label="材料撰写编辑区">
 
             <!-- ① 章节标题头（已移除） -->
@@ -3624,11 +3730,46 @@ body[data-view="matching"] .match-detail { display: block; }
 
 
           </aside>
+        </div><!-- /.ws-editor-layout -->
       </main>
     </div>
 
     <input type="file" id="file-input-req" accept=".pdf,.docx,.doc" style="display:none">
     <input type="file" id="file-input-src" accept=".pdf,.docx,.doc,.ppt,.pptx" style="display:none">
+
+    <!-- 素材列表弹窗 -->
+    <div class="mat-modal-backdrop" id="mat-modal-backdrop">
+      <div class="mat-modal-box">
+        <div class="mat-modal-header">
+          <h3>素材列表</h3>
+          <button style="all:unset;cursor:pointer;padding:4px 6px;border-radius:6px;color:var(--muted);font-size:14px;" id="mat-modal-close">✕</button>
+        </div>
+        <div class="mat-modal-body" id="mat-modal-body">
+          <p class="muted" style="text-align:center;padding:20px;">加载中...</p>
+        </div>
+        <div class="mat-modal-footer">
+          <button id="btn-mat-modal-upload" type="button" style="width:100%;padding:10px;border:1.5px dashed var(--line);border-radius:10px;background:none;font-size:13px;color:var(--muted);cursor:pointer;">+ 上传素材</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompt 预览弹窗 -->
+    <div class="prompt-modal-backdrop" id="prompt-modal-backdrop">
+      <div class="prompt-modal-box">
+        <div class="prompt-modal-header">
+          <h3>Prompt 预览</h3>
+          <button style="all:unset;cursor:pointer;padding:4px 6px;border-radius:6px;color:var(--muted);font-size:14px;" id="prompt-modal-close">✕</button>
+        </div>
+        <div class="prompt-modal-content">
+          <div class="prompt-modal-nav" id="prompt-modal-nav"></div>
+          <div class="prompt-modal-editor" id="prompt-modal-editor"></div>
+        </div>
+        <div class="prompt-modal-footer">
+          <button id="btn-prompt-cancel" style="padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);font-size:13px;cursor:pointer;">取消</button>
+          <button id="btn-prompt-confirm" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent,#2563eb);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">确认生成</button>
+        </div>
+      </div>
+    </div>
 
     <!-- API 配置弹窗 -->
     <div class="api-modal-backdrop" id="api-modal-backdrop">
@@ -3693,6 +3834,9 @@ body[data-view="matching"] .match-detail { display: block; }
 
     <!-- 三模式：各模式一个模块（各自作用域）。合并前两段内联脚本有 90 个同名顶层标识符，
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
+    <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
+         抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
+    <script type="module" src="./assets/workbench.js?v=20261013-3mode"></script>
     <script type="module" src="./assets/mode-dispatch.js?v=20261013-3mode"></script>
     <script type="module">
       import './assets/mode-outline.js?v=20261013-3mode';

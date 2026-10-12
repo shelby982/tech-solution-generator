@@ -10,7 +10,8 @@
  * ⚠️ 注意别和编辑器工具栏里的 `#ced-mode-switch`（编辑/预览）搞混：
  * 那个是**编辑器内部**的视图切换，与页面三模式无关。
  */
-import { MODES, MODE_LABEL, DEFAULT_MODE, parseMode, isValidMode } from './workbench-modes.mjs';
+import { DEFAULT_MODE, isValidMode } from './workbench-modes.mjs';
+import { renderWorkspaceChrome } from './workspace.js?v=20261013-3mode';
 
 const VIEW_KEY = 'aibidding:workspace-view';
 
@@ -46,15 +47,10 @@ export function currentMode() {
   return document.body.dataset.view || readMode();
 }
 
-/** 顶栏导航：三个模式原地切换。质量检查仍是独立页面。 */
+/** 导航的渲染权在 workspace.js（它还负责状态条）：合并页里它会输出 data-mode 链接，
+ *  本模块只绑定点击、维护 body[data-view]。包一层是为了调用处更好读。 */
 function renderNav() {
-  const nav = document.getElementById('workspace-nav');
-  if (!nav) return;
-  const mode = currentMode();
-  const link = (m) =>
-    `<a href="#" role="tab" data-mode="${m}" aria-current="${mode === m ? 'page' : 'false'}">${MODE_LABEL[m]}</a>`;
-  const review = `<a href="/review?${new URLSearchParams(location.search)}" data-external="review">质量检查</a>`;
-  nav.innerHTML = MODES.map(link).join('') + review;
+  try { renderWorkspaceChrome(); } catch {}
 }
 
 function init() {
@@ -64,6 +60,10 @@ function init() {
   document.body.dataset.view = mode;
   try { sessionStorage.setItem(VIEW_KEY, mode); } catch {}
   renderNav();
+  // 初次进入也要派发一次：各模式模块靠这个事件做"模式激活"（编辑器刷新工作区、
+  // 其余两模式重推视图）。只改 body 标记而不发事件，编辑器模式的左栏目录会是空的
+  // —— 实测就是这么来的。
+  document.dispatchEvent(new CustomEvent('workspace:mode', { detail: { mode, initial: true } }));
 
   document.getElementById('workspace-nav')?.addEventListener('click', (e) => {
     const a = e.target.closest('a[data-mode]');
