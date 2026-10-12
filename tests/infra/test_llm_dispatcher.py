@@ -113,7 +113,7 @@ async def test_dispatch_block_write_injects_feedback(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dispatch_block_write_without_feedback_unchanged(monkeypatch):
-    """不传 feedback_text 时，prompt 内容与改造前一致。"""
+    """不传 feedback_text 时，prompt 内容与改造前一致（仅标签随条目化改名）。"""
     captured = {}
 
     async def _fake_stream(**kwargs):
@@ -132,7 +132,134 @@ async def test_dispatch_block_write_without_feedback_unchanged(monkeypatch):
     assert "上轮评审意见" not in captured["extra_prompt"]
     # 逐字节钉死改造前的 prompt —— 仅断言"不含评审意见"是弱断言：
     # 把它改成无条件拼接 f"\n\n{feedback_text}" 也照样通过。
-    assert captured["extra_prompt"] == "【应标要求】\n提供业绩证明\n\n"
+    # （`items` 缺省时走的就是这条纯 requirement 路径）
+    assert captured["extra_prompt"] == "【本章应答要求】\n提供业绩证明\n"
+
+
+# ─────────────────────────────────────────────
+# 写作输入补齐 8 字段（方案 §1.1、§4.B）
+# ─────────────────────────────────────────────
+
+def _items():
+    """真实口径的条目样本：要回应的事项 + 评分口径（informative）。"""
+    return [
+        {"type": "requirement", "text": "支持国产数据库", "informative": False},
+        {"type": "key_point", "text": "给出迁移方案", "informative": False},
+        {"type": "veto", "text": "未提供 CMA 检测报告者投标无效", "informative": False},
+        {"type": "bonus", "text": "三年免费升级", "informative": False},
+        {"type": "score", "text": "技术方案完整性 20 分", "informative": True},
+        {"type": "indicator", "text": "响应时间 ≤200ms", "informative": False},
+        {"type": "evidence", "text": "提供第三方检测报告", "informative": False},
+    ]
+
+
+def test_build_write_requirement_block_expands_all_eight_fields():
+    """8 字段（除 score/indicator 外都是"要回应的事项"）全部进写作输入，且逐条编号。
+
+    改造前只带 requirement 一个字段，评分项/否决项/加分项/指标写手看不到 ——
+    这是"评审必扣分 → 回炉"的根因。
+    """
+    from infra.llm.dispatcher import build_write_requirement_block
+
+    block = build_write_requirement_block("支持国产数据库", _items())
+
+    # 每个字段的原文都必须在，且带类型标号
+    for tag, text in [
+        ("R1", "支持国产数据库"),
+        ("K1", "给出迁移方案"),
+        ("V1", "未提供 CMA 检测报告者投标无效"),
+        ("B1", "三年免费升级"),
+        ("S1", "技术方案完整性 20 分"),
+        ("I1", "响应时间 ≤200ms"),
+        ("E1", "提供第三方检测报告"),
+    ]:
+        assert f"{tag} " in block, f"缺少条目标号 {tag}"
+        assert text in block, f"缺少条目原文：{text}"
+
+    # 否决项/评分项/加分项/指标被前置为"必须显式回应"
+    assert "必须逐条显式回应" in block
+    critical_at = block.index("必须逐条显式回应")
+    assert block.index("V1 ") > critical_at
+    assert block.index("S1 ") > critical_at
+    assert block.index("B1 ") > critical_at
+    assert block.index("I1 ") > critical_at
+    # 评分口径要标注"不要复述档位"，避免把评委打分规则抄进正文
+    assert "不要复述档位" in block
+
+
+def test_build_write_requirement_block_without_items_degrades_to_requirement():
+    """无条目（数据缺失/旧调用方）时退回只给 requirement —— 行为与改造前一致。"""
+    from infra.llm.dispatcher import build_write_requirement_block
+
+    assert build_write_requirement_block("高可用", None) == "【本章应答要求】\n高可用\n"
+    assert build_write_requirement_block("高可用", []) == "【本章应答要求】\n高可用\n"
+    # 空 requirement + 空条目 → 空串（不产出空标题）
+    assert build_write_requirement_block("", None) == ""
+
+
+def test_build_write_requirement_block_keeps_requirement_when_not_covered():
+    """条目化漏掉 requirement 里的句子时，原文兜底附上（不静默丢要求）。"""
+    from infra.llm.dispatcher import build_write_requirement_block
+
+    block = build_write_requirement_block(
+        "支持国产数据库\n另外须提供迁移演练报告",
+        [{"type": "requirement", "text": "支持国产数据库", "informative": False}],
+    )
+    assert "要求原文：" in block
+    assert "另外须提供迁移演练报告" in block
+
+
+def test_build_write_requirement_block_truncates_overlong_requirement():
+    """超长要求截断到预算内（避免 prompt 超窗），并声明已截断。"""
+    from infra.llm.dispatcher import build_write_requirement_block
+
+    items = [
+        {"type": "requirement", "text": f"要求{i}：" + "细节" * 200, "informative": False}
+        for i in range(20)
+    ]
+    block = build_write_requirement_block("摘要", items, max_chars=2000)
+    assert len(block) <= 2000 + 40
+    assert "已截断" in block
+
+
+@pytest.mark.asyncio
+async def test_dispatch_block_write_injects_items_and_omits_reference_when_no_material(capture_stream):
+    """有 items 时 8 字段进 user prompt；无素材时**不拼**【参考素材】（§1.3）。"""
+    from infra.llm import dispatcher
+
+    async for _ in dispatcher.dispatch_block_write(
+        configs=[_fake_config()], rr_start_index=0, title="数据层设计",
+        requirement="支持国产数据库", chunks=[], items=_items(),
+    ):
+        pass
+
+    prompt = capture_stream[0]["user"]
+    assert "V1 否决项：未提供 CMA 检测报告者投标无效" in prompt
+    assert "S1 评分项：技术方案完整性 20 分" in prompt
+    assert "I1 量化指标：响应时间 ≤200ms" in prompt
+    # 无素材 → 【参考素材】区块整段不出现（稳定规则里的「（若有）」不算区块），
+    # 来源标记规则也不该要求 [M]（否则等于给自造内容盖章成"来自素材"）
+    assert "\n【参考素材】" not in prompt
+    assert "[M]" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_dispatch_block_write_includes_reference_when_material_present(capture_stream):
+    """有素材时仍拼【参考素材】，且来源标记规则仍在（含 [M]）。"""
+    from infra.llm import dispatcher
+
+    async for _ in dispatcher.dispatch_block_write(
+        configs=[_fake_config()], rr_start_index=0, title="数据层设计",
+        requirement="支持国产数据库",
+        chunks=[{"content": "达梦 DM8 支持国产化适配"}],
+        items=_items(),
+    ):
+        pass
+
+    prompt = capture_stream[0]["user"]
+    assert "【参考素材】" in prompt
+    assert "达梦 DM8 支持国产化适配" in prompt
+    assert "[M]...[/M]" in prompt
 
 
 # ─────────────────────────────────────────────

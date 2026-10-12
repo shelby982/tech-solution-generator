@@ -246,7 +246,8 @@ async def test_generate_concurrent_blocks_isolated_on_single_failure(monkeypatch
         return "outline content for " + str(block.get("title"))
 
     async def fake_block_write(*, configs, rr_start_index, title, requirement,
-                               chunks, target_words, feedback_text="", max_words=None):
+                               chunks, target_words, feedback_text="", max_words=None,
+                               items=None):
         # 没在 outline 阶段失败的话，正文阶段也不应该失败
         if title == "FAIL_BLOCK_TITLE":
             raise RuntimeError("should never reach: outline already failed")

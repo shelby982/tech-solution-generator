@@ -232,19 +232,25 @@ async def _stream_generate(
     else:
         # 自动生成路径（dispatch_block_write）不传规范书原文 —— 此时再要求「按原文
         # 逐段扩写」是一句没有对象的指令，模型只能自由发挥（也更容易越写越长）。
-        # 改为以【应标要求】+【参考素材】为依据撰写，与工作台手动路径的语义对齐。
+        # 改为以【本章应答要求】+【参考素材】为依据撰写，与工作台手动路径的语义对齐。
         fidelity_rule = (
-            "1. 忠于要求：严格围绕【应标要求】的要点展开，逐条响应、不遗漏要点、不新增无关内容。\n"
+            "1. 忠于要求：严格围绕【本章应答要求】展开，**逐条对应编号回应**（R=要求、"
+            "K=响应建议、V=否决项、B=加分项、S=评分项、I=量化指标、E=证明材料），"
+            "不遗漏要点、不新增无关内容。否决项必须写明如何满足，量化指标必须给出具体数值，"
+            "评分项必须写明我方如何拿到该项得分。\n"
         )
         expand_rule = (
             "3. 展开逻辑：对每条要求给出具体响应措施、实现方式与预期效果，"
             "把「我方将满足」写实为可核查的做法，不空洞凑字、不堆砌冗余语句。\n"
         )
         format_rule = (
-            "4. 格式规范：按应标要求的要点顺序组织小标题，一段一个要点，段落之间用空行分隔，排版整齐；"
+            "4. 格式规范：按应答要求的条目顺序组织小标题，一段一个要点，段落之间用空行分隔，排版整齐；"
             "禁止输出任何自创的段落编号标签（如'第一段''第一段扩写内容'等）。\n"
         )
-        stable_head = "请撰写下面给出的章节的投标应答正文，撰写依据是其后提供的【应标要求】与【参考素材】（若有）。\n"
+        stable_head = (
+            "请撰写下面给出的章节的投标应答正文，撰写依据是其后提供的"
+            "【本章应答要求】与【参考素材】（若有）。\n"
+        )
 
     parts = [
         stable_head,
@@ -300,11 +306,19 @@ async def _stream_generate(
     if extra_prompt:
         user_prompt += f"\n\n额外优化要求：{extra_prompt}"
 
-    # 当有应标指导或参考素材时，要求在 Markdown 输出中用标记包裹不同来源的内容
-    if extra_prompt and ("【应标指导】" in extra_prompt or "【参考素材】" in extra_prompt):
+    # 有应答要求或**真的带了素材**时，才要求用标记包裹不同来源的内容。
+    # 判据刻意用「块首」而不是子串包含：稳定规则头里就写着「与【参考素材】（若有）」，
+    # 用子串判断会在无素材时也要求 [M]...[/M] —— 等于指示模型给自造内容盖章成"来自素材"
+    # （方案 §1.3 的同一个坑）。
+    if extra_prompt and (
+        "\n【本章应答要求】" in extra_prompt
+        or "\n【应标要求】" in extra_prompt
+        or "\n【应标指导】" in extra_prompt
+        or "\n【参考素材】" in extra_prompt
+    ):
         user_prompt += (
             "\n\n来源标注要求：在输出的 Markdown 正文中，用以下标记成对包裹来自不同来源的内容片段：\n"
-            "- 来自【应标指导】（核心要求/策略要点/否决项/加分项）的内容用 [G]...[/G] 包裹\n"
+            "- 来自【本章应答要求】（核心要求/策略要点/否决项/加分项）的内容用 [G]...[/G] 包裹\n"
             "- 来自【参考素材】的内容用 [M]...[/M] 包裹\n"
             "- 你基于上下文合理补充的内容用 [E]...[/E] 包裹\n"
             "标记必须成对出现，标记内只放纯文本不嵌套；标记不影响 Markdown 段落和标题结构；"
@@ -558,6 +572,97 @@ async def dispatch_scope_select_json(
     raise errors.exhausted_error(configs, last_error)
 
 
+# 应答条目类型 → 写作输入里的标签。顺序即 prompt 里的顺序。
+_ITEM_LABELS: dict[str, str] = {
+    "requirement": "要求",
+    "key_point": "响应建议",
+    "veto": "否决项",
+    "bonus": "加分项",
+    "score": "评分项",
+    "indicator": "量化指标",
+    "evidence": "证明材料",
+}
+# 条目类型 → 标号前缀（与 domain.spec.response_items.TYPE_PREFIX 同一套，
+# 这样写作 prompt 里的 V1/S1/I1 与工作台界面的标号是同一个东西）
+_ITEM_PREFIXES: dict[str, str] = {
+    "requirement": "R",
+    "key_point": "K",
+    "veto": "V",
+    "bonus": "B",
+    "score": "S",
+    "indicator": "I",
+    "evidence": "E",
+}
+# 必须显式回应、否则一定扣分/废标的类型（在 prompt 里单独前置，其余照常逐条列出）
+_CRITICAL_ITEM_TYPES = ("veto", "score", "bonus", "indicator")
+
+
+def build_write_requirement_block(
+    requirement: str,
+    items: Optional[list[dict]] = None,
+    *,
+    max_chars: int = 4000,
+) -> str:
+    """把本章的 8 字段应答要求拼成「逐条编号」的写作输入块（不含素材）。
+
+    为什么需要（``docs/superpowers/plans/2026-09-21-response-coverage-and-matching-plan.md``
+    §1.1、§4.B）：提炼产出 8 个字段，但写作输入此前**只带 requirement 一个** ——
+    评分项分值 / 否决项 / 加分项 / 量化指标写手全看不到，于是"先让人在信息不全的情况下写，
+    再拿全量规则扣分"，必然漏评分项、不显式响应否决项、指标不数值化 → 评审扣分 → 回炉。
+    这是单点收益最大的一处改动。
+
+    无 ``items``（旧调用方、数据缺失）时退回只给 requirement，行为与改造前逐字一致。
+
+    编号规则（与 ``domain.spec.response_items`` 的前端标号同一套）：每条按类型独立计数，
+    形如 ``V1`` / ``S1`` / ``I1``，写手因此可以按编号逐条作答、覆盖度自检也能按编号核对。
+    """
+    text = (requirement or "").strip()
+    legacy = f"【本章应答要求】\n{text}\n" if text else ""
+    if not items:
+        return legacy
+
+    tagged: list[tuple[str, str, bool]] = []  # (tag, 渲染行, 是否必须显式回应)
+    counters: dict[str, int] = {}
+    for it in items:
+        body = (it.get("text") or "").strip()
+        if not body:
+            continue
+        type_ = str(it.get("type") or "")
+        prefix = _ITEM_PREFIXES.get(type_, "")
+        if prefix:
+            counters[prefix] = counters.get(prefix, 0) + 1
+            tag = f"{prefix}{counters[prefix]}"
+        else:
+            tag = "-"
+        # 评分口径/量化档位（informative）加"说明性"标注：它们不是"要回应的事项"，
+        # 但必须让写手看到（否则漏评分项）—— 让模型对着它写，而不是逐条复述档位。
+        note = "（评分口径：照此写，不要复述档位）" if it.get("informative") else ""
+        label = _ITEM_LABELS.get(type_, "条目")
+        tagged.append((tag, f"{tag} {label}：{body}{note}", type_ in _CRITICAL_ITEM_TYPES))
+
+    if not tagged:
+        return legacy
+
+    critical = [(t, l) for t, l, c in tagged if c]
+    rest = [(t, l) for t, l, c in tagged if not c]
+
+    head = "【本章应答要求】（逐条回应下列每一条，编号即题号）\n"
+    if text and text.replace("\n", "").strip() not in "".join(l for _, l, _ in tagged).replace("\n", ""):
+        # requirement 原文里有条目化没覆盖到的内容（拆条丢句）时兜底附上，不静默丢要求
+        head += f"要求原文：{text}\n"
+    if critical:
+        head += (
+            "以下条目**必须逐条显式回应**，遗漏即扣分或废标（否决项必须写明满足，"
+            "评分项必须写明如何拿分，加分项必须写明我方具备，量化指标必须给出具体数值）：\n"
+            + "\n".join(l for _, l in critical)
+            + "\n其余条目：\n"
+        )
+    block = head + "\n".join(l for _, l in rest) + "\n"
+    if len(block) > max_chars:
+        block = block[:max_chars] + "\n…（本条要求过长，已截断，按上述要点响应）\n"
+    return block
+
+
 async def dispatch_block_write(
     configs: list[LLMConfig],
     rr_start_index: int,
@@ -567,10 +672,15 @@ async def dispatch_block_write(
     target_words: int = 600,
     feedback_text: str = "",
     max_words: Optional[int] = None,
+    items: Optional[list[dict]] = None,
 ):
     """
     为单个 block 流式生成正文内容。
     将 requirement + chunks 拼入 extra_prompt，复用 dispatch_stream_generate。
+
+    ``items``：该章节的应答条目（``domain.spec.response_items.expand_response_items`` 的产出）。
+    给了它就把 8 字段逐条编号进 prompt（见 ``build_write_requirement_block``）；不给则退回
+    只给 requirement，行为与改造前一致。
 
     **不传规范书原文**（original_content 为空）：因此提示词走「按应标要求 + 参考素材
     撰写」分支，而不是「按原文逐段扩写」。需要原文逐段扩写的是工作台手动路径
@@ -585,9 +695,9 @@ async def dispatch_block_write(
     snippets = "\n".join(
         f"- {c['content'][:MATERIAL_SNIPPET_CHARS]}" for c in chunks
     )
-    extra_prompt = ""
-    if requirement:
-        extra_prompt += f"【应标要求】\n{requirement}\n\n"
+    extra_prompt = build_write_requirement_block(requirement, items)
+    # 无素材时**不拼**【参考素材】：此前固定拼一段，哪怕匹配为空/弱相关，
+    # 内容还会被 [M] 标成"来自素材"——等于给自造内容盖章（§1.3）。
     if snippets:
         extra_prompt += f"【参考素材】\n{snippets}"
     if feedback_text:

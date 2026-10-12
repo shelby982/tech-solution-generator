@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Optional, Union
 from domain.letter_detector import is_letter_section
 from domain.proposal import BlockOutput, Source
 from domain.spec import OutlineMatrixRow
+from domain.spec.response_items import expand_response_items
 from infra.retrieval import Match
 
 logger = logging.getLogger(__name__)
@@ -304,6 +305,19 @@ class ZhugeLiangAgent:
         target_words = max(band_lo, int(self.target_words or 0))
         max_words = max(band_hi, target_words + 600)
 
+        # 把提炼出的 8 字段展开成应答条目，逐条编号喂进写作 prompt ——
+        # 此前只传 requirement，评分项/否决项/加分项/量化指标写手看不到，
+        # 于是"写前信息不全、评审时全量扣分"（方案 §1.1、§4.B）。
+        items_for_write = expand_response_items(block_id, {
+            "requirement": row.requirement or "",
+            "key_points": getattr(row, "key_points", "") or "",
+            "veto_items": getattr(row, "veto_items", "") or "",
+            "bonus_items": getattr(row, "bonus_items", "") or "",
+            "score_items": getattr(row, "score_items", "") or "",
+            "evidence_required": getattr(row, "evidence_required", "") or "",
+            "indicators": getattr(row, "indicators", "") or "",
+        })
+
         content_parts: list[str] = []
         async for token in infra.llm.dispatch_block_write(
             configs=configs,
@@ -314,6 +328,7 @@ class ZhugeLiangAgent:
             target_words=target_words,
             max_words=max_words,
             feedback_text=feedback_text,
+            items=items_for_write,
         ):
             content_parts.append(token)
             await _emit(emitter, "token", {
