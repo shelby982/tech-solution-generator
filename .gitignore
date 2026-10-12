@@ -14,3 +14,4 @@ backend/data/
 .superpowers/
 .planning/
 .DS_Store
+backend/data/cache/

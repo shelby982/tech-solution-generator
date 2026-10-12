@@ -416,6 +416,20 @@ class ZhangHengAgent:
              "source_file": getattr(s, "source_file", "") or ""}
             for s in source_toc
         ]
+        # ── 确定性路径：材料里有评分表时，目录结构由规则定，模型只抽细项 ──
+        # 用户要求（2026-10-13）：「稳定地按照评分点和技术规范书的内容结合，输出专业目录，
+        # 不要一会儿变这样一会儿变那样」。模型自由生成结构永远做不到稳定，所以：
+        #   L1 评分因素 / L2 详细评审项 / L4 规范书专题+工作项 ← 规则
+        #   L3 分项要素细分点 ← 模型只做抽取（接地校验 + 内容哈希缓存），失败回落规则
+        det = await self._try_deterministic_outline(
+            flat, source_toc, instruction, configs, rr_start,
+        )
+        if det is not None:
+            sections, det_note = det
+            if count_top_level(sections) >= MIN_TOP_LEVEL_NODES:
+                _ground_sections(sections, source_toc)
+                return OutlineDraftResult(sections=sections, error=det_note)
+
         digest_sections, follow_structure, locate_note = await self._locate_for_digest(
             flat, instruction, configs, rr_start,
         )
@@ -481,6 +495,90 @@ class ZhangHengAgent:
             sections=sections,
             error="；".join(messages),
         )
+
+    async def _try_deterministic_outline(
+        self,
+        flat: list[dict],
+        source_toc: list,
+        instruction: str,
+        configs: list,
+        rr_start: int,
+    ):
+        """材料里有评分表时，用**确定性骨架**产出目录。
+
+        返回 ``(sections, note)``；材料里没有评分表（或骨架不完整）时返回 None，
+        调用方走原来的模型派生路径 —— 两条路都不丢内容。
+        """
+        from infra.parser.outline_builder import (
+            build_outline, criterion_lookup_key,
+        )
+        from infra.parser.review_points import extract_review_points
+        from infra.retrieval.segment import extract_category, extract_scope_tokens
+
+        sections_in = [
+            {"id": f"s{i}", "level": s.get("level") or 1, "title": s.get("title") or "",
+             "raw_content": s.get("content") or "", "source_file": s.get("source_file") or ""}
+            for i, s in enumerate(flat, start=1)
+        ]
+        table = extract_review_points(sections_in)
+        pts = list(table.points)
+        if not pts:
+            return None
+
+        category = extract_category(instruction)
+        tokens = extract_scope_tokens(instruction)
+        package_no = tokens[0][1] if tokens else ""
+        picked = [p for p in pts
+                  if (not category or p.category == category)
+                  and (not package_no or str(p.package_no or "") == package_no)]
+        if not picked:
+            return None
+
+        # 规范书侧材料：优先用户点名的那几份（排除评分表所在文件）
+        from collections import Counter
+        review_file = Counter(p.source_file for p in picked).most_common(1)[0][0]
+        named = named_files_in(instruction, sorted({s["source_file"] for s in flat
+                                                   if s.get("source_file")}))
+        spec_files = [f for f in named if f and f != review_file]
+        if not spec_files:
+            spec_files = sorted({s["source_file"] for s in flat
+                                 if s.get("source_file") and s["source_file"] != review_file})
+        spec_sections = [s for s in sections_in if s.get("source_file") in spec_files]
+
+        # L3 细项：模型抽取（带接地校验 + 内容哈希缓存），失败回落规则拆分
+        from agents.subpoints import extract_points
+        from infra.parser.outline_builder import split_criterion
+        import infra.llm
+
+        async def _llm_extract(text: str):
+            return await infra.llm.dispatch_subpoints_json(configs, rr_start,
+                                                           {"criterion": text})
+
+        subpoints: dict[str, list[str]] = {}
+        for criterion in {p.criterion or "" for p in picked}:
+            if not criterion.strip():
+                continue
+            points, source = await extract_points(
+                criterion, llm_extract=_llm_extract, rule_fallback=split_criterion,
+            )
+            if points:
+                subpoints[criterion_lookup_key(criterion)] = points
+                logger.info(f"张衡：评分点细项 {len(points)} 条（来源 {source}）")
+
+        outline = build_outline(picked, spec_sections=spec_sections,
+                                category=category, package_no=package_no,
+                                subpoints_by_criterion=subpoints or None)
+        if not outline:
+            return None
+
+        raw_nodes = [{"level": n.level, "title": n.title} for n in outline]
+        nodes, warnings = normalize_nodes(raw_nodes)
+        sections = build_sections(nodes)
+        note = ("目录按评分表结构生成：评分因素 → 详细评审项 → 分项要素要点，"
+                "并已并入技术规范书对应专题与工作项")
+        if warnings:
+            note += "；" + "；".join(warnings)
+        return sections, note
 
     async def _locate_for_digest(
         self,

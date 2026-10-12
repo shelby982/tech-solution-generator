@@ -20,6 +20,7 @@ from .dispatcher import (
     dispatch_block_write,
     dispatch_doc_summary,
     dispatch_outline_draft_json,
+    dispatch_subpoints_json,
     dispatch_outline_json,
     dispatch_scope_select_json,
     dispatch_stream_generate,

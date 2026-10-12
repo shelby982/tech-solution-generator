@@ -26,6 +26,8 @@ from agents.prompts import (
     build_outline_extract_user,
     build_section_outline_user,
     build_scope_select_user,
+    build_subpoints_user,
+    SUBPOINTS_SYSTEM,
 )
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
@@ -447,6 +449,59 @@ async def dispatch_doc_summary(
             kind = errors.note_failure(config, e)
             logger.warning(
                 f"API [{config.provider}/{config.model}] 摘要生成失败"
+                f"（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
+            )
+            if errors.blocks_chain(kind):
+                break
+
+    raise errors.exhausted_error(configs, last_error)
+
+
+async def dispatch_subpoints_json(
+    configs: list[LLMConfig],
+    rr_start_index: int,
+    payload: dict,
+) -> dict:
+    """从一个评分点的「分项要素」里抽出应答要点，返回 ``{"points": [...]}``。
+
+    为什么单独一次调用：目录的**结构**由 ``infra.parser.outline_builder`` 用规则定死，
+    模型只被允许做这一件"从异质长文里抽细项"的事 —— 规则在这上面会抽出
+    `%RLRH1`、`δ偏为评标价格` 这类碎片，模型明显更强。结果由
+    ``agents.subpoints`` 做接地校验并按内容哈希缓存，因此可复现。
+
+    payload 字段：criterion
+    """
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先添加模型配置")
+
+    user = build_subpoints_user(payload.get("criterion", "") or "")
+
+    last_error: Exception | None = None
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 抽取评分点细项")
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await clients.generate_oneshot_openai(
+                    config, SUBPOINTS_SYSTEM, user, max_tokens=800,
+                    call_site="outline_subpoints",
+                )
+            else:
+                result = await clients.generate_oneshot_claude(
+                    config, SUBPOINTS_SYSTEM, user, max_tokens=800,
+                    call_site="outline_subpoints",
+                )
+            obj = _extract_json_object(result)
+            if not isinstance(obj, dict) or not isinstance(obj.get("points"), list):
+                raise ValueError("模型输出不是含 points 的 JSON 对象")
+            return obj
+        except Exception as e:
+            last_error = e
+            kind = errors.note_failure(config, e)
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 抽取细项失败"
                 f"（{errors.describe_error(e)}），"
                 f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )

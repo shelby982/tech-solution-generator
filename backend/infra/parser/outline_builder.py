@@ -195,8 +195,28 @@ def _split_label(chunk: str) -> tuple[str, str]:
     return label, chunk[m.end():].strip()
 
 
+def _body_for_subpoint(title: str, rule_bodies: list[tuple[str, str]]) -> str:
+    """把外部细项标题映射回它所属的规则块正文（映射不到返回空串）。
+
+    映射靠"标题字符落在哪个块里"：模型给的标题多半就是原文里的说法，
+    所以字符命中率能可靠地把正文认回来。
+    """
+    t = _normalize(title)
+    if not t:
+        return ""
+    best, best_hit = "", 0
+    for label, body in rule_bodies:
+        blob = _normalize(f"{label}{body}")
+        hit = sum(1 for ch in t if ch in blob)
+        if hit > best_hit:
+            best, best_hit = body, hit
+    # 命中率太低 → 认为映射不可靠，让调用方回落整段
+    return best if best_hit >= max(2, len(t) * 0.6) else ""
+
+
 def build_scoring_skeleton(review_points: Iterable, *, category: str = "tech",
-                           package_no: str = "") -> list[OutlineNode]:
+                           package_no: str = "",
+                           subpoints_by_criterion: Optional[dict] = None) -> list[OutlineNode]:
     """评分侧骨架：L1 评分因素 → L2 详细评审项 → L3 分项要素细分点。
 
     - 过滤：只取点名类别（tech/commerce/price）与标包号的评分点；
@@ -233,7 +253,23 @@ def build_scoring_skeleton(review_points: Iterable, *, category: str = "tech",
             parent_level = 2
             parent_title = item
 
-        subs = split_criterion(criterion)
+        # 细项来源：优先用外部传入的（模型抽取 + 接地校验 + 内容哈希缓存，
+        # 见 agents.subpoints），否则用规则拆分。**结构仍由本函数决定**，
+        # 外部只提供 L3 的标题文本。
+        override = None
+        if subpoints_by_criterion:
+            override = subpoints_by_criterion.get(_normalize(criterion))
+        if override:
+            # 外部只给"标题"。正文要**逐个映射回规则块**，不能每个都塞整段：
+            # 整段塞进去会让主题匹配分不清谁是谁 —— 实测「方案先进性」的
+            # 信创/云原生/容灾/埋点被挂到了同级的「方案可行性」下（第一个命中的赢）。
+            rule_bodies = split_criterion(criterion)
+            subs = [(t, _body_for_subpoint(t, rule_bodies) or criterion) for t in override]
+        else:
+            subs = split_criterion(criterion)
+        # 去掉与上层同名的细项（模型偶尔会把因素名当要点给回来）
+        subs = [(t, b) for t, b in subs
+                if _normalize(t) not in {_normalize(factor), _normalize(item)}]
         if not subs:
             # 分项要素为空（如纯形式条款）：给一个可写作的落点，不要留空壳
             subs = [(f"{item or factor}应答", "")]
@@ -250,6 +286,13 @@ def build_scoring_skeleton(review_points: Iterable, *, category: str = "tech",
 
 def _normalize(s: str) -> str:
     return re.sub(r"[\s、，,。；;：:（）()【】\[\]]+", "", s or "")
+
+
+def criterion_lookup_key(criterion: str) -> str:
+    """分项要素的查表键。**调用方必须用它**（与内部 ``_normalize`` 同一口径），
+    否则 ``subpoints_by_criterion`` 永远查不中，表现为"接了外部细项却没生效"。
+    """
+    return _normalize(criterion)
 
 
 def spec_topic_sections(spec_sections: Iterable) -> list[dict]:
@@ -319,7 +362,8 @@ def _topic_keys(title: str) -> list[str]:
 
 def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
                   category: str = "tech", package_no: str = "",
-                  max_spec_level: int = 99) -> list[OutlineNode]:
+                  max_spec_level: int = 99,
+                  subpoints_by_criterion: Optional[dict] = None) -> list[OutlineNode]:
     """**主入口**：评分侧骨架 + 规范书结合点，输出一份稳定可复现的目录。
 
     规范书的归属（全部确定性规则）：
@@ -329,7 +373,8 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
        结果既看不见结合点、又留下悬空的重复工作项（实测）。
     3. 没被匹配的整棵子树，收进 L1「技术规范书要求应答」，保证规范书内容全有落点。
     """
-    nodes = build_scoring_skeleton(review_points, category=category, package_no=package_no)
+    nodes = build_scoring_skeleton(review_points, category=category, package_no=package_no,
+                                   subpoints_by_criterion=subpoints_by_criterion)
     # max_spec_level 默认不限层深：规范书的工作项常在第 6~7 层，而它们恰恰是
     # "研究与验证任务"，必须逐条能应答。按固定层数截断会悄悄丢掉它们
     # （实测测试里第 7 层的工作项就被 6 这个魔法数滤掉了）。
@@ -406,7 +451,7 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
         for t in leftovers:
             _emit(t, 2)
 
-    return nodes
+    return _repair_levels(nodes)
 
 
 # 容器节点：标题只起分组作用，不是可应答的主题。把它们当主题去匹配，
@@ -503,3 +548,20 @@ def render_outline_text(nodes: Iterable[OutlineNode]) -> str:
         refs = f"  ← 并入规范书：{'、'.join(n.spec_refs)}" if n.source == "scoring" and n.spec_refs else ""
         out.append(f"{indent}- {n.title}{pts}{src}{refs}")
     return "\n".join(out)
+
+
+def _repair_levels(nodes: list[OutlineNode]) -> list[OutlineNode]:
+    """把层级修成"每个节点 = 它的父节点 + 1"。
+
+    为什么要修：去重 / 剔除会让中间层消失（容器被去掉、专题被并走），
+    留下 `L2 → L4` 这样的跨度。下游 ``normalize_nodes`` 要求层级自洽，
+    不自洽就整批"重挂" —— 实测 78 节里有 **70 个被重挂**，最终结构已经不是
+    本模块定的那个了（"稳定"也就无从谈起）。
+    """
+    stack: list[int] = []
+    for n in nodes:
+        while stack and stack[-1] >= n.level:
+            stack.pop()
+        n.level = (stack[-1] + 1) if stack else 1
+        stack.append(n.level)
+    return nodes
