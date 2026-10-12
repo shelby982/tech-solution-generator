@@ -228,6 +228,9 @@ _index_path        = os.path.join(frontend_dir, "index.html")
 _projects_path     = os.path.join(frontend_dir, "projects.html")
 _workbench_path    = os.path.join(frontend_dir, "workbench.html")
 _project_init_path = os.path.join(frontend_dir, "project-init.html")
+# 三模式页（把 project-init 的要求与大纲 / 素材库 与 workbench 的方案编辑合到一页）。
+# 原两页在合并验证期内保持可用，便于对照与回退。
+_three_mode_path   = os.path.join(frontend_dir, "three-mode.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 _review_path       = os.path.join(frontend_dir, "review.html")
 
@@ -246,6 +249,14 @@ async def serve_frontend():
     if os.path.isfile(_projects_path):
         return FileResponse(_projects_path, headers=_HTML_NO_CACHE)
     return JSONResponse(content={"message": "技术方案生成助手 API 运行中", "docs": "/docs"})
+
+
+@app.get("/three-mode", include_in_schema=False)
+async def serve_three_mode():
+    """三模式工作台（合并验证期入口）。"""
+    if os.path.isfile(_three_mode_path):
+        return FileResponse(_three_mode_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "three-mode.html 不存在"})
 
 
 @app.get("/projects", include_in_schema=False)
