@@ -1287,3 +1287,61 @@ async def test_structure_edit_prunes_matrix(runner_env):
     matrix2 = (state.get("spec") or {}).get("outline_matrix") or {}
     assert "s-ghost" not in matrix2, "目录外的矩阵条目必须被裁掉"
     assert "s1" in matrix2, "目录内的条目不能误删"
+
+
+# ─────────────────────────────────────────────
+# 要求文件变更守卫：重出目录带不上新文件
+# ─────────────────────────────────────────────
+
+async def test_redraft_outline_rejects_when_requirement_files_changed(runner_env, monkeypatch):
+    """要求文件换过之后，重出目录必须被拒绝并指向「重新提炼」。
+
+    实测（项目 18，2026-10-12）：用户删掉旧文件、传了新文件，然后点「重新提炼」——
+    但那次只作废了旧 run，没有新建运行；接着连点 25 次「重新拆分目录」，
+    每次都按 checkpoint 里**上一次解析**的 source_toc 出目录 →
+    页面看起来"还是之前的目录"，而用户以为新文件已生效。
+    重出无法修复这一点（它不重跑解析），所以必须明确拒绝。
+    """
+    runner, project_id, _ = runner_env
+
+    state = {
+        "project_id": project_id,
+        "stage": "outline_review",
+        "spec": {"material_sig": "spec:旧文件.docx:100"},
+    }
+    monkeypatch.setattr(runner, "state", _state_stub(state))
+
+    async def _new_sig(_pid):
+        return "spec:新文件.docx:200"      # 原料已换
+
+    import orchestrator.nodes as nodes
+    monkeypatch.setattr(nodes, "materials_signature", _new_sig)
+
+    with pytest.raises(ValueError, match="要求文件已变更"):
+        await runner.redraft_outline("tid-x", "")
+
+
+async def test_redraft_outline_allows_when_requirement_files_unchanged(runner_env, monkeypatch):
+    """原料没变时不该被守卫拦住（不能把正常重出也拒了）。"""
+    runner, project_id, _ = runner_env
+
+    state = {
+        "project_id": project_id,
+        "stage": "outline_review",
+        "spec": {"material_sig": "spec:同一份.docx:100"},
+    }
+    monkeypatch.setattr(runner, "state", _state_stub(state))
+
+    import orchestrator.nodes as nodes
+    monkeypatch.setattr(nodes, "materials_signature",
+                        _state_stub("spec:同一份.docx:100"))
+
+    await runner.redraft_outline("tid-y", "")
+    await _wait_task(runner._runs["tid-y"])      # 不该因守卫被拒
+
+
+def _state_stub(value):
+    """runner.state 是 async 的 —— 桩要返回 coroutine，不能返回 coroutine 对象。"""
+    async def _inner(*_a, **_k):
+        return value
+    return _inner

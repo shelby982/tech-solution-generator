@@ -39,6 +39,8 @@ class SpecState(TypedDict, total=False):
     outline_revision: int              # 目录版本号，由 outline_draft 节点自增；0 = 未派生
     outline_error: str                 # 目录派生降级原因，空串 = 模型派生成功
     doc_summary_error: str             # 项目概述生成失败原因，空串 = 生成成功
+    parse_failed_files: list[str]      # 单份文件解析失败被跳过时的文件名（全失败才抛错）
+    material_sig: str                  # 本次解析所依据的要求文件指纹（角色+文件名+大小）。
 
 
 class MaterialsState(TypedDict, total=False):

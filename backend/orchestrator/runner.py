@@ -356,6 +356,21 @@ class WorkflowRunner:
         # 内容保留），用户接着改要求、重出目录是完全合理的下一步。
         # failed 也允许重出：目录派生失败后，重试派生是用户唯一的自救入口
         # （source_toc 在 checkpoint 里，重新派发不需要重解析要求文件）。
+        # 原料是否换过：重出目录用的是 checkpoint 里的 source_toc（上次解析结果），
+        # 换了要求文件却只点重拆，目录会按旧解析结果生成 —— 页面看起来"没反应"。
+        # 这里明确拒绝并指向「重新提炼」（重跑解析），而不是让用户反复点重拆。
+        from orchestrator.nodes import materials_signature
+
+        recorded_sig = (state.get("spec") or {}).get("material_sig") or ""
+        if recorded_sig:
+            current_sig = await materials_signature(int(state["project_id"]))
+            if current_sig != recorded_sig:
+                raise ValueError(
+                    "要求文件已变更（新增 / 删除 / 替换过），当前运行的目录是按**上一次解析**"
+                    "的结果生成的，「重新拆分目录」带不上新文件。\n"
+                    "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
+                )
+
         if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
             # 说清「为什么不行」与「该怎么办」。原来只写"请在…闸门处重出目录"，
             # 而 run 跑到 done 之后根本回不到那个闸门（实测用户点了 3 次，每次都只拿到

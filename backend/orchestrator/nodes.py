@@ -125,6 +125,28 @@ def _make_agent_emitter_bridge(
 SpecLoader = Callable[[int], Awaitable[list[tuple[Any, str, str]]]]
 
 
+async def materials_signature(project_id: int) -> str:
+    """「应标要求」文件的指纹：角色 + 文件名 + 大小，排序后拼接。
+
+    为什么要它：`redraft_outline` 只重跑"目录派生"，原料是 checkpoint 里的
+    ``spec.source_toc``（上一次解析的结果）。用户删掉旧文件、传了新文件之后点重拆，
+    目录仍然按**旧解析结果**生成 —— 实测因此出现"页面还是之前的目录"，
+    而用户以为新文件已经生效。这里给解析结果盖一个指纹，重拆前比对，
+    不一致就明确要求重新提炼（重跑解析）。
+    """
+    from db import get_db
+
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            "SELECT role, filename, COALESCE(file_size, 0) AS sz "
+            "FROM materials WHERE project_id = ? "
+            "ORDER BY role, filename, sz",
+            (project_id,),
+        )
+        rows = await cursor.fetchall()
+    return "|".join(f"{r['role']}:{r['filename']}:{r['sz']}" for r in rows)
+
+
 async def zhang_heng_parse_node(
     state: WorkflowState,
     *,
@@ -202,6 +224,8 @@ async def zhang_heng_parse_node(
             "source_toc": toc_dicts,
             "toc": toc_dicts,
             "parse_failed_files": failed_files,
+            # 本次解析所依据的材料指纹：重出目录前比对，原料换了就必须重跑解析
+            "material_sig": await materials_signature(project_id),
         },
     }
 
