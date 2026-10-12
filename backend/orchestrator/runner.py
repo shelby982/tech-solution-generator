@@ -78,6 +78,24 @@ class _AsyncCM:
     async def __aexit__(self, *a) -> Any: ...  # pragma: no cover
 
 
+def recorded_requirement_filenames(spec: dict) -> set[str]:
+    """这次解析到底用了哪些要求文件。
+
+    优先 ``material_files``（本次改动后写入），其次从 ``source_toc`` 的
+    ``source_file`` 反推 —— **更早的 run 也带着 source_file**，所以旧 run 同样能比。
+    两者都没有则返回空集（调用方据此放行，避免把正常重出也拦死）。
+    """
+    spec = spec or {}
+    files = {f for f in (spec.get("material_files") or []) if f}
+    if files:
+        return files
+    return {
+        (s.get("source_file") or "")
+        for s in (spec.get("source_toc") or [])
+        if isinstance(s, dict) and (s.get("source_file") or "")
+    }
+
+
 class WorkflowRunner:
     """工作流外观。
 
@@ -326,6 +344,77 @@ class WorkflowRunner:
             name=f"wf-{thread_id}-rerun-match",
         )
 
+    async def _requirement_files_changed(self, state: WorkflowState) -> bool:
+        """当前「应标要求」文件是否已不是这次运行解析时的那一批。
+
+        两条判据，任一命中即算变更（**fail-closed**：判不出来时不放行）：
+        1. ``spec.material_sig`` 有值 → 与当前材料指纹比对；
+        2. 没有指纹（本改动之前创建的 run）→ 用 ``spec.material_files``
+           （该次解析用到的文件名）与当前材料文件名比对。
+
+        为什么要兜底：实测旧 run 没有指纹，守卫被跳过，用户在"删旧文件 + 传新文件"
+        之后点「重新拆分目录」，它照旧用 checkpoint 里的旧 source_toc 出目录 ——
+        页面看起来毫无变化，而用户以为新文件已生效（本项目连点 8 次）。
+        """
+        from db import get_db
+        from orchestrator.nodes import materials_signature
+
+        spec = state.get("spec") or {}
+        project_id = int(state["project_id"])
+        current_sig = await materials_signature(project_id)
+        recorded = spec.get("material_sig") or ""
+        if recorded:
+            return current_sig != recorded
+
+        recorded_files = recorded_requirement_filenames(spec)
+        if not recorded_files:
+            # 连一条文件记录都没有（空解析的 run / 测试夹具）：无法比较，
+            # 此时拦下来只会让"正常重出"也失败 —— 放行，交由阶段守卫把关。
+            return False
+
+        async with get_db() as conn:
+            cursor = await conn.execute(
+                "SELECT filename FROM materials WHERE project_id = ?", (project_id,)
+            )
+            current = {r["filename"] for r in await cursor.fetchall()}
+        return recorded_files != current
+
+    async def redraft_check(self, thread_id: str) -> dict:
+        """重出目录前的预检：告诉前端"现在能不能重拆、不能的话该做什么"。
+
+        前端在点「重新拆分目录」前先问这里 —— 否则用户拿到的是一个 200 却
+        "什么都没变"，只能反复点（实测 8 次）。
+        """
+        state = await self.state(thread_id)
+        if not state or not state.get("project_id"):
+            raise KeyError(thread_id)
+
+        reasons: list[str] = []
+        if await self._requirement_files_changed(state):
+            reasons.append("requirement_files_changed")
+        if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
+            reasons.append("stage_not_at_gate")
+
+        if "requirement_files_changed" in reasons:
+            message = (
+                "要求文件已变更（新增 / 删除 / 替换过），当前运行的目录是按**上一次解析**"
+                "的结果生成的，「重新拆分目录」带不上新文件。\n"
+                "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
+            )
+        elif "stage_not_at_gate" in reasons:
+            message = (
+                "当前运行已推进到「撰写/评审」之后，目录不能再改（改了正文就对不上了）。\n"
+                "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
+            )
+        else:
+            message = ""
+        return {
+            "allowed": not reasons,
+            "reasons": reasons,
+            "message": message,
+            "stage": state.get("stage"),
+        }
+
     async def redraft_outline(self, thread_id: str, instruction: str) -> None:
         """整版重出「应答文件目录」：换一份提炼要求，让张衡重新派生目录。
 
@@ -359,17 +448,13 @@ class WorkflowRunner:
         # 原料是否换过：重出目录用的是 checkpoint 里的 source_toc（上次解析结果），
         # 换了要求文件却只点重拆，目录会按旧解析结果生成 —— 页面看起来"没反应"。
         # 这里明确拒绝并指向「重新提炼」（重跑解析），而不是让用户反复点重拆。
-        from orchestrator.nodes import materials_signature
-
-        recorded_sig = (state.get("spec") or {}).get("material_sig") or ""
-        if recorded_sig:
-            current_sig = await materials_signature(int(state["project_id"]))
-            if current_sig != recorded_sig:
-                raise ValueError(
-                    "要求文件已变更（新增 / 删除 / 替换过），当前运行的目录是按**上一次解析**"
-                    "的结果生成的，「重新拆分目录」带不上新文件。\n"
-                    "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
-                )
+        changed = await self._requirement_files_changed(state)
+        if changed:
+            raise ValueError(
+                "要求文件已变更（新增 / 删除 / 替换过），当前运行的目录是按**上一次解析**"
+                "的结果生成的，「重新拆分目录」带不上新文件。\n"
+                "请点「重新提炼」：会新建一次运行并重新解析全部要求文件。"
+            )
 
         if state.get("stage") not in {"outline_review", "materials_review", "paused", "failed"}:
             # 说清「为什么不行」与「该怎么办」。原来只写"请在…闸门处重出目录"，

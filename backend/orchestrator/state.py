@@ -41,6 +41,7 @@ class SpecState(TypedDict, total=False):
     doc_summary_error: str             # 项目概述生成失败原因，空串 = 生成成功
     parse_failed_files: list[str]      # 单份文件解析失败被跳过时的文件名（全失败才抛错）
     material_sig: str                  # 本次解析所依据的要求文件指纹（角色+文件名+大小）。
+    material_files: list[str]          # 同上的文件名视图（旧 run 兜底比较用；可能含重复）。
 
 
 class MaterialsState(TypedDict, total=False):

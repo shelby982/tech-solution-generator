@@ -211,6 +211,11 @@ export const api = {
     abort: (threadId) =>
       fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
 
+    // 重出目录前的预检：原料变过 / 已过闸门时，后端会说明该做什么。
+    // 前端拿它决定"重拆"还是"必须重新提炼"，避免点下去 200 却什么都没变。
+    redraftCheck: (threadId) =>
+      fetch(`/api/workflow/${threadId}/redraft-check`).then(r => r.json()),
+
     pause: (threadId) =>
       fetch(`/api/workflow/${threadId}/pause`, { method: 'POST' }).then(r => r.json()),
 

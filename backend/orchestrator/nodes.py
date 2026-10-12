@@ -224,8 +224,11 @@ async def zhang_heng_parse_node(
             "source_toc": toc_dicts,
             "toc": toc_dicts,
             "parse_failed_files": failed_files,
-            # 本次解析所依据的材料指纹：重出目录前比对，原料换了就必须重跑解析
+            # 本次解析所依据的材料指纹：重出目录前比对，原料换了就必须重跑解析。
+            # material_files 是同一事实的文件名视图 —— checklist 接口用它做兜底比较，
+            # 也能让**改动前创建的旧 run**（没有 material_sig）被正确判定为"原料已变"。
             "material_sig": await materials_signature(project_id),
+            "material_files": [s.get("source_file") or "" for s in toc_dicts],
         },
     }
 

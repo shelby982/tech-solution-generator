@@ -163,6 +163,21 @@ async def rerun_match(thread_id: str, full: bool = False):
     return JSONResponse({"thread_id": thread_id, "status": "rerunning_match"})
 
 
+@router.get("/{thread_id}/redraft-check")
+async def redraft_check(thread_id: str):
+    """重出目录前的预检：能不能重拆、不能的话该做什么。
+
+    前端点「重新拆分目录」前先问这里。此前没有这道预检，用户点下去拿到 200，
+    但重拆用的是 checkpoint 里的**旧解析结果** —— 页面看起来"没反应"，
+    只能反复点（实测连点 8 次）。
+    """
+    runner = get_runner()
+    try:
+        return await runner.redraft_check(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+
+
 @router.post("/{thread_id}/redraft-outline")
 async def redraft_outline(thread_id: str, req: RedraftOutlineReq | None = None):
     """整版重出应答文件目录：换一份提炼要求，跳过 parse 直接重跑张衡的目录派生。"""

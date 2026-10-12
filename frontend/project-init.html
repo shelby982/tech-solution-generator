@@ -1119,14 +1119,14 @@ body[data-view="matching"] .match-detail { display: block; }
     </div>
 
     <script type="module">
-import { api } from './assets/api.js?v=20260921-dedupe';
+import { api } from './assets/api.js?v=20261013-gate';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './assets/workspace.js?v=20260913-fixbtn';
+       } from './assets/workspace.js?v=20261013-gate';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -1140,7 +1140,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './assets/workspace-model.mjs?v=20260913-fixbtn';
+       } from './assets/workspace-model.mjs?v=20261013-gate';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -4497,6 +4497,32 @@ function redraftAllowedByStage() {
 }
 
 async function redraftOutline() {
+  // ① 先问后端：能不能重拆。原料变过（删旧文件/传新文件）或已过闸门时，
+  //    「重新拆分目录」用的是 checkpoint 里的**旧解析结果**，点下去会返回 200
+  //    但页面毫无变化 —— 实测用户连点 8 次。这里直接改走「重新提炼」。
+  const tidForCheck = currentThreadId || params.get('threadId') || getThread(projectId);
+  if (tidForCheck) {
+    let check = null;
+    try { check = await api.workflow.redraftCheck(tidForCheck); } catch (e) { check = null; }
+    if (check && check.allowed === false) {
+      const reason = (check.reasons || [])[0] || '';
+      if (reason === 'requirement_files_changed') {
+        const go = window.confirm(
+          '要求文件已变更（新增 / 删除 / 替换过）。\n\n' +
+          '「重新拆分目录」只重跑目录派生，用的是**上一次解析**的结果，带不上新文件 —— ' +
+          '这正是"点了没反应"的原因。\n\n' +
+          '现在改为「重新提炼」：会新建一次运行并重新解析全部要求文件。\n\n' +
+          '确定继续？');
+        if (go) await startExtraction(true);
+        return;
+      }
+      setStatusBar('gate_outline', check.message || '当前不能重新拆分目录',
+                   totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0,
+                   totalBlocks, doneBlocks);
+      return;
+    }
+  }
+
   // 已经提炼过一部分时先讲清代价：重出目录 = 换一版 block_id，已提炼的内容不再对应
   // （等于要重新提炼）。想改标题/顺序/层级应该用每行的「编辑」，想接着提炼用「继续提炼」。
   if (Number(doneBlocks) > 0) {
@@ -4746,7 +4772,7 @@ fileInputSrc.addEventListener('change', () => {
   const f = fileInputSrc.files[0];
   if (f) uploadFile(f, 'source', btnAddSrc);
 });
-btnExtract.addEventListener('click', () => {
+btnExtract.addEventListener('click', async () => {
   // 视图为 matching 时按钮承担「素材匹配」职责
   if (document.body.dataset.view === 'matching') {
     startMatching();
@@ -4945,6 +4971,6 @@ bindMatchDetailActions();
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260913-fixbtn"></script>
+  <script type="module" src="./assets/workspace.js?v=20261013-gate"></script>
   </body>
 </html>

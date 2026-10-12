@@ -1296,11 +1296,9 @@ async def test_structure_edit_prunes_matrix(runner_env):
 async def test_redraft_outline_rejects_when_requirement_files_changed(runner_env, monkeypatch):
     """要求文件换过之后，重出目录必须被拒绝并指向「重新提炼」。
 
-    实测（项目 18，2026-10-12）：用户删掉旧文件、传了新文件，然后点「重新提炼」——
-    但那次只作废了旧 run，没有新建运行；接着连点 25 次「重新拆分目录」，
-    每次都按 checkpoint 里**上一次解析**的 source_toc 出目录 →
-    页面看起来"还是之前的目录"，而用户以为新文件已生效。
-    重出无法修复这一点（它不重跑解析），所以必须明确拒绝。
+    实测（项目 18，2026-10-12）：用户删掉旧文件、传了新文件，然后连点「重新拆分目录」，
+    每次都按 checkpoint 里**上一次解析**的 source_toc 出目录 → 页面看起来毫无变化，
+    而用户以为新文件已生效（连点 8 次）。重出无法修复这一点（它不重跑解析）。
     """
     runner, project_id, _ = runner_env
 
@@ -1311,11 +1309,9 @@ async def test_redraft_outline_rejects_when_requirement_files_changed(runner_env
     }
     monkeypatch.setattr(runner, "state", _state_stub(state))
 
-    async def _new_sig(_pid):
-        return "spec:新文件.docx:200"      # 原料已换
-
     import orchestrator.nodes as nodes
-    monkeypatch.setattr(nodes, "materials_signature", _new_sig)
+    monkeypatch.setattr(nodes, "materials_signature",
+                        _state_stub("spec:新文件.docx:200"))   # 原料已换
 
     with pytest.raises(ValueError, match="要求文件已变更"):
         await runner.redraft_outline("tid-x", "")
@@ -1338,6 +1334,59 @@ async def test_redraft_outline_allows_when_requirement_files_unchanged(runner_en
 
     await runner.redraft_outline("tid-y", "")
     await _wait_task(runner._runs["tid-y"])      # 不该因守卫被拒
+
+
+def test_recorded_requirement_filenames_prefers_material_files():
+    """优先 material_files；没有则从 source_toc 的 source_file 反推。
+
+    为什么需要兜底：改动前创建的 run 没有 material_files，但 **source_toc 的每一节都带
+    source_file** —— 靠它才能判定"这次解析用的是哪批文件"。原守卫只看 material_sig，
+    旧 run 直接跳过，于是"删旧文件 + 传新文件"后点重拆照样跑（页面毫无变化，实测连点 8 次）。
+    """
+    from orchestrator.runner import recorded_requirement_filenames
+
+    assert recorded_requirement_filenames(
+        {"material_files": ["a.pdf", "b.docx"]}
+    ) == {"a.pdf", "b.docx"}
+
+    # 旧 run：只有 source_toc（每节带 source_file）
+    assert recorded_requirement_filenames({
+        "source_toc": [
+            {"source_file": "旧.pdf"}, {"source_file": "旧.pdf"}, {"source_file": "旧规范.docx"},
+        ]
+    }) == {"旧.pdf", "旧规范.docx"}
+
+    # 两者都没有 → 空集（调用方放行，不把正常重出拦死）
+    assert recorded_requirement_filenames({}) == set()
+    assert recorded_requirement_filenames({"source_toc": [{"title": "无来源"}]}) == set()
+
+
+async def test_redraft_check_reports_reason_and_action(runner_env, monkeypatch):
+    """预检接口要把"能不能重拆、不能的话该做什么"明确说出来。
+
+    前端拿它决定走"重拆"还是"必须重新提炼" —— 没有这道预检时，用户只会拿到
+    一个 200 却什么都变不了，只能反复点。
+    """
+    import orchestrator.nodes as nodes
+
+    runner, project_id, _ = runner_env
+    state = {
+        "project_id": project_id,
+        "stage": "outline_review",
+        "spec": {"material_sig": "spec:旧.docx:1"},
+    }
+    monkeypatch.setattr(runner, "state", _state_stub(state))
+    monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:新.docx:2"))
+
+    result = await runner.redraft_check("tid-c")
+    assert result["allowed"] is False
+    assert "requirement_files_changed" in result["reasons"]
+    assert "重新提炼" in result["message"]      # 指导下一步，而不是只说"不许"
+
+    # 原料一致 + 停在闸门 → 放行
+    monkeypatch.setattr(nodes, "materials_signature", _state_stub("spec:旧.docx:1"))
+    ok = await runner.redraft_check("tid-c")
+    assert ok["allowed"] is True and ok["message"] == ""
 
 
 def _state_stub(value):
