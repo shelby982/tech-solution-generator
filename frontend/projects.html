@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 项目列表</title>
-    <link rel="stylesheet" href="./assets/styles.css" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260921-dedupe" />
     <style>
       /* ── 页头 ── */
       .app-header {
@@ -807,7 +807,7 @@
     </div>
 
     <script type="module">
-      import { api } from './assets/api.js?v=20260918-loop8';
+      import { api } from './assets/api.js?v=20260921-dedupe';
 
       // ── 状态 ──
       const reqFiles = []; // {file, name, size, ext}
@@ -902,6 +902,9 @@
           case 'idle':
           case 'parsing':
           case 'outline_review':
+          // extracting：闸门 1 放行后的逐节提炼，仍属 project-init 这一步。
+          // 漏了它就会掉到 default 分支，跳转时把 threadId 丢掉（提炼完的进度看不见）。
+          case 'extracting':
           case 'matching':
           case 'materials_review':
             location.href = `/project-init?projectId=${projectId}&threadId=${enc}${backendQ}`;

@@ -1,16 +1,45 @@
-import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260918-loop8';
+import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20260921-dedupe';
+// 章节状态/依据徽标与「素材库」共用一份投影（同一棵目录树，四个环节都一样）
+import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20260921-dedupe';
 const nav = document.querySelector('.doc-outline');
 let selectedId = new URLSearchParams(location.search).get('blockId');
 let limit = 150, initialSelection = false;
-const tools = document.createElement('div');tools.className='ws-outline-tools';
-tools.innerHTML='<input type="search" aria-label="搜索章节" placeholder="搜索章节名称或问题" /><select aria-label="筛选章节"><option value="all">全部章节</option><option value="attention">需要处理</option><option value="empty">待撰写</option><option value="stale">待复审</option><option value="material">待补料</option><option value="passed">已通过</option></select>';
-nav.before(tools);
-const search=tools.querySelector('input'), filter=tools.querySelector('select');
-document.querySelector('.outline-search-btn').onclick=()=>search.focus();
-search.oninput=filter.onchange=()=>{limit=150;renderOutline();};
+// 搜索框放进共用的 .chap-search 槽位（与「素材库」同位置同尺寸）
+const tools=document.getElementById('ws-search-slot')||document.createElement('div');
+tools.innerHTML='<input type="search" aria-label="搜索章节" placeholder="搜索章节名称或问题" />';
+const search=tools.querySelector('input'), chipsBox=document.querySelector('.outline-pane .chap-chips');
+// 与「素材库」的筛选 chips 同一套样式与位置（左栏顶部）。词表按**本阶段关心的事**不同：
+// 素材库关心"有没有依据"，撰写关心"写没写 / 评审状态" —— 选项不同，组件与位置一致。
+const FILTERS=[['all','全部'],['attention','需要处理'],['empty','待撰写'],['material','待补料'],['stale','待复审'],['passed','已通过']];
+let filterMode='all';
+function filterCount(mode){
+  return workspace.chapters.filter(b=>{
+    if(mode==='all')return true;
+    if(mode==='attention')return ['material','revise','stale','error','historical','unreviewed'].includes(b.status);
+    return b.status===mode;
+  }).length;
+}
+function renderChips(){
+  chipsBox.innerHTML=FILTERS.map(([v,l])=>`<button type="button" class="chap-chip" role="tab" data-filter="${v}" aria-selected="${filterMode===v}">${l}<span class="chap-chip-count">${filterCount(v)}</span></button>`).join('');
+}
+chipsBox.addEventListener('click',e=>{const c=e.target.closest('[data-filter]');if(!c)return;filterMode=c.dataset.filter;limit=150;renderChips();renderOutline();});
+// 搜索框现在常显（原来靠栏头那个放大镜按钮切换）。这一行以前直接给 null 挂事件 ——
+// 元素一删，整个模块在这一行抛 TypeError 中断，后面的目录渲染/标题/徽标全不执行
+// （实测：树为空、顶部标题永远 "—"，而且控制台只报了个 SSE 404，很难查）。
+document.querySelector('.outline-search-btn')?.addEventListener('click',()=>search.focus());
+search.oninput=()=>{limit=150;renderOutline();};
 function editableBlock(b) {
   return {...b,id:b.db_id || b.block_id,kind:'content',source:b.source || '[]'};
 }
+// 右栏顶部展示当前章节标题（父级 › 本章）；原来 workbench.html 里找的是已不存在的
+// #section-title，`if (sTitle)` 一挡就静默失效了 —— 标题栏一直是「撰写正文」。
+function renderEditorTopbar(b) {
+  const t=document.getElementById('et-title'); if(t) t.textContent=b?.title||'—';
+  const p=document.getElementById('et-parent'); if(p) p.textContent=b?.parent_title||'';
+  const badge=document.getElementById('et-auto');
+  if(badge) badge.textContent = b?.content ? '' : '基于应标要求自动生成';
+}
+
 function selectChapter(id) {
   const b=workspace.chapters.find(b=>b.block_id===id);if(!b)return;
   if(window.__editorDirty?.()) {
@@ -23,6 +52,7 @@ function selectChapter(id) {
   if (typeof window.__onBlockSelected !== 'function') return;
   if(window.__onBlockSelected(block)===false)return;
   selectedId=id;initialSelection=true;
+  renderEditorTopbar(b);
   const url=new URL(location.href);url.searchParams.set('blockId',id);history.replaceState(null,'',url);
   nav.querySelectorAll('[data-block-id-str]').forEach(el=>el.classList.toggle('active',el.dataset.blockIdStr===id));
   renderContext();
@@ -31,8 +61,20 @@ function renderOutline() {
   window.__extractBlockMap=new Map(workspace.chapters.map(b=>[b.block_id,editableBlock(b)]));
   window.__allBlocks=[...window.__extractBlockMap.values()];
   const q=search.value.toLowerCase().trim();
-  const list=workspace.chapters.filter(b=>(!q||`${b.title} ${b.issues.map(i=>i.point).join(' ')}`.toLowerCase().includes(q)) && (filter.value==='all'||(filter.value==='attention'?['material','revise','stale','error','historical','unreviewed'].includes(b.status):b.status===filter.value)));
-  nav.innerHTML=list.slice(0,limit).map(b=>`<button type="button" class="doc-outline-item level-${Math.min(4,Number(b.level)||1)}${b.block_id===selectedId?' active':''}" data-block-id-str="${esc(b.block_id)}" data-block-id="${esc(b.db_id || '')}" title="${esc(b.title)}"><span class="outline-item-label">${esc(b.title)}</span><span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span><span class="outline-item-dot" hidden></span></button>`).join('')||'<p class="ws-muted" style="padding:12px">暂无符合条件的章节</p>';
+  const list=workspace.chapters.filter(b=>(!q||`${b.title} ${b.issues.map(i=>i.point).join(' ')}`.toLowerCase().includes(q)) && (filterMode==='all'||(filterMode==='attention'?['material','revise','stale','error','historical','unreviewed'].includes(b.status):b.status===filterMode)));
+  renderChips();
+  nav.innerHTML=list.slice(0,limit).map(b=>{
+    // 行内三件套与「素材库」**同序同款**：状态 → 依据 N → 覆盖 x/y。
+    // 依据数用共享投影（chapterBadges），覆盖数用与素材库同一份 response-items
+    // （workbench.html 的 renderReqBar 拉取后挂到 window.__responseItems）。
+    const evs=parseEvidence(b);
+    const evBadge=(chapterBadges(b,{evidenceCount:evs.length}).find(x=>x.kind==='evidence')||{}).text||'';
+    const items=((window.__responseItems||{})[String(b.block_id)]||[]).filter(it=>!it.informative);
+    const covered=new Set(evs.flatMap(e=>e.item_ids||[]));
+    const cov=items.length?`${items.filter(it=>covered.has(it.item_id)).length}/${items.length}`:'';
+    const reviewErr=b.reviewError?` title="评审未完成：${esc(b.reviewError)}"`:'';
+    return `<button type="button" class="doc-outline-item level-${Math.min(4,Number(b.level)||1)}${b.block_id===selectedId?' active':''}" data-block-id-str="${esc(b.block_id)}" data-block-id="${esc(b.db_id || '')}" title="${esc(b.title)}"${reviewErr}><span class="outline-item-label">${esc(b.title)}</span><span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span>${evBadge?`<span class="chap-badge evidence">${evBadge}</span>`:''}${cov?`<span class="chap-badge" title="要回应的事项里已有依据的条数">${cov}</span>`:''}<span class="outline-item-dot" hidden></span></button>`;
+  }).join('')||'<p class="ws-muted" style="padding:12px">暂无符合条件的章节</p>';
   if(list.length>limit){const more=document.createElement('button');more.className='ws-button';more.textContent=`显示更多（${limit}/${list.length}）`;more.onclick=()=>{limit+=150;renderOutline();};nav.append(more);}
   document.getElementById('outline-progress-badge').textContent=workspace.chapters.length;
   const n=workspace.chapters.filter(b=>b.content.trim()).length;
@@ -40,19 +82,59 @@ function renderOutline() {
   document.getElementById('outline-progress-bar').style.width=`${workspace.chapters.length?n/workspace.chapters.length*100:0}%`;
 }
 nav.addEventListener('click',e=>{const item=e.target.closest('[data-block-id-str]');if(item)selectChapter(item.dataset.blockIdStr);});
+
+// 展开/收起全部（与「素材库」目录栏头的同名按钮同职责）
+document.getElementById('btn-outline-expand-all')?.addEventListener('click', (e) => {
+  const groups=[...nav.querySelectorAll('.outline-group')];
+  const anyOpen=groups.some(g=>!g.classList.contains('collapsed'));
+  groups.forEach(g=>g.classList.toggle('collapsed', anyOpen));
+  e.currentTarget.textContent = anyOpen ? '展开全部' : '收起全部';
+});
+
+// 收起目录：左栏缩成一条 44px 的竖条，编辑区占满整个宽度；再点右侧「»」恢复。
+// 状态记 localStorage（用户摆好的工作台布局不该每次进来都重置）。
+(function initOutlineCollapse(){
+  const KEY='workbench:outlineCollapsed';
+  const apply=(collapsed)=>{
+    document.body.classList.toggle('outline-collapsed', collapsed);
+    const restore=document.getElementById('btn-expand-outline');
+    if(restore) restore.hidden = !collapsed;
+  };
+  let collapsed=false;
+  try{ collapsed = localStorage.getItem(KEY)==='1'; }catch{}
+  apply(collapsed);
+  document.getElementById('btn-collapse-outline')?.addEventListener('click',()=>{
+    collapsed=true; apply(true);
+    try{ localStorage.setItem(KEY,'1'); }catch{}
+  });
+  document.getElementById('btn-expand-outline')?.addEventListener('click',()=>{
+    collapsed=false; apply(false);
+    try{ localStorage.setItem(KEY,'0'); }catch{}
+  });
+})();
 let context;
+// 评审状态：写进编辑区顶部「本章要求」条的评审区（右栏已取消 —— 那一栏原本塞了
+// 第 1/2/4 步的内容，是"四个环节界面不清晰"的根因）。
+// **有 error 必须显示原因**：以前这里写「暂无具体评审意见」而左栏标「评审异常」，
+// 两者放在一起看自相矛盾（实测用户截图）。
 function renderContext() {
   const b=workspace.chapters.find(b=>b.block_id===selectedId);if(!b)return;
-  if(!context){context=document.createElement('section');context.className='ws-editor-review';document.querySelector('[aria-label="参考与素材"]')?.prepend(context);}
-  context.innerHTML=`<h3>本章质量检查 <span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span></h3>
-    ${b.stale?'<p>正文已变更，请复审验证修改结果。</p>':''}
-    ${b.issues.slice(0,3).map(i=>`<p>${esc(i.point)}</p>`).join('') || '<p>暂无具体评审意见。</p>'}
-    <a href="${esc(workspaceUrl('review',b.block_id))}">查看全部意见与正文对比 →</a><p><button type="button" class="ws-button" data-review ${!b.content.trim()||workspace.busy?'disabled':''}>复审本章</button> <button type="button" class="ws-button" data-history ${!b.db_id?'disabled':''}>版本</button></p>`;
-  context.querySelector('[data-review]').onclick=()=>{
+  const host=document.getElementById('req-bar-review');
+  if(!host)return;
+  const status = `<span class="ws-chapter-status" data-status="${b.status}">${statusLabels[b.status]}</span>`;
+  let detail;
+  if(b.reviewError) detail = `<span class="req-bar-err" title="${esc(b.reviewError)}">评审未完成：${esc(String(b.reviewError).slice(0,50))}</span>`;
+  else if(b.issues.length) detail = `<span>${b.issues.length} 条评审意见</span>`;
+  else detail = b.content.trim() ? '<span>暂无评审意见</span>' : '';   // 没正文时状态标签已写"待撰写"
+  host.innerHTML = `${status}${detail}
+    ${b.issues.length?`<a href="${esc(workspaceUrl('review',b.block_id))}">去质量检查 →</a>`:''}
+    <button type="button" class="ws-button" data-review ${!b.content.trim()||workspace.busy?'disabled':''}>复审</button>
+    <button type="button" class="ws-button" data-history ${!b.db_id?'disabled':''}>版本</button>`;
+  host.querySelector('[data-review]').onclick=()=>{
     if(window.__editorDirty?.()){alert('请先保存正文，再发起复审。');return;}
     confirmChapterAction([b.block_id],'review');
   };
-  context.querySelector('[data-history]').onclick=()=>showHistory(b.db_id);
+  host.querySelector('[data-history]').onclick=()=>showHistory(b.db_id);
 }
 subscribe(()=>{
   renderOutline();

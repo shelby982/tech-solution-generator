@@ -1,4 +1,4 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, isOrphanedRun, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260918-loop8';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20260921-dedupe';
 export {statusLabels, esc};
 export async function request(url, options) {
   const response = await fetch(url, options);
@@ -7,15 +7,25 @@ export async function request(url, options) {
   return data;
 }
 const params = new URLSearchParams(location.search);
-export const workspace = { projectId: params.get('projectId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false };
+export const workspace = { projectId: params.get('projectId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
+  // runStage：workflow_runs 里的阶段（运行期会被 runner 更新，见 orchestrator/runner.py
+  // 的 _mark_next_phase）。stageLabel：**页面自己**给出的阶段文案（project-init 最清楚
+  // "提炼到哪了"，它一设这里就盖过 stageLabels 的默认词）。
+  runStage: null, stageLabel: '', blocks: [] };
 let timer, loading = false, lastProjection = null;
 const listeners = new Set();
 export function subscribe(callback) { listeners.add(callback); if (workspace.ready) callback(workspace); return () => listeners.delete(callback); }
+// 当前选中的章节：由页面通过 workspace.selectedBlockId 写入（导航链接据此带上 blockId）。
+// 不带的话「素材库 → 方案编辑」会跳到第一页、用户还得再找一遍刚看的那一章
+// （模块化衔接的最后一厘米：章节是三个模块共同的导航单元）。
+workspace.selectedBlockId = null;
+
 export function workspaceUrl(view, blockId) {
   const q = new URLSearchParams();
   if (workspace.projectId) q.set('projectId', workspace.projectId);
   if (workspace.threadId) q.set('threadId', workspace.threadId);
-  if (blockId) q.set('blockId', blockId);
+  const bid = blockId ?? workspace.selectedBlockId ?? params.get('blockId');
+  if (bid) q.set('blockId', bid);
   let path = '/project-init';
   if (view === 'outline' || view === 'matching') q.set('view', view);
   if (view === 'editor') path = '/workbench';
@@ -26,6 +36,30 @@ function currentView() {
   if (location.pathname.includes('review')) return 'review';
   if (location.pathname.includes('workbench')) return 'editor';
   return document.body.dataset.view || params.get('view') || 'outline';
+}
+export function renderWorkspaceChrome() { renderChrome(); }
+
+// checkpoint 停在闸门态（outline_review / paused）时它区分不了三种子态：一节没提炼 /
+// 提炼到一半 / 全提炼完了 —— extract 收尾时图直接 END，没有节点再改 stage。
+// 这里用 blocks 计数补齐，**不依赖具体页面**：project-init / review / workbench /
+// diff-review 都挂这条顶栏，只在某个页面里做覆盖是不够的（实测 review 页就还显示
+// 「待确认目录」）。
+function outlinePhaseLabel(stage) {
+  if (stage !== 'outline_review' && stage !== 'paused') return '';
+  const blocks = workspace.blocks || [];
+  if (!blocks.length) return '';
+  // 'paused' 也可能是"生成阶段暂停"：那种情况不需要这套提炼文案
+  if (stage === 'paused' && Object.keys(workspace.state?.proposal?.blocks || {}).length) return '';
+  const total = blocks.length;
+  const done = blocks.filter(b => isExtractDone(b)).length;
+  const failed = blocks.filter(b => (b.error_kind || '') === 'failed').length;
+  if (done >= total) {
+    return failed ? `提炼完成（${failed} 节失败，可重试）` : '提炼完成，待确认内容';
+  }
+  if (done > 0) {
+    return failed ? `提炼到一半（${done}/${total}，${failed} 节失败）` : `提炼到一半（${done}/${total}）`;
+  }
+  return '';   // 一节都没提炼：闸门 1 的「待确认目录」才是对的
 }
 function renderChrome() {
   const nav = document.getElementById('workspace-nav');
@@ -42,17 +76,28 @@ function renderChrome() {
     bar.querySelector('#ws-run').onclick = showRun;
   }
   const state = workspace.state;
-  const stage = state.stage || 'idle';
+  // 运行期阶段（extracting/matching）以 workflow_runs 为准：这期间 checkpoint 还停在
+  // 闸门态，只看 state.stage 会一直显示"待确认目录"（实测就是这个 bug）。
+  const runStage = workspace.runStage;
+  const running = runtimeStages.has(runStage);
+  const stage = running ? runStage : (state.stage || runStage || 'idle');
   workspace.orphaned = isOrphanedRun(state);
   // 中断的 run 已经没有东西在跑了，不能再算 busy —— 否则 refreshWorkspace 会永远每 4 秒轮询。
-  workspace.busy = activeStages.has(stage) && !workspace.orphaned;
+  // 反过来，运行期阶段必须算 busy，否则 10s 才刷一次、标签看着像死的。
+  workspace.busy = (activeStages.has(stage) || running) && !workspace.orphaned;
   const round = Number(state.iteration || 0) + 1;
+  // 优先级：页面自己给的（最实时，带 x/y 计数）→ 按 blocks 推出的提炼进度 → 默认词
+  const label = workspace.stageLabel || outlinePhaseLabel(stage) || stageLabels[stage] || stage;
   bar.querySelector('#ws-run-label').textContent = workspace.threadId
-    ? `第 ${round} 轮 · ${stageLabels[stage] || stage}${workspace.orphaned ? '（已中断）' : ''}`
+    ? `第 ${round} 轮 · ${label}${workspace.orphaned ? '（已中断）' : ''}`
     : '开始准备方案';
-  const stats = summary.total
-    ? `正文 ${summary.written}/${summary.total} · 已通过 ${summary.counts.passed || 0} · 待处理 ${summary.needsAction}`
-    : '';
+  // 大纲阶段别显示"正文 x/y"（那时还没有正文），换成提炼进度更有意义
+  const extracting = stage === 'outline_review' || stage === 'paused' || stage === 'extracting';
+  const stats = extracting && workspace.blocks?.length
+    ? `已提炼 ${workspace.blocks.filter(b => isExtractDone(b)).length}/${workspace.blocks.length} 章节`
+    : (summary.total
+      ? `正文 ${summary.written}/${summary.total} · 已通过 ${summary.counts.passed || 0} · 待处理 ${summary.needsAction}`
+      : '');
   bar.querySelector('#ws-run-detail').textContent = workspace.orphaned
     ? `后端重启导致该任务中断，进度来自上次运行${stats ? ` · ${stats}` : ''}。可在「要求与大纲」页点「继续提炼」接着跑`
     : (stats || '上传要求后确认大纲，可随时切换工作区');
@@ -64,9 +109,11 @@ export async function refreshWorkspace() {
   if (loading) return;
   loading = true;
   try {
-    if (!workspace.threadId && workspace.projectId) {
-      const runs = await request(`/api/projects/${workspace.projectId}/workflow-runs`);
-      workspace.threadId = runs[0]?.thread_id || null;
+    if (workspace.projectId) {
+      // 每次刷新都读一次 workflow_runs：运行期阶段（extracting/matching）只有这张表是准的
+      const runs = await request(`/api/projects/${workspace.projectId}/workflow-runs`).catch(() => []);
+      workspace.runStage = runs?.[0]?.stage || null;
+      if (!workspace.threadId) workspace.threadId = runs?.[0]?.thread_id || null;
     }
     const state = workspace.threadId ? await request(`/api/workflow/${encodeURIComponent(workspace.threadId)}/state`) : {};
     workspace.state = state;
@@ -74,6 +121,7 @@ export async function refreshWorkspace() {
     const blocksUrl = `/api/projects/${workspace.projectId}/blocks`
       + (workspace.threadId ? `?threadId=${encodeURIComponent(workspace.threadId)}` : '');
     const rows = workspace.projectId ? await request(blocksUrl) : [];
+    workspace.blocks = rows;          // 原始行：顶栏要靠 error_kind/status 判断提炼进度
     workspace.chapters = projectChapters(state, rows);
     workspace.ready = true;
     renderChrome();

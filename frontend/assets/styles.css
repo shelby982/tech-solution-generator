@@ -21,6 +21,21 @@
   --radius-lg: 22px;
   --radius-md: 16px;
   --radius-sm: 12px;
+
+  /* ── 别名变量（2026-09-21 补）────────────────────────────────
+     workbench 的样式全篇在用 --ink / --ink-2..4 / --surface / --surface-2 /
+     --line-2，但**这些变量从来没被定义过**：浏览器解析 var() 失败 → 属性在
+     computed-value 阶段变成无效 → color 继承父级（该灰的字变成深色）、
+     background 变透明、border-color 退化成 currentColor（边框变黑）。
+     这就是"方案编辑页看起来丑、和素材库不一致"的主要来源。
+     在这里映射到已有调色板，两个页面共用一份。 */
+  --ink: var(--text);
+  --ink-2: #3c4a5a;
+  --ink-3: var(--muted);
+  --ink-4: var(--muted-2);
+  --surface: var(--panel);
+  --surface-2: var(--panel-soft);
+  --line-2: #e8eef6;
 }
 
 * {
@@ -2599,3 +2614,104 @@ button {
 .outline-pane:has(.outline-exit-drill:not([hidden])) .doc-outline {
   max-height: calc(100% - 75px);
 }
+
+
+/* ── 素材依据的性质徽标 ──────────────────────────────────────
+   workspace-model.mjs 的 evidenceKindBadgeHtml() 产出这套类名，素材库（project-init）
+   与方案编辑（workbench）共用。样式也必须只有一份：以前两个页面各写一套（.be-kind /
+   .matched-card-kind），改一处另一处就旧了。 */
+.be-kind {
+  flex: 0 0 auto; font-size: 10.5px; border-radius: 4px; padding: 1px 5px;
+  background: var(--bg-2, #f1f5f9); color: #475569; white-space: nowrap;
+}
+.be-kind.fact { background: #e0f2fe; color: #075985; }
+.be-kind.solution { background: #ede9fe; color: #5b21b6; }
+.be-kind.background { background: #f1f5f9; color: #475569; }
+
+
+/* ══════════════════════════════════════════════════════════════
+   章节目录栏（共用）：素材库的 .match-tree-lane 与方案编辑的 .outline-pane
+   是两套 DOM，但用户看到的是"同一棵目录树"。这里把**行/分组/栏头**的视觉
+   写成一份共用规则 —— 以前各写一套，颜色、行高、选中态都不一样。
+
+   为什么放在 styles.css：两个页面都加载它，改一处两边同步；写在各自 <style>
+   里必然漂移（这次就是：一个用 --ink-* 一个用 --text/--muted，而行高、
+   内边距、选中态也各不相同）。
+   ══════════════════════════════════════════════════════════════ */
+
+/* 栏头：`章节目录 N` + 右侧动作（展开全部 / 收起） */
+.chap-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px 6px; flex: 0 0 auto;
+}
+.chap-head-title { font-size: 12.5px; color: var(--muted); }
+.chap-head-title b { color: var(--text); font-weight: 600; }
+.chap-head-actions { margin-left: auto; display: flex; gap: 6px; }
+.chap-btn {
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 11.5px;
+  cursor: pointer; white-space: nowrap;
+}
+.chap-btn:hover { border-color: var(--text); color: var(--text); }
+.chap-btn.icon { font-size: 13px; line-height: 1; padding: 2px 7px; }
+
+/* 搜索框（两页同位置同尺寸） */
+.chap-search { padding: 0 12px 8px; flex: 0 0 auto; }
+.chap-search input {
+  width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 12px; color: var(--text); background: var(--panel);
+}
+.chap-search input:focus { outline: none; border-color: var(--accent); }
+
+/* 筛选 chips（素材库与方案编辑共用；选项按阶段不同，外观一致） */
+.chap-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 8px; flex: 0 0 auto; }
+.chap-chip {
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  border-radius: 999px; padding: 3px 9px; font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.chap-chip:hover { border-color: var(--text); color: var(--text); }
+.chap-chip[aria-selected="true"] { background: var(--text); color: #fff; border-color: var(--text); }
+.chap-chip .chap-chip-count { color: var(--muted-2); margin-left: 4px; }
+.chap-chip[aria-selected="true"] .chap-chip-count { color: rgba(255,255,255,.75); }
+
+/* 目录行：素材库的 .ot-row（仅匹配视图）与方案编辑的 .doc-outline-item 同一套度量 */
+body[data-view="matching"] .ot-row,
+.doc-outline-item {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 6px 10px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  font: inherit; font-size: 13px; line-height: 1.35;
+  text-align: left; cursor: pointer; transition: background .1s;
+}
+body[data-view="matching"] .ot-row:hover,
+.doc-outline-item:hover { background: var(--bg-2); color: var(--text); }
+body[data-view="matching"] .ot-row.mw-selected,
+.doc-outline-item.active {
+  background: var(--accent-soft); border-color: #bfdbfe; color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 一级分组（素材库是 .ot-node[data-level="1"] 的行；方案编辑是 .doc-outline-heading） */
+body[data-view="matching"] .ot-node[data-level="1"] > .ot-row,
+.doc-outline-heading {
+  min-height: 34px; padding: 6px 10px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: var(--bg-2); color: var(--text);
+  font-size: 13.5px; font-weight: 700;
+}
+body[data-view="matching"] .ot-node[data-level="1"] > .ot-row .ot-title { font-weight: 700; }
+.doc-outline-heading:hover { background: #e6ebf2; }
+
+/* 行内徽标：依据 N（绿）/ 章节状态（灰）—— 两页同款 */
+.chap-badge {
+  flex: 0 0 auto; font-size: 10.5px; border-radius: 999px;
+  padding: 1px 6px; white-space: nowrap; background: var(--bg-2); color: var(--muted);
+}
+.chap-badge.evidence { background: #dcfce7; color: #166534; }
+
+/* 一级章节（两页都做"分组"处理）：灰底 + 加粗，与素材库的 .ot-node[data-level="1"] 行一致 */
+.doc-outline-item.level-1 {
+  background: var(--bg-2); color: var(--text); font-weight: 700;
+}
+.doc-outline-item.level-1:hover { background: #e6ebf2; }

@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 材料撰写</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260605a" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260921-dedupe" />
     <style>
       /* Outline pane */
       .workspace-shell .outline-pane {
-        width: 240px;
-        flex: 0 0 240px;
+        /* 与「素材库」目录栏同宽（340）：四个环节左边都是同一棵目录树 */
+        width: 340px;
+        flex: 0 0 340px;
         background: var(--bg);
         border-right: 1px solid var(--line);
         display: flex;
@@ -79,7 +80,9 @@
         border-radius: 50%; background: #9ca3af;
         margin-right: 9px; flex-shrink: 0;
       }
-      .outline-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .outline-item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .doc-outline-item { display: flex; align-items: center; gap: 6px; }
+      .doc-outline-item .ws-chapter-status { flex: 0 0 auto; margin-left: auto; }
       .outline-item-dot {
         flex: 0 0 9px; height: 9px; width: 9px;
         border-radius: 50%; background: #d1d5db; margin-left: 8px;
@@ -88,14 +91,6 @@
       .outline-item-dot.writing { background: #d97706; }
 
       /* 顶部 header */
-      .outline-pane-header {
-        display: flex; align-items: center; gap: 8px;
-        padding: 0 14px; height: 48px;
-        border-bottom: 1px solid var(--line); flex: 0 0 auto;
-      }
-      .outline-pane-header h3 {
-        margin: 0; font-size: 13px; font-weight: 700; color: var(--ink); flex: none;
-      }
       .outline-progress-badge {
         font-size: 11.5px; font-weight: 600; color: var(--ink-3);
         background: var(--bg-2); border: 1px solid var(--line);
@@ -212,9 +207,15 @@
         display: flex;
         flex-direction: column;
         background: var(--surface);
-        height: calc(100vh - 64px);
+        /* 填满 .ws-editor-layout 的高度即可：写死 calc(100vh-64px) 会比布局高 74px，
+           底部（页脚字数/保存）被 overflow:hidden 裁掉（实测） */
+        height: auto;
+        min-height: 0;
         overflow: hidden;
       }
+      /* 正文可读宽度：取消右栏后编辑区宽到 1170px，中文长行一眼扫不过来。
+         把**正文列**限宽居中（工具栏/页脚仍占满），这是排版问题不是审美问题。 */
+      .ced-body > * { max-width: 880px; margin-left: auto; margin-right: auto; }
       /* ── 章节标题头 ── */
       .section-header {
         flex: 0 0 auto;
@@ -241,6 +242,96 @@
         transition: background 0.1s;
       }
       .btn-mark-done:hover { background: var(--bg-2); }
+
+      /* 栏头 / chips / 搜索 / 目录行：共用样式在 assets/styles.css（.chap-*） */
+
+      /* 收起目录：左栏缩成 44px 竖条，只留一个展开按钮；编辑区占满整个宽度 */
+      body.outline-collapsed .workspace-shell .outline-pane,
+      body.outline-collapsed .outline-pane {
+        width: 44px !important; flex: 0 0 44px !important;
+      }
+      body.outline-collapsed .outline-pane > *:not(.outline-collapsed-rail) { display: none !important; }
+      .outline-collapsed-rail { display: none; }
+      body.outline-collapsed .outline-collapsed-rail {
+        display: flex; align-items: flex-start; justify-content: center;
+        padding-top: 10px; height: 100%;
+      }
+
+      /* ── 右栏顶部：当前章节标题 ───────────────────────────── */
+      .editor-topbar {
+        flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+        padding: 10px 20px 0;
+      }
+      .et-restore { font-size: 14px; line-height: 1; padding: 2px 8px; }
+      .et-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+      .et-parent { font-size: 12px; color: var(--ink-4); }
+      .et-parent:not(:empty)::after { content: '›'; margin-left: 6px; color: var(--ink-4); }
+      .et-title {
+        margin: 0; font-size: 16px; font-weight: 650; color: var(--ink);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .et-auto { font-size: 11.5px; color: var(--ink-4); }
+      .et-saved { margin-left: auto; font-size: 11.5px; color: var(--ink-4); white-space: nowrap; }
+
+      /* 目录行里的「依据 N」用共用的 .chap-badge.evidence；这里只补 outline 特有的间距 */
+      .doc-outline-item .chap-badge { margin-left: 0; }
+
+      /* ── 本章要求 bar（编辑区顶部）──────────────────────────────
+         写作时必须常驻的只有"本章要回应什么"；8 项提炼字段折在「展开全部字段」里。
+         条目标号（R1/K1/V1…）与「素材库」用的是同一份 response_items，四处同构。 */
+      #gen-status-card[hidden] { display: none !important; }
+      .req-bar {
+        flex: 0 0 auto; margin: 10px 20px 0; border: 1px solid var(--line);
+        border-left: 3px solid #2563eb;
+        border-radius: 10px; background: var(--surface); overflow: hidden;
+        box-shadow: 0 1px 2px rgba(16,24,40,.04);
+      }
+      .req-bar-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+      .req-bar-toggle {
+        display: inline-flex; align-items: center; gap: 5px; border: none; background: none;
+        font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink); cursor: pointer;
+      }
+      .req-bar-caret { display: inline-block; transition: transform .15s; color: var(--ink-3); }
+      .req-bar.open .req-bar-caret { transform: rotate(90deg); }
+      .req-bar-items { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; max-height: 21px; }
+      .req-bar-item {
+        font-family: 'SF Mono', ui-monospace, monospace; font-size: 10.5px; line-height: 1.5;
+        padding: 0 6px; border-radius: 999px; border: 1px solid var(--line);
+        background: var(--surface-2); color: var(--ink-3);
+      }
+      .req-bar-item.has { background: #ecfdf5; border-color: #a7f3d0; color: #047857; font-weight: 600; }
+      .req-bar-review {
+        margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+        font-size: 11.5px; color: var(--ink-3); white-space: nowrap;
+      }
+      .req-bar-review a { color: #b45309; text-decoration: none; font-weight: 600; }
+      .req-bar-review .ws-chapter-status { font-size: 11px; }
+      .req-bar-err { color: #b91c1c; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+      .req-bar-body { padding: 2px 12px 10px; }
+      /* 要求原文可能很长（实测单章 400+ 字）：限高可滚，别把正文编辑区挤下去 */
+      .req-bar-main {
+        font-size: 12.5px; line-height: 1.75; color: var(--ink-2); white-space: pre-wrap;
+        max-height: 108px; overflow-y: auto;
+      }
+      .req-bar-fields { margin: 10px 0 6px; padding-top: 8px; border-top: 1px dashed var(--line); }
+      /* 展开 8 字段后不再重复展示要求原文（第一张卡就是「应标要求」） */
+      .req-bar.fields-open .req-bar-main { display: none; }
+      .req-bar-fields .ref-card-body { max-height: 160px; overflow-y: auto; }
+      #req-bar-more {
+        margin-top: 2px; border: none; background: none; padding: 2px 0;
+        color: #2563eb; font-size: 12px; cursor: pointer;
+      }
+      #req-bar-more:hover { text-decoration: underline; }
+      /* 素材抽屉：本章匹配到的素材 + 已引用（按需打开，不再常驻） */
+      .mat-drawer-wb {
+        position: absolute; right: 0; top: 0; bottom: 0; width: 380px; z-index: 30;
+        background: var(--surface); border-left: 1px solid var(--line);
+        box-shadow: -8px 0 24px rgba(0,0,0,.08); overflow-y: auto; padding: 10px 12px;
+      }
+      .mat-drawer-wb[hidden] { display: none; }
+      .mat-drawer-wb-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      .mat-drawer-wb-head h3 { margin: 0; font-size: 13px; }
+      .mat-drawer-wb-head .mw-btn { margin-left: auto; }
 
       /* ── 提炼参考折叠区 ── */
       .ref-section {
@@ -338,6 +429,16 @@
       }
       .ref-card-body:hover { color: var(--ink); }
       .ref-card-body:empty { display: none; }
+      /* 强制等级是三选一下拉：不能被 .ref-card-body 的两行截断裁掉，也不需要 pointer 手势 */
+      #ref-constraint-body {
+        display: block; -webkit-line-clamp: unset; overflow: visible;
+        padding: 4px 10px 8px; cursor: default;
+      }
+      .ref-card-select {
+        width: 100%; font: inherit; font-size: 12px; color: var(--ink, #16202c);
+        background: var(--panel, #fff); border: 1px solid var(--line-2, #e5e7eb);
+        border-radius: 6px; padding: 3px 6px;
+      }
       .ref-bullet-list {
         margin: 0; padding: 0; list-style: none;
         display: flex; flex-direction: column; gap: 6px;
@@ -934,15 +1035,12 @@
       }
 
       /* Context pane */
-      .context-pane {
-        width: 300px;
-        flex: 0 0 300px;
-        background: var(--panel-soft);
-        border-left: 1px solid var(--line);
-        min-height: 0;
-        overflow-y: auto;
-        overflow-x: hidden;
+      .ced-tool-btn {
+        border: 1px solid var(--line); background: var(--surface); color: var(--ink-3);
+        border-radius: 6px; padding: 4px 9px; font: inherit; font-size: 11.5px; cursor: pointer;
+        white-space: nowrap;
       }
+      .ced-tool-btn:hover { color: var(--ink); border-color: var(--ink-3); }
 
       .context-section {
         padding: 12px 14px;
@@ -1274,6 +1372,7 @@
         color: var(--ink-4);
         flex: none;
       }
+      /* 依据性质徽标用共享的 .be-kind（见 assets/styles.css） */
       .matched-card-body {
         padding: 0 11px 9px;
         font-size: 12px;
@@ -2012,19 +2111,24 @@
           <button type="button" class="extract-cancel-btn" id="extract-cancel-btn">取消</button>
         </div>
 
-        <div class="ws-editor-layout" style="display:flex; flex:1; min-height:0; overflow:hidden;">
+        <div class="ws-editor-layout" style="display:flex; flex:1; min-height:0; overflow:hidden; position:relative;">
           <!-- Left: outline nav -->
           <aside class="outline-pane" aria-label="文档大纲">
-            <div class="outline-pane-header">
-              <h3>文档大纲</h3>
-              <span class="outline-progress-badge" id="outline-progress-badge">—</span>
-              <button class="outline-search-btn" type="button" aria-label="搜索">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.3"/>
-                  <path d="M9.5 9.5L12 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                </svg>
-              </button>
+            <!-- 收起后只剩这一条竖栏（含展开按钮），编辑区占满剩余宽度 -->
+            <div class="outline-collapsed-rail">
+              <button type="button" class="mw-btn" id="btn-expand-outline" title="展开目录">»</button>
             </div>
+            <!-- 栏头与「素材库」的 .match-tree-head 同构：标题+计数 / 展开全部 / 收起目录 -->
+            <div class="chap-head">
+              <span class="chap-head-title">章节目录 <b id="outline-progress-badge">—</b></span>
+              <span class="chap-head-actions">
+                <button type="button" class="chap-btn" id="btn-outline-expand-all">展开全部</button>
+                <button type="button" class="chap-btn icon" id="btn-collapse-outline"
+                        title="收起目录（编辑区占满整个宽度）">«</button>
+              </span>
+            </div>
+            <div class="chap-chips" role="tablist" aria-label="筛选章节"></div>
+            <div class="chap-search" id="ws-search-slot"></div>
             <nav class="doc-outline" aria-label="章节导航"></nav>
             <div class="outline-progress-wrap">
               <div class="outline-progress-footer">
@@ -2061,140 +2165,19 @@
 
             <!-- ① 章节标题头（已移除） -->
 
-            <!-- 空状态提示（未选章节时显示） -->
-            <div id="editor-empty-hint" style="flex:1;display:flex;align-items:center;justify-content:center;">
-              <p style="color:var(--ink-4);font-size:13px;">选择章节开始撰写</p>
-            </div>
-
-            <!-- ② 编辑器（选中章节后显示） -->
-            <div id="editor-workspace" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
-
-              <!-- ③ 正文编辑器卡 -->
-              <div id="content-editor-wrap" style="flex:1;overflow:auto;padding:16px 20px 24px;background:var(--surface-2);min-height:0;display:flex;flex-direction:column;">
-
-                <div class="content-editor-card" id="content-editor-card">
-
-                  <!-- 头部 -->
-                  <div class="ced-header">
-
-                    <h3 class="ced-title" id="ced-section-title">撰写正文</h3>
-                    <span class="ced-page-hint" id="ced-page-hint" hidden></span>
-                    <span class="ced-auto-badge">基于应标要求自动生成</span>
-                    <span style="flex:1;"></span>
-                    <span class="ced-save-time" id="ced-save-time">—</span>
-                  </div>
-
-                  <!-- AI 生成 Banner / 入口 -->
-                  <div class="ced-gen-banner" id="ced-gen-banner">
-                    <span class="ced-gen-spinner"></span>
-                    <span class="ced-gen-label">AI 正在撰写</span>
-                    <span class="ced-gen-stage" id="ced-gen-stage">· 准备中</span>
-                    <div class="ced-gen-progress-track">
-                      <div class="ced-gen-progress-bar" id="ced-gen-pbar"></div>
-                    </div>
-                    <span class="ced-gen-pct" id="ced-gen-pct">0%</span>
-                    <button type="button" class="ced-gen-stop" id="ced-gen-stop">停止</button>
-                  </div>
-                  <div id="ced-gen-idle" style="display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid var(--line-2); background:var(--surface);">
-                    <button type="button" class="btn-ai-gen" id="btn-ai-gen">
-                      <svg width="12" height="12" viewBox="0 0 14 14" style="flex:none;"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
-                      AI 生成
-                    </button>
-                    <div style="position:relative;">
-                      <span class="inline-model-tag" id="single-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="single-model-label">Sonnet 4.6</span></span>
-                      <div class="model-dropdown" id="single-model-dropdown">
-                        <div class="model-dropdown-header">生成模型</div>
-                        <div class="model-list" id="single-model-list"></div>
-                        <div class="model-dropdown-footer">
-                          <button class="btn-add-config" type="button" data-open-api-modal>
-                            <span class="btn-add-config-left"><span class="btn-add-config-plus">＋</span><span>添加 API 配置</span></span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <span style="flex:1;"></span>
-                    <!-- 来源图例 -->
-                    <div class="ced-tone-group" id="source-legend">
-                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼指导</span>
-                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#a7f3d0;color:#065f46;font-weight:600;">引用素材</span>
-                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#fde68a;color:#92400e;font-weight:600;">AI 补充</span>
-                    </div>
-                  </div>
-
-                  <!-- 工具栏 -->
-                  <div class="ced-toolbar">
-                    <div class="ced-toolbar-group">
-                      <button type="button" class="ced-fmt-btn" style="font-weight:800;" title="加粗">B</button>
-                      <button type="button" class="ced-fmt-btn" style="font-style:italic;" title="斜体">I</button>
-                      <button type="button" class="ced-fmt-btn" style="text-decoration:underline;" title="下划线">U</button>
-                    </div>
-                    <span class="ced-divider"></span>
-                    <div class="ced-toolbar-group">
-                      <button type="button" class="ced-fmt-label-btn" title="一级标题">H1</button>
-                      <button type="button" class="ced-fmt-label-btn" title="二级标题">H2</button>
-                      <button type="button" class="ced-fmt-label-btn" title="列表">
-                        <svg width="13" height="13" viewBox="0 0 13 13"><circle cx="3" cy="4" r=".8" fill="currentColor"/><circle cx="3" cy="6.5" r=".8" fill="currentColor"/><circle cx="3" cy="9" r=".8" fill="currentColor"/><path d="M5 4H11M5 6.5H11M5 9H9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-                      </button>
-                    </div>
-                    <span class="ced-divider"></span>
-                    <!-- 预览/编辑切换 -->
-                    <div class="ced-toolbar-group ced-mode-switch" id="ced-mode-switch">
-                      <button type="button" class="ced-mode-btn active" data-mode="edit">编辑</button>
-                      <button type="button" class="ced-mode-btn" data-mode="preview">预览</button>
-                    </div>
-                    <span class="ced-divider"></span>
-                    <!-- 目标字数 -->
-                    <div class="ced-wordlimit-wrap">
-                      <span style="color:var(--ink-3);">目标字数</span>
-                      <input type="number" class="ced-wordlimit-input" id="ced-wordlimit" value="800" min="100" max="5000" />
-                      <span style="color:var(--ink-4);font-size:11px;">字</span>
-                      <span class="ced-divider" style="margin:0 2px;"></span>
-                      <span class="ced-wordlimit-cur" id="ced-wordlimit-cur">当前 0</span>
-                    </div>
-                  </div>
-
-                  <!-- 编辑区 -->
-                  <div class="ced-body" id="ced-body">
-                    <!-- 空白状态：placeholder -->
-                    <div class="ced-placeholder" id="ced-placeholder">
-                      在此撰写本节正文，或点击上方「AI 生成」让模型基于应标要求自动起草…
-                    </div>
-                    <!-- 可编辑内容区 -->
-                    <div class="ced-editable" id="ced-editable" role="textbox" aria-label="章节正文" aria-multiline="true" contenteditable="true" style="display:none;"></div>
-                    <!-- 预览容器（markdown 渲染） -->
-                    <div class="ced-preview" id="ced-preview" style="display:none;"></div>
-                  </div>
-
-                  <!-- 底栏 -->
-                  <div class="ced-footer">
-                    <span class="ced-footer-wordcount" id="ced-footer-wc">0 / 800 字</span>
-                    <span class="ced-divider"></span>
-                    <span id="ced-footer-model">公文文风</span>
-                    <span style="flex:1;"></span>
-                    <button type="button" class="ced-footer-btn" id="btn-polish" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">润色</button>
-                    <button type="button" class="ced-footer-btn" id="btn-expand" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">扩写</button>
-                    <button type="button" class="ced-footer-btn" id="btn-shrink" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">缩写</button>
-                    <button type="button" class="ced-footer-save" id="btn-save-draft">保存草稿</button>
-                  </div>
-
-                </div>
+            <!-- 右栏顶部：当前章节标题（父级 › 本章）。标题原来在编辑卡内部，
+                 被「本章要求」条压在下面；提到最顶部一眼就能看到"在写哪一章"。 -->
+            <header class="editor-topbar">
+              <div class="et-heading">
+                <span class="et-parent" id="et-parent"></span>
+                <h2 class="et-title" id="et-title">—</h2>
+                <span class="et-auto" id="et-auto"></span>
+                <span class="ced-page-hint" id="ced-page-hint" hidden></span>
               </div>
+              <span class="et-saved" id="ced-save-time">—</span>
+            </header>
 
-            </div>
-
-            <!-- 原有 editor-toolbar（隐藏，保留用于 generate-controls） -->
-            <div class="editor-toolbar" style="display:none;" aria-hidden="true">
-              <nav class="breadcrumb" data-breadcrumb aria-label="当前位置">
-                <span>选择章节开始撰写</span>
-              </nav>
-            </div>
-
-          </main>
-
-          <!-- Right: matched materials panel -->
-          <aside class="context-pane" aria-label="参考与素材" style="width:320px;flex:0 0 320px;overflow-y:auto;min-height:0;">
-
-            <!-- Generate status card (visible only while generating) -->
+            <!-- 生成进度（运行期才出现）：留在编辑区顶部，不再占右栏 -->
             <div class="gen-status-card" id="gen-status-card" hidden>
               <p class="gen-status-title" id="gen-status-title">—</p>
               <div class="gen-status-bar-wrap">
@@ -2206,13 +2189,21 @@
               </div>
             </div>
 
-            <!-- 提炼参考（从中间编辑区移入） -->
-            <div class="ref-section" id="ref-section-pane">
-              <div class="ref-section-label">
-                提炼参考
-                <span class="ref-divider"></span>
-              </div>
-              <div class="ref-cards-col">
+            <!-- 本章要求（写作时唯一必须常驻的参照）：条目标号与「素材库」一致，
+                 默认展开 requirement；8 项提炼字段折在「展开全部字段」里。
+                 以前这 8 张卡常驻在右栏 320px，把正文挤到 950px 且与第 1 步重复。 -->
+            <section class="req-bar" id="req-bar" hidden>
+              <header class="req-bar-head">
+                <button type="button" class="req-bar-toggle" id="req-bar-toggle" aria-expanded="true">
+                  <span class="req-bar-caret">›</span>本章要求
+                </button>
+                <span class="req-bar-items" id="req-bar-items"></span>
+                <span class="req-bar-review" id="req-bar-review"></span>
+              </header>
+              <div class="req-bar-body" id="req-bar-body">
+                <div class="req-bar-main" id="req-bar-main"></div>
+                <div class="req-bar-fields" id="req-bar-fields" hidden>
+                  <div class="ref-cards-col" id="ref-cards-col">
 
                 <!-- 应标要求 -->
                 <div class="ref-card" id="ref-req"
@@ -2311,33 +2302,185 @@
                   <div class="ref-card-body" id="ref-indicators-body"></div>
                 </div>
 
+                <!-- 强制等级（第 8 个字段）：不是自由文本，是三选一，所以走下拉而不是弹窗编辑。
+                     它决定正文字数档（mandatory/长要求 → core），所以值得单独露出来。 -->
+                <div class="ref-card" id="ref-constraint"
+                  style="--ref-card-soft:oklch(0.97 0.03 60);--ref-card-border:oklch(0.89 0.08 60);">
+                  <div class="ref-card-header">
+                    <span class="ref-card-icon" style="background:oklch(0.58 0.14 60);">
+                      <svg width="9" height="9" viewBox="0 0 10 10"><path d="M5 1L8.5 2.5V5c0 2-1.4 3.4-3.5 4C2.9 8.4 1.5 7 1.5 5V2.5L5 1Z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="ref-card-label">强制等级</span>
+                    <span class="ref-card-count" id="ref-constraint-count" style="color:oklch(0.58 0.14 60);"></span>
+                    <span class="ref-card-chevron"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  </div>
+                  <div class="ref-card-body" id="ref-constraint-body"></div>
+                </div>
+
               </div>
+            </div>
+                <button type="button" class="mw-btn" id="req-bar-more">展开全部字段</button>
+              </div>
+            </section>
+
+            <!-- 空状态提示（未选章节时显示） -->
+            <div id="editor-empty-hint" style="flex:1;display:flex;align-items:center;justify-content:center;">
+              <p style="color:var(--ink-4);font-size:13px;">选择章节开始撰写</p>
             </div>
 
-            <!-- 匹配素材模块 -->
-            <div class="context-module">
-              <div class="context-module-header">
-                <h3 class="context-module-title">匹配素材</h3>
-                <span id="matched-count-badge" class="mat-tab-badge">0</span>
-                <span style="flex:1;"></span>
-                <button type="button" id="btn-mat-list" class="mat-refresh-btn" title="素材列表" style="font-size:11px; padding:3px 8px; border-radius:6px;">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M2 6h8M2 9h5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-                </button>
-                <button type="button" id="btn-refresh-matched" class="mat-refresh-btn" title="刷新匹配">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 2.5V5H7.5M2 9.5V7H4.5M9.5 7C8.8 8.8 7 10 5 10C3 10 1.4 8.7 1 7M2.5 5C3.2 3.2 5 2 7 2C9 2 10.6 3.3 11 5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-              </div>
-              <!-- 已引用状态条 -->
-              <div class="cite-bar" id="cite-bar">
-                <div class="cite-bar-head" id="cite-bar-head">
-                  <span class="cite-bar-icon">✓</span>
-                  <span class="cite-bar-label">已引用 <span id="cite-bar-count">0</span> 条</span>
-                  <span class="cite-bar-chevron">▾</span>
+            <!-- ② 编辑器（选中章节后显示） -->
+            <div id="editor-workspace" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
+
+              <!-- ③ 正文编辑器卡 -->
+              <div id="content-editor-wrap" style="flex:1;overflow:auto;padding:16px 20px 24px;background:var(--surface-2);min-height:0;display:flex;flex-direction:column;">
+
+                <div class="content-editor-card" id="content-editor-card">
+
+                  <!-- 头部 -->
+
+
+                  <!-- AI 生成 Banner / 入口 -->
+                  <div class="ced-gen-banner" id="ced-gen-banner">
+                    <span class="ced-gen-spinner"></span>
+                    <span class="ced-gen-label">AI 正在撰写</span>
+                    <span class="ced-gen-stage" id="ced-gen-stage">· 准备中</span>
+                    <div class="ced-gen-progress-track">
+                      <div class="ced-gen-progress-bar" id="ced-gen-pbar"></div>
+                    </div>
+                    <span class="ced-gen-pct" id="ced-gen-pct">0%</span>
+                    <button type="button" class="ced-gen-stop" id="ced-gen-stop">停止</button>
+                  </div>
+                  <div id="ced-gen-idle" style="display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid var(--line-2); background:var(--surface);">
+                    <button type="button" class="btn-ai-gen" id="btn-ai-gen">
+                      <svg width="12" height="12" viewBox="0 0 14 14" style="flex:none;"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg>
+                      AI 生成
+                    </button>
+                    <div style="position:relative;">
+                      <span class="inline-model-tag" id="single-model-tag" title="点击切换模型"><span class="model-dot-sm"></span><span id="single-model-label">Sonnet 4.6</span></span>
+                      <div class="model-dropdown" id="single-model-dropdown">
+                        <div class="model-dropdown-header">生成模型</div>
+                        <div class="model-list" id="single-model-list"></div>
+                        <div class="model-dropdown-footer">
+                          <button class="btn-add-config" type="button" data-open-api-modal>
+                            <span class="btn-add-config-left"><span class="btn-add-config-plus">＋</span><span>添加 API 配置</span></span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <span style="flex:1;"></span>
+                    <!-- 参考与素材栏的折叠开关：这一屏的主角是正文，参考卡片要能收起来，
+                         否则编辑区永远被挤在 240px 目录 + 320px 参考之间 -->
+                    <button type="button" class="ced-tool-btn" id="btn-toggle-materials" title="本章匹配到的素材（第 2 步「素材库」的产物），按需打开">素材 <span id="mat-drawer-count">0</span> ▸</button>
+                    <!-- 来源图例 -->
+                    <div class="ced-tone-group" id="source-legend">
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼指导</span>
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#a7f3d0;color:#065f46;font-weight:600;">引用素材</span>
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#fde68a;color:#92400e;font-weight:600;">AI 补充</span>
+                    </div>
+                  </div>
+
+                  <!-- 工具栏 -->
+                  <div class="ced-toolbar">
+                    <div class="ced-toolbar-group">
+                      <button type="button" class="ced-fmt-btn" style="font-weight:800;" title="加粗">B</button>
+                      <button type="button" class="ced-fmt-btn" style="font-style:italic;" title="斜体">I</button>
+                      <button type="button" class="ced-fmt-btn" style="text-decoration:underline;" title="下划线">U</button>
+                    </div>
+                    <span class="ced-divider"></span>
+                    <div class="ced-toolbar-group">
+                      <button type="button" class="ced-fmt-label-btn" title="一级标题">H1</button>
+                      <button type="button" class="ced-fmt-label-btn" title="二级标题">H2</button>
+                      <button type="button" class="ced-fmt-label-btn" title="列表">
+                        <svg width="13" height="13" viewBox="0 0 13 13"><circle cx="3" cy="4" r=".8" fill="currentColor"/><circle cx="3" cy="6.5" r=".8" fill="currentColor"/><circle cx="3" cy="9" r=".8" fill="currentColor"/><path d="M5 4H11M5 6.5H11M5 9H9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+                      </button>
+                    </div>
+                    <span class="ced-divider"></span>
+                    <!-- 预览/编辑切换 -->
+                    <div class="ced-toolbar-group ced-mode-switch" id="ced-mode-switch">
+                      <button type="button" class="ced-mode-btn active" data-mode="edit">编辑</button>
+                      <button type="button" class="ced-mode-btn" data-mode="preview">预览</button>
+                    </div>
+                    <span class="ced-divider"></span>
+                    <!-- 目标字数 -->
+                    <div class="ced-wordlimit-wrap">
+                      <span style="color:var(--ink-3);">目标字数</span>
+                      <input type="number" class="ced-wordlimit-input" id="ced-wordlimit" value="800" min="100" max="5000" />
+                      <span style="color:var(--ink-4);font-size:11px;">字</span>
+                      <span class="ced-divider" style="margin:0 2px;"></span>
+                      <span class="ced-wordlimit-cur" id="ced-wordlimit-cur">当前 0</span>
+                    </div>
+                  </div>
+
+                  <!-- 编辑区 -->
+                  <div class="ced-body" id="ced-body">
+                    <!-- 空白状态：placeholder -->
+                    <div class="ced-placeholder" id="ced-placeholder">
+                      在此撰写本节正文，或点击上方「AI 生成」让模型基于应标要求自动起草…
+                    </div>
+                    <!-- 可编辑内容区 -->
+                    <div class="ced-editable" id="ced-editable" role="textbox" aria-label="章节正文" aria-multiline="true" contenteditable="true" style="display:none;"></div>
+                    <!-- 预览容器（markdown 渲染） -->
+                    <div class="ced-preview" id="ced-preview" style="display:none;"></div>
+                  </div>
+
+                  <!-- 底栏 -->
+                  <div class="ced-footer">
+                    <span class="ced-footer-wordcount" id="ced-footer-wc">0 / 800 字</span>
+                    <span class="ced-divider"></span>
+                    <span id="ced-footer-model">公文文风</span>
+                    <span style="flex:1;"></span>
+                    <button type="button" class="ced-footer-btn" id="btn-polish" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">润色</button>
+                    <button type="button" class="ced-footer-btn" id="btn-expand" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">扩写</button>
+                    <button type="button" class="ced-footer-btn" id="btn-shrink" disabled title="此快捷操作暂未接入，可直接编辑正文或按评审意见修订">缩写</button>
+                    <button type="button" class="ced-footer-save" id="btn-save-draft">保存草稿</button>
+                  </div>
+
                 </div>
-                <div class="cite-bar-list" id="cite-bar-list"></div>
               </div>
-              <div id="matched-list" class="matched-list"></div>
+
             </div>
+
+            <!-- 原有 editor-toolbar（隐藏，保留用于 generate-controls） -->
+            <div class="editor-toolbar" style="display:none;" aria-hidden="true">
+              <nav class="breadcrumb" data-breadcrumb aria-label="当前位置">
+                <span>选择章节开始撰写</span>
+              </nav>
+            </div>
+
+          </main>
+
+          <!-- 素材抽屉（第 2 步「素材库」的产物，写作时按需取用）：
+               以前常驻右栏 320px，把正文挤到 950px。现在从工具栏「素材」打开。 -->
+          <aside class="mat-drawer-wb" id="mat-drawer-wb" hidden aria-label="匹配素材">
+            <header class="mat-drawer-wb-head">
+              <h3>本章素材</h3>
+              <button type="button" class="mw-btn" id="btn-close-mat-drawer">收起</button>
+            </header>
+        <!-- 匹配素材模块 -->
+        <div class="context-module">
+          <div class="context-module-header">
+            <h3 class="context-module-title">匹配素材</h3>
+            <span id="matched-count-badge" class="mat-tab-badge">0</span>
+            <span style="flex:1;"></span>
+            <button type="button" id="btn-mat-list" class="mat-refresh-btn" title="素材列表" style="font-size:11px; padding:3px 8px; border-radius:6px;">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M2 6h8M2 9h5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+            </button>
+            <button type="button" id="btn-refresh-matched" class="mat-refresh-btn" title="刷新匹配">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 2.5V5H7.5M2 9.5V7H4.5M9.5 7C8.8 8.8 7 10 5 10C3 10 1.4 8.7 1 7M2.5 5C3.2 3.2 5 2 7 2C9 2 10.6 3.3 11 5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <!-- 已引用状态条 -->
+          <div class="cite-bar" id="cite-bar">
+            <div class="cite-bar-head" id="cite-bar-head">
+              <span class="cite-bar-icon">✓</span>
+              <span class="cite-bar-label">已引用 <span id="cite-bar-count">0</span> 条</span>
+              <span class="cite-bar-chevron">▾</span>
+            </div>
+            <div class="cite-bar-list" id="cite-bar-list"></div>
+          </div>
+          <div id="matched-list" class="matched-list"></div>
+        </div>
+
 
           </aside>
         </div>
@@ -2345,13 +2488,38 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/workbench.js?v=20260916-loop4"></script>
+    <script type="module" src="./assets/workbench.js?v=20260921-dedupe"></script>
     <script type="module">
       import { GenerateSession } from './assets/generate-session.js';
       import { initContextPanel } from './assets/context-panel.js';
-      import { api } from './assets/api.js?v=20260918-loop8';
-      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20260918-loop8';
+      import { api } from './assets/api.js?v=20260921-dedupe';
+      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20260921-dedupe';
+      // 提炼字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
+      // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
+      // "每行显示 #undefined"）。
+      import { CONSTRAINT_LEVELS, constraintLevelLabel,
+               evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
+               chapterStage, CHAPTER_STAGE_LABELS } from './assets/workspace-model.mjs?v=20260921-dedupe';
       initContextPanel();
+
+      // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
+      // 引用动作在抽屉里完成，编辑区底部保留「已引用 n 条」。
+      (function initMaterialDrawer() {
+        const drawer = document.getElementById('mat-drawer-wb');
+        const btn = document.getElementById('btn-toggle-materials');
+        const close = document.getElementById('btn-close-mat-drawer');
+        const toggle = (open) => {
+          if (!drawer) return;
+          drawer.hidden = open === undefined ? !drawer.hidden : !open;
+          btn?.classList.toggle('active', !drawer.hidden);
+        };
+        btn?.addEventListener('click', () => toggle());
+        close?.addEventListener('click', () => toggle(false));
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && drawer && !drawer.hidden) toggle(false);
+        });
+        window.__toggleMaterialDrawer = toggle;
+      })();
 
       const params = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
@@ -2366,6 +2534,7 @@
           const STAGE_ORDER_LITERAL = ['parsing', 'matching', 'generating', 'reviewing'];
           const STAGE_MAP_LITERAL = {
             parsing: 'parsing', outline_review: 'parsing',
+            extracting: 'parsing',
             matching: 'matching', materials_review: 'matching',
             generating: 'generating',
             reviewing: 'reviewing',
@@ -2385,6 +2554,8 @@
         parsing: 'parsing',
         // 闸门停留态映射回当前阶段：进度条与项目实际所处步骤一致
         outline_review: 'parsing',
+        // extracting：闸门 1 放行后的逐节提炼，仍属「解析大纲」这一步
+        extracting: 'parsing',
         matching: 'matching',
         materials_review: 'matching',
         generating: 'generating',
@@ -2660,6 +2831,8 @@
         switch (stage) {
           case 'parsing':
           case 'outline_review':
+          // extracting：逐节提炼还在跑，同样属于「前置步骤未完成」
+          case 'extracting':
           case 'matching':
             // 前置阶段：用户大概率从 stage-progress 点击「方案撰写」误进；不再硬 redirect
             // 否则会出现"闪一下方案撰写后跳回素材匹配"的体验。改为提示+引导。
@@ -2786,12 +2959,15 @@
         total = e.detail.total || 0;
         if (btnGen) btnGen.textContent = '■ 停止';
         if (progress) { progress.hidden = false; progress.textContent = `0 / ${total}`; }
-        if (genCard) genCard.hidden = false;
+        // 空闲不显示进度卡：一张「— 0% 取消」的空卡挂在顶上很难看，还占编辑区高度。
+        // 真正的第一帧进度（onBlockStart）才把它亮出来。
+        if (genCard) genCard.hidden = true;
         updateGenCard('', 0, total);
       });
 
       window.addEventListener('block:start', e => {
         const { title = '', index = 0 } = e.detail;
+        if (genCard) genCard.hidden = false;   // 有真实进度了才显示
         updateGenCard(title, index, total);
         if (progress) progress.textContent = `${index} / ${total}`;
       });
@@ -2856,6 +3032,9 @@
           onBlockStart: (data) => {
             const bid = data.block_id;
             if (bid && !seen.has(bid)) { seen.add(bid); total++; }
+            // 真的有章节开始跑了：这时才显示进度卡（并同步标题/百分比）
+            if (genCard) { genCard.hidden = false; genCard.style.display = ''; }
+            updateGenCard(data.title || bid || '', doneCount, total);
             const editable = findEditableForBlock(bid);
             if (editable) {
               editable.textContent = '';
@@ -2940,7 +3119,8 @@
         if (!threadId) return false;
         closeWorkflowStream();
         if (btnGen) btnGen.textContent = '■ 停止';
-        if (genCard) { genCard.hidden = false; genCard.style.display = ''; }
+        // 先隐藏，等 onBlockStart 的第一帧再亮（否则会出现一张「— 0% 取消」的空卡）
+        if (genCard) { genCard.hidden = true; genCard.style.display = ''; }
         doneCount = 0;
         // total 在 block_start 累计；进度条按已知 total 推进
         total = 0;
@@ -3080,7 +3260,7 @@
         renderPageHint(b);
         // 切回编辑模式（避免新 block 还显示上一份预览）
         setEditorMode('edit');
-        document.getElementById('ced-section-title').textContent = b.title || '撰写正文';
+        // 标题由顶部条展示（#et-title，见 assets/workbench.js 的 renderEditorTopbar）
         return true;
       };
       window.__refreshEditorChapter = function(b) {
@@ -3184,8 +3364,9 @@
         const sTitle = document.getElementById('section-title');
         if (sTitle) sTitle.textContent = b.title || '—';
 
-        // 渲染折叠卡
+        // 渲染折叠卡 + 本章要求 bar（条目编号与「素材库」同一份 response_items）
         renderRefCards(b);
+        renderReqBar(b);
 
         // 编辑器内容：优先使用缓存（批量生成后已更新），其次用 block.content
         const editable = document.getElementById('ced-editable');
@@ -3208,10 +3389,108 @@
         }
         updateWordCount();
 
-        // 保存时间
-        document.getElementById('ced-save-time').textContent =
-          b.updated_at ? `已保存 · ${new Date(b.updated_at).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}` : '—';
+        // 保存时间（顶部条 + 卡片页脚共用一份）
+        setSavedTime(b.updated_at
+          ? `已保存 · ${new Date(b.updated_at).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`
+          : '—');
       }
+
+      // 保存状态在两处显示：右栏顶部条（显眼）+ 编辑卡页脚（贴近正文）。
+      // 以前只写页脚，用户切章节时看不到"这一章存了没有"。
+      function setSavedTime(text) {
+        const el = document.getElementById('ced-save-time');   // 现在在右栏顶部条上
+        if (el) el.textContent = text;
+      }
+
+      // ── 本章要求 bar ────────────────────────────────────────
+      // 写作时唯一必须常驻的参照：本章要回应什么 + 每条有没有素材依据。
+      // 数据与「素材库」同源：GET /response-items（后端展开，R/K/V/B/S/E/I 编号一致）。
+      let responseItemsByBlock = {};
+      async function loadResponseItems() {
+        if (Object.keys(responseItemsByBlock).length) return responseItemsByBlock;
+        try {
+          const r = await fetch(`/api/projects/${projectId}/response-items${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`);
+          const map = await r.json();
+          if (map && typeof map === 'object') {
+            responseItemsByBlock = map;
+            // 目录行要显示"覆盖 x/y"，与素材库同源同一份数据（workbench.js 读这个）
+            window.__responseItems = responseItemsByBlock;
+          }
+        } catch (err) { console.warn('[req-bar] 应答条目加载失败', err); }
+        return responseItemsByBlock;
+      }
+
+      const ITEM_CODE = (id) => String(id || '').split('#').pop();
+      function renderReqBar(b) {
+        const bar = document.getElementById('req-bar');
+        if (!bar) return;
+        if (!b) { bar.hidden = true; return; }
+        bar.hidden = false;
+
+        const items = (responseItemsByBlock[String(b.block_id)] || []).filter(it => !it.informative);
+        const evs = [];
+        try { evs.push(...(JSON.parse(b.source || '[]') || [])); } catch {}
+        const covered = new Set(evs.flatMap(e => e.item_ids || []));
+
+        const main = document.getElementById('req-bar-main');
+        if (main) {
+          main.textContent = (b.requirement || '').trim() || '本章暂无提炼出的应标要求（可直接撰写）。';
+        }
+
+        const chips = document.getElementById('req-bar-items');
+        if (chips) {
+          chips.innerHTML = items.length
+            ? items.map(it => `<span class="req-bar-item${covered.has(it.item_id) ? ' has' : ''}"
+                  title="${escHtml(it.text)}${covered.has(it.item_id) ? '（有素材依据）' : ''}">${ITEM_CODE(it.item_id)}</span>`).join('')
+            : '';
+        }
+
+        // 评审区（#req-bar-review）由 assets/workbench.js 负责：它手上有 statusLabels、
+        // 复审动作与版本弹窗。这里不写，避免两个写者互相覆盖。
+        // 有依据的条目标记（与素材抽屉里的引用动作配合）
+        const drawerCount = document.getElementById('mat-drawer-count');
+        if (drawerCount) drawerCount.textContent = String(evs.length);
+      }
+
+      function workspaceReviewUrl(blockId) {
+        const q = new URLSearchParams({ projectId: String(projectId) });
+        if (threadId) q.set('threadId', threadId);
+        if (blockId) q.set('blockId', String(blockId));
+        return `/review?${q}`;
+      }
+
+      (function initReqBar() {
+        // 条目表要等声明之后才能用（let 的 TDZ：放在模块顶部调用会抛 ReferenceError）
+        loadResponseItems().then(() => {
+          if (currentBlock) renderReqBar(currentBlock);
+        });
+        const bar = document.getElementById('req-bar');
+        const toggle = document.getElementById('req-bar-toggle');
+        const more = document.getElementById('req-bar-more');
+        if (!bar) return;
+        let open = true;
+        try { open = localStorage.getItem('workbench:reqBar') !== '0'; } catch {}
+        const apply = () => {
+          bar.classList.toggle('open', open);
+          toggle?.setAttribute('aria-expanded', String(open));
+          const body = document.getElementById('req-bar-body');
+          if (body) body.hidden = !open;
+        };
+        apply();
+        toggle?.addEventListener('click', () => {
+          open = !open; apply();
+          try { localStorage.setItem('workbench:reqBar', open ? '1' : '0'); } catch {}
+        });
+        more?.addEventListener('click', () => {
+          const fields = document.getElementById('req-bar-fields');
+          if (!fields) return;
+          fields.hidden = !fields.hidden;
+          // 展开字段时藏掉上面那段要求原文：8 张卡里的第一张就是「应标要求」，
+          // 同一段文本上下各一遍（用户截图反馈"上下存在重复"）。
+          bar.classList.toggle('fields-open', !fields.hidden);
+          more.textContent = fields.hidden ? '展开全部字段' : '收起全部字段';
+        });
+      })();
 
       function renderRefCards(b) {
         // 应标要求
@@ -3285,6 +3564,42 @@
         if (indBody) {
           indBody.textContent = ind || '暂无量化指标';
           indBody.dataset.refType = 'indicators';
+        }
+
+        // 强制等级（第 8 个字段）：三选一下拉。后端存英文枚举，界面显示中文；
+        // 改一次就 PUT 一个字段（后端局部更新，不会清空别的字段）。
+        const cBody = document.getElementById('ref-constraint-body');
+        const cCount = document.getElementById('ref-constraint-count');
+        const level = CONSTRAINT_LEVELS.some(o => o.value === b.constraint_level)
+          ? b.constraint_level : 'recommended';
+        if (cCount) cCount.textContent = constraintLevelLabel(level);
+        if (cBody) {
+          cBody.innerHTML = '';
+          const sel = document.createElement('select');
+          sel.className = 'ref-card-select';
+          sel.id = 'ref-constraint-select';
+          CONSTRAINT_LEVELS.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label;
+            if (o.value === level) opt.selected = true;
+            sel.appendChild(opt);
+          });
+          sel.addEventListener('change', async () => {
+            const value = sel.value;
+            sel.disabled = true;
+            try {
+              await api.blocks.updateFields(currentBlock.id, { constraint_level: value });
+              currentBlock.constraint_level = value;
+              if (cCount) cCount.textContent = constraintLevelLabel(value);
+            } catch (err) {
+              console.error('强制等级保存失败', err);
+              sel.value = currentBlock.constraint_level || 'recommended';
+              alert('强制等级保存失败');
+            } finally {
+              sel.disabled = false;
+            }
+          });
+          cBody.appendChild(sel);
         }
       }
 
@@ -3379,7 +3694,7 @@
 
       document.getElementById('ced-editable')?.addEventListener('input', () => {
         updateWordCount(); editorDirty = true;
-        document.getElementById('ced-save-time').textContent = '未保存';
+        setSavedTime('未保存');
       });
       document.getElementById('ced-placeholder')?.addEventListener('click', () => {
         if (!currentBlock) return;
@@ -3691,8 +4006,7 @@
         if (pct) pct.textContent = '100%';
         if (stageEl) stageEl.textContent = '· 撰写完成';
         updateWordCount();
-        document.getElementById('ced-save-time').textContent =
-          `已保存 · ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
+        setSavedTime(`已保存 · ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`);
       }
 
       document.getElementById('btn-ai-gen')?.addEventListener('click', openPromptPreview);
@@ -3744,7 +4058,8 @@
               block.bonus_items ? `加分项：${block.bonus_items}` : '',
               block.score_items ? `评分项：${block.score_items}` : '',
               block.evidence_required ? `证明材料：${block.evidence_required}` : '',
-              block.constraint_level ? `强制性：${block.constraint_level}` : '',
+              block.constraint_level
+                ? `强制性：${constraintLevelLabel(block.constraint_level)}` : '',
               block.indicators ? `量化指标：${block.indicators}` : '',
             ].filter(Boolean).join('\n') || '（暂无提炼内容）',
             collapsed: false,
@@ -3962,13 +4277,23 @@
           const collapsed = content.length > 90;
           const score = typeof s.score === 'number' ? s.score : 0;
           const isCited = cited.has(citeKey(s));
+          // 出处 / 性质都用共享片段（模型层一份实现）：老数据没有 locator，退回旧字段，
+          // 不能像以前那样固定渲染 `#${chunk_index}`（契约升级后该字段已不存在）。
+          const locator = s.locator || (s.chunk_index != null ? `#${s.chunk_index}` : '');
+          const legacy = { ...s, locator };
+          // 相关度：新契约给 0~1 的 confidence（规则命中=1、语义命中=归一化分），
+          // 老数据的 BM25 原始分是十几位小数，渲染出来是一串噪声，退回两位小数。
+          const relevance = typeof s.confidence === 'number'
+            ? `${Math.round(s.confidence * 100)}%`
+            : (score > 0 ? `×${Number(score).toFixed(2)}` : '');
 
           return `<div class="matched-card" data-idx="${i}">
             <div class="matched-card-head">
               <span class="matched-card-ext" style="background:${pal.bg};color:${pal.fg};">${escHtml(ext)}</span>
               <span class="matched-card-name" title="${escHtml(filename)}">${escHtml(filename)}</span>
-              <span class="matched-card-chunk">#${s.chunk_index}</span>
-              ${score > 0 ? `<span class="matched-card-score">×${score}</span>` : ''}
+              ${evidenceKindBadgeHtml(legacy)}
+              ${locator ? `<span class="matched-card-chunk" title="出处">${escHtml(locator)}</span>` : ''}
+              ${relevance ? `<span class="matched-card-score" title="相关度${s.by ? `（${s.by === 'rule' ? '规则命中' : s.by === 'semantic' ? '语义命中' : s.by}）` : ''}">${relevance}</span>` : ''}
             </div>
             <div class="matched-card-body${collapsed ? ' collapsed' : ''}" data-content>${escHtml(content)}</div>
             ${collapsed ? `<button type="button" class="matched-card-toggle">展开全文</button>` : ''}
@@ -5238,6 +5563,6 @@
       })();
     })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20260918-loop8"></script>
+  <script type="module" src="./assets/workspace.js?v=20260921-dedupe"></script>
   </body>
 </html>
