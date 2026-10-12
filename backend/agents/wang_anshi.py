@@ -18,6 +18,7 @@ from domain.proposal import BlockOutput
 from domain.review import Finding, Issue
 from domain.spec import OutlineMatrixRow
 from infra.llm import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
+from infra.llm import errors as llm_errors
 from infra.llm.clients import generate_oneshot_claude, generate_oneshot_openai
 from infra.llm.json_utils import extract_json_object as _extract_json_object
 
@@ -125,35 +126,40 @@ class WangAnshiAgent:
         configs: list[LLMConfig],
         rr_start: int,
     ) -> Finding:
-        """对单个 block 调 LLM；按 rr_start 轮询全部 config，全失败时返 Finding(error=...)."""
-        n = len(configs)
+        """对单个 block 调 LLM；按 rr_start 轮询可用 config，全失败时返 Finding(error=...)."""
+        usable = llm_errors.available_configs(configs, rr_start)
         last_error: Optional[Exception] = None
 
-        for i in range(n):
-            config = configs[(rr_start + i) % n]
+        for i, config in enumerate(usable):
             try:
                 if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                     raw = await generate_oneshot_openai(
                         config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        call_site="review_tech",
                     )
                 else:
                     raw = await generate_oneshot_claude(
                         config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        call_site="review_tech",
                     )
                 return self._parse_finding(block_id, raw)
             except Exception as e:
                 last_error = e
+                kind = llm_errors.note_failure(config, e)
                 logger.warning(
                     f"{self.AGENT_NAME}: block {block_id} API "
-                    f"[{config.provider}/{config.model}] 失败 ({i + 1}/{n})：{e}"
+                    f"[{config.provider}/{config.model}] 失败 "
+                    f"({i + 1}/{len(usable)}，{llm_errors.describe_error(e)})：{e}"
                 )
+                if llm_errors.blocks_chain(kind):
+                    break
 
         # 全失败兜底
         return Finding(
             block_id=block_id,
             agent=self.AGENT_NAME,
             score=0,
-            error=f"全部 API 失败：{last_error}" if last_error else "评审失败",
+            error=f"全部 API 失败：{llm_errors.exhausted_summary(configs, last_error)}",
         )
 
     # ── 结果解析 ───────────────────────────────

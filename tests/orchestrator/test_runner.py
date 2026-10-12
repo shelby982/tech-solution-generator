@@ -53,7 +53,7 @@ class _StubZhang:
         from agents.zhang_heng import OutlineDraftResult
         return OutlineDraftResult(
             sections=[DomainSection(**s.to_dict()) for s in source_toc],
-            degraded=True, error="stub 未派生",
+            error="stub 未派生",
         )
 
     async def extract(self, toc, **kw):
@@ -376,7 +376,7 @@ class _RecordingZhang(_StubZhang):
                               raw_content="", special_marks=[])
                 for i in range(1, n + 1)
             ],
-            degraded=False, error="",
+            error="",
         )
 
 
@@ -626,3 +626,662 @@ async def test_outline_derives_from_every_requirement_file(tmp_path, monkeypatch
     # 派生目录是模型产出（mock fixture 出 11 个节点），不是原目录的镜像
     assert len(state["spec"]["toc"]) == 11
     assert state["spec"]["outline_revision"] == 1
+
+
+# ─────────────────────────────────────────────
+# LLM 用量归属：图执行期间设置 run_context
+# ─────────────────────────────────────────────
+
+async def test_run_context_attributes_llm_usage_to_run(runner_env, monkeypatch):
+    """图执行期间 LLM 用量归属到本次运行 —— 「按运行算费用」的前置条件。
+
+    用假 graph 捕获 invoke 时刻的上下文，绕开「mock 模式不记账」的限制：
+    要验的是 runner 有没有在 invoke 之前把 contextvar 设好，不是记账本身。
+    """
+    from infra.llm import usage as llm_usage
+
+    runner, project_id, _ = runner_env
+    seen: list[dict] = []
+
+    class _Snap:
+        next = ()
+
+        def __init__(self, values):
+            self.values = values
+
+    class _FakeGraph:
+        async def ainvoke(self, *a, **kw):
+            seen.append(dict(llm_usage.current_run()))
+
+        async def aupdate_state(self, *a, **kw):
+            seen.append(dict(llm_usage.current_run()))
+
+        async def aget_state(self, *a, **kw):
+            return _Snap({"project_id": project_id, "stage": "outline_review"})
+
+    monkeypatch.setattr(runner, "_build", lambda *a, **kw: _FakeGraph())
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    assert seen, "初次跑应至少 invoke 一次"
+    assert seen[-1] == {"project_id": project_id, "thread_id": tid}
+
+    seen.clear()
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    assert seen, "续跑应至少 invoke 一次"
+    assert all(s == {"project_id": project_id, "thread_id": tid} for s in seen), seen
+
+
+async def test_run_context_cleared_after_run(runner_env, monkeypatch):
+    """跑完退出 with 块后归属清空，不泄漏给后续无关调用。"""
+    from infra.llm import usage as llm_usage
+
+    runner, project_id, _ = runner_env
+
+    class _Snap:
+        next = ()
+
+        def __init__(self, values):
+            self.values = values
+
+    class _FakeGraph:
+        async def ainvoke(self, *a, **kw):
+            pass
+
+        async def aget_state(self, *a, **kw):
+            return _Snap({"project_id": project_id, "stage": "idle"})
+
+    monkeypatch.setattr(runner, "_build", lambda *a, **kw: _FakeGraph())
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    assert llm_usage.current_run() == {}
+
+
+# ─────────────────────────────────────────────
+# 目录结构编辑（闸门 1 增删改 / 排序）
+# ─────────────────────────────────────────────
+
+async def test_update_outline_structure_rewrites_state_and_blocks(runner_env):
+    """结构编辑要同时改 blocks 表与图里的 spec.toc —— extract 逐节提炼读的是后者。"""
+    import aiosqlite
+
+    runner, project_id, db_path = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    original = state["spec"]["toc"][0]
+
+    # ① 新增两节 + 把原节点降为子级并改名 + 放到中间（一次请求覆盖增/改/排序）
+    nodes = [
+        {"block_id": "nuser1", "level": 1, "title": "用户新增一章"},
+        {"block_id": original["id"], "level": 2, "title": original["title"] + "（改）"},
+        {"block_id": "nuser2", "level": 2, "title": "用户新增子章"},
+    ]
+    stats = await runner.update_outline_structure(tid, nodes)
+
+    assert stats["created"] == 2        # 新增节点建了占位行
+    assert stats["updated"] == 1        # 已有节点只改 title/level/order_idx
+    assert stats["removed"] == 0
+
+    new_state = await runner.state(tid)
+    assert [d["id"] for d in new_state["spec"]["toc"]] == ["nuser1", original["id"], "nuser2"]
+    assert new_state["spec"]["toc"][1]["title"] == original["title"] + "（改）"
+    assert new_state["spec"]["toc"][1]["level"] == 2
+    # source_toc 是只读溯源（grounding 用），结构编辑不能动它
+    assert new_state["spec"]["source_toc"] == state["spec"]["source_toc"]
+
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT block_id, order_idx, level FROM blocks WHERE project_id = ? ORDER BY order_idx",
+            (project_id,),
+        )
+        rows = await cur.fetchall()
+    assert [(r["block_id"], r["order_idx"], r["level"]) for r in rows] == [
+        ("nuser1", 0, 1), (original["id"], 1, 2), ("nuser2", 2, 2),
+    ]
+
+    # ② 删掉一节（无正文）→ 行被清理
+    stats2 = await runner.update_outline_structure(tid, nodes[:2])
+    assert stats2["removed"] == 1
+    assert [d["id"] for d in (await runner.state(tid))["spec"]["toc"]] == ["nuser1", original["id"]]
+
+
+async def test_update_outline_structure_rejects_busy_stage(runner_env, monkeypatch):
+    """运行中的 stage 不接受结构编辑：一边写一边被读会打架。"""
+    runner, project_id, _ = runner_env
+
+    async def _busy(_tid):
+        return {"project_id": project_id, "stage": "extracting", "spec": {}}
+
+    monkeypatch.setattr(runner, "state", _busy)
+
+    with pytest.raises(ValueError, match="仍在运行"):
+        await runner.update_outline_structure(
+            "tid-x", [{"block_id": "s1", "level": 1, "title": "A"}],
+        )
+
+
+async def test_update_outline_structure_rejects_invalid(runner_env, monkeypatch):
+    """空目录 / 空标题在 runner 层就被挡下（路由再转成 400）。"""
+    from domain.spec.structure import StructureError
+
+    runner, project_id, _ = runner_env
+
+    async def _state(_tid):
+        return {"project_id": project_id, "stage": "outline_review", "spec": {}}
+
+    monkeypatch.setattr(runner, "state", _state)
+
+    with pytest.raises(StructureError):
+        await runner.update_outline_structure("tid-x", [])
+    with pytest.raises(StructureError):
+        await runner.update_outline_structure(
+            "tid-x", [{"block_id": "s1", "level": 1, "title": "   "}],
+        )
+
+
+async def test_redraft_outline_rejects_aborted_thread(runner_env, monkeypatch):
+    """已作废的 run 不能重出目录：抛专用异常（路由层转成可判别的 workflow_aborted）。"""
+    from orchestrator.runner import WorkflowAbortedError
+
+    runner, project_id, _ = runner_env
+
+    async def _aborted(_tid):
+        return {"project_id": project_id, "stage": "aborted", "spec": {}}
+
+    monkeypatch.setattr(runner, "state", _aborted)
+
+    with pytest.raises(WorkflowAbortedError):
+        await runner.redraft_outline("tid-x", "重出")
+
+
+async def test_outline_structure_rejects_aborted_thread(runner_env, monkeypatch):
+    """作废的 run 也不接受目录结构编辑（它不会再往下跑，改了只会让页面与库发散）。"""
+    from orchestrator.runner import WorkflowAbortedError
+
+    runner, project_id, _ = runner_env
+
+    async def _aborted(_tid):
+        return {"project_id": project_id, "stage": "aborted", "spec": {"toc": []}}
+
+    monkeypatch.setattr(runner, "state", _aborted)
+
+    with pytest.raises(WorkflowAbortedError):
+        await runner.update_outline_structure(
+            "tid-x", [{"block_id": "s1", "level": 1, "title": "A"}],
+        )
+
+
+# ─────────────────────────────────────────────
+# 派生失败：抛异常 → 运行落 failed 终态（不再降级沿用原始目录）
+# ─────────────────────────────────────────────
+
+async def test_graph_failure_marks_run_failed(runner_env, monkeypatch):
+    """目录派生失败 → 运行标 failed（不是停在「跑着」的阶段）。
+
+    停在 parsing 的话，刷新页面时前端会以为它还在跑、继续等帧（SSE 无回放），
+    于是变成「卡住」。标 failed 之后 boot / 兜底轮询都会立刻按终态处理并给重试入口。
+    """
+    import aiosqlite
+    from agents.zhang_heng import OutlineDraftError
+
+    runner, project_id, db_path = runner_env
+
+    async def _boom(self, *a, **kw):
+        raise OutlineDraftError("目录派生失败：模型调用失败：Connection error.")
+
+    monkeypatch.setattr(_StubZhang, "draft_outline", _boom)
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state.get("stage") == "failed"
+    errors = state.get("errors") or []
+    assert errors and "Connection error" in str(errors[-1].get("message", ""))
+
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        row = await (await conn.execute(
+            "SELECT stage FROM workflow_runs WHERE thread_id = ?", (tid,),
+        )).fetchone()
+    assert row["stage"] == "failed"
+
+
+async def test_redraft_outline_allowed_on_failed_stage(runner_env, monkeypatch):
+    """failed 之后必须还能重出目录（要求文件已解析好，重试派生是用户的唯一自救入口）。"""
+    runner, project_id, _ = runner_env
+
+    async def _generating(_tid):
+        return {"project_id": project_id, "stage": "generating", "spec": {}}
+
+    monkeypatch.setattr(runner, "state", _generating)
+    with pytest.raises(ValueError, match="闸门处重出目录"):
+        await runner.redraft_outline("tid-x", "")
+
+    async def _failed(_tid):
+        return {"project_id": project_id, "stage": "failed", "spec": {}}
+
+    monkeypatch.setattr(runner, "state", _failed)
+    await runner.redraft_outline("tid-x", "")     # 不该因阶段被拒
+    await _wait_task(runner._runs["tid-x"])
+
+
+# ─────────────────────────────────────────────
+# 运行中互斥 + 运行期 stage（提炼/匹配要跑十几分钟，不能靠节点结束时才写 stage）
+# ─────────────────────────────────────────────
+
+async def test_resume_rejected_while_task_running(runner_env):
+    """同一 thread 已有后台 task 时，resume 必须直接拒绝。
+
+    没有这层保护，刷新页面 /开第二个标签页重复点「确认目录」会并发跑第二遍逐节提炼
+    （每章一次模型调用，费用翻倍、SSE 帧双份）。
+    """
+    runner, project_id, _ = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])          # 停在闸门 1
+
+    async def _still_running():
+        await asyncio.sleep(5)
+
+    run = runner._runs[tid]
+    original = run.task
+    run.task = asyncio.create_task(_still_running())
+    try:
+        with pytest.raises(ValueError, match="仍在运行"):
+            await runner.resume(tid, user_choice="approve")
+    finally:
+        run.task.cancel()
+        run.task = original
+
+    # 任务跑完后同一个 resume 正常放行（保护不能把正常路径也堵死）
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(run)
+
+
+class _FakeSnap:
+    def __init__(self, nxt):
+        self.next = nxt
+
+
+class _FakeGraph:
+    """只实现 _mark_next_phase 要用的 aget_state（返回下一个节点）。"""
+
+    def __init__(self, nxt):
+        self._next = nxt
+
+    async def aget_state(self, config):
+        return _FakeSnap(self._next)
+
+
+async def _db_stage(db_path, tid):
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        row = await (await conn.execute(
+            "SELECT stage FROM workflow_runs WHERE thread_id = ?", (tid,),
+        )).fetchone()
+    return row["stage"] if row else None
+
+
+async def _drain_frames(runner, tid, limit=60, timeout=0.5):
+    """把 emitter 队列里的帧取空（含上一段跑的残余帧），返回按序的列表。"""
+    frames: list[str] = []
+    agen = runner.stream(tid)
+    try:
+        for _ in range(limit):
+            try:
+                frames.append(await asyncio.wait_for(agen.__anext__(), timeout))
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                break
+    finally:
+        await agen.aclose()
+    return frames
+
+
+async def test_mark_next_phase_writes_runtime_stage(runner_env):
+    """续跑前按下一个节点写运行期 stage：extract → extracting / match → matching。
+
+    节点只能在**结束时**返回 stage，所以「正在提炼」的这十几分钟必须由 runner 先写
+    workflow_runs —— 否则页面刷新读到的仍是 outline_review（闸门 1），会误导用户
+    再确认一次。
+    """
+    runner, project_id, db_path = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+    assert await _db_stage(db_path, tid) == "outline_review"
+
+    config = {"configurable": {"thread_id": tid}}
+    from orchestrator.graph import NODE_EXTRACT, NODE_MATCH, NODE_PARSE
+
+    await runner._mark_next_phase(_FakeGraph((NODE_EXTRACT,)), config, tid)
+    assert await _db_stage(db_path, tid) == "extracting"
+    # 同时要推一帧 checkpoint，页面接上后能立刻校准进度条
+    frames = await _drain_frames(runner, tid)
+    checkpoints = [f for f in frames if "event: checkpoint" in f]
+    assert any('"stage": "extracting"' in f for f in checkpoints), checkpoints
+
+    await runner._mark_next_phase(_FakeGraph((NODE_MATCH,)), config, tid)
+    assert await _db_stage(db_path, tid) == "matching"
+
+    # 不在长阶段上（如 parse）不动 stage；读不到 next 也不动
+    await runner._mark_next_phase(_FakeGraph((NODE_PARSE,)), config, tid)
+    assert await _db_stage(db_path, tid) == "matching"
+    await runner._mark_next_phase(_FakeGraph(()), config, tid)
+    assert await _db_stage(db_path, tid) == "matching"
+
+
+async def test_resume_marks_extracting_during_extract(runner_env, monkeypatch):
+    """闸门 1 放行后、提炼真正跑起来之前，workflow_runs 已被标成 extracting。"""
+    runner, project_id, db_path = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    seen: list[str] = []
+    real = runner._mark_next_phase
+
+    async def _spy(graph, config, thread_id):
+        await real(graph, config, thread_id)
+        seen.append(await _db_stage(db_path, thread_id))
+
+    monkeypatch.setattr(runner, "_mark_next_phase", _spy)
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    assert seen == ["extracting"]
+
+
+async def test_resume_approve_clears_cancel_and_aborted_stage(runner_env):
+    """取消之后「确认 / 继续」必须能解冻 —— 这是「取消后重新开始、白烧 token」的根因之一。
+
+    abort 只在 checkpoint 写 cancel_requested=True、把 workflow_runs 写 'aborted'；
+    此后任何 resume(approve) 若不清理它，extract 节点开头的 _check_cancel 会立刻再抛
+    WorkflowCancelled（用户看到「点了确认什么都没发生」），只能退化成「重新提炼」——
+    重新解析 + 重新派生目录 + 全量重算。前端还需要保留 thread 引用才能复用这条 run。
+    """
+    runner, project_id, db_path = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])                  # 停在闸门 1
+
+    await runner.abort(tid)
+    assert (await runner.state(tid))["cancel_requested"] is True
+    assert await _db_stage(db_path, tid) == "aborted"
+    assert runner._runs[tid].cancel_flag is True
+
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["cancel_requested"] is False, "放行后必须清掉取消标记，否则提炼会立刻再中断"
+    assert state["stage"] == "materials_review"           # 全链路真的跑下去了
+    assert await _db_stage(db_path, tid) == "materials_review"
+    assert runner._runs[tid].cancel_flag is False
+
+
+async def test_resume_extract_reenters_extract_and_skips_done(runner_env, monkeypatch):
+    """取消后「继续提炼」：复用同一条 run，只补没做完的章节，且不重新派生目录。
+
+    图在取消时已收尾（next=()），普通 ainvoke(None) 是空跑 —— resume_extract 借
+    闸门 1 的出边把指针拨回 extract 之前，extract 自己按 status='outline_done'
+    跳过已完成的章节（skip_ids）。这是"取消后重新开始、白烧 token"的正面锚点。
+    """
+    runner, project_id, db_path = runner_env
+
+    import inspect as _inspect
+
+    seen: list[list[str]] = []
+
+    async def _spy(self, toc, *, on_section=None, on_section_start=None, should_cancel=None):
+        """按真实 agent 的方式逐节回调：测试替身原来直接返回结果、不触发 on_section，
+        于是 blocks 表里根本没有 outline_done 行，skip_ids 永远是空的（测不出跳过）。"""
+        seen.append([s.id for s in toc])
+        out = {}
+        for s in toc:
+            if should_cancel and should_cancel():
+                break
+            row = OutlineMatrixRow(block_id=s.id, title=s.title, requirement="r")
+            out[s.id] = row
+            if on_section:
+                rv = on_section(s, row)
+                if _inspect.isawaitable(rv):
+                    await rv
+        return out
+
+    monkeypatch.setattr(_StubZhang, "extract", _spy)
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    # 第一轮：闸门 1 放行 → 全部章节提炼完（stub 立刻返回）
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+    assert seen and seen[0] == ["s1"], seen      # stub 目录只有一节，先提炼它
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        row = await (await conn.execute(
+            "SELECT status FROM blocks WHERE block_id = 's1'")).fetchone()
+    assert row["status"] == "outline_done", "逐节落库是跳过的前提（skip_ids 读这张表）"
+
+    before = await runner.state(tid)
+    toc_ids = [s["id"] for s in before["spec"]["toc"]]
+
+    # 再跑一次「继续提炼」：全部章节都已是 outline_done → 一节都不该再调用模型
+    await runner.resume_extract(tid)
+    await _wait_task(runner._runs[tid])
+
+    assert seen[-1] == [], f"已提炼的章节不该重复调用模型，实际收到 {seen[-1]}"
+    after = await runner.state(tid)
+    # 目录（用户审过的那版）原样保留：没有重新派生
+    assert [s["id"] for s in after["spec"]["toc"]] == toc_ids
+    assert after["cancel_requested"] is False
+    assert await _db_stage(db_path, tid) != "aborted"
+
+
+async def test_sync_stage_keeps_paused_when_graph_ended_for_pause(runner_env):
+    """graph_done 不等于「跑完」：提炼被取消时图也是收尾，但 stage 是 paused。
+
+    标成 'done' 会让页面显示「提炼完成」而其实还有章节没提炼。
+    """
+    runner, project_id, db_path = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        await graph.aupdate_state(
+            {"configurable": {"thread_id": tid}},
+            {"stage": "paused"},
+        )
+    await runner._sync_stage(tid, graph_done=True)
+    assert await _db_stage(db_path, tid) == "paused"
+
+    # 正常跑完（stage 不是 paused）仍然收尾为 done
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        await graph.aupdate_state(
+            {"configurable": {"thread_id": tid}},
+            {"stage": "report_review"},
+        )
+    await runner._sync_stage(tid, graph_done=True)
+    assert await _db_stage(db_path, tid) == "done"
+
+
+async def test_resume_extract_after_paused_extract_runs_only_remaining(runner_env, monkeypatch):
+    """暂停收尾（图 next 为空）后再点确认 —— 这正是"点了没反应"的那个 case。
+
+    取消 = 优雅暂停：extract 节点返回 stage='paused'，图随即收尾。此时普通
+    resume(approve) 的 ainvoke(None) 是**空跑**（实测点击后 0 次模型调用、进度不动），
+    必须走 resume_extract（as_node=GATE_OUTLINE 把指针拨回 extract 之前）；而且只能
+    跑剩下的章节，已完成的既不重跑也不能被跳过成"啥也没干"。
+    """
+    runner, project_id, db_path = runner_env
+
+    seen: list[list[str]] = []
+    cancel_after = {"n": 1}          # 第 1 节跑完就让 _Run.cancel_flag 为真
+
+    async def _spy(self, toc, *, on_section=None, on_section_start=None, should_cancel=None):
+        import inspect as _inspect
+        seen.append([s.id for s in toc])
+        out = {}
+        for i, s in enumerate(toc):
+            if should_cancel and should_cancel():
+                break
+            row = OutlineMatrixRow(block_id=s.id, title=s.title, requirement="r")
+            out[s.id] = row
+            if on_section:
+                rv = on_section(s, row)
+                if _inspect.isawaitable(rv):
+                    await rv
+            if i + 1 >= cancel_after["n"]:
+                cancel_after["real"] = True      # 触发下一节的取消检查
+                runner._runs[tid].cancel_flag = True
+        return out
+
+    # 先把 stub 目录做成 3 节
+    original_parse = _StubZhang.parse
+
+    async def _parse3(self, sources, *, progress_callback=None):
+        from agents.zhang_heng import SpecParseResult
+        return SpecParseResult(
+            doc_id="d1", doc_title="规范书", doc_summary="摘要",
+            toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
+                               special_marks=[]) for i in (1, 2, 3)],
+        )
+
+    monkeypatch.setattr(_StubZhang, "extract", _spy)
+    monkeypatch.setattr(_StubZhang, "parse", _parse3)
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+    assert len((await runner.state(tid))["spec"]["toc"]) == 3
+
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    state = await runner.state(tid)
+    assert state["stage"] == "paused", "取消后应停在 paused（而不是 done/outline_review）"
+    assert await _db_stage(db_path, tid) == "paused"
+    done_ids = [s["id"] for s in state["spec"]["toc"]
+                if (state["spec"]["outline_matrix"].get(s["id"]) or {}).get("requirement")]
+    assert done_ids == ["s1"], done_ids
+
+    # 图已收尾 → 普通 resume 是空跑（这是"点了没反应"的根因），先锚住这个事实
+    import orchestrator.runner as _runner_mod
+    snap_next = None
+    async with runner._checkpointer_provider() as saver:
+        g = runner._build(saver, None, thread_id=tid)
+        snap_next = (await g.aget_state({"configurable": {"thread_id": tid}})).next
+    assert snap_next == (), f"暂停收尾后 next 应为空，实际 {snap_next}"
+
+    # 再点确认 = resume_extract：只跑剩下的 s2/s3
+    before_calls = len(seen)
+    runner._runs[tid].cancel_flag = False
+    await runner.resume_extract(tid)
+    await _wait_task(runner._runs[tid])
+
+    assert len(seen) > before_calls, "resume_extract 必须真的再次进入 extract（不是空跑）"
+    assert seen[-1] == ["s2", "s3"], f"只该跑剩余章节，实际 {seen[-1]}"
+    assert (await runner.state(tid))["cancel_requested"] is False
+
+
+async def test_failed_section_is_retried_but_no_source_is_skipped(runner_env, monkeypatch):
+    """失败章节必须能重试；无原文章节跳过即可。
+
+    以前两者落库后都是 status='outline_done'（8 字段全空），无法区分 —— 界面把失败
+    当成"已提炼"，页面显示「提炼完成」而字段是空的，用户也没法重试。
+    """
+    runner, project_id, db_path = runner_env
+    import inspect as _inspect
+
+    rounds: list[list[str]] = []
+
+    async def _parse3(self, sources, *, progress_callback=None):
+        from agents.zhang_heng import SpecParseResult
+        return SpecParseResult(
+            doc_id="d1", doc_title="规范书", doc_summary="摘要",
+            toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
+                               special_marks=[]) for i in (1, 2, 3)],
+        )
+
+    async def _extract(self, toc, *, on_section=None, on_section_start=None, should_cancel=None):
+        rounds.append([s.id for s in toc])
+        out = {}
+        for s in toc:
+            if s.id == "s2":
+                row = OutlineMatrixRow(block_id=s.id, title=s.title,
+                                       error="全部 API 失败：测试", error_kind="failed")
+            elif s.id == "s3":
+                row = OutlineMatrixRow(block_id=s.id, title=s.title,
+                                       error="本章节没有可提炼的原文", error_kind="no_source")
+            else:
+                row = OutlineMatrixRow(block_id=s.id, title=s.title, requirement="r")
+            out[s.id] = row
+            if on_section:
+                rv = on_section(s, row)
+                if _inspect.isawaitable(rv):
+                    await rv
+        return out
+
+    monkeypatch.setattr(_StubZhang, "parse", _parse3)
+    monkeypatch.setattr(_StubZhang, "extract", _extract)
+
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])
+
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        rows = {r["block_id"]: dict(r) for r in await (await conn.execute(
+            "SELECT block_id, status, error, error_kind FROM blocks ORDER BY order_idx")).fetchall()}
+    assert rows["s1"]["error_kind"] in ("", None)
+    assert rows["s2"]["error_kind"] == "failed" and "全部 API 失败" in (rows["s2"]["error"] or "")
+    assert rows["s3"]["error_kind"] == "no_source"
+
+    # 失败要写进 run 级 errors（刷新后仍能看到信号）
+    errs = (await runner.state(tid)).get("errors") or []
+    assert any("提炼失败" in (e.get("message") or "") for e in errs), errs
+
+    # 再「继续提炼」：只重试失败的那节（无原文/已成功的都跳过）
+    rounds.clear()
+    await runner.resume_extract(tid)
+    await _wait_task(runner._runs[tid])
+    assert rounds and rounds[-1] == ["s2"], f"只该重试失败章节，实际 {rounds}"
+
+
+async def test_structure_edit_prunes_matrix(runner_env):
+    """删掉章节后，spec.outline_matrix 里的对应条目要一起消失。
+
+    矩阵是整版替换的；残留条目会被 generate 的"toc 之外兜底"当成章节生成正文 ——
+    用户删掉的章节又长回来。
+    """
+    runner, project_id, _ = runner_env
+    tid = await runner.start(project_id, config={})
+    await _wait_task(runner._runs[tid])
+    await runner.resume(tid, user_choice="approve")
+    await _wait_task(runner._runs[tid])          # stub 只有 s1，矩阵里就是它
+
+    # 再补一条"目录里没有"的矩阵条目（模拟历史残留）
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        cfg = {"configurable": {"thread_id": tid}}
+        snap = await graph.aget_state(cfg)
+        matrix = dict((snap.values.get("spec") or {}).get("outline_matrix") or {})
+        matrix["s-ghost"] = {"block_id": "s-ghost", "title": "已删除的章节", "requirement": "r"}
+        await graph.aupdate_state(cfg, {"spec": {"outline_matrix": matrix}})
+
+    # 目录结构编辑：只保留 s1（等价于把 s-ghost 从目录里去掉）
+    await runner.update_outline_structure(
+        tid, [{"block_id": "s1", "level": 1, "title": "技术方案"}],
+    )
+
+    state = await runner.state(tid)
+    matrix2 = (state.get("spec") or {}).get("outline_matrix") or {}
+    assert "s-ghost" not in matrix2, "目录外的矩阵条目必须被裁掉"
+    assert "s1" in matrix2, "目录内的条目不能误删"

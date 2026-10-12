@@ -33,6 +33,9 @@ class FakeRunner:
         self.calls.append(("resume", (thread_id, user_choice, edits)))
         if thread_id == "missing":
             raise KeyError(thread_id)
+        # 同一 thread 已有后台 task 在跑（刷新页面/第二个标签页重复确认）
+        if thread_id == "busy":
+            raise ValueError("当前任务仍在运行，请等待完成后再操作")
 
     async def regen(self, thread_id, block_ids):
         self.calls.append(("regen", (thread_id, list(block_ids))))
@@ -63,18 +66,40 @@ class FakeRunner:
         self.calls.append(("resume_generation", (thread_id,)))
         if thread_id == "missing":
             raise KeyError(thread_id)
+        if thread_id == "busy":
+            raise ValueError("当前任务仍在运行，请等待完成后再操作")
 
-    async def rerun_match(self, thread_id):
-        self.calls.append(("rerun_match", (thread_id,)))
-        if thread_id == "missing":
-            raise KeyError(thread_id)
-
-    async def redraft_outline(self, thread_id, instruction):
-        self.calls.append(("redraft_outline", (thread_id, instruction)))
+    async def rerun_match(self, thread_id, *, full: bool = False):
+        self.calls.append(("rerun_match", (thread_id, full)))
         if thread_id == "missing":
             raise KeyError(thread_id)
         if thread_id == "busy":
             raise ValueError("当前任务仍在运行，请等待完成后再操作")
+
+    async def redraft_outline(self, thread_id, instruction):
+        from orchestrator.runner import WorkflowAbortedError
+
+        self.calls.append(("redraft_outline", (thread_id, instruction)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+        if thread_id == "aborted":
+            raise WorkflowAbortedError("该工作流已作废，请创建新的工作流")
+        if thread_id == "busy":
+            raise ValueError("当前任务仍在运行，请等待完成后再操作")
+
+    async def update_outline_structure(self, thread_id, nodes, *, purge=False):
+        from domain.spec.structure import StructureError, validate_structure
+
+        self.calls.append(("update_outline_structure", (thread_id, nodes, purge)))
+        if thread_id == "missing":
+            raise KeyError(thread_id)
+        if thread_id == "busy":
+            raise ValueError("当前任务仍在运行，请等这一步结束后再调整目录")
+        clean = validate_structure(nodes)          # 非法时抛 StructureError
+        return {"created": 0, "updated": len(clean), "removed": 0, "kept": 0,
+                "total": len(clean),
+                "nodes": [{"block_id": n["block_id"], "level": n["level"],
+                           "title": n["title"]} for n in clean]}
 
     async def recover(self, thread_id):
         self.calls.append(("recover", (thread_id,)))
@@ -217,7 +242,7 @@ async def test_rerun_match_ok(client, runner):
     r = await client.post("/api/workflow/tid-1/rerun-match")
     assert r.status_code == 200
     assert r.json() == {"thread_id": "tid-1", "status": "rerunning_match"}
-    assert runner.calls[0] == ("rerun_match", ("tid-1",))
+    assert runner.calls[0] == ("rerun_match", ("tid-1", False))
 
 
 async def test_state_ok(client, runner):
@@ -387,5 +412,116 @@ async def test_redraft_outline_busy_returns_409(client, runner):
     """工作流正在跑 / 不在闸门 1：runner 抛 ValueError → 409，不是 500。"""
     workflow_routes.set_runner(runner)
     r = await client.post("/api/workflow/busy/redraft-outline", json={})
+    assert r.status_code == 409
+    assert "仍在运行" in r.json()["detail"]
+
+
+# ─────────────────────────────────────────────
+# 目录结构编辑（增删改 / 排序）
+# ─────────────────────────────────────────────
+
+async def test_outline_structure_ok(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/tid-1/outline-structure", json={
+        "nodes": [
+            {"block_id": "s1", "level": 1, "title": "技术方案"},
+            {"block_id": "s2", "level": 2, "title": "方案先进性"},
+        ],
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "structure_updated"
+    assert body["total"] == 2
+    # 响应必须带服务端归一化后的结构：前端据此重绘，才不会与库里的权威结构发散
+    assert body["nodes"] == [
+        {"block_id": "s1", "level": 1, "title": "技术方案"},
+        {"block_id": "s2", "level": 2, "title": "方案先进性"},
+    ]
+    assert runner.calls[-1][0] == "update_outline_structure"
+    assert runner.calls[-1][1][2] is False        # 默认不带 purge（保留正文）
+
+
+async def test_outline_structure_unknown_thread_404(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/missing/outline-structure", json={
+        "nodes": [{"block_id": "s1", "level": 1, "title": "A"}],
+    })
+    assert r.status_code == 404
+
+
+async def test_outline_structure_invalid_400(client, runner):
+    workflow_routes.set_runner(runner)
+    """空标题 / 空目录 / id 重复 → 400，且消息可直接展示给用户。"""
+    r = await client.post("/api/workflow/tid-1/outline-structure", json={
+        "nodes": [{"block_id": "s1", "level": 1, "title": "  "}],
+    })
+    assert r.status_code == 400
+    assert "标题不能为空" in r.json()["detail"]
+
+    r = await client.post("/api/workflow/tid-1/outline-structure", json={"nodes": []})
+    assert r.status_code == 400
+    assert "不能为空" in r.json()["detail"]
+
+
+async def test_outline_structure_busy_409(client, runner):
+    workflow_routes.set_runner(runner)
+    """任务运行中调整结构 → 409（一边写一边被读会打架）。"""
+    r = await client.post("/api/workflow/busy/outline-structure", json={
+        "nodes": [{"block_id": "s1", "level": 1, "title": "A"}],
+    })
+    assert r.status_code == 409
+    assert "仍在运行" in r.json()["detail"]
+
+
+async def test_redraft_outline_on_aborted_thread_returns_code(client, runner):
+    """已作废的 thread → 409 + X-Error-Code，前端据此自动切到最近一次可用运行。
+
+    只给中文提示的话，用户不知道该点哪里，页面会一直卡在这个死线程上
+    （后续每个动作都打向它）。
+    """
+    workflow_routes.set_runner(runner)
+
+    r = await client.post("/api/workflow/aborted/redraft-outline", json={"instruction": "x"})
+
+    assert r.status_code == 409
+    assert r.headers.get("X-Error-Code") == "workflow_aborted"
+    assert "已作废" in r.json()["detail"]
+
+
+async def test_outline_structure_forwards_purge_flag(client, runner):
+    """用户选「移除并删除正文」时 purge 必须透传到 runner（否则正文会留下来继续被导出）。"""
+    workflow_routes.set_runner(runner)
+
+    r = await client.post("/api/workflow/tid-1/outline-structure", json={
+        "nodes": [{"block_id": "s1", "level": 1, "title": "保留的章节"}],
+        "purge": True,
+    })
+
+    assert r.status_code == 200
+    assert runner.calls[-1][1][2] is True
+
+
+# ── 运行中互斥：409 而不是 500 ────────────────────────────
+# runner._assert_idle 在续跑入口抛 ValueError。路由必须把它映射成 409 + detail，
+# 前端才能把「当前任务仍在运行」写进状态栏（否则用户看到的是 500 / 点了没反应）。
+
+async def test_resume_busy_returns_409(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/busy/resume", json={"user_choice": "approve"})
+    assert r.status_code == 409
+    assert "仍在运行" in r.json()["detail"]
+
+
+async def test_rerun_match_busy_returns_409(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/busy/rerun-match")
+    assert r.status_code == 409
+    assert "仍在运行" in r.json()["detail"]
+
+
+async def test_resume_generation_busy_returns_409(client, runner):
+    workflow_routes.set_runner(runner)
+    r = await client.post("/api/workflow/busy/resume-generation")
     assert r.status_code == 409
     assert "仍在运行" in r.json()["detail"]

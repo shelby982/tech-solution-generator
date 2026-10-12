@@ -10,10 +10,12 @@
 
 import inspect
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, BinaryIO, Callable, Optional, Union
 
 from domain.spec import OutlineMatrixRow
+from domain.spec.field_normalize import normalize_row_fields
 from domain.spec import Section as DomainSection
 from domain.spec.outline_draft import (
     MIN_TOP_LEVEL_NODES,
@@ -43,6 +45,9 @@ class SpecParseResult:
     # 所以恒为空串；字段与它的消费方（state、闸门 1）保留不动 —— 恢复摘要时
     # 不该还要回头改这条链路。
     doc_summary_error: str = ""
+    # 解析失败或被跳过（解析成功但 0 章节）的文件名。非空时由 parse 节点写进
+    # spec.parse_failed_files，闸门 1 展示 —— 静默缺席会让用户以为它参与了派生。
+    failed_files: list[str] = field(default_factory=list)
 
 
 # ─────────────────────────────────────────────
@@ -152,17 +157,50 @@ def _best_overlap_section(query: str, source_sections, tokenize_fn):
 class OutlineDraftResult:
     """draft_outline 的产出。
 
-    degraded=True 表示未采用模型输出，``sections`` 是规范书原始目录（等价改造前
     的行为），``error`` 写明原因供前端展示。
     """
     sections: list[DomainSection]
-    degraded: bool = False
     error: str = ""
 
 
 # ─────────────────────────────────────────────
 # Agent
 # ─────────────────────────────────────────────
+
+def named_files_in(instruction: str, file_names: list[str]) -> list[str]:
+    """要求在文字里**点名**了哪几份文件（整名或去扩展名的主干都能认）。
+
+    「按照评分表拆分章节」这类说法里没有标包/标段词族，区段定位与模型兜底的门控
+    都不会触发 —— 而它恰恰是最常见的诉求（评分表本身就是拆章依据）。这里做**确定性**
+    的文件名匹配：命中就把那份文件的章节整体当材料，连一次模型调用都不用花。
+    """
+    text = re.sub(r"\s+", "", instruction or "").lower()
+    if not text:
+        return []
+    picked = []
+    for name in file_names or []:
+        clean = re.sub(r"\s+", "", str(name or "")).lower()
+        if not clean:
+            continue
+        stem = clean.rsplit(".", 1)[0] if "." in clean else clean
+        if clean in text or (len(stem) >= 2 and stem in text):
+            picked.append(name)
+    return picked
+
+
+class RequirementParseError(RuntimeError):
+    """要求文件**全部**解析失败（单份失败只跳过并记录，不抛）。"""
+
+
+class OutlineDraftError(RuntimeError):
+    """目录派生失败。
+
+    **不降级**：派生失败时不再偷偷沿用规范书原始目录 —— 那份目录不是模型按提炼要求
+    拆的，用户会误以为派生成功（实测踩过：`outline_error=Connection error.`，页面
+    照常显示原始目录，用户还按它往下走）。现在直接抛，由 runner 把运行标成 failed，
+    前端明确报错并提供「重新拆分目录」重试。
+    """
+
 
 class ZhangHengAgent:
     """张衡：规范书解析与 8 字段响应矩阵提炼。"""
@@ -206,19 +244,44 @@ class ZhangHengAgent:
         if not sources:
             raise ValueError("没有可解析的要求文件")
 
-        docs = []
+        # (ParsedDocument, 文件名) —— 配对在**解析成功时**就定下来：
+        # 跳过的文件不在列表里，用 zip(docs, sources) 会整体错位（坏文件的名字
+        # 会安到后面那份好文件的章节上，进而是按区段切段时切错文件）。
+        parsed_docs: list[tuple[object, str]] = []
+        failed_files: list[str] = []
         for idx, (file_source, suffix, filename) in enumerate(sources, start=1):
             # parse_document 是同步且耗时（解析 docx/pdf）。直接 await 会阻塞事件循环，
             # 导致 SSE emitter 的 stream() 在解析期间一帧都吐不出。扔到后台线程跑。
-            docs.append(await asyncio.to_thread(
-                parse_document,
-                file_source,
-                suffix=suffix,
-                filename=filename,
-                progress_callback=_label_progress(
-                    progress_callback, filename, idx, len(sources),
-                ),
-            ))
+            try:
+                doc = await asyncio.to_thread(
+                    parse_document,
+                    file_source,
+                    suffix=suffix,
+                    filename=filename,
+                    progress_callback=_label_progress(
+                        progress_callback, filename, idx, len(sources),
+                    ),
+                )
+            except Exception as e:
+                # **单份隔离**：磁盘缺文件那条路早就只告警跳过了（main.py），
+                # 但「文件在、内容坏」（损坏 PDF / 旧版 .doc 无转换器 / 不支持的格式）
+                # 之前会让整次解析失败 —— 规范书+评分表+评审要素里坏一份，全部白解析。
+                logger.warning(f"张衡：要求文件「{filename}」解析失败，跳过：{e}")
+                failed_files.append(filename or f"第 {idx} 份文件")
+                continue
+            parsed_docs.append((doc, filename))
+            if not doc.sections:
+                # 解析成功但一个章节都没有（无文字层且 OCR 无输出 / 空文档）：
+                # 静默缺席会让用户以为它参与了，这里记下来回传前端
+                logger.warning(f"张衡：要求文件「{filename}」没有解析出任何章节")
+                failed_files.append(f"{filename}（无章节）")
+
+        if not parsed_docs:
+            raise RequirementParseError(
+                "要求文件全部解析失败："
+                + "、".join(failed_files or ["未知原因"])
+                + "。请检查文件格式（支持 PDF / DOCX / DOC）与内容是否可读"
+            )
 
         # infra Section → domain Section。
         # 每份文档的 section id 都是 s1..sN，直接拼接会撞车，所以按拼接后的
@@ -226,7 +289,7 @@ class ZhangHengAgent:
         # 重新编号不影响任何下游语义。
         toc: list[DomainSection] = []
         doc_titles: list[str] = []
-        for doc in docs:
+        for doc, filename in parsed_docs:
             if doc.title:
                 doc_titles.append(doc.title)
             for s in doc.sections:
@@ -236,6 +299,8 @@ class ZhangHengAgent:
                     title=s.title,
                     raw_content=s.raw_content,
                     special_marks=list(s.special_marks),
+                    # 多份文件拼接后文件边界只剩这一处线索（见 Section.source_file）
+                    source_file=filename or "",
                 ))
 
         # 摘要生成暂时停用（2026-09-17）。
@@ -255,12 +320,19 @@ class ZhangHengAgent:
         doc_summary = ""
         doc_summary_error = ""
 
+        # 多份文件时 doc_title 用**文件名**拼接：各文档的 doc.title 是解析器猜的
+        # （pdf 路径常常只是正文第一个一级标题），几份拼起来既不是标题也不含来源信息。
+        if len(parsed_docs) > 1:
+            doc_title = "、".join(name for _doc, name in parsed_docs if name) or "、".join(doc_titles)
+        else:
+            doc_title = doc_titles[0] if doc_titles else ""
         return SpecParseResult(
-            doc_id=docs[0].doc_id,
-            doc_title="、".join(doc_titles),
+            doc_id=parsed_docs[0][0].doc_id,
+            doc_title=doc_title,
             doc_summary=doc_summary,
             toc=toc,
             doc_summary_error=doc_summary_error,
+            failed_files=failed_files,
         )
 
     # ── draft_outline ──────────────────────────
@@ -279,35 +351,29 @@ class ZhangHengAgent:
         grounding 回的 raw_content/special_marks），8 字段章节要求仍由 ``extract``
         逐节点填。职责边界与改造前一致，只是 toc 的来源从正则变成了模型。
 
-        任何失败都不抛：降级为「沿用规范书原始目录」并把原因写进 ``error``，
-        让用户能在闸门 1 看到并决定是否重出。
+        **失败即抛** :class:`OutlineDraftError`（不再降级沿用原始目录）：原始目录不是
+        按用户提炼要求拆的，静默展示会让用户以为派生成功。调用方（节点 / runner）负责
+        把运行标成 failed 并把原因显示给用户，用户可点「重新拆分目录」重试。
         """
         from agents.prompts import build_spec_digest
 
         if not source_toc:
-            return OutlineDraftResult(
-                sections=[], degraded=True, error="要求文件目录为空，无法派生应答目录",
-            )
-
-        def _fallback(reason: str) -> OutlineDraftResult:
-            logger.warning(f"张衡：目录派生降级（{reason}），沿用要求文件原始目录")
-            return OutlineDraftResult(
-                sections=[DomainSection(**s.to_dict()) for s in source_toc],
-                degraded=True,
-                error=reason,
-            )
+            raise OutlineDraftError("目录派生失败：要求文件里没有解析出任何章节")
 
         configs, rr_start = self._configs_provider()
         if not configs:
-            return _fallback("未配置模型，沿用要求文件原目录")
+            raise OutlineDraftError(
+                "目录派生失败：未配置可用模型，请先在「设置」中添加模型配置"
+            )
 
         # 先按提炼要求定位「用文件的哪一部分」，再拿这部分去派生。
         # 整份文件灌进去时，招标公告/资格要求/合同范本会把真正要的章节挤出预算。
         flat = [
-            {"title": s.title, "content": s.raw_content, "level": s.level}
+            {"title": s.title, "content": s.raw_content, "level": s.level,
+             "source_file": getattr(s, "source_file", "") or ""}
             for s in source_toc
         ]
-        digest_sections, follow_structure = await self._locate_for_digest(
+        digest_sections, follow_structure, locate_note = await self._locate_for_digest(
             flat, instruction, configs, rr_start,
         )
 
@@ -329,24 +395,37 @@ class ZhangHengAgent:
         try:
             raw = await infra.llm.dispatch_outline_draft_json(configs, rr_start, payload)
         except Exception as e:
-            return _fallback(f"模型调用失败：{e}")
+            logger.warning(f"张衡：目录派生失败，模型调用异常：{e}")
+            raise OutlineDraftError(f"目录派生失败：模型调用失败：{e}") from e
+
+        # 输出被截断时抢救出的目录只是部分成功 —— 让用户在闸门看到，而不是
+        # 只看目录少了几节。占位符由 dispatcher 在抢救路径上放置。
+        truncated = raw.get("_truncated_nodes") if isinstance(raw, dict) else None
+        notes: list[str] = []
+        if truncated:
+            notes.append(
+                f"模型输出被截断，仅保留前 {int(truncated)} 个章节，"
+                f"建议删掉过长的提炼要求后点「重新拆分目录」重试"
+            )
 
         nodes, warnings = normalize_nodes(raw.get("nodes"))
         sections = build_sections(nodes)
 
         if not sections:
-            return _fallback("模型输出无法解析出目录节点")
+            raise OutlineDraftError("目录派生失败：模型输出无法解析出目录节点")
         if count_top_level(sections) < MIN_TOP_LEVEL_NODES:
-            return _fallback(
-                f"目录结构不完整（仅 {count_top_level(sections)} 个一级章节）"
+            raise OutlineDraftError(
+                f"目录派生失败：目录结构不完整（仅 {count_top_level(sections)} 个一级章节，"
+                f"至少需要 {MIN_TOP_LEVEL_NODES} 个）"
             )
 
         _ground_sections(sections, source_toc)
 
+        # note（范围没定位到 / 输出被截断）排在最前：它们比 normalize 的告警更需要用户先看到
+        messages = ([locate_note] if locate_note else []) + notes + list(warnings)
         return OutlineDraftResult(
             sections=sections,
-            degraded=False,
-            error="；".join(warnings),
+            error="；".join(messages),
         )
 
     async def _locate_for_digest(
@@ -373,16 +452,43 @@ class ZhangHengAgent:
            这条路只是「挑出相关章节」，没定位到用户点名的部分，结构仍由模型组织。
         """
         from infra.retrieval.locate import locate_sections
-        from infra.retrieval.segment import extract_scope_tokens, locate_segments
+        from infra.retrieval.segment import (
+            diagnose_scope_miss, extract_scope_tokens, locate_segments,
+        )
 
+        known_files = sorted({s["source_file"] for s in flat if s.get("source_file")})
         segments = locate_segments(flat, instruction)
+        note = ""
+
+        # 先看要求里是否**点名了文件**（「按评分表拆」）——这是确定性的，不用调模型。
+        named = named_files_in(instruction, known_files)
+        if segments is None and named:
+            scoped = [s for s in flat if s.get("source_file") in named]
+            if scoped:
+                return (
+                    [{"title": s["title"], "content": s["content"]} for s in scoped],
+                    True,
+                    f"已按文件名定位到：{'、'.join(named)}",
+                )
 
         # 只有「用户确实点了范围、却哪儿都认不出」才值得多花一次模型调用；
         # 要求里压根没有范围标识时（「按评分项逐条拆章」），模型也无从下手。
         if segments is None and extract_scope_tokens(instruction):
-            keyword = await self._model_scope_keyword(
+            keyword, picked_files = await self._model_scope_keyword(
                 instruction, [s["title"] for s in flat], configs, rr_start,
+                file_names=known_files,
             )
+            # 「按评分表拆章」这类**点名文件**的说法：模型认出是哪一份，就把那份文件的
+            # 章节整体当作材料（结构锁死 = 照它的章节组织，不再由模型重新组织）。
+            if picked_files:
+                scoped = [s for s in flat if s.get("source_file") in picked_files]
+                if scoped:
+                    return (
+                        [{"title": s["title"], "content": s["content"]} for s in scoped],
+                        True,
+                        f"已按文件名定位到 {len(picked_files)} 份材料"
+                        f"（{'、'.join(picked_files)}）",
+                    )
             if keyword:
                 segments = locate_segments(flat, keyword)
 
@@ -393,7 +499,15 @@ class ZhangHengAgent:
                     for s in segments
                 ],
                 True,
+                note,
             )
+
+        # 没定位到：如果用户点名了范围，必须让他在闸门看得到（并给出下一步），
+        # 否则目录是按全文拆的，用户却以为「按标包2 拆」生效了。
+        reason = diagnose_scope_miss(flat, instruction)
+        if reason:
+            note = (f"{reason}；已按全量材料拆分目录 —— "
+                    f"可改写在提炼要求里的说法后点「重新拆分目录」重试")
 
         located = locate_sections(flat, instruction)
         return (
@@ -402,6 +516,7 @@ class ZhangHengAgent:
                 for i in located
             ],
             False,
+            note,
         )
 
     async def _model_scope_keyword(
@@ -410,30 +525,42 @@ class ZhangHengAgent:
         titles: list[str],
         configs: list,
         rr_start: int,
-    ) -> str:
-        """兜底：让模型把要求里的说法换成文档里的字面标识。失败返回空串。"""
+        file_names: Optional[list[str]] = None,
+    ) -> tuple[str, list[str]]:
+        """兜底：让模型把要求里的说法换成文档里的字面标识。
+
+        返回 ``(检索关键词, 命中的文件名)``。prompt 一直要求模型同时给出 ``files``，
+        但旧实现只取 ``keywords``、还恒传空 ``file_names`` —— 于是「按评分表拆」这种
+        **点名文件**的说法完全没救。失败返回 ``("", [])``。
+        """
         import infra.llm
 
+        known = [n for n in (file_names or []) if n]
         try:
             obj = await infra.llm.dispatch_scope_select_json(configs, rr_start, {
                 "instruction": instruction,
-                # 文件名没传到这一层（SpecLoader 元组里才有），只给章节标题
-                "file_names": [],
+                "file_names": known,
                 "section_titles": titles,
             })
         except Exception as e:
             logger.warning(f"张衡：检索范围兜底失败，退回章级定位：{e}")
-            return ""
+            return "", []
 
         keywords = [
             str(k).strip()
             for k in (obj.get("keywords") or [])
             if isinstance(k, (str, int, float)) and str(k).strip()
         ]
-        if not keywords:
-            return ""
-        logger.info(f"张衡：模型圈定的检索关键词 {keywords}")
-        return " ".join(keywords)
+        # 只采信**确实存在**的文件名（模型可能编一个）
+        picked_files = [
+            name for name in (str(f).strip() for f in (obj.get("files") or []))
+            if name and name in known
+        ]
+        if picked_files:
+            logger.info(f"张衡：模型圈定文件 {picked_files}")
+        if keywords:
+            logger.info(f"张衡：模型圈定的检索关键词 {keywords}")
+        return " ".join(keywords), picked_files
 
     # ── extract ────────────────────────────────
 
@@ -449,6 +576,7 @@ class ZhangHengAgent:
         on_section_start: Optional[
             Callable[[DomainSection], Optional[Awaitable[None]]]
         ] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> dict[str, OutlineMatrixRow]:
         """对 toc 中每个 section 做 8 字段提炼。
 
@@ -458,6 +586,9 @@ class ZhangHengAgent:
         on_section: 每完成一章节立即回调一次，签名 (section, row) → None | awaitable[None]。
         on_section_start: 章节真正开始处理时（拿到信号量、调 LLM 前）回调一次，
                          前端用它把卡片切到"提炼中"状态，避免并发等待期看不到反馈。
+
+        should_cancel: 逐节取消探测（runner 的 _Run.cancel_flag）。为真时**停止后续章节**，
+        已完成的照常返回 —— 用于用户点「取消」时不再把剩余章节的模型调用烧掉。
 
         失败的章节：行的 8 字段保持默认空，error 字段写错误描述，不抛错（per spec §3）。
 
@@ -500,6 +631,7 @@ class ZhangHengAgent:
                 await _fire(s, row)
             return matrix
 
+        normalized_sections = 0
         # 构造 sections 列表交给 dispatch_outline_json
         sections_for_extract: list[dict[str, Any]] = []
         for s in toc:
@@ -527,14 +659,18 @@ class ZhangHengAgent:
         except (TypeError, ValueError):
             supports_on_start = False
 
+        dispatch_kwargs: dict[str, Any] = {}
         if supports_on_start:
-            gen = infra.llm.dispatch_outline_json(
-                configs, rr_start, sections_for_extract, on_start=_dispatch_on_start,
-            )
-        else:
-            gen = infra.llm.dispatch_outline_json(
-                configs, rr_start, sections_for_extract,
-            )
+            dispatch_kwargs["on_start"] = _dispatch_on_start
+        # 逐节取消：dispatch 内部每节前检查一次（旧 stub 不接受该参数 → 签名探测）
+        try:
+            if "should_cancel" in inspect.signature(infra.llm.dispatch_outline_json).parameters:
+                dispatch_kwargs["should_cancel"] = should_cancel
+        except (TypeError, ValueError):
+            pass
+        gen = infra.llm.dispatch_outline_json(
+            configs, rr_start, sections_for_extract, **dispatch_kwargs,
+        )
 
         matrix: dict[str, OutlineMatrixRow] = {}
         seq_fallback_idx = 0
@@ -568,21 +704,37 @@ class ZhangHengAgent:
                 ),
                 indicators=str(item.get("indicators", "") or ""),
                 error=str(item.get("error", "") or ""),
+                error_kind=str(item.get("error_kind", "") or ""),
             )
+            # 字段口径兜底：把"评分档位/得分规则"从 requirement 挪到 score_items。
+            # 模型不保证听话，历史数据也不会因改 prompt 而变好；这一步是确定性的
+            # （见 domain/spec/field_normalize.py 的说明）。
+            moved = normalize_row_fields(row).get("moved") or []
+            if moved:
+                normalized_sections += 1
+                logger.info(f"张衡：{section.id} 从 requirement 挪走 {len(moved)} 条评分口径 → score_items")
             matrix[section.id] = row
             await _fire(section, row)
 
-        # toc 中存在但 results 缺少的章节兜底（防 dispatch bug）
-        for section in toc:
-            if section.id not in matrix:
-                row = OutlineMatrixRow(
-                    block_id=section.id,
-                    title=section.title,
-                    error="提炼缺失",
-                )
-                matrix[section.id] = row
-                await _fire(section, row)
+        # toc 中存在但 results 缺少的章节兜底（防 dispatch bug）。
+        # **取消时不补**：补出来的空行会以 status='outline_done' 落库（8 字段全空、
+        # error=「提炼缺失」），前端按 status 判定就成了"已提炼" —— 取消后页面显示
+        # 「提炼完成」而 8 字段是空的，用户根本判断不出到底跑没跑，也没法"继续提炼"
+        # （skip_ids 要求 key_points/requirement 非空，空行本来不会被跳过，但会被算成已完成）。
+        # 取消时让这些章节保持"未提炼"，继续提炼时重新排队。
+        if not (should_cancel and should_cancel()):
+            for section in toc:
+                if section.id not in matrix:
+                    row = OutlineMatrixRow(
+                        block_id=section.id,
+                        title=section.title,
+                        error="提炼缺失",
+                    )
+                    matrix[section.id] = row
+                    await _fire(section, row)
 
+        if normalized_sections:
+            logger.info(f"张衡：{normalized_sections} 个章节的评分口径已从 requirement 归位到 score_items")
         return matrix
 
 

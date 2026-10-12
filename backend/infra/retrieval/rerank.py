@@ -10,6 +10,7 @@ from typing import Optional
 
 from agents.prompts import RERANK_SYSTEM, build_rerank_user
 from infra.llm import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
+from infra.llm import errors as llm_errors
 from infra.llm.clients import generate_oneshot_openai, generate_oneshot_claude
 from infra.llm.json_utils import extract_json_object as _extract_json_object
 
@@ -22,11 +23,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Match:
-    """单条素材重排后的匹配结果。Phase 2 会移到 domain/material/models.py。"""
+    """单条素材匹配结果。
+
+    ``content`` 及其后面的字段是"匹配阶段 → 撰写阶段"契约的一部分（见 MaterialEvidence）：
+    **撰写阶段必须拿到素材原文**，而不是只有一句 rerank 评语（``reason``）。
+    旧数据没有这些字段，所以全部可选、默认空。
+    """
     chunk_id: object
     score: float
     reason: str
     hit_points: list[str] = field(default_factory=list)
+    content: str = ""            # 素材原文（撰写阶段引用它）
+    filename: str = ""           # 出处：文件名
+    locator: str = ""            # 出处：第 N 段（P1 升级为页码/锚点）
+    kind: str = ""               # fact | solution | background
+    source_kind: str = ""        # ours | tender
+    by: str = ""                 # rule | semantic | model | human
+    confidence: float = 0.0
+    locked: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -61,16 +75,18 @@ async def llm_rerank(
     user_prompt = build_rerank_user(chunks, query, requirement)
     last_error: Optional[Exception] = None
 
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = llm_errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 raw = await generate_oneshot_openai(
                     config, RERANK_SYSTEM, user_prompt, max_tokens=2000,
+                    call_site="rerank",
                 )
             else:
                 raw = await generate_oneshot_claude(
                     config, RERANK_SYSTEM, user_prompt, max_tokens=2000,
+                    call_site="rerank",
                 )
 
             obj = _extract_json_object(raw)
@@ -97,10 +113,15 @@ async def llm_rerank(
 
         except Exception as e:
             last_error = e
+            kind = llm_errors.note_failure(config, e)
             logger.warning(
                 f"llm_rerank API [{config.provider}/{config.model}] 失败"
-                f"（{i + 1}/{n}）：{e}"
+                f"（{i + 1}/{len(usable)}，{llm_errors.describe_error(e)}）：{e}"
             )
+            if llm_errors.blocks_chain(kind):
+                break
 
-    logger.error(f"llm_rerank 全部 {n} 个 API 均失败：{last_error}")
+    logger.error(
+        f"llm_rerank 无可用 API：{llm_errors.exhausted_summary(configs, last_error)}"
+    )
     return []

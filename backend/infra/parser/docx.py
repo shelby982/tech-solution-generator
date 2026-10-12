@@ -16,7 +16,6 @@ from typing import Optional, Callable, Union, BinaryIO
 from ._ocr import ocr_image
 from .toc import (
     Section, ParsedDocument, TocEntry, Block,
-    HEADING_PATTERNS,
     _TOC_STYLES, _MANUAL_TOC_MARKERS, _SPECIAL_MARK_RE,
     extract_special_marks, detect_level_from_numbering, clean_title,
     _toc_style_to_level, _clean_toc_line, rows_to_markdown,

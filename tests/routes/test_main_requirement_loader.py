@@ -44,8 +44,12 @@ async def seeded(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_loads_every_requirement_role_in_upload_order(seeded):
-    """四种要求角色都算数，按上传顺序返回 —— 不再只认 role='spec'。"""
+async def test_loads_every_requirement_role_in_role_priority_order(seeded):
+    """四种要求角色都算数，按**角色优先级**返回（主招标/规范书在前）—— 不再只认 role='spec'。
+
+    顺序即拼接顺序、也是 digest 吃预算的顺序：主招标文件定义章节骨架，先吃预算；
+    同档内仍按上传顺序（id）稳定。展示顺序与此一致（list_materials 共用同一片段）。
+    """
     await seeded("main_rfp", "招标文件.pdf")
     await seeded("scoring", "评分表.pdf")
     await seeded("evaluation", "评审要素.pdf")
@@ -53,8 +57,9 @@ async def test_loads_every_requirement_role_in_upload_order(seeded):
 
     sources = await main_module._load_spec_for_project(1)
 
+    # 同档内按上传顺序（id）稳定：main_rfp(id1) 与 spec(id4) 同属第一档 → id 小的在前
     assert [name for _, _, name in sources] == [
-        "招标文件.pdf", "评分表.pdf", "评审要素.pdf", "规范书.pdf",
+        "招标文件.pdf", "规范书.pdf", "评分表.pdf", "评审要素.pdf",
     ]
     assert all(suffix == ".pdf" for _, suffix, _ in sources)
     assert sources[0][0].read().startswith(b"%PDF")

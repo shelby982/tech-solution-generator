@@ -98,7 +98,7 @@ async def test_review_parses_valid_response(monkeypatch):
         "strengths": ["架构清晰", "技术指标响应完整"],
     }, ensure_ascii=False)
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return fake_response
 
     monkeypatch.setattr("agents.bao_zheng.generate_oneshot_openai", fake_oneshot)
@@ -122,7 +122,7 @@ async def test_review_clamps_score_to_0_100(monkeypatch):
     """score 超出 [0, 100] 被 clamp。"""
     monkeypatch.setenv("LLM_MODE", "mock")
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return json.dumps({"score": 150, "issues": [], "strengths": []})
 
     monkeypatch.setattr("agents.bao_zheng.generate_oneshot_openai", fake_oneshot)
@@ -140,7 +140,7 @@ async def test_review_handles_invalid_json(monkeypatch):
     """LLM 返回非 JSON：Finding.error 写入失败，不抛错。"""
     monkeypatch.setenv("LLM_MODE", "mock")
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return "this is not json"
 
     monkeypatch.setattr("agents.bao_zheng.generate_oneshot_openai", fake_oneshot)
@@ -165,7 +165,7 @@ async def test_review_isolates_block_failure(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def flaky_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def flaky_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:  # s1 第一次（也是唯一一次，单个 config）失败
             raise RuntimeError("simulated API failure")

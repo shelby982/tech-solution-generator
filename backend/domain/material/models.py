@@ -1,6 +1,6 @@
 """素材聚合的领域模型 — Material、Chunk（dataclass）。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -79,4 +79,84 @@ class Chunk:
             chunk_index=int(d["chunk_index"]),
             content=d.get("content", ""),
             filename=d.get("filename", ""),
+        )
+
+
+# ─────────────────────────────────────────────────────────
+# MaterialEvidence：匹配阶段的产物（章节/条目 → 素材依据）
+# ─────────────────────────────────────────────────────────
+#
+# 设计约束（见 docs/superpowers/plans/2026-09-21-response-coverage-and-matching-plan.md §4.D）：
+# - **必须带 content（素材原文）**：撰写阶段要引用原文，而不是"这段相关度 8 分"这类评语；
+#   历史实现只留了 reason，导致正文和界面都拿不到素材原文（"最后一公里"缺口）。
+# - 必须带出处：P0 精确到「文件名 + 第 N 段」，P1 再补页码/锚点。
+# - 区分性质与来源：fact/solution/background；ours/tender（招标文件用途受限）。
+# - by 记录归属方式，便于统计"零调用命中占比"与人工改判回收。
+
+KIND_FACT = "fact"            # 事实性：参数/接口/标准条款（可核）
+KIND_SOLUTION = "solution"    # 方案性：架构/方案论述/方法论（可引）
+KIND_BACKGROUND = "background"  # 背景性：项目背景/需求理解（可溯）
+VALID_KINDS = (KIND_FACT, KIND_SOLUTION, KIND_BACKGROUND)
+
+SOURCE_OURS = "ours"          # 我方素材（「素材」窗口上传）
+SOURCE_TENDER = "tender"      # 招标文件（「应标要求」窗口上传，用途受限）
+VALID_SOURCE_KINDS = (SOURCE_OURS, SOURCE_TENDER)
+
+BY_RULE = "rule"              # 规则/结构命中（0 调用）
+BY_SEMANTIC = "semantic"      # 语义检索命中（0 调用）
+BY_MODEL = "model"            # 模型归属（1 份素材 1 次调用）
+BY_HUMAN = "human"            # 人工挂接（锁定）
+VALID_BY = (BY_RULE, BY_SEMANTIC, BY_MODEL, BY_HUMAN)
+
+
+@dataclass
+class MaterialEvidence:
+    """一段素材对某个章节（后续细化到条目）的依据。"""
+    chunk_id: int
+    material_id: int
+    content: str                       # 素材原文（必须）
+    filename: str = ""
+    locator: str = ""                  # "P12 · 第 8 段 · 切片标题"（有什么给什么）
+    page: int = 0                      # 出处页码（解析器能给才有；Word 无页码则为 0）
+    kind: str = KIND_SOLUTION          # fact | solution | background
+    source_kind: str = SOURCE_OURS     # ours | tender
+    by: str = BY_RULE                  # rule | semantic | model | human
+    confidence: float = 0.0
+    score: float = 0.0                 # 检索/相似度原始分（便于排查与调阈值）
+    item_ids: list[str] = field(default_factory=list)   # P0 为空；P1 挂到具体要求条目
+    locked: bool = False               # 人工挂接/改判后为真，重算不覆盖
+
+    def to_dict(self) -> dict:
+        return {
+            "chunk_id": self.chunk_id,
+            "material_id": self.material_id,
+            "content": self.content,
+            "filename": self.filename,
+            "locator": self.locator,
+            "page": self.page,
+            "kind": self.kind,
+            "source_kind": self.source_kind,
+            "by": self.by,
+            "confidence": self.confidence,
+            "score": self.score,
+            "item_ids": list(self.item_ids),
+            "locked": self.locked,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "MaterialEvidence":
+        return cls(
+            chunk_id=d.get("chunk_id"),
+            material_id=int(d.get("material_id") or 0),
+            content=d.get("content", "") or "",
+            filename=d.get("filename", "") or "",
+            locator=d.get("locator", "") or "",
+            page=int(d.get("page") or 0),
+            kind=d.get("kind", KIND_SOLUTION) or KIND_SOLUTION,
+            source_kind=d.get("source_kind", SOURCE_OURS) or SOURCE_OURS,
+            by=d.get("by", BY_RULE) or BY_RULE,
+            confidence=float(d.get("confidence") or 0.0),
+            score=float(d.get("score") or 0.0),
+            item_ids=list(d.get("item_ids") or []),
+            locked=bool(d.get("locked")),
         )

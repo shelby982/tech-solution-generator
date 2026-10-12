@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS blocks (
     order_idx   INTEGER,
     run_thread_id TEXT,
     status      TEXT DEFAULT 'empty',
+    -- 逐节提炼的结果状态（'' 正常 / 'no_source' 无原文 / 'failed' 需要重试）+ 原因
+    error       TEXT DEFAULT '',
+    error_kind  TEXT DEFAULT '',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -131,7 +134,10 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     output_tokens          INTEGER,
     cache_read_tokens      INTEGER,
     cache_creation_tokens  INTEGER,
+    reasoning_tokens       INTEGER,
     total_tokens           INTEGER,
+    project_id             INTEGER,
+    thread_id              TEXT,
     ok                     INTEGER NOT NULL DEFAULT 1,
     error                  TEXT DEFAULT '',
     latency_ms             INTEGER,
@@ -154,9 +160,20 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # 读路径在「该 run 一行都没有」时退回显示全部行，见 block_store.list_blocks。
     for col in ("key_points", "veto_items", "bonus_items",
                 "score_items", "evidence_required", "constraint_level", "indicators",
-                "run_thread_id"):
+                "run_thread_id",
+                # error/error_kind：逐节提炼的结果状态。以前只在 SSE 帧里带一次，
+                # 刷新就没了，而且"无原文"（正常）与"全部 API 失败"（要处理）在页面上
+                # 完全同形 —— 于是失败章节被当成"已完成"、页面照样显示「提炼完成」。
+                # error_kind: '' 正常 | 'no_source' 无原文（正常，不必重试）
+                #             | 'failed' 需要重试
+                "error", "error_kind"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
+    # material_chunks.page：出处页码（PDF 有；Word 无页码概念，留 0）
+    cursor = await conn.execute("PRAGMA table_info(material_chunks)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    if "page" not in existing_cols:
+        await conn.execute("ALTER TABLE material_chunks ADD COLUMN page INTEGER")
     cursor = await conn.execute("PRAGMA table_info(materials)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
     if "file_size" not in existing_cols:
@@ -167,10 +184,23 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     existing_cols = {row[1] for row in await cursor.fetchall()}
     if "target_pages" not in existing_cols:
         await conn.execute("ALTER TABLE projects ADD COLUMN target_pages INTEGER")
+    # llm_usage 的归集列：老库的行留 NULL（语义是「不属于任何 run」），不回填。
+    cursor = await conn.execute("PRAGMA table_info(llm_usage)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    if "reasoning_tokens" not in existing_cols:
+        await conn.execute("ALTER TABLE llm_usage ADD COLUMN reasoning_tokens INTEGER")
+    if "project_id" not in existing_cols:
+        await conn.execute("ALTER TABLE llm_usage ADD COLUMN project_id INTEGER")
+    if "thread_id" not in existing_cols:
+        await conn.execute("ALTER TABLE llm_usage ADD COLUMN thread_id TEXT")
     # 索引建在加列之后：老库的 blocks 表先执行上面的 ALTER 才有 run_thread_id，
     # 放进 _DDL 会在老库上引用了尚不存在的列而直接报错。
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_blocks_project_run ON blocks(project_id, run_thread_id)"
+    )
+    # 同上：thread_id 要先 ALTER 出来才能建索引。
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_run ON llm_usage(thread_id)"
     )
     await conn.commit()
 

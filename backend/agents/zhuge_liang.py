@@ -275,14 +275,34 @@ class ZhugeLiangAgent:
         feedback_text = format_feedback_block(feedback)
 
         # 流式正文（chunks 入参为 dict 列表，与 dispatch_block_write 现有签名一致）
-        # 把沈括 rerank 后的 reason + hit_points 拼成 content，作为参考素材片段
+        # **素材原文优先**：匹配阶段的契约保证 evidence 带 content（原文）+ filename/locator（出处）。
+        # 历史上这里只把 rerank 的 reason 拼进去 —— 写手看不到素材原文，只能凭空编技术细节
+        # （见 docs/.../2026-09-21-response-coverage-and-matching-plan.md §1.2）。
+        # 旧数据（只有 reason）保留兼容分支。
         chunks_for_write = []
         for m in matches:
-            hp = "、".join(m.hit_points) if m.hit_points else ""
-            content_snippet = (m.reason or "")
-            if hp:
-                content_snippet = f"{content_snippet}（要点：{hp}）"
-            chunks_for_write.append({"content": content_snippet})
+            text = (getattr(m, "content", "") or "").strip()
+            if text:
+                src = (getattr(m, "filename", "") or "").strip()
+                loc = (getattr(m, "locator", "") or "").strip()
+                prefix = f"（出处：{src}{(' ' + loc) if loc else ''}）" if src else ""
+                chunks_for_write.append({"content": f"{text}{prefix}"})
+            else:
+                hp = "、".join(m.hit_points) if m.hit_points else ""
+                content_snippet = (m.reason or "")
+                if hp:
+                    content_snippet = f"{content_snippet}（要点：{hp}）"
+                chunks_for_write.append({"content": content_snippet})
+
+        # 正文字数分档：应标文档整体偏长，所以档位给得宽（brief 600–1000 /
+        # standard 1000–1600 / core 1600–2400 汉字），但**必须有上限** ——
+        # 原来只写「不少于 600 字」，实测写到 3.7 倍并顶到 max_tokens 被硬截断。
+        # 显式把 self.target_words 设得比档位下限更大时，上限跟着放宽，尊重调用方意图。
+        band_lo, band_hi = infra.llm.length_band(
+            row.requirement or "", getattr(row, "constraint_level", "") or "",
+        )
+        target_words = max(band_lo, int(self.target_words or 0))
+        max_words = max(band_hi, target_words + 600)
 
         content_parts: list[str] = []
         async for token in infra.llm.dispatch_block_write(
@@ -291,7 +311,8 @@ class ZhugeLiangAgent:
             title=row.title,
             requirement=row.requirement or "",
             chunks=chunks_for_write,
-            target_words=self.target_words,
+            target_words=target_words,
+            max_words=max_words,
             feedback_text=feedback_text,
         ):
             content_parts.append(token)

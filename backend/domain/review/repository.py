@@ -112,9 +112,17 @@ class ReviewRepository:
 # ─────────────────────────────────────────────────────────
 _VALID_STAGES = {
     "idle", "parsing", "outline_review",
-    "matching", "materials_review",
+    # extracting：闸门 1 放行后的逐节提炼（运行期 stage，由 runner 写入，见
+    # orchestrator/state.py StageLiteral 的说明）。
+    "extracting", "matching", "materials_review",
     "generating", "reviewing",
     "report_review", "done", "aborted",
+    # failed：图执行中途抛异常（如目录派生失败）。与 aborted（用户取消）区分开，
+    # 前端据此显示失败原因 + 「重新拆分目录」重试入口。
+    "failed",
+    # paused：节点主动停下（用户取消逐节提炼 / 生成）。见 orchestrator/state.py 的说明：
+    # 以前两份白名单都没有它，写 'paused' 会抛 ValueError 把运行误标成 failed。
+    "paused",
 }
 
 

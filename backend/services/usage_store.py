@@ -10,6 +10,9 @@ llm_usage 表。未装配时（测试、脚本）不落库。
 
 token 列写 NULL 而不是 0：provider 没返回该字段和「真的是 0」是两件事，
 NULL 才能在汇总时区分（见 model_id 定价缺失那次教训 —— 记成 0 会被误读为免费）。
+
+project_id / thread_id 用于把费用归集到「哪次运行」；未在 run_context 内发生的
+调用（脚本、测试直调）写 NULL，而不是 0/空串 —— 同 NULL/0 的区分原则。
 """
 
 import logging
@@ -24,8 +27,10 @@ _INSERT = """
 INSERT INTO llm_usage (
     call_site, provider, model, streaming,
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-    total_tokens, ok, error, latency_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    reasoning_tokens, total_tokens,
+    project_id, thread_id,
+    ok, error, latency_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -43,7 +48,10 @@ async def record(rec: dict) -> None:
                 rec.get("output_tokens"),
                 rec.get("cache_read_tokens"),
                 rec.get("cache_creation_tokens"),
+                rec.get("reasoning_tokens"),
                 rec.get("total_tokens"),
+                rec.get("project_id"),
+                rec.get("thread_id"),
                 1 if rec.get("ok", True) else 0,
                 rec.get("error") or "",
                 rec.get("latency_ms"),

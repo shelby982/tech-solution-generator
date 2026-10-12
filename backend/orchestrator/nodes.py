@@ -187,6 +187,9 @@ async def zhang_heng_parse_node(
         logger.warning(f"parse_node：占位 block 落库失败（{e}），不阻断")
 
     toc_dicts = [_section_to_dict(s) for s in parsed.toc]
+    # 有哪些要求文件没能参与（解析失败 / 0 章节）：闸门 1 要能告诉用户，
+    # 否则用户以为所有上传的文件都被用来派生目录了。
+    failed_files = list(getattr(parsed, "failed_files", []) or [])
     return {
         "stage": "parsing",
         "spec": {
@@ -198,6 +201,7 @@ async def zhang_heng_parse_node(
             # toc 会在 outline_draft 节点被模型派生的应答目录整体替换。
             "source_toc": toc_dicts,
             "toc": toc_dicts,
+            "parse_failed_files": failed_files,
         },
     }
 
@@ -217,10 +221,13 @@ async def zhang_heng_outline_draft_node(
     state 写入：``stage="parsing"``，``spec.{toc, outline_revision, outline_error}``，
     并显式清空 ``spec.outline_matrix``（目录换了，旧的章节要求全部作废）。
 
-    ``spec.source_toc`` 只读不动 —— 它是本节点的输入，也是降级时的兜底目录。
+    ``spec.source_toc`` 只读不动 —— 它是本节点的输入（也是「重新拆分」时再次派生的
+    依据），但**不再作为失败兜底**。
 
-    与 parse 一样不抛：模型不可用 / 输出不可解析时沿用规范书原始目录，把原因写进
-    ``outline_error``，照常进闸门 1 让用户看到并决定是否重出。
+    **失败即抛**：模型不可用 / 输出不可解析 / 一级章节太少时，``agent.draft_outline``
+    抛 ``OutlineDraftError``，本节点不兜底、原样上抛；由 runner 把这次运行标成
+    ``stage="failed"`` 并把原因写给前端。静默改用规范书原始目录会让用户以为派生成功
+    —— 那份目录并没有按他的提炼要求拆。
     """
     _check_cancel(state)
 
@@ -275,7 +282,6 @@ async def zhang_heng_outline_draft_node(
     await _emit_frame(emitter, events.outline_draft(
         toc=toc_dicts,
         revision=revision,
-        degraded=result.degraded,
         error=result.error,
     ))
 
@@ -307,8 +313,14 @@ async def zhang_heng_extract_node(
     *,
     agent: ZhangHengAgent,
     emitter: EmitterArg = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> WorkflowState:
     """张衡 extract：8 字段提炼，逐章节流式推 outline_extract 事件。
+
+    ``should_cancel``：runner 传进来的 _Run.cancel_flag 闭包。**必须逐节检查** ——
+    否则用户点了「取消」，这一节点仍会把 400 章全部提炼完（每章一次模型调用），
+    取消等于没点（实测：abort 之后又跑了 8 节）。真取消时节点把已完成的部分写回
+    state 并标 ``stage='paused'``，由 runner 收尾成 paused（不是 done）。
 
     state 写入：``spec.outline_matrix``。
 
@@ -321,6 +333,13 @@ async def zhang_heng_extract_node(
     if not ENABLE_SECTION_EXTRACT:
         logger.info("extract 跳过：当前只做「按提炼要求拆分章节目录」")
         return {"spec": {"outline_matrix": {}}}
+
+    # 逐节取消信号：优先用 runner 的实时 flag（节点拿到的 state 是快照，
+    # cancel_requested 在节点跑的过程中不会变），测试里没有就退回快照值。
+    def _cancelled() -> bool:
+        if should_cancel is not None:
+            return bool(should_cancel())
+        return bool(state.get("cancel_requested"))
 
     spec = state.get("spec") or {}
     toc_raw = spec.get("toc") or []
@@ -344,8 +363,18 @@ async def zhang_heng_extract_node(
                     db, int(project_id), run_thread_id=state.get("thread_id"),
                 )
             for b in existing:
-                if (b.get("status") == "outline_done") and (b.get("key_points") or b.get("requirement")):
-                    skip_ids.add(str(b.get("block_id")))
+                bid = str(b.get("block_id"))
+                kind = b.get("error_kind") or ""
+                # 失败的行**不跳过** → 下一轮（「继续提炼」）会重试它。以前它也是
+                # outline_done，于是"继续提炼"永远不重试、界面还显示已提炼。
+                if kind == "failed":
+                    continue
+                if b.get("status") != "outline_done":
+                    continue
+                # 'no_source'（无原文）与正常成功的行都跳过；无原文重试也只是再走一次
+                # 空短路，没有模型调用，跳过纯粹是省掉一次往返。
+                if kind == "no_source" or b.get("key_points") or b.get("requirement"):
+                    skip_ids.add(bid)
                     # 把已完成行回填到 matrix_dict / state，让后续闸门快照与 emit 完整
                     matrix_dict[str(b.get("block_id"))] = {
                         "block_id": str(b.get("block_id")),
@@ -358,7 +387,8 @@ async def zhang_heng_extract_node(
                         "evidence_required": b.get("evidence_required", "") or "",
                         "constraint_level": b.get("constraint_level", "recommended") or "recommended",
                         "indicators": b.get("indicators", "") or "",
-                        "error": "",
+                        "error": b.get("error", "") or "",
+                        "error_kind": b.get("error_kind", "") or "",
                     }
         except Exception as e:
             logger.warning(f"extract_node：读已提炼 blocks 失败（{e}），全量重跑")
@@ -395,13 +425,25 @@ async def zhang_heng_extract_node(
                         level=int(section.level or 1),
                         title=row.title or section.title or section.id,
                         order_idx=section_order.get(section.id, 0),
+                        # row_dict 里带 error / error_kind：失败章节的**原因**要落库，
+                        # 否则刷新后只剩一张空卡片，用户无从判断（以前就是这样）
                         matrix=row_dict,
                         run_thread_id=state.get("thread_id"),
                     )
             except Exception as e:
                 logger.warning(f"extract_node：block 落库失败（{section.id} / {e}），仅缓存到 state")
 
-    matrix = await agent.extract(toc, on_section=_on_section, on_section_start=_on_section_start)
+    # stub agent 可能没声明 should_cancel → 签名探测降级（同 generate 节点的做法）
+    import inspect as _inspect
+    try:
+        _sig = _inspect.signature(agent.extract)
+        _supports_cancel = "should_cancel" in _sig.parameters
+    except (TypeError, ValueError):
+        _supports_cancel = False
+    _extract_kwargs: dict = {"on_section": _on_section, "on_section_start": _on_section_start}
+    if _supports_cancel:
+        _extract_kwargs["should_cancel"] = _cancelled
+    matrix = await agent.extract(toc, **_extract_kwargs)
 
     # 回调可能因极端异常未触发，这里兜底一次：保证 matrix_dict 与 matrix 一致
     for block_id, row in matrix.items():
@@ -415,12 +457,34 @@ async def zhang_heng_extract_node(
     # 清掉匹配触发标志：extract 的出边是条件边，读它决定要不要接 match。走到这里
     # 说明用户只要求提炼，收尾停在「要求与大纲」；素材匹配由素材库的「素材匹配」
     # 按钮（rerun_match 重新置真）触发。
-    return {"spec": {"outline_matrix": matrix_dict}, "match_requested": False}
+    failed_ids = [bid for bid, r in matrix_dict.items() if (r.get("error_kind") or "") == "failed"]
+    patch: WorkflowState = {"spec": {"outline_matrix": matrix_dict}, "match_requested": False}
+    if failed_ids:
+        # run 级信号：失败章节数写进 errors，状态栏/排查都能看到（以前只在单帧里出现一次）
+        patch["errors"] = [{
+            "message": f"{len(failed_ids)} 个章节提炼失败（可点「继续提炼」重试）："
+                       + "、".join(failed_ids[:5]) + ("…" if len(failed_ids) > 5 else ""),
+            "retryable": True,
+        }]
+        logger.warning(f"extract：{len(failed_ids)} 个章节提炼失败：{failed_ids}")
+    if _cancelled():
+        # 用户点了取消：已完成的部分照常写回（blocks 表里逐节的落库也在），
+        # 但**不能**标成跑完 —— 否则页面显示「提炼完成」而后面还有章节没提炼。
+        logger.info(f"extract 被取消：已完成 {len(matrix_dict)} 个章节，收尾为 paused")
+        patch["stage"] = "paused"
+    return patch
 
 
 # ─────────────────────────────────────────────
 # 沈括 match 节点
 # ─────────────────────────────────────────────
+
+# 匹配模式：
+#   assign = **素材 → 章节 归属**（默认）。规则（片段首行标题 ↔ 章节标题）+ 语义（BM25 反向分配），
+#            **零模型调用**，产出带素材原文/出处的依据（见 domain/material/models.py 的 MaterialEvidence）。
+#   rerank = 旧的逐章 BM25 top-k + LLM 重排（调用数 = O(章节数)，且只留评语不留原文）。
+#            保留用于回滚/对照，默认不用。
+MATCH_MODE = "assign"
 
 async def shen_kuo_match_node(
     state: WorkflowState,
@@ -441,8 +505,39 @@ async def shen_kuo_match_node(
         bid: _dict_to_row(d)
         for bid, d in (spec.get("outline_matrix") or {}).items()
     }
-    chunks = list(materials.get("chunks") or [])
     project_id = state.get("project_id")
+    chunks: list[dict] = []
+    if project_id is not None:
+        # **根因修复**：标准流程（闸门1 → 提炼 → 素材匹配）里从来没人往 state 放 chunks
+        # （只有工作台局部修订的 workspace_action 会放），于是本节点一直走 "not chunks" 短路：
+        # 每章都返回空匹配、零调用，界面却显示"33/33 章节已完成" —— 用户以为匹配过了。
+        # 这里改为**从库里按来源分池取**：我方素材 + 招标文件（后者用途受限，见 assign.py）。
+        try:
+            from db import get_db
+            from services.block_store import (
+                OURS_MATERIAL_ROLES,
+                TENDER_MATERIAL_ROLES,
+                list_chunks_with_filename,
+            )
+
+            async with get_db() as db:
+                ours = await list_chunks_with_filename(
+                    db, int(project_id), roles=OURS_MATERIAL_ROLES)
+                tender = await list_chunks_with_filename(
+                    db, int(project_id), roles=TENDER_MATERIAL_ROLES)
+            chunks = ours + tender
+            logger.info(
+                f"match_node：从库里取素材片段 {len(chunks)} 条"
+                f"（我方 {len(ours)} / 招标 {len(tender)}）"
+            )
+        except Exception as e:
+            logger.warning(f"match_node：取素材片段失败（{e}），回退用 state 缓存")
+            chunks = []
+    if not chunks:
+        # 兜底：没有 project_id（单测）或读库失败时用 state 缓存。
+        # **注意不能反过来**：素材是图外上传/解析的，state 里的 chunks 是上一轮的快照，
+        # 优先用它会导致"新上传的素材永远进不了池子"（实测踩过：增量匹配只看到旧的 16 条）。
+        chunks = list(materials.get("chunks") or [])
 
     matches_dict: dict[str, list[dict]] = {}
 
@@ -451,8 +546,9 @@ async def shen_kuo_match_node(
             block_id=section.id, title=section.title or section.id,
         ))
 
-    async def _on_section(section: DomainSection, mlist: list[Match]) -> None:
-        serialized = [_match_to_dict(m) for m in mlist]
+    async def _on_section(section: DomainSection, rows: list[dict]) -> None:
+        """section 完成：写 state、推帧、落库。rows 是**已序列化**的行（两条路径共用）。"""
+        serialized = rows
         matches_dict[section.id] = serialized
         await _emit_frame(emitter, events.match_progress(
             block_id=section.id, matches=serialized,
@@ -473,6 +569,19 @@ async def shen_kuo_match_node(
             except Exception as e:
                 logger.warning(f"match_node：source 落库失败（{section.id} / {e}），仅缓存到 state")
 
+    if MATCH_MODE == "assign":
+        return await _match_by_assignment(
+            state, toc=toc, outline_matrix=outline_matrix, chunks=chunks,
+            matches_dict=matches_dict, emitter=emitter,
+            on_section=_on_section, on_section_start=_on_section_start,
+        )
+
+    # ── 旧路径：逐章 BM25 + LLM 重排（MATCH_MODE="rerank" 时启用）──
+    if not chunks:
+        for section in toc:
+            await _on_section_start(section)
+            await _on_section(section, [])
+
     # 测试 stub 可能不接受新 callback 参数 —— 用签名探测降级
     import inspect as _inspect
     try:
@@ -481,10 +590,13 @@ async def shen_kuo_match_node(
     except (TypeError, ValueError):
         supports_callbacks = False
 
+    async def _bridge(section, mlist):
+        await _on_section(section, [_match_to_dict(m) for m in mlist])
+
     if supports_callbacks:
         matches = await agent.match(
             toc, outline_matrix, chunks,
-            on_section=_on_section, on_section_start=_on_section_start,
+            on_section=_bridge, on_section_start=_on_section_start,
         )
     else:
         matches = await agent.match(toc, outline_matrix, chunks)
@@ -493,12 +605,69 @@ async def shen_kuo_match_node(
     for block_id, mlist in matches.items():
         if block_id not in matches_dict:
             serialized = [_match_to_dict(m) for m in mlist]
-            matches_dict[block_id] = serialized
-            await _emit_frame(emitter, events.match_progress(
-                block_id=block_id, matches=serialized,
-            ))
+            await _on_section(
+                next((s for s in toc if s.id == block_id), DomainSection(
+                    id=block_id, level=1, title=block_id, raw_content="", special_marks=[])),
+                serialized,
+            )
 
-    return {"materials": {"matches": matches_dict}}
+    return {"materials": {"matches": matches_dict, "chunks": chunks}}
+
+
+async def _match_by_assignment(
+    state: WorkflowState,
+    *,
+    toc: list[DomainSection],
+    outline_matrix: dict,
+    chunks: list[dict],
+    matches_dict: dict[str, list[dict]],
+    emitter: EmitterArg,
+    on_section,
+    on_section_start,
+) -> WorkflowState:
+    """素材 → 章节 归属（匹配阶段 P0 主线，零模型调用）。
+
+    增量：只处理"池里还没有被任何章节引用过"的片段（新上传的素材），
+    已有依据（含人工挂接的 locked 行）原样保留 —— 补一份素材不再全量重跑。
+    """
+    from domain.spec.response_items import expand_all_items
+    from infra.retrieval.assign import assign_evidence
+
+    existing: dict[str, list[dict]] = {
+        sid: list(rows or [])
+        for sid, rows in ((state.get("materials") or {}).get("matches") or {}).items()
+    }
+    # 开启新一轮"全部重匹配"时由 runner 清空 matches；这里以 state 为准
+    # id 类型不做强制转换：库里是 int，测试/旧数据可能是 str，混用会直接抛 ValueError
+    already_ids = {
+        ev["chunk_id"]
+        for rows in existing.values() for ev in rows
+        if isinstance(ev, dict) and ev.get("chunk_id") is not None
+    }
+    pool_ids = {c["id"] for c in chunks if c.get("id") is not None}
+    only_chunk_ids = (pool_ids - already_ids) if already_ids else None
+
+    matrix_dict = {
+        bid: (row.to_dict() if hasattr(row, "to_dict") else dict(row))
+        for bid, row in (outline_matrix or {}).items()
+    }
+    # 条目级挂载：把每段素材挂到该章的具体要求条目上（"并发 ≥2000"这条依据是哪段素材），
+    # 撰写阶段要按条目逐条作答 + 做覆盖度自检。挂不上就留空 = 只作章节级依据。
+    items_by_section = expand_all_items(matrix_dict)
+    result = assign_evidence(
+        chunks, toc, matrix_dict,
+        only_chunk_ids=only_chunk_ids,
+        items_by_section=items_by_section,
+    )
+    logger.info(f"match_node：归属完成 {result.stats()}（增量 {only_chunk_ids is not None}）")
+
+    for section in toc:
+        await on_section_start(section)
+        rows = list(existing.get(section.id, []))
+        rows.extend(ev.to_dict() for ev in result.evidence.get(section.id, []))
+        await on_section(section, rows)
+
+    return {"materials": {"matches": matches_dict, "chunks": chunks}}
 
 
 # ─────────────────────────────────────────────
@@ -554,11 +723,23 @@ async def zhuge_liang_generate_node(
         # 正向模式：按 toc 顺序生成（spec.outline_matrix 字典 key 顺序由完成顺序决定，
         # 不再是 toc 顺序，直接迭代会让生成顺序与文档章节脱节）。
         toc_for_order = state.get("spec", {}).get("toc") or []
-        ordered_ids = [s.get("id") for s in toc_for_order if s.get("id") in outline_matrix]
-        # toc 之外的兜底（理论上不会有）
-        for bid in outline_matrix.keys():
-            if bid not in ordered_ids:
-                ordered_ids.append(bid)
+        if toc_for_order:
+            ordered_ids = [s.get("id") for s in toc_for_order if s.get("id") in outline_matrix]
+            # toc 之外的矩阵条目：**告警并跳过**，不要静默生成。目录是用户的权威结构，
+            # 矩阵里多出来的 id 只可能来自"目录被删改后的残留"（update_outline_structure
+            # 现在会同步裁剪，这里是双保险）。以前会把它们追加进生成目标 —— 用户删掉的
+            # 章节又会以正文的形式长回来。
+            ghosts = [bid for bid in outline_matrix.keys() if bid not in set(ordered_ids)]
+            if ghosts:
+                logger.warning(
+                    "generate：矩阵里有 %d 个章节不在当前目录中，已跳过：%s",
+                    len(ghosts), ghosts[:10],
+                )
+        else:
+            # 没有目录可比对（老 checkpoint / toc 缺失）：只能按矩阵生成，不做"目录外"判断
+            logger.warning("generate：state 里没有 spec.toc，退回按矩阵顺序生成 %d 节",
+                           len(outline_matrix))
+            ordered_ids = list(outline_matrix.keys())
         target_for_agent = [
             bid for bid in ordered_ids if bid not in existing_blocks
         ]
@@ -1116,6 +1297,7 @@ def _section_to_dict(s: DomainSection) -> dict:
         "title": s.title,
         "raw_content": s.raw_content,
         "special_marks": list(s.special_marks),
+        "source_file": s.source_file,
     }
 
 
@@ -1126,6 +1308,7 @@ def _dict_to_section(d: dict) -> DomainSection:
         title=d.get("title", ""),
         raw_content=d.get("raw_content", ""),
         special_marks=list(d.get("special_marks", []) or []),
+        source_file=d.get("source_file", "") or "",
     )
 
 
@@ -1142,6 +1325,7 @@ def _row_to_dict(r: OutlineMatrixRow) -> dict:
         "constraint_level": r.constraint_level,
         "indicators": r.indicators,
         "error": r.error,
+        "error_kind": getattr(r, "error_kind", "") or "",
     }
 
 
@@ -1167,6 +1351,15 @@ def _match_to_dict(m: Match) -> dict:
         "score": float(m.score),
         "reason": m.reason,
         "hit_points": list(m.hit_points or []),
+        # 契约字段：素材原文 + 出处 + 性质/来源/归属方式（撰写阶段与界面都要用）
+        "content": getattr(m, "content", "") or "",
+        "filename": getattr(m, "filename", "") or "",
+        "locator": getattr(m, "locator", "") or "",
+        "kind": getattr(m, "kind", "") or "",
+        "source_kind": getattr(m, "source_kind", "") or "",
+        "by": getattr(m, "by", "") or "",
+        "confidence": float(getattr(m, "confidence", 0.0) or 0.0),
+        "locked": bool(getattr(m, "locked", False)),
     }
 
 
@@ -1176,6 +1369,14 @@ def _dict_to_match(d: dict) -> Match:
         score=float(d.get("score", 0.0) or 0.0),
         reason=d.get("reason", ""),
         hit_points=list(d.get("hit_points") or []),
+        content=d.get("content", "") or "",
+        filename=d.get("filename", "") or "",
+        locator=d.get("locator", "") or "",
+        kind=d.get("kind", "") or "",
+        source_kind=d.get("source_kind", "") or "",
+        by=d.get("by", "") or "",
+        confidence=float(d.get("confidence") or 0.0),
+        locked=bool(d.get("locked")),
     )
 
 

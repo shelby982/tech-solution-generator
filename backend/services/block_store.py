@@ -11,6 +11,22 @@ import aiosqlite
 logger = logging.getLogger(__name__)
 
 
+# 材料角色优先级（列表与派生输入共用一个顺序）：
+# 主招标/规范书类排最前 —— 它定义了章节骨架，也是 digest 8,000 字预算最该先吃的部分；
+# 评分表/评审要素表随后（多用于按评分项拆章）。同档内仍按上传顺序（id）稳定排序。
+# 之前统一是 `ORDER BY id`：把一份老的素材文件改成 spec，它会插队到所有规范书之前。
+ROLE_PRIORITY_SQL = """
+    CASE role
+        WHEN 'spec' THEN 0
+        WHEN 'main_rfp' THEN 0
+        WHEN 'requirement' THEN 0
+        WHEN 'scoring' THEN 1
+        WHEN 'evaluation' THEN 2
+        ELSE 3
+    END, id
+"""
+
+
 # ══════════════════════════════════════════════════
 # projects
 # ══════════════════════════════════════════════════
@@ -107,7 +123,8 @@ async def list_materials(
     project_id: int,
 ) -> list[dict]:
     cursor = await db.execute(
-        "SELECT * FROM materials WHERE project_id = ? ORDER BY id", (project_id,)
+        f"SELECT * FROM materials WHERE project_id = ? ORDER BY {ROLE_PRIORITY_SQL}",
+        (project_id,)
     )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
@@ -398,6 +415,7 @@ async def upsert_outline_block(
                            requirement = '', key_points = '', veto_items = '',
                            bonus_items = '', score_items = '', evidence_required = '',
                            constraint_level = 'recommended', indicators = '',
+                           error = '', error_kind = '',
                            score = '[]', status = 'empty',
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
@@ -435,6 +453,7 @@ async def upsert_outline_block(
                    requirement = ?, key_points = ?, veto_items = ?,
                    bonus_items = ?, score_items = ?, evidence_required = ?,
                    constraint_level = ?, indicators = ?,
+                   error = ?, error_kind = ?,
                    status = 'outline_done',
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
@@ -442,6 +461,7 @@ async def upsert_outline_block(
              requirement, key_points, veto_items,
              bonus_items, score_items, evidence_required,
              constraint_level, indicators,
+             str(matrix.get("error") or ""), str(matrix.get("error_kind") or ""),
              row["id"]),
         )
         await db.commit()
@@ -452,12 +472,14 @@ async def upsert_outline_block(
            (project_id, block_id, kind, level, title, domain, parent_title,
             requirement, key_points, veto_items, bonus_items,
             score_items, evidence_required, constraint_level, indicators,
+            error, error_kind,
             score, source, order_idx, content, status, run_thread_id)
-           VALUES (?, ?, 'content', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?,
+           VALUES (?, ?, 'content', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                    '', '[]', ?, '', 'outline_done', ?)""",
         (project_id, block_id, level, title, title,
          requirement, key_points, veto_items, bonus_items,
          score_items, evidence_required, constraint_level, indicators,
+         str(matrix.get("error") or ""), str(matrix.get("error_kind") or ""),
          order_idx, run_thread_id),
     )
     await db.commit()
@@ -631,10 +653,11 @@ async def list_project_revisions(
     return [dict(row) for row in rows]
 
 
-async def create_chunk(db, material_id: int, chunk_index: int, content: str) -> dict:
+async def create_chunk(db, material_id: int, chunk_index: int, content: str,
+                       page: int = 0) -> dict:
     cursor = await db.execute(
-        "INSERT INTO material_chunks (material_id, chunk_index, content) VALUES (?, ?, ?)",
-        (material_id, chunk_index, content),
+        "INSERT INTO material_chunks (material_id, chunk_index, content, page) VALUES (?, ?, ?, ?)",
+        (material_id, chunk_index, content, int(page or 0)),
     )
     await db.commit()
     row = await (await db.execute("SELECT * FROM material_chunks WHERE id = ?", (cursor.lastrowid,))).fetchone()
@@ -651,15 +674,79 @@ async def list_chunks_by_project(db, project_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def list_chunks_with_filename(db, project_id: int) -> list[dict]:
+async def list_chunks_with_filename(
+    db,
+    project_id: int,
+    *,
+    roles: tuple[str, ...] | None = None,
+    exclude_roles: tuple[str, ...] | None = None,
+) -> list[dict]:
+    """取项目的素材切片，附带 filename 与**素材角色**。
+
+    ``material_role`` 是 m.role 的别名，调用方据此分池（见方案 §4.D.1）：
+    - **我方素材池**：``roles=("source",)``（用户在「素材」窗口上传的内容）
+    - **招标文件池**：``roles=("spec","main_rfp","requirement","scoring","evaluation")``
+
+    历史实现没有任何 role 过滤，导致匹配池里 57% 是招标文件自己的文字
+    （实测全库要求类 83 段 / 素材类 63 段），既白烧 token 又会把招标原文当我方素材。
+    不传参数时保持旧行为（全部角色），避免影响其它调用点。
+    """
+    if roles and exclude_roles:
+        raise ValueError("roles 与 exclude_roles 不能同时给")
+    where = ["m.project_id = ?"]
+    params: list = [project_id]
+    if roles:
+        where.append(f"m.role IN ({','.join('?' * len(roles))})")
+        params.extend(roles)
+    if exclude_roles:
+        where.append(f"m.role NOT IN ({','.join('?' * len(exclude_roles))})")
+        params.extend(exclude_roles)
     cursor = await db.execute(
-        """SELECT mc.*, m.filename FROM material_chunks mc
-           JOIN materials m ON mc.material_id = m.id
-           WHERE m.project_id = ? ORDER BY mc.material_id, mc.chunk_index""",
-        (project_id,),
+        f"""SELECT mc.*, m.filename, m.role AS material_role
+            FROM material_chunks mc
+            JOIN materials m ON mc.material_id = m.id
+            WHERE {' AND '.join(where)}
+            ORDER BY mc.material_id, mc.chunk_index""",
+        tuple(params),
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def get_chunk_with_filename(db, chunk_id: int) -> dict | None:
+    """按 id 取单个素材切片（附 filename / material_role）。人工挂接要用它建契约。"""
+    cursor = await db.execute(
+        """SELECT mc.*, m.filename, m.role AS material_role
+             FROM material_chunks mc
+             JOIN materials m ON mc.material_id = m.id
+            WHERE mc.id = ?""",
+        (chunk_id,),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def update_block_source(db, block_id: int, rows: list[dict]) -> dict | None:
+    """整版写 blocks.source（匹配阶段写依据的那一列）。
+
+    与 ``update_block_matrix_fields`` 同一约定：拿到的是**完整** rows，不是增量 ——
+    人工挂接/解绑都是"改这一章的依据列表"，语义上就是整版替换，避免读改写竞态。
+    """
+    import json as _json
+
+    async with db.execute(
+        "UPDATE blocks SET source = ? WHERE id = ?",
+        (_json.dumps(rows or [], ensure_ascii=False), block_id),
+    ) as cur:
+        if cur.rowcount == 0:
+            return None
+    await db.commit()
+    return await get_block(db, block_id)
+
+
+# 素材池角色常量：与 infra.retrieval.assign.TENDER_ROLES 对应（避免调用方各写一份）
+TENDER_MATERIAL_ROLES = ("spec", "main_rfp", "requirement", "scoring", "evaluation")
+OURS_MATERIAL_ROLES = ("source",)
 
 
 async def list_chunks_by_materials(db, material_ids: list[int]) -> list[dict]:
@@ -704,6 +791,32 @@ async def update_block_requirement(db, block_id_int: int, requirement: str) -> d
     return await get_block(db, block_id_int)
 
 
+# 允许被局部更新的提炼字段（列名白名单，拼 SQL 只能来自这里）
+_MATRIX_UPDATE_COLUMNS = (
+    "key_points", "veto_items", "bonus_items", "score_items",
+    "evidence_required", "indicators", "constraint_level",
+)
+
+
+async def update_block_matrix_fields(db, block_id_int: int, fields: dict) -> dict | None:
+    """按 key **局部**更新提炼字段（工作台参考卡片的单字段编辑）。
+
+    与 ``update_outline_fields`` 的区别：那个是"确认内容大纲"的整行写入（缺的字段会被
+    写成空串），适合一次提交整份矩阵；这里只写调用方给的列，改一个字段不会清空别的。
+    未知列名直接忽略。
+    """
+    cols = [c for c in _MATRIX_UPDATE_COLUMNS if c in fields]
+    if not cols:
+        return await get_block(db, block_id_int)
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    await db.execute(
+        f"UPDATE blocks SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [*[fields[c] for c in cols], block_id_int],
+    )
+    await db.commit()
+    return await get_block(db, block_id_int)
+
+
 async def update_outline_fields(
     db,
     project_id: int,
@@ -742,3 +855,84 @@ async def update_outline_fields(
     )
     await db.commit()
     return cursor.rowcount
+
+
+async def apply_outline_structure(
+    db: aiosqlite.Connection,
+    project_id: int,
+    nodes: list[dict],
+    run_thread_id: str | None = None,
+    purge: bool = False,
+) -> dict:
+    """按用户编辑后的目录结构重写 blocks：改标题/层级/顺序、建新占位、删空行。
+
+    ``nodes`` 是**有序**列表 ``[{block_id, level, title}]``（层级由顺序推导，见
+    ``domain/spec/structure.py``），顺序即 ``order_idx``。
+
+    与 :func:`sync_outline_placeholders` 的关键区别：**不经过
+    ``upsert_outline_block`` 的「同 id 换节」重置逻辑**。用户把某一节改标题或调层级
+    时，同一个 ``block_id`` 仍然是同一节 —— 已提炼的 8 个字段必须保留（那是用户刚
+    提炼出来、正要审的内容）。所以已有行只 UPDATE title/level/order_idx，绝不碰
+    8 字段、status 与正文。
+
+    删除保护沿用既有约定：**只删 content 为空的行**；已有正文的宁可留一条脏数据。
+    但"保留"的行仍在库里、也仍会被导出（``routes/export.py`` 取全量 blocks）——
+    所以用户主动删除时给出选择：``purge=True`` 表示**连正文一起删**（用户在确认框里
+    选"移除并删除正文"）。默认 False，保持"不删用户内容"的既有语义。
+
+    返回 ``{"created", "updated", "removed", "kept"}``。
+    """
+    nodes = list(nodes)
+    ids = {n["block_id"] for n in nodes}
+
+    existing = await list_blocks(db, project_id, run_thread_id)
+    existing_ids = {b.get("block_id") for b in existing}
+
+    stale = [
+        b for b in existing
+        if b.get("block_id") not in ids
+        and (purge or not (b.get("content") or "").strip())
+    ]
+    for row in stale:
+        await db.execute("DELETE FROM blocks WHERE id = ?", (row.get("id"),))
+
+    kept = [] if purge else [
+        b for b in existing
+        if b.get("block_id") not in ids and (b.get("content") or "").strip()
+    ]
+    if kept:
+        logger.info(
+            "apply_outline_structure：项目 %s 有 %d 个被移出目录的章节保留了正文，未删除（block_id=%s）",
+            project_id, len(kept),
+            ", ".join(str(b.get("block_id")) for b in kept[:10]),
+        )
+
+    created = updated = 0
+    for idx, node in enumerate(nodes):
+        block_id = node["block_id"]
+        level = int(node.get("level") or 1)
+        title = node["title"]
+        if block_id in existing_ids:
+            await db.execute(
+                """UPDATE blocks
+                      SET title = ?, level = ?, order_idx = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = ? AND block_id = ? AND run_thread_id IS ?""",
+                (title, level, idx, project_id, block_id, run_thread_id),
+            )
+            updated += 1
+        else:
+            await upsert_outline_block(
+                db,
+                project_id=project_id,
+                block_id=block_id,
+                level=level,
+                title=title,
+                order_idx=idx,
+                matrix=None,
+                run_thread_id=run_thread_id,
+            )
+            created += 1
+
+    await db.commit()
+    return {"created": created, "updated": updated,
+            "removed": len(stale), "kept": len(kept)}

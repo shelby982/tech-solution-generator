@@ -38,6 +38,13 @@ _ANCHOR_RE = re.compile(
 # （「标包 2：高可靠技术专题研究与验证标包 商务评审要素相关材料…」）。
 _ANCHOR_TITLE_CHARS = 40
 
+# 「第一个锚点之前」那一段的标题。多文件时会被加上文件名后缀（见 cut_segments）。
+_DOC_HEAD = "（文档开头）"
+# 多文件时，完全没有锚点的那份文件整份作为一个**未选中**段，标题用这个前缀。
+# 不带前缀（直接用文件名）会有一个副作用：文件名里恰好含「标包N」时会被范围匹配选中
+# 而带进整份正文 —— 那种情况确实是用户点名的文件，但把标题与文件名分开更不容易误判。
+_NO_ANCHOR = "（无匹配锚点）"
+
 _CN_DIGIT = {
     "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
     "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
@@ -123,6 +130,27 @@ def _build_full(sections: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def _group_by_file(sections: list[dict]) -> list[tuple[str, list[dict]]]:
+    """按 ``source_file`` 把章节分组，**保持出现顺序**。
+
+    多份要求文件是拼接在一起的：``_build_full`` 拼出来的全文里没有任何文件边界，
+    而最后一段的 end 是「全文末尾」—— 于是一份文件里的锚点段会把其后**所有文件**
+    的正文整段吞进来（实测：选中段 20275 字符里只有约 200 属于该锚点）。
+    按文件分组后分别切段，段就不可能跨文件。
+
+    没有 ``source_file``（单文件、老 checkpoint）时天然只有一组，行为与改造前一致。
+    """
+    groups: list[tuple[str, list[dict]]] = []
+    index: dict[str, int] = {}
+    for s in sections:
+        name = str(s.get("source_file") or "")
+        if name not in index:
+            index[name] = len(groups)
+            groups.append((name, []))
+        groups[index[name]][1].append(s)
+    return groups
+
+
 def _find_anchors(full: str) -> list[tuple[int, str]]:
     """返回 ``(行首偏移, 锚点标题)``，同一行只算一处。"""
     anchors: list[tuple[int, str]] = []
@@ -141,8 +169,54 @@ def _find_anchors(full: str) -> list[tuple[int, str]]:
 
 
 def cut_segments(sections: list[dict]) -> list[Segment]:
-    """按锚点把全文切成区段：第一个锚点之前、锚点之间、最后一个锚点之后。"""
-    return _cut(_build_full(sections or []))
+    """按锚点把全文切成区段：第一个锚点之前、锚点之间、最后一个锚点之后。
+
+    **按文件分别切**（见 ``_group_by_file``）：段绝不跨文件。``start``/``end`` 仍然
+    是拼接全文里的偏移（各文件的偏移累加），便于日志与验收核对。
+    """
+    sections = list(sections or [])
+    groups = _group_by_file(sections)
+    if len(groups) <= 1:
+        return _cut(_build_full(sections))
+
+    per_file: list[tuple[str, list[Segment], str, list[dict]]] = []
+    for name, group in groups:
+        text = _build_full(group)
+        per_file.append((name, _cut(text), text, group))
+
+    if not any(segs for _name, segs, _text, _grp in per_file):
+        # 所有文件都没有同类锚点 → 与单文件语义一致，让调用方退回章级定位
+        return []
+
+    segments: list[Segment] = []
+    offset = 0
+    for name, segs, text, group in per_file:
+        if segs:
+            for seg in segs:
+                seg.start += offset
+                seg.end += offset
+                # 多文件时「文档开头」要区分是哪一份，否则几份文件的头部段在日志/选择里同名
+                if seg.title == _DOC_HEAD and name:
+                    seg.title = f"{_DOC_HEAD}·{name}"
+                segments.append(seg)
+        else:
+            # 这份文件没有任何锚点：**按章节各给一段**（全部未选中）。
+            # 不补的话它在 digest 里彻底消失（模型连它有哪些章节都看不到）；
+            # 按章节给则「其余部分」能列出它的章节清单，而正文不进预算
+            # （未选中段只贡献标题 —— 见 build_spec_digest）。
+            cursor = 0
+            for s in group:
+                content = s.get("content") or ""
+                segments.append(Segment(
+                    title=str(s.get("title") or f"{_NO_ANCHOR}·{name}"),
+                    content=content,
+                    start=offset + cursor,
+                    end=offset + cursor + len(content),
+                ))
+                cursor += len(content) + 1      # +1 对应组内 join 的 "\n"
+        # +1 对应 _build_full 里 join 的分隔符
+        offset += len(text) + 1
+    return segments
 
 
 def _cut(full: str) -> list[Segment]:
@@ -153,7 +227,7 @@ def _cut(full: str) -> list[Segment]:
     segments: list[Segment] = []
     if anchors[0][0] > 0:
         segments.append(Segment(
-            title="（文档开头）", content=full[:anchors[0][0]],
+            title=_DOC_HEAD, content=full[:anchors[0][0]],
             start=0, end=anchors[0][0],
         ))
     for i, (start, title) in enumerate(anchors):
@@ -179,6 +253,23 @@ def select_segments(
     return [s for s in segments if wanted_numbers & {n for _, n in _tokens_of(s)}]
 
 
+def diagnose_scope_miss(sections: list[dict], instruction: str) -> str:
+    """区段定位没成时，给用户一句**可操作**的原因（空串表示要求里根本没点范围）。
+
+    只用于文案：调用方把它并进 ``spec.outline_error``，闸门 1 会展示。
+    以前这里只有 logger.info —— 用户写「按标包2 拆」而文档写法不被覆盖时，
+    目录实际按全文派生，界面零提示，用户以为范围生效了。
+    """
+    tokens = extract_scope_tokens(instruction)
+    if not tokens:
+        return ""
+    pretty = "、".join(f"{prefix}{number}" for prefix, number in tokens)
+    groups = _group_by_file(sections or [])
+    if any(_find_anchors(_build_full(group)) for _name, group in groups):
+        return f"要求文件里的锚点编号与「{pretty}」对不上"
+    return f"要求文件里没有「标包/标段/标的/分包」这类可切分的锚点，无法按「{pretty}」定位"
+
+
 def locate_segments(
     sections: list[dict],
     instruction: str,
@@ -196,7 +287,7 @@ def locate_segments(
         return None
 
     full = _build_full(sections or [])
-    segments = _cut(full)
+    segments = cut_segments(sections)
     if not segments:
         logger.info("提炼要求里有范围标识，但文档没有同类锚点，退回章级定位")
         return None
@@ -219,6 +310,7 @@ def locate_segments(
 
 __all__ = [
     "Segment",
+    "diagnose_scope_miss",
     "extract_scope_tokens",
     "cut_segments",
     "select_segments",

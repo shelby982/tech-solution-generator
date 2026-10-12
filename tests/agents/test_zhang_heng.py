@@ -7,7 +7,7 @@ import io
 
 import pytest
 
-from agents.zhang_heng import SpecParseResult, ZhangHengAgent
+from agents.zhang_heng import OutlineDraftError, SpecParseResult, ZhangHengAgent
 from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
 
@@ -112,6 +112,55 @@ async def test_parse_merges_multiple_requirement_files(monkeypatch):
     assert [s.id for s in result.toc] == ["s1", "s2", "s3", "s4"]
     # 两份文档的标题拼在一起（fixture 两份同名，所以是两个「第一章 项目概述」）
     assert result.doc_title.count("、") == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_skips_broken_file_but_keeps_the_rest(monkeypatch):
+    """单份文件坏掉只跳过它 —— 之前一份坏文件会让整次解析失败，规范书+评分表全白解析。
+
+    坏文件用真实路径构造：`.pptx` 在上传白名单之外（现在会被 400 挡），但历史数据或
+    磁盘损坏的 PDF/DOC 仍会走到这里。
+    """
+    agent = ZhangHengAgent(configs_provider=lambda: ([], 0))
+
+    result = await agent.parse([
+        (io.BytesIO(b"not a real pptx"), ".pptx", "坏文件.pptx"),
+        (_build_minimal_docx(), ".docx", "招标文件.docx"),
+    ])
+
+    assert len(result.toc) == 2, "好文件的章节必须保留"
+    assert result.failed_files == ["坏文件.pptx"]
+    # 每节都带上来源文件（按区段切段靠它还原文件边界）
+    assert {s.source_file for s in result.toc} == {"招标文件.docx"}
+
+
+@pytest.mark.asyncio
+async def test_parse_records_source_file_per_section(monkeypatch):
+    """多份文件拼接后，每节要记住自己来自哪份文件（否则段会跨文件吞内容）。"""
+    agent = ZhangHengAgent(configs_provider=lambda: ([], 0))
+
+    result = await agent.parse([
+        (_build_minimal_docx(), ".docx", "招标文件.docx"),
+        (_build_minimal_docx(), ".docx", "评分表.docx"),
+    ])
+
+    assert [s.source_file for s in result.toc] == [
+        "招标文件.docx", "招标文件.docx", "评分表.docx", "评分表.docx",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parse_raises_when_every_file_fails(monkeypatch):
+    """全部文件都解析失败时明确抛错（带文件名），而不是产出一份空目录。"""
+    from agents.zhang_heng import RequirementParseError
+
+    agent = ZhangHengAgent(configs_provider=lambda: ([], 0))
+
+    with pytest.raises(RequirementParseError) as ei:
+        await agent.parse([(io.BytesIO(b"x"), ".pptx", "坏.pptx")])
+
+    assert "全部解析失败" in str(ei.value)
+    assert "坏.pptx" in str(ei.value)
 
 
 @pytest.mark.asyncio
@@ -229,30 +278,26 @@ def _no_configs():
 
 
 @pytest.mark.asyncio
-async def test_draft_outline_degrades_without_llm_configs():
-    """无 LLM 配置时沿用规范书目录，不抛错，error 写明原因。"""
+async def test_draft_outline_raises_without_llm_configs():
+    """无 LLM 配置 → 抛 OutlineDraftError（不再静默沿用规范书原始目录）。"""
     agent = ZhangHengAgent(configs_provider=_no_configs)
     source = [
         DomainSection(id="s1", level=1, title="技术方案", raw_content="正文",
                       special_marks=["★"]),
     ]
 
-    result = await agent.draft_outline(source)
+    with pytest.raises(OutlineDraftError) as ei:
+        await agent.draft_outline(source)
 
-    assert result.degraded is True
-    assert "未配置模型" in result.error
-    assert [(s.id, s.level, s.title) for s in result.sections] == [("s1", 1, "技术方案")]
-    # 降级路径要原样带上 raw_content / special_marks，extract 仍能正常跑
-    assert result.sections[0].raw_content == "正文"
-    assert result.sections[0].special_marks == ["★"]
+    assert "未配置可用模型" in str(ei.value)
 
 
 @pytest.mark.asyncio
-async def test_draft_outline_degrades_on_empty_source_toc():
+async def test_draft_outline_raises_on_empty_source_toc():
     agent = ZhangHengAgent(configs_provider=_fake_configs)
-    result = await agent.draft_outline([])
-    assert result.degraded is True
-    assert result.sections == []
+    with pytest.raises(OutlineDraftError) as ei:
+        await agent.draft_outline([])
+    assert "没有解析出任何章节" in str(ei.value)
 
 
 @pytest.mark.asyncio
@@ -265,11 +310,10 @@ async def test_draft_outline_degrades_when_dispatch_raises(monkeypatch):
 
     agent = ZhangHengAgent(configs_provider=_fake_configs)
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
-    result = await agent.draft_outline(source)
+    with pytest.raises(OutlineDraftError) as ei:
+        await agent.draft_outline(source)
 
-    assert result.degraded is True
-    assert "全部 API 失败" in result.error
-    assert [s.title for s in result.sections] == ["技术方案"]
+    assert "模型调用失败" in str(ei.value) and "全部 API 失败" in str(ei.value)
 
 
 @pytest.mark.asyncio
@@ -282,15 +326,15 @@ async def test_draft_outline_degrades_when_nodes_unparsable(monkeypatch):
 
     agent = ZhangHengAgent(configs_provider=_fake_configs)
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
-    result = await agent.draft_outline(source)
+    with pytest.raises(OutlineDraftError) as ei:
+        await agent.draft_outline(source)
 
-    assert result.degraded is True
-    assert "无法解析" in result.error
+    assert "无法解析" in str(ei.value)
 
 
 @pytest.mark.asyncio
-async def test_draft_outline_degrades_when_too_few_top_level(monkeypatch):
-    """一级章节 < MIN_TOP_LEVEL_NODES 视为目录不可信，整体降级。"""
+async def test_draft_outline_raises_when_too_few_top_level(monkeypatch):
+    """一级章节 < MIN_TOP_LEVEL_NODES 视为目录不可信 → 抛（不再降级）。"""
     async def _thin(configs, rr_start, payload):
         return {"nodes": [{"level": 1, "title": "唯一一级"}]}
 
@@ -299,10 +343,10 @@ async def test_draft_outline_degrades_when_too_few_top_level(monkeypatch):
 
     agent = ZhangHengAgent(configs_provider=_fake_configs)
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
-    result = await agent.draft_outline(source)
+    with pytest.raises(OutlineDraftError) as ei:
+        await agent.draft_outline(source)
 
-    assert result.degraded is True
-    assert "结构不完整" in result.error
+    assert "结构不完整" in str(ei.value)
 
 
 @pytest.mark.asyncio
@@ -526,7 +570,6 @@ async def test_draft_outline_builds_hierarchical_ids(monkeypatch):
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="正文")]
     result = await agent.draft_outline(source)
 
-    assert result.degraded is False
     assert [(s.id, s.level) for s in result.sections] == [
         ("s1", 1), ("s1.1", 2), ("s2", 1), ("s2.1", 2), ("s2.1.1", 3), ("s3", 1),
     ]
@@ -615,7 +658,7 @@ async def test_draft_outline_passes_previous_outline_on_redraft(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_draft_outline_reports_warnings_in_error_but_not_degraded(monkeypatch):
+async def test_draft_outline_reports_warnings_in_error(monkeypatch):
     """部分节点被截断/重挂属于「成功但有警告」，不能算降级。"""
     async def _messy(configs, rr_start, payload):
         return {"nodes": [
@@ -632,6 +675,207 @@ async def test_draft_outline_reports_warnings_in_error_but_not_degraded(monkeypa
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="")]
     result = await agent.draft_outline(source)
 
-    assert result.degraded is False
     assert "重名" in result.error
     assert len(result.sections) == 3
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_reports_when_scope_not_located(monkeypatch):
+    """用户点名了范围却定位不到 → 原因必须回到 outline_error（前端闸门会展示）。
+
+    旧行为只有 logger.info：目录实际按全文拆的，用户从界面完全看不出范围没生效。
+    """
+    async def _outline(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "项目理解"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 1, "title": "服务保障"},
+        ]}
+
+    async def _no_keyword(configs, rr_start, payload):
+        return {"files": [], "keywords": []}      # 模型兜底也认不出
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _outline)
+    monkeypatch.setattr(infra.llm, "dispatch_scope_select_json", _no_keyword)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="技术规范", raw_content="没有任何锚点的正文"),
+    ]
+
+    result = await agent.draft_outline(source, instruction="按照标包2的技术评分要求拆分章节")
+
+    assert "标包2" in result.error
+    assert "锚点" in result.error
+    assert "重新拆分目录" in result.error          # 给出下一步动作
+    assert result.sections, "范围没定位到也要照常派生目录（只是没锁定结构）"
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_reports_truncated_output(monkeypatch):
+    """输出被截断（抢救出的部分成功）→ error 里要说清，闸门 1 才能提示重试。"""
+    async def _outline(configs, rr_start, payload):
+        return {"nodes": [
+            {"level": 1, "title": "项目理解"},
+            {"level": 1, "title": "技术响应"},
+            {"level": 1, "title": "服务保障"},
+        ], "_truncated_nodes": 3}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _outline)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [DomainSection(id="s1", level=1, title="技术规范", raw_content="正文")]
+
+    result = await agent.draft_outline(source, instruction="按评分项拆章")
+
+    assert "截断" in result.error and "3 个章节" in result.error
+    assert "重新拆分目录" in result.error
+    assert len(result.sections) == 3        # 部分成功仍然落目录
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_scopes_to_named_file_without_model_call(monkeypatch):
+    """要求里**点名文件**（「按照评分表拆分章节」）→ 确定性地用那份文件当材料。
+
+    这种说法里没有标包/标段词族，区段定位与模型兜底的门控都不会触发；而它恰恰是
+    最常见的诉求。命中文件名后不该再花一次模型调用。
+    """
+    captured: dict = {}
+    scope_calls = {"n": 0}
+
+    async def _outline(configs, rr_start, payload):
+        captured.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "评分项一"},
+            {"level": 1, "title": "评分项二"},
+            {"level": 1, "title": "评分项三"},
+        ]}
+
+    async def _scope(configs, rr_start, payload):
+        scope_calls["n"] += 1
+        return {"files": [], "keywords": []}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _outline)
+    monkeypatch.setattr(infra.llm, "dispatch_scope_select_json", _scope)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="投标人须知",
+                      raw_content="与评分无关的正文", source_file="招标文件.pdf"),
+        DomainSection(id="s2", level=1, title="技术评分标准",
+                      raw_content="评分项：技术方案完整性", source_file="评分表.pdf"),
+    ]
+
+    result = await agent.draft_outline(source, instruction="按照评分表拆分章节")
+
+    digest = captured["spec_digest"]
+    assert "评分项：技术方案完整性" in digest          # 点名文件的内容进来了
+    assert "与评分无关的正文" not in digest            # 其它文件没进来
+    assert captured["follow_structure"] is True        # 点名文件 → 结构锁死
+    assert scope_calls["n"] == 0, "确定性命中不该再调模型兜底"
+    assert "评分表.pdf" in result.error                # 闸门能看到定位依据
+
+
+@pytest.mark.asyncio
+async def test_draft_outline_uses_model_picked_file_as_scope(monkeypatch):
+    """要求里是「标包2 的评分表」这种说法时：模型认出是哪份文件 → 用那份文件当材料。
+
+    prompt 一直要求模型同时给 keywords 与 files，旧实现只取 keywords、还恒传空
+    file_names，于是「点名文件」这条完全没救。
+    """
+    captured: dict = {}
+
+    async def _outline(configs, rr_start, payload):
+        captured.update(payload)
+        return {"nodes": [
+            {"level": 1, "title": "评分项一"},
+            {"level": 1, "title": "评分项二"},
+            {"level": 1, "title": "评分项三"},
+        ]}
+
+    async def _scope(configs, rr_start, payload):
+        assert payload["file_names"] == ["招标文件.pdf", "评分表.pdf"]
+        return {"files": ["评分表.pdf"], "keywords": []}
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "dispatch_outline_draft_json", _outline)
+    monkeypatch.setattr(infra.llm, "dispatch_scope_select_json", _scope)
+
+    agent = ZhangHengAgent(configs_provider=_fake_configs)
+    source = [
+        DomainSection(id="s1", level=1, title="投标人须知",
+                      raw_content="与评分无关的正文", source_file="招标文件.pdf"),
+        DomainSection(id="s2", level=1, title="技术评分标准",
+                      raw_content="评分项：技术方案完整性", source_file="评分表.pdf"),
+    ]
+
+    await agent.draft_outline(source, instruction="按照标包2的评分表拆分章节")
+
+    digest = captured["spec_digest"]
+    assert "评分项：技术方案完整性" in digest
+    assert "与评分无关的正文" not in digest
+    assert captured["follow_structure"] is True
+
+
+def test_named_files_in_matches_full_name_or_stem():
+    """文件名匹配：整名或去扩展名的主干、忽略空白与大小写；不误伤无关键。"""
+    from agents.zhang_heng import named_files_in
+
+    files = ["招标文件.pdf", "评分表.pdf", "评审要素表.docx"]
+    assert named_files_in("按照评分表拆分章节", files) == ["评分表.pdf"]
+    assert named_files_in("按 评分表 拆", files) == ["评分表.pdf"]
+    assert named_files_in("按照招标文件.pdf里的评分表", files) == ["招标文件.pdf", "评分表.pdf"]
+    assert named_files_in("按评分项逐条拆章", files) == []
+    assert named_files_in("", files) == []
+    assert named_files_in("按评分表拆", []) == []
+
+
+async def test_extract_does_not_fill_missing_sections_when_cancelled():
+    """取消时不要给未提炼的章节补空行。
+
+    兜底补出来的行是 status='outline_done' + 8 字段全空（error=「提炼缺失」），前端按
+    status 判定就成了"已提炼" —— 取消后页面显示「提炼完成」、字段却是空的，用户没法
+    判断到底跑没跑，「继续提炼」也会被这份假完成态误导。
+    """
+    from agents.zhang_heng import OutlineMatrixRow, ZhangHengAgent
+    from domain.spec import Section as DomainSection
+
+    agent = ZhangHengAgent.__new__(ZhangHengAgent)
+    section = DomainSection(id="s1", level=1, title="第一章", raw_content="内容",
+                            special_marks=[])
+
+    fired: list[str] = []
+
+    class _Cfg:
+        provider, model = "deepseek", "deepseek-v4-flash"
+
+    async def _on_section(sec, row):
+        fired.append(sec.id)
+
+    # dispatch 一个都不产出（模拟取消后 generator 提前结束）
+    import infra.llm
+
+    async def _empty_dispatch(configs, rr, sections, **kw):
+        if False:
+            yield {}
+        return
+
+    orig = infra.llm.dispatch_outline_json
+    infra.llm.dispatch_outline_json = _empty_dispatch
+    agent._configs_provider = lambda: ([_Cfg()], 0)
+    try:
+        cancelled = await agent.extract([section], on_section=_on_section,
+                                        should_cancel=lambda: True)
+        assert cancelled == {}, "取消时不该补出空行"
+        assert fired == []
+
+        # 没取消：兜底照旧补一行（防 dispatch bug）
+        filled = await agent.extract([section], on_section=_on_section,
+                                     should_cancel=lambda: False)
+        assert list(filled) == ["s1"]
+        assert filled["s1"].error == "提炼缺失"
+    finally:
+        infra.llm.dispatch_outline_json = orig

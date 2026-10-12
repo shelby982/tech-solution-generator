@@ -87,9 +87,21 @@ class ErrorEntry(TypedDict, total=False):
 # 合法 stage 集合（与 domain.review.repository._VALID_STAGES 同步）
 StageLiteral = Literal[
     "idle", "parsing", "outline_review",
-    "matching", "materials_review",
+    # extracting：闸门 1 放行后**逐节提炼 8 字段的运行期 stage**（每章一次模型调用，
+    # 一份 400 章的要求文件要跑很久）。节点只能在自己**结束时**把 stage 写进
+    # checkpoint，所以这个值由 runner 在续跑前写进 workflow_runs 表；否则这十几分钟里
+    # 页面刷新读到的仍是 outline_review，又会给出「确认目录，开始提炼要点」。
+    "extracting", "matching", "materials_review",
     "generating", "reviewing",
     "report_review", "done", "aborted",
+    # failed：图执行中途抛异常（如目录派生失败）。与 aborted 的区别是「不是用户取消」，
+    # 前端据此显示失败原因 + 「重新拆分目录」重试入口。
+    "failed",
+    # paused：节点主动停下的"暂停"态（用户取消）。generate 节点早已在返回它，
+    # extract 节点被取消时也返回它；前端 SETTLED_STAGES / stageLabels 一直在处理它，
+    # 但两份白名单以前漏了 —— 于是 _sync_stage 写 'paused' 会抛 ValueError，
+    # 被 _resume_until_pause 的 except 兜住后把这次运行误标成 failed。
+    "paused",
 ]
 
 UserChoiceLiteral = Literal[

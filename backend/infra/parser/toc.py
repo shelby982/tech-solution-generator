@@ -34,12 +34,16 @@ class Section:
         title: str,
         raw_content: str = "",
         special_marks: Optional[list] = None,
+        page: int = 0,
     ):
         self.id = section_id
         self.level = level
         self.title = title
         self.raw_content = raw_content
         self.special_marks: list[str] = special_marks or []
+        # 页码（PDF 从行级 page_no 推出；Word 无页码概念，留 0）。
+        # 素材切片把它带进 material_chunks.page，最终出现在依据的出处 locator 里。
+        self.page = int(page or 0)
 
     def to_dict(self) -> dict:
         return {
@@ -147,59 +151,75 @@ def extract_special_marks(text: str) -> tuple[list[str], str]:
 # 编号识别正则（4 层级）
 # ─────────────────────────────────────────────
 
-HEADING_PATTERNS: list[tuple[int, re.Pattern]] = [
-    (4, re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]')),
-    (4, re.compile(r'^\d+\.\d+[\s　]')),
-    (3, re.compile(r'^（\d+）')),
-    (3, re.compile(r'^\(\d+\)')),
-    (2, re.compile(r'^\d+\.\s')),
-    (2, re.compile(r'^\d+\.　')),
-    (1, re.compile(r'^[一二三四五六七八九十百千]+[、，]')),
-    (1, re.compile(r'^第\s*[一二三四五六七八九十百千\d]+\s*[章节篇部]')),
-]
+# 十进制编号：**级别 = 点分段数**（1→1 级，1.1→2 级，1.1.1→3 级，1.1.1.1→4 级）。
+# 旧实现用「(4) ^\d+\.\d+」这类写死的模式，结果是 `1.1 项目背景` 判成 **4 级**、
+# `1.1.1 详细要求` 反而判不出（`^\d+\.\s` 要求点号后紧跟空白）—— 同一文档里
+# 1. 判 2 级、1.1 判 4 级，层级整体错乱且出现跳级。
+# 段内限 1~3 位数字，避免把表格里的价值（「2320.48 否」）当成章节号。
+_DECIMAL_NUMBER_RE = re.compile(r'^(\d{1,2}(?:\.\d{1,3}){0,3})[.．、]?(?![.\d])')
+
+# 其余编号族显式列出（级别是约定：章 > 节 > 一、/（一） > （1） > ①）
+_CN_CHAPTER_RE = re.compile(r'^第\s*[一二三四五六七八九十百千\d]+\s*[章篇部]')
+_CN_SECTION_RE = re.compile(r'^第\s*[一二三四五六七八九十百千\d]+\s*节')
+_CN_COMMA_RE = re.compile(r'^[一二三四五六七八九十百千]+[、，]')
+_PAREN_CN_RE = re.compile(r'^[（(][一二三四五六七八九十百千]+[）)]')
+_PAREN_ARABIC_RE = re.compile(r'^[（(]\d{1,2}[）)]')
+_CIRCLED_RE = re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]')
 
 
 # 章节号长相：每段 1~2 位。用来把表格里的数量（「2320.48 否」）
 # 和真正的二级章节号（「1.1 项目背景」）分开——前者整数部分常有 3 位以上。
-_SECTION_NUMBER_RE = re.compile(r'^\d{1,2}\.\d{1,3}(?:\.\d{1,3})*')
 
 # 列表项常见的收尾：以这些标点结束的多半是正文枚举，不是标题。
 _LIST_ITEM_TAIL = "；;。，,：:"
 
 
 def detect_level_from_numbering(text: str) -> Optional[int]:
+    """按编号判章节级别。判不出返回 None（由调用方走字号兜底）。
+
+    级别约定（同一份文档内自洽；文档顺序仍是层级的最终权威，见 normalize_nodes）：
+    ``第X章/篇/部``=1、``第X节``=2、``1.``=1、``1.1``=2、``1.1.1``=3、``1.1.1.1``=4、
+    ``一、``/``（一）``=2、``（1）``=3、``①``=4。判不出前缀里的数字是否为章节号时
+    （表格数值）一律 None。
+    """
     text = text.strip()
-    for level, pattern in HEADING_PATTERNS:
+    if not text:
+        return None
+
+    for level, pattern in (
+        (1, _CN_CHAPTER_RE),
+        (2, _CN_SECTION_RE),
+        (2, _CN_COMMA_RE),
+        (2, _PAREN_CN_RE),
+        (3, _PAREN_ARABIC_RE),
+        (4, _CIRCLED_RE),
+    ):
         m = pattern.match(text)
-        if not m:
-            continue
-        # level 3/4 编号常被列表项使用，去前缀后通常 ≤ 20 字。
-        # 超过则视为列表项不当作标题。
-        if level >= 3:
-            remainder = text[m.end():].strip()
-            if len(remainder) > 20:
-                return None
-            # 空标题、以及以顿挫/句号收尾的枚举项，都不是标题
-            if not remainder or remainder[-1] in _LIST_ITEM_TAIL:
-                return None
-        if level == 4 and not _looks_like_section_number(m.group(0)):
-            return None
-        return level
+        if m:
+            return level if _passes_heading_guards(text, m.end(), level) else None
+
+    m = _DECIMAL_NUMBER_RE.match(text)
+    if m:
+        # 点分段数即级别；``1.`` 结尾的点号属于编号本身，级别算 1
+        level = min(4, m.group(1).count(".") + 1)
+        return level if _passes_heading_guards(text, m.end(), level) else None
     return None
 
 
-def _looks_like_section_number(prefix: str) -> bool:
-    """判断匹配到的编号前缀是不是「章节号」。
+def _passes_heading_guards(text: str, prefix_end: int, level: int) -> bool:
+    """深层编号与空正文的过滤：列表项常以统一编号开头，不是章节标题。
 
-    非十进制编号（①②、「（1）」等）按原样放行；
-    纯数字开头的要求长得像 1.1 / 3.2.1，否则就是表格里的数值。
-
-    只认 ASCII 数字：``"①".isdigit()`` 是 True（Unicode 数字类），
-    用 isdigit 会把「①概述」误判成十进制编号。
+    - ``level >= 3`` 时去前缀后通常 ≤ 20 字；超过视为正文枚举。
+    - 去前缀后为空、或以顿挫/句号收尾的枚举项，也不是标题。
     """
-    if not prefix or prefix[0] not in "0123456789":
+    if level < 3:
         return True
-    return bool(_SECTION_NUMBER_RE.match(prefix))
+    remainder = text[prefix_end:].strip()
+    if len(remainder) > 20:
+        return False
+    if not remainder or remainder[-1] in _LIST_ITEM_TAIL:
+        return False
+    return True
 
 
 def clean_title(text: str) -> str:
@@ -230,10 +250,18 @@ def _normalize_for_match(text: str) -> str:
     return text.lower()
 
 
+# 编号前缀识别用的模式表（`_extract_numbering_prefix` 逐个试；分级规则在
+# detect_level_from_numbering 里，另有"点分段数 = 级别"与长度守卫）。
+_NUMBERING_PREFIX_PATTERNS: tuple[re.Pattern, ...] = (
+    _CN_CHAPTER_RE, _CN_SECTION_RE, _CN_COMMA_RE, _PAREN_CN_RE,
+    _PAREN_ARABIC_RE, _CIRCLED_RE, _DECIMAL_NUMBER_RE,
+)
+
+
 def _extract_numbering_prefix(text: str) -> str:
-    """提取编号前缀（如 "一、"、"1."、"（1）"）。"""
+    """提取编号前缀（如 "一、"、"1."、"（1）"）。判不出返回空串。"""
     text = text.strip()
-    for _, pattern in HEADING_PATTERNS:
+    for pattern in _NUMBERING_PREFIX_PATTERNS:
         m = pattern.match(text)
         if m:
             return m.group(0)

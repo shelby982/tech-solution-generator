@@ -434,6 +434,8 @@ def _sections_from_tables(table_lines: list[dict]) -> list[Section]:
         rows = line.get("rows") or []
         if not rows:
             continue
+        # 该表格行所在页码（1-based）；表格式目录还原出的章节要带出处页码
+        cur_page = int(line.get("page_no") or 0) + 1
         serial_col, title_cols = _table_layout(rows)
 
         for row in rows:
@@ -477,6 +479,7 @@ def _sections_from_tables(table_lines: list[dict]) -> list[Section]:
                 title=clean_title(f"{serial} {title}".strip()),
                 raw_content=content,
                 special_marks=[],
+                page=int(cur_page or 0),
             ))
 
     if sections and pending:
@@ -564,6 +567,8 @@ def _pdf_lines_to_sections(
             title=clean_title(text),
             raw_content=raw_content,
             special_marks=marks,
+            # 页码来自标题所在行（行级 page_no 是 0-based）；素材切片与依据出处要用它
+            page=int(lines[line_idx].get("page_no") or 0) + 1,
         ))
 
     if not sections:
@@ -587,6 +592,7 @@ def _pdf_lines_to_sections(
                 title=doc_title or "全文",
                 raw_content=all_text,
                 special_marks=[],
+                page=int((lines[0].get("page_no") or 0)) + 1 if lines else 0,
             ))
 
     return sections, doc_title

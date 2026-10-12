@@ -303,3 +303,55 @@ def test_convergence_frame_content():
     name, data = _parse_frame(events.convergence(payload))
     assert name == "convergence"
     assert data == payload
+
+
+async def test_emitter_broadcasts_to_every_subscriber():
+    """多订阅者必须**都**收到同一帧（广播），而不是一人一半。
+
+    以前是单个共享 asyncio.Queue：开第二个标签页 / 旧连接未断时，逐节提炼的帧被分走，
+    两个页面都看到残缺进度（只能靠 3s 兜底轮询慢慢补齐）。
+    """
+    from orchestrator.events import EventEmitter
+
+    em = EventEmitter()
+    a = em.stream()
+    b = em.stream()
+    await em.emit("event: x\ndata: 1\n\n")
+    await em.aclose()
+
+    assert await anext(a) == "event: x\ndata: 1\n\n"
+    assert await anext(b) == "event: x\ndata: 1\n\n"
+    # 关闭后两个订阅者都要结束（并且不抛）
+    for gen in (a, b):
+        try:
+            await anext(gen)
+            raise AssertionError("订阅者应当在 _END 处结束")
+        except StopAsyncIteration:
+            pass
+
+
+async def test_emitter_subscribe_after_close_ends_immediately():
+    """关闭后才来订阅：立刻结束，不能永远等一个不会来的 _END。"""
+    from orchestrator.events import EventEmitter
+
+    em = EventEmitter()
+    await em.aclose()
+    gen = em.stream()
+    try:
+        await anext(gen)
+        raise AssertionError("应当立刻结束")
+    except StopAsyncIteration:
+        pass
+
+
+async def test_emitter_dropped_subscriber_stops_receiving():
+    """断开（close 生成器）的订阅者要从广播列表里摘掉，避免帧堆在没人读的队列里。"""
+    from orchestrator.events import EventEmitter
+
+    em = EventEmitter()
+    a = em.stream()
+    await em.emit("event: x\ndata: 1\n\n")
+    assert await anext(a) == "event: x\ndata: 1\n\n"
+    await a.aclose()                       # 连接断开
+    assert len(em._subscribers) == 0
+    await em.emit("event: x\ndata: 2\n\n")  # 不该炸

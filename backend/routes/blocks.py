@@ -11,7 +11,7 @@ backend/routes/blocks.py — Block CRUD + SSE 生成 + AI 功能
 
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -21,7 +21,7 @@ from db import get_db
 from services.block_store import (
     get_block, update_block_content, update_block_status,
     list_blocks, add_revision, update_block_requirement, list_revisions,
-    current_run_thread_id,
+    current_run_thread_id, update_block_matrix_fields,
 )
 from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
 from infra.llm import dispatch_stream_generate
@@ -85,11 +85,75 @@ async def get_block_matched_sources(block_id: int):
     return JSONResponse(content={"matched_sources": sources})
 
 
+# ── PUT /api/blocks/{block_id}/evidence ──────────────────
+# 人工挂接 / 解绑素材依据。写库 + 写 checkpoint 都在 runner.set_chapter_evidence 里
+# （两处都要写：库是页面与撰写读的权威，state 是下一轮匹配"已有依据"的来源）。
+class EvidenceEditRequest(BaseModel):
+    """人工挂接/解绑/改挂载条目。
+
+    - ``action=mount``：把某段素材挂到本章（可带 item_ids 直接挂到具体应答条目）
+    - ``action=unmount``：从本章解绑
+    - ``action=set_items``：只改这段依据挂到哪些条目（不动归属本身）
+    """
+    action: Literal["mount", "unmount", "set_items"]
+    chunk_id: int
+    item_ids: list[str] | None = None
+    threadId: str | None = None
+
+
+@router.put("/blocks/{block_id}/evidence")
+async def update_block_evidence(block_id: int, body: EvidenceEditRequest):
+    """按**字符串 block_id**（s2.1 这类位置派生 id）操作：block_id 是路径里的主键行 id，
+    先查出它的 block_id 字符串再交给 runner。"""
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+        if block is None:
+            raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
+        bid = str(block.get("block_id") or block_id)
+        project_id = int(block.get("project_id") or 0)
+        tid = body.threadId or await current_run_thread_id(db, project_id)
+
+    if not tid:
+        raise HTTPException(status_code=404, detail="该项目还没有运行记录，无法挂接素材")
+
+    from orchestrator.runner import WorkflowAbortedError
+    from routes.workflow import get_runner
+
+    try:
+        result = await get_runner().set_chapter_evidence(
+            tid, bid, action=body.action,
+            chunk_id=body.chunk_id, item_ids=body.item_ids,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]) if exc.args else str(exc))
+    except WorkflowAbortedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc),
+                            headers={"X-Error-Code": "workflow_aborted"})
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse(content=result)
+
+
 # ── PUT /api/blocks/{id} ─────────────────────────────────
 
 class BlockUpdateRequest(BaseModel):
+    """工作台参考卡片 / 正文的局部更新。**只写调用方给的字段**，未给的不动。
+
+    之前这里只有 content / requirement，于是参考卡片上改 key_points / veto_items /
+    bonus_items / score_items / evidence_required / indicators 的 PUT **被静默丢弃**
+    （pydantic 把多余字段丢掉，后端 200 返回原值，只有前端本地副本变了，刷新即回退）。
+    """
+
     content: str | None = Field(default=None, max_length=500_000)
     requirement: str | None = Field(default=None, max_length=5000)
+    key_points: str | None = Field(default=None, max_length=20_000)
+    veto_items: str | None = Field(default=None, max_length=20_000)
+    bonus_items: str | None = Field(default=None, max_length=20_000)
+    score_items: str | None = Field(default=None, max_length=20_000)
+    evidence_required: str | None = Field(default=None, max_length=20_000)
+    indicators: str | None = Field(default=None, max_length=20_000)
+    # 三选一枚举；非法值直接 422，别把脏值写进决定正文字数档的列
+    constraint_level: Literal["mandatory", "recommended", "optional"] | None = None
 
 
 VALID_TONES = {"official", "tech", "concise"}
@@ -121,6 +185,16 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
                                source="edit", summary="手动编辑")
         if body.requirement is not None:
             updated = await update_block_requirement(db, block_id, body.requirement)
+        # 其余参考卡片字段（提炼 8 字段里除 requirement 外）：**局部**更新，
+        # 只写请求里显式给出的列 —— 一次改一个字段不该把别的字段清空。
+        matrix_patch = {
+            field: getattr(body, field)
+            for field in ("key_points", "veto_items", "bonus_items", "score_items",
+                          "evidence_required", "indicators", "constraint_level")
+            if getattr(body, field) is not None
+        }
+        if matrix_patch:
+            updated = await update_block_matrix_fields(db, block_id, matrix_patch)
     return JSONResponse(content=updated)
 
 

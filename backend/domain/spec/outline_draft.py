@@ -55,7 +55,13 @@ def normalize_nodes(
     dropped_dup = 0
     rehung = 0
 
-    for raw in raw_nodes or []:
+    # 模型给的 ``parent`` 是**原始 nodes 数组**里的下标（prompt 里就是这么承诺的），
+    # 而 accepted 会因为空标题 / 非 dict / 同级重名而变短。直接把 explicit 当 accepted
+    # 下标用，一旦有节点被丢弃，其后每个 parent 都会指向更早的另一个节点 ——
+    # 实测：中间一个空标题节点会让其后 parent=1 的节点被降级重挂并留下假告警。
+    raw_to_accepted: dict[int, int] = {}
+
+    for raw_idx, raw in enumerate(raw_nodes or []):
         if not isinstance(raw, dict):
             continue
         title = str(raw.get("title") or "").strip()
@@ -69,12 +75,13 @@ def normalize_nodes(
         level = raw_level
 
         explicit = _coerce_int(raw.get("parent"))
+        mapped = raw_to_accepted.get(explicit) if explicit is not None else None
         if (
-            explicit is not None
-            and 0 <= explicit < len(accepted)
-            and accepted[explicit].level == raw_level - 1
+            mapped is not None
+            and 0 <= mapped < len(accepted)
+            and accepted[mapped].level == raw_level - 1
         ):
-            parent_idx, level = explicit, raw_level
+            parent_idx, level = mapped, raw_level
         else:
             # 回退：最近一个 level 更小的前驱（保证 level = parent.level + 1 ≤ MAX_LEVEL）
             for j in range(len(accepted) - 1, -1, -1):
@@ -92,6 +99,7 @@ def normalize_nodes(
             continue
         seen_siblings.add(key)
 
+        raw_to_accepted[raw_idx] = len(accepted)
         accepted.append(NormalizedNode(level=level, title=title, parent=parent_idx))
 
     if dropped_dup:
@@ -114,33 +122,43 @@ def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
 
     ``raw_content`` / ``special_marks`` 留空，由调用方做 grounding 时填充。
     """
-    counters = [0] * (MAX_LEVEL + 1)
-    last_id_at_level: dict[int, str] = {}
+    top_counter = 0
+    # 子序号按**父 id** 记账，而不是按 level 记一个全局计数器。
+    # 旧实现用 ``last_id_at_level`` + 按 level 的计数器：换一级时只清深层的
+    # ``last_id_at_level``，浅层记录留着，于是「上一棵子树遗留的父 id + 归零的计数」
+    # 会拼出与更早节点**完全相同**的 id（实测合法模型输出即可撞出两个 ``s1.2.1``，
+    # 且 normalize 零告警）—— 重复 id 会让一节被静默覆盖丢失。
+    child_counters: dict[str, int] = {}
     sections: list[Section] = []
+    used_ids: set[str] = set()
 
     for node in nodes:
-        level = max(1, min(MAX_LEVEL, node.level))
-        if level == 1:
-            counters[1] += 1
-            for lv in range(2, MAX_LEVEL + 1):
-                counters[lv] = 0
-            section_id = f"s{counters[1]}"
+        parent = node.parent
+        parent_section = (
+            sections[parent]
+            if isinstance(parent, int) and 0 <= parent < len(sections)
+            else None
+        )
+        if parent_section is None:
+            # 一级节点（normalize_nodes 保证 level>1 必有父；这里对脏输入兜底）
+            top_counter += 1
+            level = 1
+            section_id = f"s{top_counter}"
         else:
-            parent_id = last_id_at_level.get(level - 1)
-            if parent_id is None:
-                # 理论上不会发生（normalize_nodes 保证有一级前驱），兜底降为一级
-                counters[1] += 1
-                for lv in range(2, MAX_LEVEL + 1):
-                    counters[lv] = 0
-                section_id = f"s{counters[1]}"
-                level = 1
-            else:
-                counters[level] += 1
-                for lv in range(level + 1, MAX_LEVEL + 1):
-                    counters[lv] = 0
-                section_id = f"{parent_id}.{counters[level]}"
+            # 层级以父级为准：parent 是权威关系，避免 level 与 parent 不一致
+            level = max(1, min(MAX_LEVEL, parent_section.level + 1))
+            used = child_counters.get(parent_section.id, 0) + 1
+            child_counters[parent_section.id] = used
+            section_id = f"{parent_section.id}.{used}"
 
-        last_id_at_level[level] = section_id
+        if section_id in used_ids:
+            # 构造上不可能（父 id 唯一 + 每个父的子序号自增）；留一道防线，宁可改 id 也不撞号
+            suffix = 1
+            while f"{section_id}-{suffix}" in used_ids:
+                suffix += 1
+            section_id = f"{section_id}-{suffix}"
+        used_ids.add(section_id)
+
         sections.append(Section(id=section_id, level=level, title=node.title))
 
     return sections

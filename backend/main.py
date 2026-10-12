@@ -68,15 +68,19 @@ async def _load_spec_for_project(project_id: int):
     """
     from io import BytesIO
     from db import get_db
+    from services.block_store import ROLE_PRIORITY_SQL
 
     data_dir = DATA_DIR
 
     placeholders = ",".join("?" * len(REQUIREMENT_ROLES))
     async with get_db() as conn:
         cursor = await conn.execute(
+            # 顺序即拼接顺序、也是 digest 吃预算的顺序：主招标/规范书类排最前
+            # （它定义章节骨架），评分表/评审要素随后。与 list_materials 同一片段，
+            # 保证「界面看到的顺序」=「派生用的顺序」。
             "SELECT filename, file_path FROM materials "
             f"WHERE project_id = ? AND role IN ({placeholders}) "
-            "ORDER BY id ASC",
+            f"ORDER BY {ROLE_PRIORITY_SQL}",
             (project_id, *REQUIREMENT_ROLES),
         )
         rows = await cursor.fetchall()
@@ -89,15 +93,13 @@ async def _load_spec_for_project(project_id: int):
     for row in rows:
         filename = row["filename"]
         rel_path = row["file_path"]
+        # file_path 形如 uploads/{pid}/{落盘名}，相对 backend/data/。
+        # （曾经有个「相对工程根」兜底，算出来是 backend/uploads/…，永远不可能命中，
+        #   已删 —— 上传写盘用的是 routes/materials.UPLOAD_ROOT，与此处 data_dir 同源。）
         abs_path = data_dir / rel_path
         if not abs_path.exists():
-            # 兜底：相对工程根
-            candidate = data_dir.parent / rel_path
-            if candidate.exists():
-                abs_path = candidate
-            else:
-                logger.warning(f"要求文件不存在，跳过：{abs_path}")
-                continue
+            logger.warning(f"要求文件不存在，跳过：{abs_path}")
+            continue
         suffix = Path(filename).suffix.lower()
         with open(abs_path, "rb") as f:
             data = f.read()

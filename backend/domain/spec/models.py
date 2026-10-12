@@ -20,6 +20,10 @@ class Section:
     title: str
     raw_content: str = ""    # 章节原文（用于 LLM 上下文）
     special_marks: list[str] = field(default_factory=list)  # ★ ▲
+    # 该章节来自哪份要求文件。多份文件拼接后**文件边界只能靠它还原**：
+    # 按区段定位（segment.py）必须按文件分别切段，否则最后一个锚点到文末的那一段
+    # 会把其后所有文件的正文整段吞进来（实测：选中段 20275 字符里只有 ~200 属实）。
+    source_file: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -28,6 +32,7 @@ class Section:
             "title": self.title,
             "raw_content": self.raw_content,
             "special_marks": list(self.special_marks),
+            "source_file": self.source_file,
         }
 
     @classmethod
@@ -38,6 +43,7 @@ class Section:
             title=d["title"],
             raw_content=d.get("raw_content", ""),
             special_marks=list(d.get("special_marks", [])),
+            source_file=d.get("source_file", ""),
         )
 
 
@@ -58,7 +64,11 @@ class OutlineMatrixRow:
     evidence_required: str = ""
     constraint_level: str = "recommended"  # mandatory | recommended | optional
     indicators: str = ""
-    error: str = ""          # 提炼失败时的错误描述（不持久化，仅工作流内传递）
+    error: str = ""          # 结果说明（失败原因 / "无原文"提示），会落库到 blocks.error
+    # error_kind: '' 正常 | 'no_source' 无原文（正常，不必重试）| 'failed' 需要重试。
+    # 有了它界面才能把"失败"和"这节本来就没内容"分开 —— 以前两者在页面上完全同形，
+    # 失败章节被算成"已提炼"，页面照样显示「提炼完成」。
+    error_kind: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +83,7 @@ class OutlineMatrixRow:
             "constraint_level": self.constraint_level,
             "indicators": self.indicators,
             "error": self.error,
+            "error_kind": self.error_kind,
         }
 
     @classmethod
@@ -89,4 +100,5 @@ class OutlineMatrixRow:
             constraint_level=d.get("constraint_level", "recommended"),
             indicators=d.get("indicators", ""),
             error=d.get("error", ""),
+            error_kind=d.get("error_kind", ""),
         )

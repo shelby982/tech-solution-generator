@@ -80,7 +80,7 @@ class _StubZhangHeng:
         from agents.zhang_heng import OutlineDraftResult
         return OutlineDraftResult(
             sections=[DomainSection(**s.to_dict()) for s in source_toc],
-            degraded=True, error="stub 未派生",
+            error="stub 未派生",
         )
 
     async def extract(self, toc, **kw):

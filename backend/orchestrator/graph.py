@@ -251,7 +251,7 @@ def build_graph(
 
     async def extract_node(state: WorkflowState) -> WorkflowState:
         return await nodes.zhang_heng_extract_node(
-            state, agent=deps.zhang_heng, emitter=emitter,
+            state, agent=deps.zhang_heng, emitter=emitter, should_cancel=should_cancel,
         )
 
     async def match_node(state: WorkflowState) -> WorkflowState:
@@ -325,6 +325,10 @@ def build_graph(
     # ENABLE_SECTION_EXTRACT=False 时同样收尾：匹配依赖它产出的矩阵，空矩阵匹配不出东西。
     def _after_extract(state: WorkflowState) -> str:
         if not nodes.ENABLE_SECTION_EXTRACT:
+            return END
+        # 用户取消导致提炼提前收尾（stage='paused'）：只是补了一部分章节，绝不能
+        # 顺着 AUTO_MATCH 去匹配 —— 矩阵不全，匹配出来的东西是残的。
+        if state.get("stage") == "paused":
             return END
         if AUTO_MATCH_AFTER_EXTRACT or state.get("match_requested"):
             return NODE_MATCH

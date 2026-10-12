@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import pytest
 
+import db as db_module
 from agents.zhang_heng import SpecParseResult
 from domain.proposal import BlockOutput, Source
 from domain.review import Finding, Issue
@@ -111,6 +112,8 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
     assert spec["toc"] == [{
         "id": "s1", "level": 1, "title": "技术方案",
         "raw_content": "原文", "special_marks": ["★"],
+        # source_file：多份要求文件拼接后，文件边界只剩这一处线索（按区段切段要用）
+        "source_file": "",
     }]
     assert len(agent.calls) == 1 and len(agent.calls[0]) == 1
     assert agent.calls[0][0][1:] == (".pdf", "spec.pdf")
@@ -216,7 +219,13 @@ class _ShenKuoStub:
         }
 
 
-async def test_shen_kuo_match_node_writes_matches_and_emits():
+async def test_shen_kuo_match_node_rerank_mode_writes_matches_and_emits(monkeypatch):
+    """旧路径（MATCH_MODE="rerank"）：逐章重排 + 落 state。
+
+    默认模式已切到 assign（素材 → 章节 归属），这条用例显式把模式切回去，
+    保证回滚路径仍然可用。
+    """
+    monkeypatch.setattr(nodes, "MATCH_MODE", "rerank")
     state = {
         "thread_id": "tid",
         "spec": {
@@ -1016,12 +1025,12 @@ async def test_build_feedback_refine_at_max_iterations_refuses_regen():
 # ─────────────────────────────────────────────
 
 class _OutlineDraftStub:
-    """记录调用参数，返回给定 sections/degraded。"""
+    """记录调用参数，返回给定 sections。"""
 
-    def __init__(self, sections, *, degraded=False, error=""):
+    def __init__(self, sections, *, error=""):
         from agents.zhang_heng import OutlineDraftResult
         self._result = OutlineDraftResult(
-            sections=sections, degraded=degraded, error=error,
+            sections=sections, error=error,
         )
         self.calls = []
 
@@ -1080,23 +1089,25 @@ async def test_outline_draft_node_writes_toc_and_bumps_revision():
     assert frames[0][1] == {"revision": 1}
     assert frames[1][1]["revision"] == 1
     assert [s["title"] for s in frames[1][1]["toc"]] == ["项目理解", "技术响应"]
-    assert frames[1][1]["degraded"] is False
 
 
-async def test_outline_draft_node_degrades_to_source_toc_with_error():
-    """模型不可用：节点照常写 toc（=原目录）并把原因写进 outline_error，不抛。"""
-    source = [DomainSection(id="s1", level=1, title="技术方案",
-                            raw_content="原文", special_marks=["★"])]
-    patch = await nodes.zhang_heng_outline_draft_node(
-        _draft_state(),
-        agent=_OutlineDraftStub(source, degraded=True, error="未配置模型，沿用规范书目录"),
-        emitter=EventEmitter(),
-    )
+async def test_outline_draft_node_propagates_failure_instead_of_degrading():
+    """派生失败**不再降级**：异常原样上抛，节点不写 toc/outline_error。
 
-    spec = patch["spec"]
-    assert [s["title"] for s in spec["toc"]] == ["技术方案"]
-    assert spec["outline_error"] == "未配置模型，沿用规范书目录"
-    assert spec["outline_revision"] == 1
+    旧行为是「沿用规范书原始目录 + 记 outline_error」，用户会以为目录是模型按他的
+    提炼要求拆的（实测踩过：outline_error=Connection error.，页面照常显示原始目录）。
+    现在抛出去，由 runner 把运行标成 failed、前端明确报错并提供重试。
+    """
+    from agents.zhang_heng import OutlineDraftError
+
+    class _BoomStub:
+        async def draft_outline(self, *a, **kw):
+            raise OutlineDraftError("目录派生失败：模型调用失败：Connection error.")
+
+    with pytest.raises(OutlineDraftError, match="Connection error"):
+        await nodes.zhang_heng_outline_draft_node(
+            _draft_state(), agent=_BoomStub(), emitter=EventEmitter(),
+        )
 
 
 async def test_outline_draft_node_passes_instruction_and_revision_upstream():
@@ -1219,3 +1230,209 @@ async def test_outline_draft_node_skips_db_when_project_id_missing():
         db_module.get_db = original
 
     assert [s["id"] for s in patch["spec"]["toc"]] == ["s1"]
+
+
+async def test_extract_stops_at_section_boundary_when_cancelled():
+    """逐节提炼必须**逐节**检查取消：否则用户点了取消，这一节点仍把剩余章节全部提炼完
+    （每章一次模型调用），取消等于没点 —— 实测 abort 之后又跑了 8 节。
+
+    真取消时：已完成的章节照常返回（内容不丢），并标 stage='paused'（不是 done，
+    否则页面会显示「提炼完成」而其实还有章节没提炼）。
+    """
+    from orchestrator import nodes
+
+    calls: list[str] = []
+    cancelled = {"v": False}
+
+    class _Agent:
+        async def extract(self, toc, *, on_section=None, on_section_start=None,
+                          should_cancel=None):
+            out = {}
+            for s in toc:
+                if should_cancel and should_cancel():
+                    break
+                calls.append(s.id)
+                row = OutlineMatrixRow(block_id=s.id, title=s.title, requirement="r")
+                out[s.id] = row
+                if on_section:
+                    await on_section(s, row)
+                if len(calls) == 1:
+                    cancelled["v"] = True          # 第 1 节跑完就被取消
+            return out
+
+    toc = [{"id": f"s{i}", "level": 1, "title": f"章节{i}", "raw_content": "内容"}
+           for i in range(1, 5)]
+    state = {
+        "project_id": None, "thread_id": "t", "stage": "outline_review",
+        "cancel_requested": False, "spec": {"toc": toc}, "match_requested": False,
+    }
+    patch = await nodes.zhang_heng_extract_node(
+        state, agent=_Agent(), should_cancel=lambda: cancelled["v"],
+    )
+
+    assert calls == ["s1"], "取消后不能再提炼剩余章节"
+    assert patch["stage"] == "paused", "提前停下必须标 paused，不能标成跑完"
+    assert set(patch["spec"]["outline_matrix"]) == {"s1"}, "已完成的部分要保留"
+
+
+async def test_shen_kuo_match_node_assign_mode_attaches_evidence_with_content():
+    """默认模式（assign）：素材 → 章节 归属，**零模型调用**，且依据**带素材原文**。
+
+    锚住两件事：
+    1. 归属走规则/语义，不调用 agent（旧实现逐章 LLM 重排，调用数 = O(章节数)）；
+    2. evidence 必须带 content + filename + locator —— 撰写阶段要靠它引用原文，
+       历史 Match 只有 reason，导致正文与界面都拿不到素材。
+    """
+    state = {
+        "thread_id": "tid",
+        "spec": {
+            "toc": [
+                {"id": "s1", "level": 1, "title": "项目理解", "raw_content": "", "special_marks": []},
+                {"id": "s2", "level": 1, "title": "技术架构设计", "raw_content": "", "special_marks": []},
+            ],
+            "outline_matrix": {
+                "s1": {"block_id": "s1", "title": "项目理解", "requirement": "理解项目背景与现状"},
+                "s2": {"block_id": "s2", "title": "技术架构设计",
+                       "requirement": "总体技术架构、分层设计与部署拓扑"},
+            },
+        },
+        "materials": {"chunks": [
+            {"id": 1, "material_id": 1, "chunk_index": 0, "filename": "架构方案.docx",
+             "material_role": "source", "content": "技术架构设计\n四层架构，数据层使用达梦 DM8。"},
+            {"id": 2, "material_id": 2, "chunk_index": 0, "filename": "招标文件.pdf",
+             "material_role": "spec", "content": "技术评分表\n技术方案完整性 20 分。"},
+        ]},
+    }
+    emitter = EventEmitter()
+    patch = await nodes.shen_kuo_match_node(
+        state, agent=_ShenKuoStub(), emitter=emitter,
+    )
+
+    matches = patch["materials"]["matches"]
+    assert set(matches) == {"s1", "s2"}
+    s2_rows = matches["s2"]
+    assert len(s2_rows) == 1, f"架构章节应挂到 1 条我方素材，实际 {s2_rows}"
+    row = s2_rows[0]
+    assert row["content"].startswith("技术架构设计")      # 原文
+    assert row["filename"] == "架构方案.docx"             # 出处
+    assert row["locator"] == "第 1 段 · 技术架构设计"   # 出处 = 段号 + 切片标题（锚点）
+    assert row["kind"] == "solution" and row["source_kind"] == "ours"
+    assert row["by"] == "rule"
+    # 招标"评分表"不得作为我方依据挂到架构章节
+    assert all(r["source_kind"] == "ours" for r in s2_rows)
+
+    frames = await _drain(emitter)
+    names = [n for n, _ in frames]
+    assert names.count("match_start") == 2
+    assert names.count("match_progress") == 2
+
+
+async def test_shen_kuo_match_node_assign_mode_is_incremental():
+    """已在 state 里的依据不重复归属；只处理新素材（补一份素材不再全量重跑）。"""
+    base = {
+        "thread_id": "tid",
+        "spec": {
+            "toc": [{"id": "s1", "level": 1, "title": "技术架构设计",
+                     "raw_content": "", "special_marks": []}],
+            "outline_matrix": {"s1": {"block_id": "s1", "title": "技术架构设计",
+                                      "requirement": "总体架构与分层设计"}},
+        },
+    }
+    old_row = {"chunk_id": 1, "content": "旧素材", "filename": "旧.docx", "by": "rule"}
+    state = {**base, "materials": {
+        "matches": {"s1": [old_row]},
+        "chunks": [
+            {"id": 1, "material_id": 1, "chunk_index": 0, "filename": "旧.docx",
+             "material_role": "source", "content": "技术架构设计\n旧素材原文"},
+            {"id": 2, "material_id": 1, "chunk_index": 1, "filename": "新.docx",
+             "material_role": "source", "content": "技术架构设计\n新素材原文"},
+        ],
+    }}
+    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+
+    rows = patch["materials"]["matches"]["s1"]
+    ids = [r["chunk_id"] for r in rows]
+    assert ids == [1, 2], f"旧依据保留 + 新素材追加，实际 {ids}"
+    assert rows[0]["content"] == "旧素材"        # 旧的没被覆盖
+    assert rows[1]["content"].endswith("新素材原文")  # 新的带原文
+
+
+async def test_shen_kuo_match_node_loads_pool_from_db(tmp_path, monkeypatch):
+    """state 里没有 chunks 时，**从库里按来源分池取**。
+
+    根因：标准流程从来没人往 state 放 chunks，匹配节点于是走 "not chunks" 短路 ——
+    每章返回空匹配、零调用，界面却显示"33/33 章节已完成"。
+    """
+    import aiosqlite
+
+    from db import init_db
+    from services.block_store import create_chunk, create_material
+
+    db_path = str(tmp_path / "match.db")
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        await init_db(conn)
+        cur = await conn.execute("INSERT INTO projects (name) VALUES (?)", ("t",))
+        pid = cur.lastrowid
+        ours = await create_material(conn, project_id=pid, filename="架构方案.docx",
+                                     type_="docx", file_path="uploads/x", role="source")
+        tender = await create_material(conn, project_id=pid, filename="规范书.pdf",
+                                       type_="pdf", file_path="uploads/y", role="spec")
+        await create_chunk(conn, material_id=ours["id"], chunk_index=0,
+                           content="技术架构设计\n四层架构，数据层使用达梦 DM8。")
+        await create_chunk(conn, material_id=tender["id"], chunk_index=0,
+                           content="技术评分表\n技术方案完整性 20 分。")
+        await conn.commit()
+
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    state = {
+        "thread_id": "tid", "project_id": pid,
+        "spec": {
+            "toc": [{"id": "s1", "level": 1, "title": "技术架构设计",
+                     "raw_content": "", "special_marks": []}],
+            "outline_matrix": {"s1": {"block_id": "s1", "title": "技术架构设计",
+                                      "requirement": "总体技术架构与分层设计"}},
+        },
+    }
+    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+
+    rows = patch["materials"]["matches"]["s1"]
+    assert [r["filename"] for r in rows] == ["架构方案.docx"], f"只应挂我方素材，实际 {rows}"
+    assert patch["materials"]["chunks"], "chunks 要写回 state（评审补料环节也在读它）"
+
+
+async def test_shen_kuo_match_node_keeps_human_locked_evidence():
+    """人工挂接的依据（by=human / locked）在重匹配后必须还在。
+
+    这是"人工挂接"功能的底线：`_match_by_assignment` 用 state 里的 matches 当"已有依据"
+    兜底旧行、再追加新增 —— 只要人工挂接同时写进了 checkpoint（runner.set_chapter_evidence
+    负责），这里就会原样保留。只写库不写 state 的话，用户下一次点「素材匹配」就把它抹掉了。
+    """
+    human_row = {"chunk_id": 1, "material_id": 41, "content": "服务团队\n项目经理 PMP",
+                 "filename": "规格书.pdf", "locator": "P3 · 第 8 段 · 服务团队",
+                 "by": "human", "locked": True, "item_ids": ["s1#E1"]}
+    state = {
+        "thread_id": "tid",
+        "spec": {
+            "toc": [{"id": "s1", "level": 1, "title": "服务团队",
+                     "raw_content": "", "special_marks": []}],
+            "outline_matrix": {"s1": {"block_id": "s1", "title": "服务团队",
+                                      "requirement": "项目负责人具有 PMP 证书",
+                                      "evidence_required": "提供 PMP 证书扫描件"}},
+        },
+        "materials": {
+            "matches": {"s1": [human_row]},
+            "chunks": [
+                {"id": 1, "material_id": 41, "chunk_index": 7, "filename": "规格书.pdf",
+                 "material_role": "source", "content": "服务团队\n项目经理 PMP"},
+                {"id": 2, "material_id": 42, "chunk_index": 0, "filename": "架构.pptx",
+                 "material_role": "source", "content": "服务团队\n团队共 35 人。"},
+            ],
+        },
+    }
+    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+
+    rows = patch["materials"]["matches"]["s1"]
+    assert rows[0]["by"] == "human" and rows[0]["locked"] is True
+    assert rows[0]["item_ids"] == ["s1#E1"]
+    assert [r["chunk_id"] for r in rows] == [1, 2], "人工挂接的也要保留，且不重复归属同一段"

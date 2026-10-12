@@ -4,11 +4,11 @@ import pytest
 
 from infra.parser import parse_document, ParsedDocument
 from infra.parser.toc import (
+    _extract_numbering_prefix,
     extract_special_marks,
     detect_level_from_numbering,
     clean_title,
     _clean_toc_line,
-    _looks_like_section_number,
     _text_similarity,
 )
 
@@ -30,31 +30,29 @@ def test_extract_special_marks_no_marks():
 
 
 def test_detect_level_from_numbering_all_levels():
-    assert detect_level_from_numbering("一、概述") == 1
+    """级别约定：章=1、节=2、一、/（一）=2、十进制按**点分段数**、（）=3、①=4。
+
+    旧实现把 ``1.1 子项`` 判成 4 级（模式写的是 ``^\d+\.\d+`` 却挂在 4 级上），
+    而 ``1.1.1`` 反而判不出 —— 同一文档里层级自相矛盾且出现跳级。
+    """
+    assert detect_level_from_numbering("一、概述") == 2
     assert detect_level_from_numbering("第三章 系统设计") == 1
-    assert detect_level_from_numbering("1. 项目背景") == 2
+    assert detect_level_from_numbering("第二节 范围") == 2
+    assert detect_level_from_numbering("（一）总体要求") == 2
+    assert detect_level_from_numbering("1. 项目背景") == 1
+    assert detect_level_from_numbering("1、项目背景") == 1
+    assert detect_level_from_numbering("1.1 子项") == 2
+    assert detect_level_from_numbering("1.1.1 更细的子项") == 3
+    assert detect_level_from_numbering("1.1.1.1 第四层") == 4
+    assert detect_level_from_numbering("2.2.4（3）分值") == 3
     assert detect_level_from_numbering("（1）需求分析") == 3
     assert detect_level_from_numbering("(2) 需求分析") == 3
     assert detect_level_from_numbering("①概述") == 4
-    assert detect_level_from_numbering("1.1 子项") == 4
 
 
 def test_detect_level_returns_none_for_non_heading():
     assert detect_level_from_numbering("普通段落正文") is None
     assert detect_level_from_numbering("") is None
-
-
-def test_looks_like_section_number():
-    """十进制编号要求整数部分 ≤2 位；非十进制编号一律放行。"""
-    assert _looks_like_section_number("1.1 ")
-    assert _looks_like_section_number("12.3 ")
-    assert _looks_like_section_number("1.2.3 ")
-    assert not _looks_like_section_number("2320.48 ")  # 表格里的金额
-    assert not _looks_like_section_number("902.36 ")
-    # 「（1）」「①」不是十进制编号，交给各自的 level 规则
-    assert _looks_like_section_number("（1）")
-    assert _looks_like_section_number("①")
-    assert _looks_like_section_number("")
 
 
 def test_detect_level_rejects_table_quantities_and_list_items():
@@ -66,7 +64,9 @@ def test_detect_level_rejects_table_quantities_and_list_items():
     assert detect_level_from_numbering("（1）") is None
     # 真标题照旧
     assert detect_level_from_numbering("（1）需求分析") == 3
-    assert detect_level_from_numbering("5.2 开标时间") == 4
+    assert detect_level_from_numbering("5.2 开标时间") == 2
+    # 段内超过 3 位数字的（1.2345）与首段超过 2 位的都不是章节号
+    assert detect_level_from_numbering("1.2345 数值") is None
 
 
 def test_clean_title_collapses_whitespace():
@@ -454,3 +454,19 @@ def test_table_sections_lose_no_body_text():
     joined = "\n".join(s.raw_content for s in sections)
     for token in ("深刻理解项目背景", "10", "方案可行性", "30"):
         assert token in joined
+
+
+def test_extract_numbering_prefix_covers_all_families():
+    """编号前缀提取（手工目录匹配用）：各族都要能取到前缀，判不出返回空串。
+
+    这条锁住的是「改了编号正则忘了改这里」——它没有别的调用点测试覆盖，
+    之前删掉旧的 HEADING_PATTERNS 时这里静默变成了 NameError。
+    """
+    assert _extract_numbering_prefix("一、总体要求") == "一、"
+    assert _extract_numbering_prefix("第三章 系统设计") == "第三章"
+    assert _extract_numbering_prefix("1. 项目背景") == "1."
+    assert _extract_numbering_prefix("1.1 子项") == "1.1"
+    assert _extract_numbering_prefix("（1）需求分析") == "（1）"
+    assert _extract_numbering_prefix("①概述") == "①"
+    assert _extract_numbering_prefix("没有编号的标题") == ""
+    assert _extract_numbering_prefix("2320.48 否") == ""

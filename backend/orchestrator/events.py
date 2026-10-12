@@ -12,6 +12,7 @@ LangGraph 节点向前端推事件的统一入口。两层：
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import Any, AsyncIterator
 
 from utils.sse import format_sse_event
@@ -43,18 +44,15 @@ def outline_draft_start(revision: int) -> str:
 def outline_draft(
     toc: list[dict[str, Any]],
     revision: int,
-    degraded: bool = False,
     error: str = "",
 ) -> str:
     """张衡 outline_draft 阶段：应答目录已确定（一次推全量）。
 
     目录是整体替换的，不存在逐条增量，所以一次性推 toc 全量。
-    degraded=True 表示模型没能派生、沿用了规范书原始目录，error 写明原因。
     """
     return format_sse_event("outline_draft", {
         "toc": toc,
         "revision": revision,
-        "degraded": degraded,
         "error": error,
     })
 
@@ -249,7 +247,7 @@ _END = object()
 
 
 class EventEmitter:
-    """节点内向上发事件的回调对象，基于 ``asyncio.Queue``。
+    """节点内向上发事件的回调对象：**广播 + 有界回放**。
 
     生命周期：
     1. routes 层创建一份 emitter，放进 LangGraph config / 上下文
@@ -257,36 +255,63 @@ class EventEmitter:
     3. routes 层 ``async for frame in emitter.stream():`` 读帧 yield 给 SSE
     4. graph 跑完或异常时，routes 层 ``await emitter.aclose()`` 关闭流
 
-    ``maxsize=0`` 表示无界；如需背压可在构造时显式指定。
+    两种订阅者都要伺候好：
+    - **同时在线**（多个标签页 / 重连前旧连接未断）：必须**广播**，每人一份队列。
+      以前是单个共享队列 → 消费者互相抢帧，两个页面都看到残缺进度。
+    - **来晚了**（SSE 连接晚于运行开始）：补发一段**有界历史**（``replay_limit`` 帧），
+      否则订阅前的帧全丢 —— 这是旧实现顺手提供的便利，改成纯广播会退化。
+
+    历史有上限（默认 500 帧）：更早的帧不再补发，前端本来就靠读库对齐（settle poll）。
     """
 
-    def __init__(self, *, maxsize: int = 0) -> None:
-        self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=maxsize)
+    def __init__(self, *, maxsize: int = 0, replay_limit: int = 500) -> None:
+        self._subscribers: list[asyncio.Queue[Any]] = []
+        self._history: deque[Any] = deque(maxlen=max(0, replay_limit))
+        self._maxsize = maxsize
         self._closed = False
 
     async def emit(self, frame: str) -> None:
-        """节点端：把已格式化的 SSE 帧塞进队列。
+        """节点端：把已格式化的 SSE 帧广播给每个订阅者，并进回放缓冲。
 
         关闭后再 emit 会被静默丢弃（节点不需要关心 routes 是否已断开）。
         """
         if self._closed:
             return
-        await self._queue.put(frame)
+        self._history.append(frame)
+        for q in list(self._subscribers):
+            await q.put(frame)
 
     async def aclose(self) -> None:
-        """关闭流：通知 ``stream()`` 的消费者结束循环。幂等。"""
+        """关闭流：通知所有 ``stream()`` 消费者结束循环。幂等。"""
         if self._closed:
             return
         self._closed = True
-        await self._queue.put(_END)
+        for q in list(self._subscribers):
+            await q.put(_END)
 
     async def stream(self) -> AsyncIterator[str]:
-        """routes 端：消费帧直到 emitter 关闭。"""
-        while True:
-            frame = await self._queue.get()
-            if frame is _END:
-                return
-            yield frame
+        """routes 端：先补发历史帧，再直播直到 emitter 关闭。
+
+        每个订阅者一份独立队列（互不抢帧）；断开时把自己从广播列表摘掉。
+        """
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._maxsize)
+        for frame in list(self._history):
+            await queue.put(frame)
+        if self._closed:
+            # 已经关闭：补完历史立刻结束，别让订阅者永远等一个不会来的 _END
+            await queue.put(_END)
+        else:
+            self._subscribers.append(queue)
+        try:
+            while True:
+                frame = await queue.get()
+                if frame is _END:
+                    return
+                yield frame
+        finally:
+            # 断开的连接要及时摘掉，否则 emit 会往没人读的队列里堆帧
+            if queue in self._subscribers:
+                self._subscribers.remove(queue)
 
 
 __all__ = [

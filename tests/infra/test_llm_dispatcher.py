@@ -415,3 +415,145 @@ async def test_dispatch_outline_draft_json_fails_when_nothing_salvageable(monkey
 
     with pytest.raises(ValueError):
         await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
+
+
+# ─────────────────────────────────────────────
+# 正文长度分档（M2）与「无原文」提示词分支（M6）
+# ─────────────────────────────────────────────
+
+def test_length_band_selection():
+    """分档判据：mandatory 或长要求 → core；中等 → standard；其余 → brief。"""
+    from infra.llm import dispatcher
+
+    assert dispatcher.length_band("", "recommended") == (600, 1000)
+    assert dispatcher.length_band("简要说明", "recommended") == (600, 1000)
+    assert dispatcher.length_band("甲" * 150, "recommended") == (1000, 1600)
+    assert dispatcher.length_band("甲" * 400, "recommended") == (1600, 2400)
+    assert dispatcher.length_band("短要求", "mandatory") == (1600, 2400)
+    assert dispatcher.length_band("", "MANDATORY") == (1600, 2400)  # 大小写不敏感
+
+
+@pytest.fixture
+def capture_stream(monkeypatch):
+    """拦下 clients.stream_openai，收集实际发出的 prompt。"""
+    captured: list[dict] = []
+
+    async def _fake_stream(config, system_prompt, user_prompt, **kw):
+        captured.append({"system": system_prompt, "user": user_prompt})
+        yield "正文"
+
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    monkeypatch.setattr("infra.llm.dispatcher.clients.stream_openai", _fake_stream)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_block_write_without_source_says_requirement_not_expand(capture_stream):
+    """M6：自动路径不传规范书原文，就不该要求「按原文逐段扩写」。
+
+    dispatch_block_write 的 original_content 恒为空 —— 旧提示词却写着
+    「以下是技术规范书中关于「X」的原文内容结构」+「严格按原文逐段扩写」，
+    正文里根本没有原文可对，模型只能自由发挥。
+    """
+    from infra.llm import dispatcher
+
+    async for _ in dispatcher.dispatch_block_write(
+        configs=[_fake_config()], rr_start_index=0, title="系统架构设计",
+        requirement="提供系统架构设计", chunks=[], target_words=1600, max_words=2400,
+    ):
+        pass
+
+    prompt = capture_stream[0]["user"]
+    assert "请撰写下面给出的章节的投标应答正文" in prompt
+    assert "【章节】系统架构设计" in prompt
+    assert "忠于要求" in prompt
+    assert "逐段扩写" not in prompt
+    assert "以下是技术规范书中" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_block_write_prompt_has_length_band_and_stop_rule(capture_stream):
+    """M2：给上限时写入区间与收束要求，且不再出现「不少于」。"""
+    from infra.llm import dispatcher
+
+    async for _ in dispatcher.dispatch_block_write(
+        configs=[_fake_config()], rr_start_index=0, title="总体方案",
+        requirement="提供总体方案", chunks=[], target_words=1000, max_words=1600,
+    ):
+        pass
+
+    prompt = capture_stream[0]["user"]
+    assert "正文长度要求：1000–1600 字" in prompt
+    assert "必须收束" in prompt
+    assert "不少于" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_with_source_keeps_expand_wording(capture_stream):
+    """有原文（工作台手动路径）时保持「逐段扩写」语义与旧措辞。
+
+    未给 max_words → 沿用「不少于 N 字」，不改手动路径行为。
+    """
+    from infra.llm import dispatcher
+
+    async for _ in dispatcher.dispatch_stream_generate(
+        configs=[_fake_config()], rr_start_index=0, section_title="总体要求",
+        original_content="原文内容", target_words=600,
+    ):
+        pass
+
+    prompt = capture_stream[0]["user"]
+    assert "请按下面给出的原文，逐段扩写本节的投标应答正文" in prompt
+    assert "以下是技术规范书中关于「总体要求」的原文内容结构" in prompt
+    assert "忠于原意" in prompt
+    assert "扩写后内容字数不少于 600 字" in prompt
+
+
+@pytest.mark.asyncio
+async def test_outline_draft_salvage_marks_truncation(monkeypatch):
+    """抢救出来的目录必须带「被截断」标记，否则用户看到的是「派生完成」。
+
+    部分成功不标 = 用户只会发现目录里少了几节，不知道是模型输出被 max_tokens 截断。
+    """
+    from infra.llm import dispatch_outline_draft_json
+    from infra.llm import clients
+
+    async def _truncated(config, system, user, **kw):
+        # 尾部未闭合 → salvage 抢救出前缀
+        return '{"nodes": [{"level": 1, "title": "A"}, {"level": 1, "title": "B"}, {"level": 1, "tit'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _truncated)
+
+    obj = await dispatch_outline_draft_json([_fake_config()], 0, {"spec_digest": "x"})
+
+    assert [n["title"] for n in obj["nodes"]] == ["A", "B"]
+    assert obj["_truncated_nodes"] == 2
+
+
+@pytest.mark.asyncio
+async def test_extract_skips_empty_content_without_calling_model(monkeypatch):
+    """没有原文的章节（用户新增 / 纯目录节点）不发模型调用。
+
+    旧行为把空内容块（`---\\n\\n---`）发过去：白花一次调用，还可能让模型凭空编出
+    requirement / veto_items —— 那些假要求会流进素材匹配、生成与评审。
+    """
+    from infra.llm import dispatch_outline_json
+    from infra.llm import clients
+
+    called = {"n": 0}
+
+    async def _spy(config, system, user, **kw):
+        called["n"] += 1
+        return '{"requirement": "编出来的要求"}'
+
+    monkeypatch.setattr(clients, "generate_oneshot_openai", _spy)
+
+    results = []
+    async for item in dispatch_outline_json(
+        [_fake_config()], 0, [{"title": "用户新增的章节", "content": "   "}],
+    ):
+        results.append(item)
+
+    assert called["n"] == 0, "空内容不该调用模型"
+    assert results[0]["requirement"] == ""
+    assert "没有可提炼的原文" in results[0]["error"]

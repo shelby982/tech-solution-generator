@@ -92,7 +92,7 @@ async def test_match_returns_top_n_via_llm_rerank(monkeypatch):
         ]
     }, ensure_ascii=False)
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return fake_response
 
     monkeypatch.setattr(
@@ -126,7 +126,7 @@ async def test_match_handles_block_with_no_keyword_hits(monkeypatch):
     monkeypatch.setenv("LLM_MODE", "mock")
     import json
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return json.dumps({"matches": [
             {"chunk_id": 1, "score": 8.0, "reason": "ok", "hit_points": []},
         ]}, ensure_ascii=False)
@@ -155,7 +155,7 @@ async def test_match_isolates_block_failure(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def flaky_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def flaky_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise RuntimeError("simulated rerank failure")
@@ -296,7 +296,7 @@ async def test_retrieve_for_llm_path_dedups_by_higher_score(monkeypatch):
     ]
     prompts: list[str] = []
 
-    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         prompts.append(user_prompt)
         return responses[min(len(prompts) - 1, len(responses) - 1)]
 

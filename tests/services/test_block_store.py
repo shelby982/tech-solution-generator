@@ -258,3 +258,123 @@ async def test_current_run_thread_id_picks_latest(db):
 
     assert await current_run_thread_id(conn, pid) == "run-new"
     assert await current_run_thread_id(conn, 999) is None
+
+
+# ══════════════════════════════════════════════════
+# 目录结构编辑（闸门 1 增删改 / 排序）
+# ══════════════════════════════════════════════════
+
+async def test_apply_structure_creates_updates_and_reorders(db):
+    """新增建占位、已存在只改 title/level/order_idx、顺序即 order_idx。"""
+    conn, pid = db
+    from services.block_store import (
+        apply_outline_structure, list_blocks, sync_outline_placeholders,
+    )
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "技术方案"), _Sec("s2", 1, "服务方案")])
+
+    stats = await apply_outline_structure(conn, pid, [
+        {"block_id": "s2", "level": 1, "title": "服务方案（改名）"},
+        {"block_id": "s1", "level": 2, "title": "技术方案"},
+        {"block_id": "n7x", "level": 2, "title": "用户新增的章节"},
+    ])
+
+    assert stats == {"created": 1, "updated": 2, "removed": 0, "kept": 0}
+    rows = await list_blocks(conn, pid)
+    assert [(r["block_id"], r["order_idx"], r["level"], r["title"]) for r in rows] == [
+        ("s2", 0, 1, "服务方案（改名）"),
+        ("s1", 1, 2, "技术方案"),
+        ("n7x", 2, 2, "用户新增的章节"),
+    ]
+
+
+async def test_apply_structure_preserves_extracted_fields_on_rename(db):
+    """改名 / 调层级后 8 个提炼字段必须还在 —— 同一个 block_id 仍是同一节。"""
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, upsert_outline_block
+
+    await upsert_outline_block(
+        conn, project_id=pid, block_id="s1", level=1, title="技术方案",
+        order_idx=0, matrix={"requirement": "必须响应", "key_points": "要点A"},
+    )
+
+    await apply_outline_structure(conn, pid, [
+        {"block_id": "s1", "level": 2, "title": "技术方案（改）"},
+    ])
+
+    row = (await list_blocks(conn, pid))[0]
+    assert row["title"] == "技术方案（改）"
+    assert row["level"] == 2
+    assert row["requirement"] == "必须响应"
+    assert row["key_points"] == "要点A"
+
+
+async def test_apply_structure_deletes_removed_nodes(db):
+    """删除的章节（无正文）从表里移除。"""
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, sync_outline_placeholders
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "A"), _Sec("s2", 1, "B")])
+    stats = await apply_outline_structure(conn, pid, [{"block_id": "s1", "level": 1, "title": "A"}])
+
+    assert stats["removed"] == 1
+    assert [r["block_id"] for r in await list_blocks(conn, pid)] == ["s1"]
+
+
+async def test_apply_structure_keeps_rows_with_content(db):
+    """被移出目录但已有正文的行保留（沿用「宁留脏数据不删用户内容」的约定）。"""
+    conn, pid = db
+    from services.block_store import (
+        apply_outline_structure, list_blocks, sync_outline_placeholders, update_block_content,
+    )
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "A"), _Sec("s2", 1, "B")])
+    rows = await list_blocks(conn, pid)
+    await update_block_content(conn, rows[1]["id"], "这是已写好的正文")
+
+    stats = await apply_outline_structure(conn, pid, [{"block_id": "s1", "level": 1, "title": "A"}])
+
+    assert stats["removed"] == 0
+    assert stats["kept"] == 1
+    assert {r["block_id"] for r in await list_blocks(conn, pid)} == {"s1", "s2"}
+
+
+async def test_apply_structure_scoped_to_run(db):
+    """结构编辑只动本次 run 的行：别的 run 的行不受影响。"""
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, sync_outline_placeholders
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "旧run")], run_thread_id="run-old")
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "新run")], run_thread_id="run-new")
+
+    await apply_outline_structure(
+        conn, pid, [{"block_id": "s1", "level": 1, "title": "改名"}], run_thread_id="run-new",
+    )
+
+    old_rows = await list_blocks(conn, pid, "run-old")
+    new_rows = await list_blocks(conn, pid, "run-new")
+    assert [r["title"] for r in old_rows] == ["旧run"]
+    assert [r["title"] for r in new_rows] == ["改名"]
+
+
+async def test_apply_structure_purge_deletes_rows_with_content(db):
+    """purge=True（用户在确认框选「移除并删除正文」）时连有正文的行一起删。
+
+    默认保留正文的行仍会出现在导出里（export.py 取全量 blocks），所以这个选择必须
+    由用户明确给出，而不是"删除目录节点"顺手替他决定。
+    """
+    conn, pid = db
+    from services.block_store import (
+        apply_outline_structure, list_blocks, sync_outline_placeholders, update_block_content,
+    )
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "A"), _Sec("s2", 1, "B")])
+    rows = await list_blocks(conn, pid)
+    await update_block_content(conn, rows[1]["id"], "已写好的正文")
+
+    stats = await apply_outline_structure(
+        conn, pid, [{"block_id": "s1", "level": 1, "title": "A"}], purge=True,
+    )
+
+    assert stats["removed"] == 1 and stats["kept"] == 0
+    assert [r["block_id"] for r in await list_blocks(conn, pid)] == ["s1"]

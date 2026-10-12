@@ -30,6 +30,7 @@ from agents.prompts import (
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 from . import clients
+from . import errors
 from .json_utils import extract_json_object as _extract_json_object
 from .json_utils import salvage_nodes_array as _salvage_nodes_array
 
@@ -45,8 +46,35 @@ OUTLINE_DRAFT_TIMEOUT = 300.0
 # 章节提炼的预算同样是「思考 + 正文」。比目录派生小一档（单章节矩阵的正文远短于
 # 整份目录），但 4000 对推理模型实测不够：deepseek-v4-pro 把 4000 全烧在思考上，
 # finish_reason=length、content 为空，章节矩阵直接落成空占位。
+# 撰写阶段每条素材原文的注入上限（见 dispatch_block_write）
+MATERIAL_SNIPPET_CHARS = 600
+
 OUTLINE_EXTRACT_MAX_TOKENS = 16000
 OUTLINE_EXTRACT_TIMEOUT = 180.0
+
+# ── 正文长度分档（汉字）──────────────────────
+# 原来的提示词只写「扩写后内容字数**不少于** 600 字」——只有下限没有上限，实测
+# 输出 2,200 汉字（3.7 倍）并顶到 max_tokens 被硬截断。应标文档整体偏长，所以
+# 档位比通用文案宽，但必须有上限：超上限时要求收束，避免「越写越长 + 截断」。
+LENGTH_BANDS: dict[str, tuple[int, int]] = {
+    "brief":    (600, 1000),    # 概述 / 说明类章节
+    "standard": (1000, 1600),   # 一般技术方案章节
+    "core":     (1600, 2400),   # 核心方案 / 强制要求 / 评分项覆盖
+}
+
+
+def length_band(requirement: str, constraint_level: str = "") -> tuple[int, int]:
+    """按应标要求的篇幅与强制等级选正文长度档，返回 (下限, 上限)，单位汉字。
+
+    判据刻意简单（可测、可解释）：强制等级 mandatory 或要求较长 → core；
+    要求中等 → standard；其余 → brief。
+    """
+    text = (requirement or "").strip()
+    if (constraint_level or "").strip().lower() == "mandatory" or len(text) >= 400:
+        return LENGTH_BANDS["core"]
+    if len(text) >= 150:
+        return LENGTH_BANDS["standard"]
+    return LENGTH_BANDS["brief"]
 
 
 # ─────────────────────────────────────────────
@@ -162,6 +190,7 @@ async def _stream_generate(
     extra_prompt: str = "",
     doc_template: str = "",
     tone: str = "official",
+    max_words: Optional[int] = None,
 ) -> AsyncIterator[str]:
     """
     流式生成单个章节的技术方案内容。
@@ -169,8 +198,11 @@ async def _stream_generate(
     Args:
         config:           LLM 配置
         section_title:    章节标题
-        original_content: 章节原始内容（来自规范书）
-        target_words:     目标字数（默认 500 字）
+        original_content: 章节原始内容（来自规范书）；为空时按「应标要求 + 参考素材」
+                          撰写，不再要求「按原文逐段扩写」（那是没有对象的指令）
+        target_words:     目标字数（给 max_words 时它是区间下限）
+        max_words:        字数上限；给定则写入区间与收束要求，None 时沿用旧的
+                          「不少于 N 字」措辞（工作台手动路径保持原行为）
         doc_summary:      文档整体摘要（作为全局上下文）
 
     Yields:
@@ -178,31 +210,82 @@ async def _stream_generate(
     """
     system_prompt = TONE_SYSTEM_PROMPTS.get(tone, TONE_SYSTEM_PROMPTS["official"])
 
-    # 构建 user_prompt：先注入项目整体摘要，再给出章节内容
-    parts = []
+    # 构建 user_prompt 的顺序原则：**稳定段在前、动态段在后**。
+    # 6 条核心规则在整轮生成里逐字不变（同一分支下），把它放在最前面能让 system +
+    # 规则块构成一段稳定的共同前缀，命中上下文缓存（实测命中率 29% → 目标 60%+）。
+    # 原实现的顺序是「摘要 → 标题 → 要求/素材 → 规则」，前缀第 20 个字就分叉。
+    original = (original_content or "").strip()
+
+    if original:
+        fidelity_rule = (
+            "1. 忠于原意：完全保留原文核心含义、业务定位、逻辑框架，不篡改、不删减、不新增无关内容。\n"
+        )
+        expand_rule = (
+            "3. 扩写逻辑：在原文基础上补充背景释义、功能价值、作用意义、应用场景，拉长句式、丰富表述，"
+            "合理扩充篇幅，不空洞凑字、不堆砌冗余语句。\n"
+        )
+        format_rule = (
+            "4. 格式规范：严格保留原文的段落结构与小标题，不改变原有段落顺序；在每个小标题后紧接输出扩写正文，"
+            "段落之间用空行分隔，排版整齐；禁止输出任何自创的段落编号标签（如'第一段''第一段扩写内容'等）。\n"
+        )
+        stable_head = "请按下面给出的原文，逐段扩写本节的投标应答正文。\n"
+    else:
+        # 自动生成路径（dispatch_block_write）不传规范书原文 —— 此时再要求「按原文
+        # 逐段扩写」是一句没有对象的指令，模型只能自由发挥（也更容易越写越长）。
+        # 改为以【应标要求】+【参考素材】为依据撰写，与工作台手动路径的语义对齐。
+        fidelity_rule = (
+            "1. 忠于要求：严格围绕【应标要求】的要点展开，逐条响应、不遗漏要点、不新增无关内容。\n"
+        )
+        expand_rule = (
+            "3. 展开逻辑：对每条要求给出具体响应措施、实现方式与预期效果，"
+            "把「我方将满足」写实为可核查的做法，不空洞凑字、不堆砌冗余语句。\n"
+        )
+        format_rule = (
+            "4. 格式规范：按应标要求的要点顺序组织小标题，一段一个要点，段落之间用空行分隔，排版整齐；"
+            "禁止输出任何自创的段落编号标签（如'第一段''第一段扩写内容'等）。\n"
+        )
+        stable_head = "请撰写下面给出的章节的投标应答正文，撰写依据是其后提供的【应标要求】与【参考素材】（若有）。\n"
+
+    parts = [
+        stable_head,
+        "核心规则：\n"
+        f"{fidelity_rule}"
+        "2. 文风标准：采用政企、园区、数字化平台、项目方案正式书面文风，语言严谨专业、通顺流畅、格调正式。\n"
+        f"{expand_rule}"
+        f"{format_rule}"
+        "5. 专业适配：贴合平台运营、资源汇聚、系统整合、生态建设、服务输出、账号统一、办公联动等政企信息化通用专业语境，用词贴合汇报材料、建设方案、平台介绍文案风格。\n"
+        "6. 应标者身份（强约束）：使用第一人称「我方」「本公司」「我公司」撰写，禁止第三人称「投标方」「投标人」；"
+        "对要求逐条做明确响应/承诺（「我方将…」「我方已…」「本公司承诺…」「我方完全响应…」「我方满足…」），"
+        "禁止「应当」「应该」「建议」「需要」「可以」等咨询/分析口吻，"
+        "禁止笼统讨论应该如何应答，禁止元层次描述（「本节将阐述…」「以下从X方面说明…」），直接进入实质内容。\n",
+    ]
+
+    # ── 以下全部是动态内容 ──
+    parts.append(f"\n【章节】{section_title}\n")
+
+    if max_words is not None:
+        # 区间 + 收束：只写「不少于」时实测写到 3.7 倍目标，并顶到 max_tokens 被硬截断
+        parts.append(
+            f"\n正文长度要求：{target_words}–{max_words} 字。\n"
+            f"达到 {max_words} 字时必须收束：补齐当前段落即结束，不得再展开新的小节。\n"
+        )
+    else:
+        parts.append(f"\n扩写后内容字数不少于 {target_words} 字。\n")
+
+    if original:
+        parts.append(
+            f"\n以下是技术规范书中关于「{section_title}」的原文内容结构：\n\n"
+            f"---\n{original}\n---\n"
+        )
+
     if doc_summary:
         # 截断保护：摘要最多注入 3000 字符，避免超窗
         safe_summary = doc_summary[:3000] + ("\n..." if len(doc_summary) > 3000 else "")
         parts.append(
-            f"以下是该项目的整体概述：\n\n"
-            f"===\n{safe_summary}\n===\n\n"
+            f"\n以下是该项目的整体概述：\n\n"
+            f"===\n{safe_summary}\n===\n"
         )
-    parts.append(
-        f"以下是技术规范书中关于「{section_title}」的原文内容结构：\n\n"
-        f"---\n{original_content}\n---\n\n"
-        f"请严格按照提供的原文逐段进行独立扩写，一段原文对应一段扩写内容，保持原有段落结构不变。\n"
-        f"扩写后内容字数不少于 {target_words} 字。\n\n"
-        f"核心规则：\n"
-        f"1. 忠于原意：完全保留原文核心含义、业务定位、逻辑框架，不篡改、不删减、不新增无关内容。\n"
-        f"2. 文风标准：采用政企、园区、数字化平台、项目方案正式书面文风，语言严谨专业、通顺流畅、格调正式。\n"
-        f"3. 扩写逻辑：在原文基础上补充背景释义、功能价值、作用意义、应用场景，拉长句式、丰富表述，合理扩充篇幅，不空洞凑字、不堆砌冗余语句。\n"
-        f"4. 格式规范：严格保留原文的段落结构与小标题，不改变原有段落顺序；在每个小标题后紧接输出扩写正文，段落之间用空行分隔，排版整齐；禁止输出任何自创的段落编号标签（如'第一段''第一段扩写内容'等）。\n"
-        f"5. 专业适配：贴合平台运营、资源汇聚、系统整合、生态建设、服务输出、账号统一、办公联动等政企信息化通用专业语境，用词贴合汇报材料、建设方案、平台介绍文案风格。\n"
-        f"6. 应标者身份（强约束）：使用第一人称「我方」「本公司」「我公司」撰写，禁止第三人称「投标方」「投标人」；"
-        f"对要求逐条做明确响应/承诺（「我方将…」「我方已…」「本公司承诺…」「我方完全响应…」「我方满足…」），"
-        f"禁止「应当」「应该」「建议」「需要」「可以」等咨询/分析口吻，"
-        f"禁止笼统讨论应该如何应答，禁止元层次描述（「本节将阐述…」「以下从X方面说明…」），直接进入实质内容。"
-    )
+
     user_prompt = "".join(parts)
 
     if doc_template:
@@ -252,6 +335,7 @@ async def dispatch_stream_generate(
     extra_prompt: str = "",
     doc_template: str = "",
     tone: str = "official",
+    max_words: Optional[int] = None,
 ) -> AsyncGenerator[str, None]:
     """
     从 rr_start_index 指定的 API 开始尝试流式生成，失败时自动 fallback 到下一个。
@@ -267,14 +351,16 @@ async def dispatch_stream_generate(
         raise ValueError("未配置任何 API，请先在「设置」中添加配置")
 
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    # 跳过冷却中的坏配置（余额不足/Key 无效等）：否则一个不可用的配置会被后面
+    # 每个小节反复重试。全部冷却时 usable 为空 → 直接快速失败并给出聚合原因。
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         started = False  # 是否已开始 yield token
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
             async for token in _stream_generate(
                 config, section_title, original_content, target_words,
-                doc_summary, extra_prompt, doc_template, tone,
+                doc_summary, extra_prompt, doc_template, tone, max_words,
             ):
                 started = True
                 yield token
@@ -284,12 +370,16 @@ async def dispatch_stream_generate(
                 # 流已开始，不能 fallback（前端已收到部分内容），直接上抛
                 raise
             last_error = e
+            kind = errors.note_failure(config, e)
             logger.warning(
-                f"API [{config.provider}/{config.model}] 连接失败，"
-                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+                f"API [{config.provider}/{config.model}] 连接失败"
+                f"（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )
+            if errors.blocks_chain(kind):
+                break
 
-    raise last_error  # type: ignore[misc]
+    raise errors.exhausted_error(configs, last_error)
 
 
 async def dispatch_doc_summary(
@@ -306,19 +396,23 @@ async def dispatch_doc_summary(
         raise ValueError("未配置任何 API，请先在「设置」中添加配置")
 
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成文档摘要")
             return await _generate_doc_summary(config, sections)
         except Exception as e:
             last_error = e
+            kind = errors.note_failure(config, e)
             logger.warning(
-                f"API [{config.provider}/{config.model}] 摘要生成失败，"
-                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+                f"API [{config.provider}/{config.model}] 摘要生成失败"
+                f"（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )
+            if errors.blocks_chain(kind):
+                break
 
-    raise last_error  # type: ignore[misc]
+    raise errors.exhausted_error(configs, last_error)
 
 
 async def dispatch_outline_draft_json(
@@ -350,8 +444,8 @@ async def dispatch_outline_draft_json(
     )
 
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 派生应答文件目录")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -382,19 +476,27 @@ async def dispatch_outline_draft_json(
                 logger.warning(
                     f"目录派生输出被截断，仅抢救出 {len(salvaged)} 个节点"
                 )
-                obj = {"nodes": salvaged}
+                # 带上「被截断」标记：抢救出来的目录是**部分成功**，不标的话用户
+                # 看到的是「派生完成」，只会觉得目录少了几节（实测 32000 token
+                # 预算对推理模型并非不会触顶）。标记由 draft_outline 并进
+                # outline_error → 闸门 1 展示并建议重新拆分。
+                obj = {"nodes": salvaged, "_truncated_nodes": len(salvaged)}
 
             if not isinstance(obj, dict) or not isinstance(obj.get("nodes"), list):
                 raise ValueError("模型输出缺少 nodes 数组")
             return obj
         except Exception as e:
             last_error = e
+            kind = errors.note_failure(config, e)
             logger.warning(
-                f"API [{config.provider}/{config.model}] 目录派生失败，"
-                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+                f"API [{config.provider}/{config.model}] 目录派生失败"
+                f"（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )
+            if errors.blocks_chain(kind):
+                break
 
-    raise last_error  # type: ignore[misc]
+    raise errors.exhausted_error(configs, last_error)
 
 
 async def dispatch_scope_select_json(
@@ -424,8 +526,8 @@ async def dispatch_scope_select_json(
     )
 
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             logger.info(f"使用 API [{config.provider}/{config.model}] 圈定检索范围")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -444,12 +546,16 @@ async def dispatch_scope_select_json(
             return obj
         except Exception as e:
             last_error = e
+            kind = errors.note_failure(config, e)
             logger.warning(
-                f"API [{config.provider}/{config.model}] 圈定检索范围失败，"
-                f"{'尝试下一个' if i < n - 1 else '已无可用 API'}：{e}"
+                f"API [{config.provider}/{config.model}] 圈定检索范围失败"
+                f"（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
             )
+            if errors.blocks_chain(kind):
+                break
 
-    raise last_error  # type: ignore[misc]
+    raise errors.exhausted_error(configs, last_error)
 
 
 async def dispatch_block_write(
@@ -460,16 +566,24 @@ async def dispatch_block_write(
     chunks: list[dict],
     target_words: int = 600,
     feedback_text: str = "",
+    max_words: Optional[int] = None,
 ):
     """
     为单个 block 流式生成正文内容。
     将 requirement + chunks 拼入 extra_prompt，复用 dispatch_stream_generate。
 
+    **不传规范书原文**（original_content 为空）：因此提示词走「按应标要求 + 参考素材
+    撰写」分支，而不是「按原文逐段扩写」。需要原文逐段扩写的是工作台手动路径
+    （routes/blocks.py），它把 block 正文作为 original_content 传入。
+
+    target_words / max_words：字数区间（给 max_words 时才生效）。
     feedback_text：协同闭环回灌的上一轮评审意见（已由
     ``agents.prompts.format_feedback_block`` 格式化）。为空时行为与改造前一致。
     """
+    # 素材原文每条的注入上限：以前是 200 字，素材原文（契约要求带 content）会被腰斩成半句。
+    # 600 字与 rerank 阶段看到的窗口一致，5 条 ≈ 3k 字符，prompt 预算可接受。
     snippets = "\n".join(
-        f"- {c['content'][:200]}" for c in chunks
+        f"- {c['content'][:MATERIAL_SNIPPET_CHARS]}" for c in chunks
     )
     extra_prompt = ""
     if requirement:
@@ -486,6 +600,7 @@ async def dispatch_block_write(
         original_content="",
         target_words=target_words,
         extra_prompt=extra_prompt,
+        max_words=max_words,
     ):
         yield token
 
@@ -504,6 +619,7 @@ async def dispatch_outline_json(
     *,
     on_start: Optional[Callable[[int], Awaitable[None] | None]] = None,
     concurrency: int = 1,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ):
     """
     按文档原始章节提炼响应矩阵（8 字段），默认**严格按目录顺序**逐章 yield。
@@ -544,7 +660,13 @@ async def dispatch_outline_json(
     if concurrency <= 1:
         # 严格按目录自上而下逐节提炼：前端才能一路看到「提炼中 → 已完成」，
         # 不被先完成的章节打乱顺序。代价是总耗时 ≈ 章节数 × 单节耗时。
+        #
+        # should_cancel：每节开始前检查一次。用户点「取消」时立刻停在这里，
+        # 剩下的章节一次模型调用都不发 —— 这是取消唯一能真正省钱的位置。
         for i, sec in enumerate(sections):
+            if should_cancel is not None and should_cancel():
+                logger.info(f"逐节提炼被取消：已完成 {i}/{len(sections)} 个章节，停止后续调用")
+                return
             yield await _run_one(i, sec)
         return
 
@@ -577,6 +699,24 @@ async def _extract_one_section(
 ) -> dict:
     """单章节提炼 worker：按 (rr_start_index + idx) 起点轮询全部 API，全失败时返回空占位。"""
     title = sec["title"]
+
+    if not (sec.get("content") or "").strip():
+        # 没有可提炼的原文：用户新增的章节（目录结构编辑加进来的）与纯目录/分组节点
+        # 都是这种。这里**不发模型调用** —— 旧行为是把空内容块发过去（prompt 里
+        # 是「---\n\n---」），既白花一次调用，又可能让模型凭空编出 requirement /
+        # veto_items，而那些假要求会一路流进素材匹配、正文生成与评审。
+        return {
+            "title": title,
+            "requirement": "", "key_points": "",
+            "veto_items": "", "bonus_items": "",
+            "score_items": "", "evidence_required": "",
+            "constraint_level": "recommended", "indicators": "",
+            # error_kind='no_source'：这是**正常**结果（用户新增/纯目录节点），不必重试；
+            # 与下面的 'failed' 必须在界面上区分开，否则失败会被当成"已完成"。
+            "error": "本章节没有可提炼的原文（用户新增或纯目录节点），要点请在正文阶段手写补充",
+            "error_kind": "no_source",
+            "ok": True,
+        }
     user = build_outline_extract_user(
         title=title,
         content=sec.get("content", "") or "",
@@ -586,9 +726,10 @@ async def _extract_one_section(
     )
 
     last_error: Exception | None = None
-    chain_start = (rr_start_index + idx) % n
-    for i in range(n):
-        config = configs[(chain_start + i) % n]
+    # 逐节提炼是本项目调用量最大的环节（每节一次），坏配置在这里被反复重试的
+    # 代价也最大：实测 3 条配置全部余额不足时，每个小节都要白试 3 次。
+    usable = errors.available_configs(configs, (rr_start_index + idx) % max(n, 1))
+    for i, config in enumerate(usable):
         try:
             logger.info(f"提炼章节「{title}」，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -613,6 +754,7 @@ async def _extract_one_section(
             obj = _extract_json_object(result)
             return {
                 "title": title,
+                "error": "", "error_kind": "", "ok": True,
                 "requirement": str(obj.get("requirement", "")),
                 "key_points": str(obj.get("key_points", "")),
                 "veto_items": str(obj.get("veto_items", "")),
@@ -625,16 +767,25 @@ async def _extract_one_section(
             }
         except Exception as e:
             last_error = e
-            logger.warning(f"章节「{title}」提炼失败（API {i+1}/{n}）：{e}")
+            kind = errors.note_failure(config, e)
+            logger.warning(
+                f"章节「{title}」提炼失败（API {i+1}/{len(usable)}，"
+                f"{errors.describe_error(e)}）：{e}"
+            )
+            if errors.blocks_chain(kind):
+                break
 
-    logger.error(f"章节「{title}」全部 API 失败，使用空占位：{last_error}")
+    summary = errors.exhausted_summary(configs, last_error)
+    logger.error(f"章节「{title}」无可用 API，使用空占位：{summary}")
     return {
         "title": title,
         "requirement": "", "key_points": "",
         "veto_items": "", "bonus_items": "",
         "score_items": "", "evidence_required": "",
         "constraint_level": "recommended", "indicators": "",
-        "error": f"全部 API 失败：{last_error}" if last_error else "提炼失败",
+        "error": f"全部 API 失败：{summary}",
+        "error_kind": "failed",     # 需要重试：界面要标出来，且**不能**算"已提炼"
+        "ok": False,
     }
 
 
@@ -659,8 +810,8 @@ async def generate_section_outline(
 
     user_prompt = build_section_outline_user(block, extra_context)
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             logger.info(f"为「{block.get('title')}」生成写作大纲，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -674,9 +825,15 @@ async def generate_section_outline(
             )
         except Exception as e:
             last_error = e
-            logger.warning(f"模块大纲生成失败（API {i+1}/{n}）：{e}")
+            kind = errors.note_failure(config, e)
+            logger.warning(
+                f"模块大纲生成失败（API {i+1}/{len(usable)}，"
+                f"{errors.describe_error(e)}）：{e}"
+            )
+            if errors.blocks_chain(kind):
+                break
 
-    logger.error(f"模块大纲全部 API 失败：{last_error}")
+    logger.error(f"模块大纲无可用 API：{errors.exhausted_summary(configs, last_error)}")
     return ""
 
 
@@ -702,8 +859,8 @@ async def generate_letter_content(
 
     user_prompt = build_letter_user(block)
     last_error: Exception | None = None
-    for i in range(n):
-        config = configs[(rr_start_index + i) % n]
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
         try:
             logger.info(f"为公文章节「{block.get('title')}」生成内容，使用 API [{config.provider}/{config.model}]")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -717,7 +874,13 @@ async def generate_letter_content(
             )
         except Exception as e:
             last_error = e
-            logger.warning(f"公文生成失败（API {i+1}/{n}）：{e}")
+            kind = errors.note_failure(config, e)
+            logger.warning(
+                f"公文生成失败（API {i+1}/{len(usable)}，"
+                f"{errors.describe_error(e)}）：{e}"
+            )
+            if errors.blocks_chain(kind):
+                break
 
-    logger.error(f"公文章节全部 API 失败：{last_error}")
+    logger.error(f"公文章节无可用 API：{errors.exhausted_summary(configs, last_error)}")
     return ""

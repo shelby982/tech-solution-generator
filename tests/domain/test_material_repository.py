@@ -66,10 +66,13 @@ async def test_create_and_list_materials(db):
     items = await repo.list_materials(proj_id)
     assert len(items) == 2
     assert all(isinstance(x, Material) for x in items)
-    assert [x.id for x in items] == sorted(x.id for x in items)
-    assert items[0].filename == "a.docx"
-    assert items[0].file_size == 100
-    assert items[1].role == "spec"
+    # 顺序 = 材料角色优先级（主招标/规范书类在前），同档内按 id 稳定 —— 与「应标要求」
+    # 面板展示顺序、派生输入顺序三者一致（之前统一 ORDER BY id，改 role 会让老文件插队）。
+    assert [x.id for x in items] == [m2.id, m1.id]
+    assert items[0].filename == "b.pdf"     # spec 优先
+    assert items[0].file_size == 200
+    assert items[1].filename == "a.docx"
+    assert items[1].role == "material"
     assert items[0].parse_status == "pending"
 
 

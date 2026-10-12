@@ -47,7 +47,7 @@ def records():
     usage.set_sink(None)
 
 
-def _openai_response(content="ok", *, prompt=100, completion=20, cached=30):
+def _openai_response(content="ok", *, prompt=100, completion=20, cached=30, reasoning=None):
     choice = _Obj(
         finish_reason="stop" if content else "length",
         message=_Obj(content=content, reasoning_content=""),
@@ -59,6 +59,7 @@ def _openai_response(content="ok", *, prompt=100, completion=20, cached=30):
             completion_tokens=completion,
             total_tokens=prompt + completion,
             prompt_tokens_details=_Obj(cached_tokens=cached),
+            completion_tokens_details=_Obj(reasoning_tokens=reasoning),
         ),
     )
 
@@ -222,6 +223,56 @@ async def test_mock_mode_not_recorded(monkeypatch, records):
 
 
 # ─────────────────────────────────────────────
+# 运行归属：哪次运行花了多少
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_reasoning_tokens_recorded_separately(monkeypatch, records):
+    """推理 token 单列落账：「思考吃掉多少预算」是判断 max_tokens 的关键读数。"""
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    _fake_openai(monkeypatch, _openai_response("ok", completion=2500, reasoning=1980))
+
+    await clients.generate_oneshot_openai(_cfg(), "sys", "user", call_site="section_outline")
+
+    assert records[0]["reasoning_tokens"] == 1980
+    # 它已包含在 output_tokens 里，不是额外加总
+    assert records[0]["output_tokens"] == 2500
+
+
+@pytest.mark.asyncio
+async def test_run_context_attributes_usage_to_run(monkeypatch, records):
+    """run_context 内的调用带上 project/thread，才能按运行归集费用。"""
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    _fake_openai(monkeypatch, _openai_response("ok"))
+
+    with usage.run_context(project_id=17, thread_id="tid-abc"):
+        await clients.generate_oneshot_openai(_cfg(), "sys", "user", call_site="stream_generate")
+
+    assert records[0]["project_id"] == 17
+    assert records[0]["thread_id"] == "tid-abc"
+
+
+@pytest.mark.asyncio
+async def test_usage_outside_run_context_has_null_attribution(monkeypatch, records):
+    """未在运行上下文里（脚本、测试直调）写 NULL，而不是 0 或空串。"""
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    _fake_openai(monkeypatch, _openai_response("ok"))
+
+    await clients.generate_oneshot_openai(_cfg(), "sys", "user", call_site="letter")
+
+    assert records[0]["project_id"] is None
+    assert records[0]["thread_id"] is None
+
+
+def test_run_context_is_scoped():
+    """退出 with 块后归属清空，不泄漏到后续调用。"""
+    assert usage.current_run() == {}
+    with usage.run_context(project_id=3, thread_id="t"):
+        assert usage.current_run() == {"project_id": 3, "thread_id": "t"}
+    assert usage.current_run() == {}
+
+
+# ─────────────────────────────────────────────
 # 落库
 # ─────────────────────────────────────────────
 
@@ -284,3 +335,39 @@ async def test_missing_tokens_stored_as_null(fresh_db):
     assert row["input_tokens"] is None
     assert row["output_tokens"] is None
     assert row["ok"] == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_store_writes_run_attribution(fresh_db):
+    """归集列落库：按 thread_id 就能算出「这次运行花了多少」。"""
+    from services import usage_store
+
+    await usage_store.record({
+        "call_site": "outline_extract",
+        "provider": "deepseek",
+        "model": "deepseek-v4-pro",
+        "reasoning_tokens": 1980,
+        "project_id": 17,
+        "thread_id": "tid-abc",
+        "ok": True,
+    })
+
+    async with get_db() as conn:
+        cur = await conn.execute(
+            "SELECT project_id, thread_id, reasoning_tokens FROM llm_usage"
+        )
+        row = await cur.fetchone()
+
+    assert row["project_id"] == 17
+    assert row["thread_id"] == "tid-abc"
+    assert row["reasoning_tokens"] == 1980
+
+
+@pytest.mark.asyncio
+async def test_llm_usage_columns_exist_on_migrated_db(fresh_db):
+    """迁移后新列都在（老库走 ALTER 补齐，不是只有新建库才有）。"""
+    async with get_db() as conn:
+        cur = await conn.execute("PRAGMA table_info(llm_usage)")
+        cols = {row[1] for row in await cur.fetchall()}
+
+    assert {"project_id", "thread_id", "reasoning_tokens"} <= cols

@@ -24,6 +24,12 @@ _VERIFY_PROMPT = "Reply with the single word: ok"
 # 流式 chunk 级超时（秒），可通过环境变量 LLM_CHUNK_TIMEOUT 覆盖
 CHUNK_TIMEOUT = float(os.getenv("LLM_CHUNK_TIMEOUT", "30"))
 
+# 流式正文的输出上限。原为硬编码 4096，实测正文经常顶到它被硬截断（章节断在半句），
+# 因为应标正文按长度分档要 1,600–2,400 汉字，而思考型模型还要额外占 reasoning 预算。
+# max_tokens 只是安全网 —— 只有实际输出计费，抬高它不增加成本，只消除截断。
+# 需要收紧时用 LLM_STREAM_MAX_TOKENS 覆盖。
+STREAM_MAX_TOKENS = int(os.getenv("LLM_STREAM_MAX_TOKENS", "8192"))
+
 
 def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
@@ -35,11 +41,15 @@ def _openai_usage_fields(response) -> dict:
     if u is None:
         return {}
     details = getattr(u, "prompt_tokens_details", None)
+    completion_details = getattr(u, "completion_tokens_details", None)
     return {
         "input_tokens": getattr(u, "prompt_tokens", None),
         "output_tokens": getattr(u, "completion_tokens", None),
         # OpenAI 兼容协议里缓存读计在 prompt_tokens_details.cached_tokens
         "cache_read_tokens": getattr(details, "cached_tokens", None),
+        # 推理 token 单列：它已包含在 output_tokens 里，但「思考吃掉多少预算」
+        # 是判断 max_tokens 是否偏低的关键读数，不能只留在失败日志的字符串里
+        "reasoning_tokens": getattr(completion_details, "reasoning_tokens", None),
         "total_tokens": getattr(u, "total_tokens", None),
     }
 
@@ -61,6 +71,7 @@ _USAGE_TOKEN_KEYS = (
     "output_tokens",
     "cache_read_tokens",
     "cache_creation_tokens",
+    "reasoning_tokens",
     "total_tokens",
 )
 
@@ -79,15 +90,20 @@ async def _emit_usage(
 
     记录形状固定：provider 没返回的字段补 None，而不是省略键 —— sink 不必猜
     这次调用有哪些列，且 NULL 与 0 在汇总时能区分开。
+
+    归属（project_id / thread_id）取自 ``usage.run_context``，未设置时写 None。
     """
     tokens = {k: None for k in _USAGE_TOKEN_KEYS}
     tokens.update(fields)
+    run = usage.current_run()
     await usage.emit({
         "call_site": call_site,
         "provider": config.provider,
         "model": config.model,
         "streaming": streaming,
         **tokens,
+        "project_id": run.get("project_id"),
+        "thread_id": run.get("thread_id"),
         "ok": ok,
         "error": error,
         "latency_ms": _elapsed_ms(started),
@@ -355,7 +371,7 @@ async def stream_openai(
     call_site: str = "",
 ) -> AsyncIterator[str]:
     if _is_mock_mode():
-        iterator = await _mock.respond(system_prompt, user_prompt, stream=True, max_tokens=4096)
+        iterator = await _mock.respond(system_prompt, user_prompt, stream=True, max_tokens=STREAM_MAX_TOKENS)
         async for chunk in iterator:
             yield chunk
         return
@@ -378,7 +394,7 @@ async def stream_openai(
         return await client.chat.completions.create(
             model=config.model,
             messages=messages,
-            max_tokens=4096,
+            max_tokens=STREAM_MAX_TOKENS,
             stream=True,
             **({"stream_options": {"include_usage": True}} if with_usage else {}),
         )
@@ -423,7 +439,7 @@ async def stream_claude(
     call_site: str = "",
 ) -> AsyncIterator[str]:
     if _is_mock_mode():
-        iterator = await _mock.respond(system_prompt, user_prompt, stream=True, max_tokens=4096)
+        iterator = await _mock.respond(system_prompt, user_prompt, stream=True, max_tokens=STREAM_MAX_TOKENS)
         async for chunk in iterator:
             yield chunk
         return
@@ -442,7 +458,7 @@ async def stream_claude(
             model=config.model,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-            max_tokens=4096,
+            max_tokens=STREAM_MAX_TOKENS,
         ) as stream:
             async for text in _iter_with_chunk_timeout(stream.text_stream, "Claude", CHUNK_TIMEOUT):
                 yield text

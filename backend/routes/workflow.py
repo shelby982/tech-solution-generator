@@ -82,12 +82,29 @@ class ConfirmOutlineReq(BaseModel):
     matrix: dict[str, dict] = Field(default_factory=dict)
 
 
+class OutlineStructureReq(BaseModel):
+    """目录结构编辑：**有序**节点列表，顺序即目录顺序。
+
+    每项 ``{"block_id": str, "level": int, "title": str}``；层级由顺序推导
+    （见 domain/spec/structure.py），所以没有 parent 字段。
+    """
+    nodes: list[dict] = Field(default_factory=list)
+    # 用户主动删除章节时可选「连正文一起删」：默认 False 沿用"保留用户内容"的约定，
+    # 但保留的行仍会出现在导出里，所以要在确认框里让用户明确选择。
+    purge: bool = False
+
+
 @router.post("/{thread_id}/workspace-action")
 async def workspace_action(thread_id: str, req: WorkspaceActionReq):
+    from orchestrator.runner import WorkflowAbortedError
+
     try:
         await get_runner().workspace_action(thread_id, req.block_ids, req.action)
     except KeyError:
         raise HTTPException(status_code=404, detail="工作流不存在")
+    except WorkflowAbortedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc),
+                            headers={"X-Error-Code": "workflow_aborted"})
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"status": "started", "action": req.action, "block_ids": req.block_ids}
@@ -111,6 +128,10 @@ async def resume(thread_id: str, req: ResumeReq):
         await runner.resume(thread_id, req.user_choice, req.edits)
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        # 同一 thread 已有后台 task 在跑（刷新页面 / 第二个标签页重复确认）。
+        # 必须让前端拿到 409 + 可展示的原因，而不是 500。
+        raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "resumed"})
 
 
@@ -121,17 +142,24 @@ async def regen(thread_id: str, req: RegenReq):
         await runner.regen(thread_id, req.block_ids)
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "regen_targets": req.block_ids})
 
 
 @router.post("/{thread_id}/rerun-match")
-async def rerun_match(thread_id: str):
-    """重新触发素材匹配：把状态拨回 NODE_EXTRACT 后 → graph 自动跑 match → gate_materials。"""
+async def rerun_match(thread_id: str, full: bool = False):
+    """触发素材匹配：把状态拨回 NODE_EXTRACT 后 → graph 自动跑 match → gate_materials。
+
+    ``full=false``（默认）增量：只归属新上传的素材；``full=true`` 清空重来（代价大）。
+    """
     runner = get_runner()
     try:
-        await runner.rerun_match(thread_id)
+        await runner.rerun_match(thread_id, full=full)
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "rerunning_match"})
 
 
@@ -139,10 +167,15 @@ async def rerun_match(thread_id: str):
 async def redraft_outline(thread_id: str, req: RedraftOutlineReq | None = None):
     """整版重出应答文件目录：换一份提炼要求，跳过 parse 直接重跑张衡的目录派生。"""
     runner = get_runner()
+    from orchestrator.runner import WorkflowAbortedError
+
     try:
         await runner.redraft_outline(thread_id, (req.instruction if req else "") or "")
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
+    except WorkflowAbortedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc),
+                            headers={"X-Error-Code": "workflow_aborted"})
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "redrafting_outline"})
@@ -159,6 +192,36 @@ async def confirm_outline(thread_id: str, req: ConfirmOutlineReq):
     return JSONResponse({
         "thread_id": thread_id, "status": "confirmed", "blocks": len(req.matrix),
     })
+
+
+@router.post("/{thread_id}/outline-structure")
+async def update_outline_structure(thread_id: str, req: OutlineStructureReq):
+    """闸门 1 的目录结构编辑：增删章节 / 改标题 / 上下移动 / 缩进。
+
+    请求体是有序节点列表（顺序即目录顺序，层级由顺序推导）：
+
+        {"nodes": [{"block_id": "s1", "level": 1, "title": "技术方案"}, ...]}
+
+    结构非法（空目录 / id 重复 / 标题为空 / 节点过多）→ 400，消息可直接展示给用户；
+    任务正在运行（解析、提炼、匹配、生成中）→ 409。
+    """
+    runner = get_runner()
+    from domain.spec.structure import StructureError
+
+    from orchestrator.runner import WorkflowAbortedError
+
+    try:
+        stats = await runner.update_outline_structure(thread_id, req.nodes, purge=req.purge)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    except StructureError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except WorkflowAbortedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc),
+                            headers={"X-Error-Code": "workflow_aborted"})
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse({"thread_id": thread_id, "status": "structure_updated", **stats})
 
 
 @router.post("/{thread_id}/pause")
@@ -191,7 +254,22 @@ async def resume_generation(thread_id: str):
         await runner.resume_generation(thread_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "resuming_generation"})
+
+
+@router.post("/{thread_id}/resume-extract")
+async def resume_extract(thread_id: str):
+    """取消/暂停后接着逐节提炼：复用同一条 run，跳过已完成的章节。"""
+    runner = get_runner()
+    try:
+        await runner.resume_extract(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse({"thread_id": thread_id, "status": "resuming_extract"})
 
 
 @router.post("/{thread_id}/abort")
@@ -207,7 +285,11 @@ async def abort(thread_id: str):
 @router.post("/{thread_id}/recover")
 async def recover(thread_id: str):
     runner = get_runner()
-    await runner.recover(thread_id)
+    try:
+        await runner.recover(thread_id)
+    except ValueError as exc:
+        # 已有后台 task 在跑：recover 不该再起一个（否则并发跑同一个 thread）
+        raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "recovering"})
 
 

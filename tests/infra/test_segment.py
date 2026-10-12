@@ -10,6 +10,7 @@ import pytest
 
 from infra.retrieval.segment import (
     Segment,
+    diagnose_scope_miss,
     cut_segments,
     extract_scope_tokens,
     locate_segments,
@@ -227,3 +228,103 @@ def test_project8_like_regression():
     # 选中段远小于全文 —— 这就是省下来的部分
     total = sum(len(s["content"]) for s in doc)
     assert len(blob) < total * 0.2
+
+
+# ─────────────────────────────────────────────
+# 回归：段不得跨文件（F2）
+# ─────────────────────────────────────────────
+
+def _file_sec(title, content, source_file, level=1):
+    """带来源文件的章节（与文件里既有的 _sec 助手区分开，别再撞名）。"""
+    return {"title": title, "content": content, "level": level,
+            "source_file": source_file}
+
+
+def test_segments_never_swallow_the_next_file():
+    """最后一段的边界是该**文件**末尾，不是拼接全文末尾。
+
+    旧实现把多份文件直接 join，最后一个锚点之后那一段的 end=len(full)，于是
+    「标包2」的选中段会把后面整份 docx（实测 20275 字符，其中只有 ~200 属实）
+    吞进来，再以"【已定位到的材料】+ 强制复刻结构"的身份进 prompt —— 目录就按
+    无关文件的结构拆了。
+    """
+    file_a = [
+        _file_sec("标包1 评审标准", "标包1：内容甲" + "甲" * 60, "A.pdf"),
+        _file_sec("标包2 评审标准", "标包2：高可靠技术专题研究与验证" + "乙" * 200, "A.pdf"),
+    ]
+    file_b = [
+        _file_sec("技术规范", "整份技术规范书的正文" + "丙" * 3000, "B.docx"),
+    ]
+
+    segments = locate_segments(
+        file_a + file_b, "按照主招标文件的PDF中的标包2的技术评分要求的点拆分章节",
+    )
+    picked = [s for s in segments if s.selected]
+
+    assert len(picked) == 1
+    assert "乙" in picked[0].content
+    assert "丙" not in picked[0].content, "选中段跨文件吞进了另一份文件的正文"
+    assert len(picked[0].content) < 1000
+
+
+def test_segments_tile_every_file_without_loss():
+    """按文件切段后仍然覆盖全部正文（不因为切分而丢内容），且各文件都有段。"""
+    sections = [
+        _file_sec("封面", "前置说明文字\n", "A.pdf"),       # 锚点之前的内容 → 产生「文档开头」段
+        _file_sec("标包1 评审标准", "标包1：甲" * 20, "A.pdf"),
+        _file_sec("标包2 评审标准", "标包2：乙" * 20, "A.pdf"),
+        _file_sec("无关章节", "丙" * 500, "B.docx"),        # 这份没有任何锚点
+    ]
+    segments = cut_segments(sections)
+
+    # A 有锚点 → 开头段 + 两个锚点段；B 无锚点 → 按它的章节各给一段（都未选中）
+    assert any(s.title.startswith("（文档开头）·A.pdf") for s in segments)
+    b_segments = [s for s in segments if s.title == "无关章节"]
+    assert len(b_segments) == 1 and len(b_segments[0].content) == 500
+    assert not b_segments[0].selected, "无锚点文件的段不能被范围匹配选中"
+
+    # 每个文件内部按 "\n" 拼接，文件之间不拼 → join 分隔符数按文件分别计
+    per_file: dict[str, int] = {}
+    for s in sections:
+        per_file[s["source_file"]] = per_file.get(s["source_file"], 0) + 1
+    total = sum(len(s.content) for s in segments)
+    expected = (sum(len(s["content"]) for s in sections)
+                + sum(n - 1 for n in per_file.values()))
+    assert total == expected, f"切段后字符数 {total} != 原文 {expected}（有内容丢失或重复）"
+
+
+def test_single_file_without_source_file_still_works():
+    """没有 source_file（单文件 / 老 checkpoint）时回退到原来的单文件切段。"""
+    segments = cut_segments([
+        {"title": "前置说明", "content": "开头文字\n"},
+        {"title": "标包2 评审标准", "content": "标包2：乙" * 10},
+    ])
+    assert segments[0].title == "（文档开头）"
+    # 锚点段的标题取自锚点行原文（不是章节标题）—— 这是既有设计
+    assert segments[1].title.startswith("标包2：")
+    assert "标包2：乙" in segments[1].content
+
+
+# ─────────────────────────────────────────────
+# 范围未命中的可诊断原因（F3）
+# ─────────────────────────────────────────────
+
+def test_diagnose_scope_miss_empty_when_no_scope_token():
+    """要求里没点范围 → 空串（调用方不该提示"没定位到"，因为压根没要求定位）。"""
+    assert diagnose_scope_miss([_file_sec("任意", "正文", "A.pdf")], "按评分项逐条拆章") == ""
+
+
+def test_diagnose_scope_miss_says_no_anchor_when_file_has_none():
+    reason = diagnose_scope_miss(
+        [_file_sec("技术规范", "没有锚点的正文", "A.pdf")],
+        "按照标包2的技术评分要求拆分章节",
+    )
+    assert "没有" in reason and "锚点" in reason and "标包2" in reason
+
+
+def test_diagnose_scope_miss_says_number_mismatch_when_anchors_exist():
+    reason = diagnose_scope_miss(
+        [_file_sec("标包1 评审标准", "标包1：甲", "A.pdf")],
+        "按照标包2的技术评分要求拆分章节",
+    )
+    assert "对不上" in reason and "标包2" in reason

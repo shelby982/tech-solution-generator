@@ -45,6 +45,54 @@ OUTLINE_EXTRACT_SYSTEM = (
 )
 
 
+# 8 字段提炼的**稳定指令块**：逐字不变地放在 user prompt 最前面。
+#
+# 为什么要单独提出来：上下文缓存（DeepSeek 等）按**共同前缀**命中，命中的前提是
+# 请求开头有一长段逐字相同的文本。原实现把这 1200 字的固定规则放在 prompt **末尾**、
+# 开头放变化的标题与正文 → 前缀第 10 个字就分叉，缓存几乎完全不命中（实测命中率
+# 21.5%）。把稳定块前置、动态内容全部后置后，system + 本块的约 1600 字在所有章节间
+# 逐字相同，命中率可到 60–70%。
+#
+# ⚠️ 改这段文字 = 所有历史缓存失效（下次调用重新写缓存）。要改措辞时请连带跑一次
+# 成本核算，并同步更新 tests/agents/test_prompt_cache_prefix.py。
+# ⚠️ 字段口径（2026-09-21 修正，用户反馈"匹配页满屏无依据、看不懂"）：
+# 原口径把「全面提炼、覆盖原文所有要点、不遗漏」压在 requirement 上，模型于是把整段
+# **评分细则**（优良 7-10 分 / 中等 6 分 / 一般 1-5 分 / 未作响应不得分…）也抄进了
+# requirement。实测项目 18 的 s1.1：requirement 展开出 12 条，其中 8 条是"评委怎么打分"，
+# 而我方要做的只有 4 条 —— 评分档位不可能有素材依据，于是界面满屏"无依据"，
+# 用户完全看不懂这一屏在说什么。
+# 现在的口径：**requirement 只写"我方要做什么"（可回应/可作答的事项）**，
+# 评分档位与分值一律进 score_items，量化数字进 indicators。
+OUTLINE_EXTRACT_INSTRUCTIONS = (
+    "请针对本章节提炼以下八项内容，输出单个 JSON 对象：\n"
+    "- requirement：**本章节要求投标方做什么**（要回应、要满足、要提交的事项），"
+    "要求**全面提炼、不遗漏我方的动作与约束**，采用分点列出（用\\n分隔），不限字数。"
+    "**只写我方要做的动作**：以「投标方应/须/需…」这类可回应的表述为主；"
+    "**不要把评分档位、分档描述、得分规则抄进来**"
+    "（例如「优良（7-10分）：投标响应度较高」「中等（6分）：…」「未作响应不得分」「满分10分」）"
+    "—— 这些属于评分口径，请放进 score_items；"
+    "若有【评分上下文】或【评审上下文】，**先判断 score_items 里是否已经写了这些分值**："
+    "已经写过的就**不要再追加**（同一个分值在两处出现 = 界面重复展示、撰写阶段重复喂模型，"
+    "实测项目 18 的 s2.1：requirement 12 行里 7 行是与 score_items 逐条重复的【评分对应】）；"
+    "**只有 score_items 里确实没有的分值**，才在末尾用「【评分对应】XXX X分」「【评审对应】XXX」补一条\n"
+    "- key_points：站在投标方角度，针对 requirement 中的**每一条要求**给出具体响应建议，"
+    "说明应提供的内容形式（图、文、表、案例、流程图、参数对照表等不限形式），"
+    "**必须覆盖 requirement 的全部要点、不遗漏**；分点列出（用\\n分隔），不限字数\n"
+    "- veto_items：可能导致废标/投标无效的硬性约束，引用原文，多条用\\n分隔，没有则留空\n"
+    "- bonus_items：能提升评分的加分要素，引用原文，多条用\\n分隔，没有则留空\n"
+    "- score_items：**评分项、分值、以及分档口径**，例如「技术评分标准 10分」"
+    "「优良（7-10分）：投标响应度较高」「中等（6分）」「未作响应不得分」；"
+    "requirement 里出现的任何分档/得分规则都归到这里，多条用\\n分隔，没有则留空\n"
+    "- evidence_required：投标方需提供的证明材料，多条用\\n分隔，没有则留空\n"
+    "- constraint_level：本章节要求的强制性等级，三选一：mandatory（必须响应）/recommended（应当响应）/optional（可选响应）\n"
+    "- indicators：量化指标和时限要求（**可核对的具体数值/时限**，如「不少于35人」「3年及以上经验」"
+    "「交付周期90天」），引用原文中的具体数值，多条用\\n分隔，没有则留空。"
+    "**不要复述评分档位或分值**：像「方案可行性得分档位：8-12分、5-7分」「…总分30分」"
+    "这类属于 score_items，放这里就会和评分项重复（实测踩到）\n\n"
+    '只输出 JSON 对象，格式：{"requirement":"...","key_points":"...","veto_items":"...","bonus_items":"...","score_items":"...","evidence_required":"...","constraint_level":"...","indicators":"..."}'
+)
+
+
 def build_outline_extract_user(
     title: str,
     content: str,
@@ -54,10 +102,13 @@ def build_outline_extract_user(
 ) -> str:
     """构造单章节 8 字段提炼 user prompt。
 
+    结构：**稳定指令块在前**（见 ``OUTLINE_EXTRACT_INSTRUCTIONS``，逐字不变以命中
+    上下文缓存），动态内容（标题 / 正文 / 标记 / 上下文）在后。
+
     内嵌 marks 提示、评分/评审上下文（截断至 3000 字符）；
     content 超 16000 字符截断 + ellipsis。
 
-    返回的字符串末尾必须包含关键短语 '提炼以下八项内容'，
+    返回的字符串必须包含关键短语 '提炼以下八项内容'，
     以便 LLM mock 模式按关键词路由到 8 字段 fixture。
     """
     content = content or ""
@@ -80,24 +131,11 @@ def build_outline_extract_user(
         extra_blocks += f"\n\n【评审上下文（来自评审要素）】\n{evaluation_ctx[:3000]}"
 
     return (
+        f"{OUTLINE_EXTRACT_INSTRUCTIONS}\n\n"
         f"以下是招标文件中「{title}」章节的内容：\n\n"
         f"---\n{content}\n---\n"
         f"{marks_hint}"
-        f"{extra_blocks}\n\n"
-        "请针对本章节提炼以下八项内容，输出单个 JSON 对象：\n"
-        "- requirement：本章节对投标方的核心技术要求，要求**全面提炼、覆盖原文所有要点、不遗漏关键信息**，"
-        "采用分点列出（用\\n分隔），不限字数；"
-        "若有【评分上下文】或【评审上下文】，请在末尾用「【评分对应】XXX X分」「【评审对应】XXX」追加对应条款\n"
-        "- key_points：站在投标方角度，针对 requirement 中的**每一条要求**给出具体响应建议，"
-        "说明应提供的内容形式（图、文、表、案例、流程图、参数对照表等不限形式），"
-        "**必须覆盖 requirement 的全部要点、不遗漏**；分点列出（用\\n分隔），不限字数\n"
-        "- veto_items：可能导致废标/投标无效的硬性约束，引用原文，多条用\\n分隔，没有则留空\n"
-        "- bonus_items：能提升评分的加分要素，引用原文，多条用\\n分隔，没有则留空\n"
-        "- score_items：关联的评分项及分值，格式如'评分项名称 X分'，多条用\\n分隔，没有则留空\n"
-        "- evidence_required：投标方需提供的证明材料，多条用\\n分隔，没有则留空\n"
-        "- constraint_level：本章节要求的强制性等级，三选一：mandatory（必须响应）/recommended（应当响应）/optional（可选响应）\n"
-        "- indicators：量化指标和时限要求，引用原文中的具体数值，多条用\\n分隔，没有则留空\n\n"
-        '只输出 JSON 对象，格式：{"requirement":"...","key_points":"...","veto_items":"...","bonus_items":"...","score_items":"...","evidence_required":"...","constraint_level":"...","indicators":"..."}'
+        f"{extra_blocks}"
     )
 
 
@@ -372,8 +410,17 @@ RERANK_SYSTEM = (
 )
 
 
+# 重排的稳定指令块：前置以命中上下文缓存（见 OUTLINE_EXTRACT_INSTRUCTIONS 的说明）。
+RERANK_INSTRUCTIONS = (
+    '请对下面给出的候选素材片段逐一打分，输出形如 '
+    '{"matches":[{"chunk_id":...,"score":0-10,"reason":"...","hit_points":["..."]}]} 的 JSON。'
+    "score 越高越相关，hit_points 列出该素材命中的应标要点；"
+    "无关素材也要列出（score 设低分）。"
+)
+
+
 def build_rerank_user(chunks: list[dict], query: str, requirement: str) -> str:
-    """构造沈括 LLM 重排 user prompt。"""
+    """构造沈括 LLM 重排 user prompt（稳定指令在前，候选与查询在后）。"""
     lines = []
     for i, c in enumerate(chunks, start=1):
         cid = c.get("chunk_id", c.get("id", i))
@@ -382,12 +429,10 @@ def build_rerank_user(chunks: list[dict], query: str, requirement: str) -> str:
     chunks_block = "\n\n".join(lines)
 
     return (
+        f"{RERANK_INSTRUCTIONS}\n\n"
         f"【应标要求】\n{requirement}\n\n"
         f"【检索查询】\n{query}\n\n"
-        f"【候选素材片段】\n{chunks_block}\n\n"
-        '请输出形如 {"matches":[{"chunk_id":...,"score":0-10,"reason":"...","hit_points":["..."]}]} 的 JSON。'
-        "score 越高越相关，hit_points 列出该素材命中的应标要点；"
-        "无关素材也要列出（score 设低分）。"
+        f"【候选素材片段】\n{chunks_block}"
     )
 
 
@@ -427,8 +472,28 @@ SECTION_OUTLINE_SYSTEM = (
 )
 
 
+# 写作大纲的稳定指令块：前置以命中上下文缓存（见 OUTLINE_EXTRACT_INSTRUCTIONS 的说明）。
+# 注意首行不再嵌入 {title} —— 否则前缀第一个变量就分叉，缓存必然不命中。
+SECTION_OUTLINE_INSTRUCTIONS = (
+    "请为下面给出的模块产出**写作大纲**，要求：\n"
+    "1. 逐条对应【应标要求】中的要点，给出具体响应思路（每点 1-2 句）；"
+    "**必须覆盖应标要求里所有要点，不得遗漏**\n"
+    "2. 涉及对比/规格/参数/资质清单等内容，先用 markdown 表格给出**示例表头 + 1-2 行示例数据**，"
+    "正文阶段会在其上补全实际数据\n"
+    "3. 涉及架构图/拓扑图/流程图/部署图/时序图等图形内容，用占位符表达，格式："
+    "`【架构图：xx 系统部署架构】`、`【流程图：xx 业务流程】`\n"
+    "4. 暂时无法直接生成的具体数据/案例/品牌型号/数值，用占位符："
+    "`【待补充：xx】`，便于用户后续自定义补充\n"
+    "5. 必须覆盖所有【否决项】要求；尽量覆盖【加分项】\n"
+    "6. 大纲采用二级标题（##）+ 项目符号（-）+ 表格 的形式，结构清晰\n"
+    "7. **公文展开标记**：如果应标要求或加分项中提到要附「承诺书 / 保证函 / 声明书 / 授权委托书 / 履约保证 / 廉洁承诺」"
+    "等公文，**在大纲对应位置明确写出「展开完整 XX 公文正文」**，提醒正文阶段直接生成可签署文本（含标题、抬头、分点承诺、落款占位），"
+    "不要只用一句话概括"
+)
+
+
 def build_section_outline_user(block: dict, extra_context: str) -> str:
-    """构造写作大纲 user prompt（移自 dispatcher._build_section_outline_prompt）。
+    """构造写作大纲 user prompt（稳定指令在前，模块标题与提炼字段在后）。
 
     返回字符串包含关键短语 '产出**写作大纲**' 与表格样例 / 占位符规约。
     """
@@ -452,21 +517,9 @@ def build_section_outline_user(block: dict, extra_context: str) -> str:
     ctx_part = f"\n\n【参考素材】\n{extra_context[:6000]}" if extra_context else ""
 
     return (
-        f"请为「{title}」模块产出**写作大纲**，要求：\n"
-        "1. 逐条对应【应标要求】中的要点，给出具体响应思路（每点 1-2 句）；"
-        "**必须覆盖应标要求里所有要点，不得遗漏**\n"
-        "2. 涉及对比/规格/参数/资质清单等内容，先用 markdown 表格给出**示例表头 + 1-2 行示例数据**，"
-        "正文阶段会在其上补全实际数据\n"
-        "3. 涉及架构图/拓扑图/流程图/部署图/时序图等图形内容，用占位符表达，格式："
-        "`【架构图：xx 系统部署架构】`、`【流程图：xx 业务流程】`\n"
-        "4. 暂时无法直接生成的具体数据/案例/品牌型号/数值，用占位符："
-        "`【待补充：xx】`，便于用户后续自定义补充\n"
-        "5. 必须覆盖所有【否决项】要求；尽量覆盖【加分项】\n"
-        "6. 大纲采用二级标题（##）+ 项目符号（-）+ 表格 的形式，结构清晰\n"
-        "7. **公文展开标记**：如果应标要求或加分项中提到要附「承诺书 / 保证函 / 声明书 / 授权委托书 / 履约保证 / 廉洁承诺」"
-        "等公文，**在大纲对应位置明确写出「展开完整 XX 公文正文」**，提醒正文阶段直接生成可签署文本（含标题、抬头、分点承诺、落款占位），"
-        "不要只用一句话概括\n\n"
-        f"{ref_part}{ctx_part}"
+        f"{SECTION_OUTLINE_INSTRUCTIONS}\n\n"
+        f"【模块】\n{title}"
+        f"\n\n{ref_part}{ctx_part}"
     )
 
 

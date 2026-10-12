@@ -69,6 +69,7 @@ DEFAULT_BASE_URLS = {
     "kimi":      "https://api.moonshot.cn/v1",
     "minimax":   "https://api.minimax.chat/v1",
     "deepseek":  "https://api.deepseek.com/v1",
+    "typesafe":  "https://api.typesafe.ai/v1",
 }
 
 # 默认模型映射
@@ -79,10 +80,16 @@ DEFAULT_MODELS = {
     "kimi":      "moonshot-v1-32k",
     "minimax":   "MiniMax-M2.7",
     "deepseek":  "deepseek-chat",
+    "typesafe":  "jev-latest",
 }
 
 # OpenAI 兼容的 provider 集合（共用 openai SDK 路径）
 OPENAI_COMPATIBLE_PROVIDERS = {"openai", "doubao", "kimi", "minimax", "deepseek"}
+
+# 判断型 provider（TypeSafe System One：POST /systemone 协议，不是 chat/completions）。
+# 只服务素材重排 / 收敛校准等判断场景，**不参与生成链路的轮询**——生成侧若拿到
+# 这种配置会按 claude 协议去调 systemone 端点，白白烧一次失败 fallback。
+JUDGMENT_PROVIDERS = {"typesafe"}
 
 
 class ConfigStore:
@@ -173,12 +180,18 @@ class ConfigStore:
 
         优先返回 verified=True 的配置；若无任何 verified 项则 fallback 到全部
         （避免启动期未跑过 verify 时全部不可用）。
+        判断型 provider（JUDGMENT_PROVIDERS）一律排除——它们不走生成协议，
+        混进轮询只会白白烧失败 fallback。全部被排除时返回 ([], 0)，
+        生成侧按"无 LLM 配置"降级（仅判断型配置本来也无法生成）。
         """
         with self._lock:
             if not self._configs:
                 return [], 0
             verified = [c for c in self._configs if c.verified]
             pool = verified if verified else list(self._configs)
+            pool = [c for c in pool if c.provider not in JUDGMENT_PROVIDERS]
+            if not pool:
+                return [], 0
             idx = self._rr_index % len(pool)
             self._rr_index = (self._rr_index + 1) % len(pool)
             return pool, idx
@@ -194,6 +207,16 @@ class ConfigStore:
         with self._lock:
             configs_snapshot = list(self._configs)
         for cfg in configs_snapshot:
+            if cfg.provider in JUDGMENT_PROVIDERS:
+                # 判断型 provider 不走 chat 协议，对话式 verify 必然失败——
+                # 跳过并如实记 False（生成轮询本来就会排除它）。
+                # 专属 verify 待 typesafe_client 落地时补。
+                results[cfg.id] = False
+                logger.info(
+                    "config verify skipped (judgment provider): %s/%s",
+                    cfg.provider, cfg.model,
+                )
+                continue
             exc_raised = False
             try:
                 ok, msg = await verify_api_key(cfg)

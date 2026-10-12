@@ -6,6 +6,7 @@ infra/llm 公开 API：
 - dispatch_outline_draft_json / dispatch_scope_select_json
 - generate_section_outline / generate_letter_content
 - is_letter_section / LETTER_KEYWORDS
+- length_band / LENGTH_BANDS（正文长度分档）
 
 Phase 1 阶段，LLMConfig 仍由 services/config_store.py 维护；
 Phase 7 会把存储层迁过来后再断开此处依赖。
@@ -14,6 +15,7 @@ Phase 7 会把存储层迁过来后再断开此处依赖。
 from services.config_store import LLMConfig, OPENAI_COMPATIBLE_PROVIDERS
 
 from .dispatcher import (
+    LENGTH_BANDS,
     LETTER_KEYWORDS,
     dispatch_block_write,
     dispatch_doc_summary,
@@ -24,6 +26,7 @@ from .dispatcher import (
     generate_letter_content,
     generate_section_outline,
     is_letter_section,
+    length_band,
     verify_api_key,
 )
 
@@ -31,6 +34,8 @@ __all__ = [
     "LLMConfig",
     "OPENAI_COMPATIBLE_PROVIDERS",
     "LETTER_KEYWORDS",
+    "LENGTH_BANDS",
+    "length_band",
     "verify_api_key",
     "dispatch_stream_generate",
     "dispatch_doc_summary",

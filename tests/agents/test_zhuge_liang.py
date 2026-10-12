@@ -246,7 +246,7 @@ async def test_generate_concurrent_blocks_isolated_on_single_failure(monkeypatch
         return "outline content for " + str(block.get("title"))
 
     async def fake_block_write(*, configs, rr_start_index, title, requirement,
-                               chunks, target_words, feedback_text=""):
+                               chunks, target_words, feedback_text="", max_words=None):
         # 没在 outline 阶段失败的话，正文阶段也不应该失败
         if title == "FAIL_BLOCK_TITLE":
             raise RuntimeError("should never reach: outline already failed")
@@ -455,3 +455,54 @@ async def test_generate_without_feedback_sends_empty_feedback_text(monkeypatch):
         assert captured.get("feedback_text") == "", (
             f"feedback={fb!r} 时 s1 不应注入任何评审意见"
         )
+
+
+# ─────────────────────────────────────────────
+# 正文长度分档：按 8 字段选档并传给 dispatch_block_write
+# ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generate_passes_length_band_by_constraint_and_requirement(monkeypatch):
+    """强制要求 / 长要求 → core 档；短要求 → brief 档；上限一并传入。"""
+    captured: list[dict] = []
+
+    async def _fake_outline(*a, **kw):
+        return "## 大纲"
+
+    async def _fake_write(*, title, requirement, target_words, max_words=None, **kw):
+        captured.append({
+            "title": title, "target_words": target_words, "max_words": max_words,
+        })
+        yield "正文"
+
+    import infra.llm
+    monkeypatch.setattr(infra.llm, "generate_section_outline", _fake_outline)
+    monkeypatch.setattr(infra.llm, "dispatch_block_write", _fake_write)
+
+    matrix = {
+        "core": OutlineMatrixRow(
+            block_id="core", title="强制章节", requirement="必须满足本条款",
+            constraint_level="mandatory",
+        ),
+        "long": OutlineMatrixRow(
+            block_id="long", title="长要求章节", requirement="甲" * 400,
+        ),
+        "brief": OutlineMatrixRow(
+            block_id="brief", title="概述章节", requirement="简要说明",
+        ),
+    }
+
+    agent = ZhugeLiangAgent(configs_provider=_fake_configs)
+    await agent.generate(outline_matrix=matrix, materials={}, regenerate_targets=None)
+
+    by_title = {c["title"]: c for c in captured}
+    # mandatory → core(1600,2400)
+    assert by_title["强制章节"]["target_words"] == 1600
+    assert by_title["强制章节"]["max_words"] == 2400
+    # 400 字要求 → 同样 core
+    assert by_title["长要求章节"]["target_words"] == 1600
+    # 短要求 → brief(600,1000)，此时 self.target_words 默认 600 不抬高下限
+    assert by_title["概述章节"]["target_words"] == 600
+    assert by_title["概述章节"]["max_words"] == 1200
+    # 每个章节都拿到了上限（有上限才止得住越写越长）
+    assert all(c["max_words"] and c["max_words"] > c["target_words"] for c in captured)

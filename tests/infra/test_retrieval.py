@@ -62,7 +62,7 @@ async def test_llm_rerank_returns_top_n_sorted_by_score(monkeypatch):
         ]
     }, ensure_ascii=False)
 
-    async def _fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500):
+    async def _fake_oneshot(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         return fake_response
 
     monkeypatch.setattr("infra.retrieval.rerank.generate_oneshot_openai", _fake_oneshot)
@@ -97,7 +97,7 @@ async def test_llm_rerank_empty_chunks_returns_empty():
 @pytest.mark.asyncio
 async def test_llm_rerank_total_failure_returns_empty(monkeypatch):
     """所有 config 全部失败时返回空列表（不抛错）。"""
-    async def _boom(config, system_prompt, user_prompt, max_tokens=1500):
+    async def _boom(config, system_prompt, user_prompt, max_tokens=1500, **_kwargs):
         raise RuntimeError("simulated LLM failure")
 
     monkeypatch.setattr("infra.retrieval.rerank.generate_oneshot_openai", _boom)

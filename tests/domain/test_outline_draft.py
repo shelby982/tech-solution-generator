@@ -211,3 +211,76 @@ def test_count_top_level():
     ])
     assert count_top_level(build_sections(nodes)) == 2
     assert count_top_level([]) == 0
+
+
+# ─────────────────────────────────────────────
+# 回归：重复 block_id（F7）与 parent 下标语义（F6）
+# ─────────────────────────────────────────────
+
+def test_build_sections_never_duplicates_ids_on_legal_model_output():
+    """合法模型输出不得撞出重复 id。
+
+    旧实现用「上一棵子树遗留的父 id + 按 level 归零的计数器」拼 id，这段输入会
+    产出两个 s1.2.1（normalize 零告警）—— 重复 id 会让 sync_outline_placeholders
+    覆盖掉一节、前端 blocksById 互相覆盖、extract 的 matrix 直接少一节。
+    """
+    raw = [
+        {"level": 1, "title": "A"},
+        {"level": 2, "parent": 0, "title": "B"},
+        {"level": 3, "parent": 1, "title": "C"},
+        {"level": 2, "parent": 0, "title": "D"},
+        {"level": 3, "parent": 1, "title": "E"},
+        {"level": 1, "title": "F"},
+        {"level": 3, "parent": 3, "title": "G"},   # 父是 D（更早、level 恰好多 1）
+    ]
+    nodes, warnings = normalize_nodes(raw)
+    assert warnings == []
+    sections = build_sections(nodes)
+    ids = [s.id for s in sections]
+
+    assert len(ids) == len(set(ids)), f"id 撞号：{ids}"
+    # id 必须如实反映声明的关系：E 的父是 B(s1.1)、G 的父是 D(s1.2)
+    assert ids == ["s1", "s1.1", "s1.1.1", "s1.2", "s1.1.2", "s2", "s1.2.1"]
+
+
+def test_build_sections_ids_unique_across_many_random_shapes():
+    """随机合法层级序列下 id 恒唯一（防将来又引入"按 level 记账"的变体）。"""
+    import random
+
+    rng = random.Random(20260920)
+    for _ in range(200):
+        raw = []
+        for _ in range(rng.randint(1, 40)):
+            level = rng.choice([1, 1, 2, 2, 3, 4])
+            parent = None
+            if level > 1:
+                candidates = [i for i, r in enumerate(raw)
+                              if r.get("level") == level - 1]
+                if not candidates:
+                    level = 1
+                else:
+                    parent = rng.choice(candidates)
+            item = {"level": level, "title": f"t{len(raw)}"}
+            if parent is not None:
+                item["parent"] = parent
+            raw.append(item)
+        ids = [s.id for s in build_sections(normalize_nodes(raw)[0])]
+        assert len(ids) == len(set(ids)), f"撞号：{ids}"
+
+
+def test_normalize_maps_parent_over_dropped_nodes():
+    """parent 是**原始数组**下标：前面有空标题被丢时，后续 parent 不能错位到别人身上。
+
+    这条用例专门构造「错位会指向另一个节点」的形状：D 声明父是下标 2（B），
+    若把 2 当成 accepted 下标就会挂到 C 下（accepted = A,B,C → accepted[2] = C）。
+    """
+    nodes, _ = normalize_nodes([
+        {"level": 1, "title": "   "},              # 空标题 → 被丢弃（占着原始下标 0）
+        {"level": 1, "title": "A"},
+        {"level": 2, "parent": 1, "title": "B"},
+        {"level": 2, "parent": 1, "title": "C"},
+        {"level": 3, "parent": 2, "title": "D"},   # 父是 B（原始下标 2）
+    ])
+    ids = [s.id for s in build_sections(nodes)]
+    # A=s1, B=s1.1, C=s1.2, D 必须挂在 B 下（s1.1.x），不能挂到 C 下
+    assert ids == ["s1", "s1.1", "s1.2", "s1.1.1"]
