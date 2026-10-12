@@ -120,9 +120,11 @@ def _make_agent_emitter_bridge(
 # 张衡 parse 节点
 # ─────────────────────────────────────────────
 
-# 文件源加载回调（routes 在 start 时注入）：返回 [(binary_io, suffix, filename), ...]
+# 文件源加载回调（routes 在 start 时注入）：返回 [(binary_io, suffix, filename[, material_id]), ...]
 # 列表 = 「应标要求」面板下的全部文件，提炼不绑定技术规范书。
-SpecLoader = Callable[[int], Awaitable[list[tuple[Any, str, str]]]]
+# 第 4 项 material_id 是**本次运行绑定哪几份文件**的依据：解析时记进 checkpoint，
+# 重跑派生按 id 原样取回，与项目当前材料表无关。
+SpecLoader = Callable[..., Awaitable[list[tuple]]]
 
 
 async def materials_signature(project_id: int) -> str:
@@ -163,7 +165,22 @@ async def zhang_heng_parse_node(
     _check_cancel(state)
 
     project_id = state["project_id"]
-    sources = await spec_loader(project_id)
+    # 优先带 material_id 取（新契约）：解析结果里就能记住"这次用了哪几份文件"。
+    # 旧 loader 只接受一个位置参数 → 退回旧调用，行为不变。
+    try:
+        sources = await spec_loader(project_id, with_ids=True)
+    except TypeError:
+        sources = await spec_loader(project_id)
+
+    def _material_id_of(src) -> int | None:
+        if isinstance(src, (tuple, list)) and len(src) >= 4:
+            try:
+                return int(src[3])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    material_ids = [mid for mid in (_material_id_of(s) for s in sources) if mid]
 
     loop = asyncio.get_running_loop()
 
@@ -181,7 +198,7 @@ async def zhang_heng_parse_node(
             return
 
     parsed = await agent.parse(
-        sources,
+        [tuple(s)[:3] for s in sources],      # parse 只吃 (io, suffix, filename)
         progress_callback=_sync_progress,
     )
 
@@ -229,6 +246,9 @@ async def zhang_heng_parse_node(
             # 也能让**改动前创建的旧 run**（没有 material_sig）被正确判定为"原料已变"。
             "material_sig": await materials_signature(project_id),
             "material_files": [s.get("source_file") or "" for s in toc_dicts],
+            # 本次运行**绑定**的材料 id：重跑派生按它取回原批文件（含已软删的），
+            # 于是"重新上传"不会影响旧 run，旧 run 也不会拿到新文件。
+            "material_ids": material_ids,
         },
     }
 

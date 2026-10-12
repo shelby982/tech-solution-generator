@@ -4,6 +4,7 @@
 """
 
 import logging
+from typing import Optional
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -54,16 +55,19 @@ REQUIREMENT_ROLES = ("spec", "main_rfp", "requirement", "scoring", "evaluation")
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
-async def _load_spec_for_project(project_id: int):
-    """spec_loader：取「应标要求」面板下全部已上传文件，按上传顺序返回列表，
-    每项是 (BytesIO, suffix, filename)。
+async def _load_spec_for_project(project_id: int, *, with_ids: bool = False,
+                                 material_ids: Optional[list[int]] = None):
+    """spec_loader：取「应标要求」文件，按上传顺序返回列表。
 
-    返回列表而非单份：提炼要求可能同时用到规范书 + 评分表 + 评审要素，
-    这些都要进大纲派生的输入。
+    每项是 ``(BytesIO, suffix, filename)``；``with_ids=True`` 时是四元组
+    ``(BytesIO, suffix, filename, material_id)`` —— 解析节点靠它把"这次用了哪几份文件"
+    记进 checkpoint（``spec.material_ids``），重跑派生时按 id 原样取回**那次运行的那批**，
+    与项目当前材料表无关。
 
-    单份文件在磁盘上缺失（DB 有记录但文件被清）只跳过该份并告警，
-    不让整条链路因为一份陈旧记录失败；一份都取不到才抛错。
+    ``material_ids``：给了就只取这几份（**含已软删的**）。这正是"重新上传文件"
+    不再影响旧 run 的关键：旧 run 认自己的 id，新文件各走各的运行。
 
+    单份文件在磁盘上缺失只跳过并告警；一份都取不到才抛错。
     materials.file_path 形如 ``uploads/{pid}/{filename}``，相对于 backend/data/。
     """
     from io import BytesIO
@@ -72,17 +76,26 @@ async def _load_spec_for_project(project_id: int):
 
     data_dir = DATA_DIR
 
-    placeholders = ",".join("?" * len(REQUIREMENT_ROLES))
     async with get_db() as conn:
-        cursor = await conn.execute(
-            # 顺序即拼接顺序、也是 digest 吃预算的顺序：主招标/规范书类排最前
-            # （它定义章节骨架），评分表/评审要素随后。与 list_materials 同一片段，
-            # 保证「界面看到的顺序」=「派生用的顺序」。
-            "SELECT filename, file_path FROM materials "
-            f"WHERE project_id = ? AND role IN ({placeholders}) "
-            f"ORDER BY {ROLE_PRIORITY_SQL}",
-            (project_id, *REQUIREMENT_ROLES),
-        )
+        if material_ids:
+            placeholders = ",".join("?" * len(material_ids))
+            cursor = await conn.execute(
+                f"SELECT id, filename, file_path FROM materials "
+                f"WHERE id IN ({placeholders}) ORDER BY id",
+                tuple(int(i) for i in material_ids),
+            )
+        else:
+            placeholders = ",".join("?" * len(REQUIREMENT_ROLES))
+            cursor = await conn.execute(
+                # 顺序即拼接顺序、也是 digest 吃预算的顺序：主招标/规范书类排最前
+                # （它定义章节骨架），评分表/评审要素随后。与 list_materials 同一片段，
+                # 保证「界面看到的顺序」=「派生用的顺序」。
+                "SELECT id, filename, file_path FROM materials "
+                f"WHERE project_id = ? AND role IN ({placeholders}) "
+                f"AND deleted_at IS NULL "
+                f"ORDER BY {ROLE_PRIORITY_SQL}",
+                (project_id, *REQUIREMENT_ROLES),
+            )
         rows = await cursor.fetchall()
     if not rows:
         raise FileNotFoundError(
@@ -103,7 +116,10 @@ async def _load_spec_for_project(project_id: int):
         suffix = Path(filename).suffix.lower()
         with open(abs_path, "rb") as f:
             data = f.read()
-        sources.append((BytesIO(data), suffix, filename))
+        if with_ids:
+            sources.append((BytesIO(data), suffix, filename, int(row["id"])))
+        else:
+            sources.append((BytesIO(data), suffix, filename))
 
     if not sources:
         raise FileNotFoundError(f"项目 {project_id} 的要求文件均不存在于磁盘，请重新上传")

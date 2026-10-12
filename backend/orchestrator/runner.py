@@ -361,6 +361,32 @@ class WorkflowRunner:
 
         spec = state.get("spec") or {}
         project_id = int(state["project_id"])
+
+        # ① 最硬的判据：本次运行绑定的 material_ids vs 项目当前未删材料。
+        #    比文件名/大小都可靠（改名、换内容、同名替换都能识别）。
+        recorded_ids = [int(i) for i in (spec.get("material_ids") or []) if i]
+        if not recorded_ids:
+            # 旧 run（本次改动前创建）没有 material_ids：按它 source_toc 里的文件名
+            # 反查当前材料表，把"它自己那批文件"的 id 补出来。查不到就留空，
+            # 走下面的指纹/文件名兜底。
+            names = recorded_requirement_filenames(spec)
+            if names:
+                async with get_db() as conn:
+                    cursor = await conn.execute(
+                        "SELECT id, filename FROM materials WHERE project_id = ?",
+                        (project_id,),
+                    )
+                    recorded_ids = [
+                        int(r["id"]) for r in await cursor.fetchall()
+                        if r["filename"] in names
+                    ]
+        if recorded_ids:
+            from services.block_store import list_materials
+            async with get_db() as conn:
+                current_ids = [int(m["id"]) for m in await list_materials(conn, project_id)]
+            return sorted(recorded_ids) != sorted(current_ids)
+
+        # ② 兼容旧 run：按指纹 → 文件名兜底
         current_sig = await materials_signature(project_id)
         recorded = spec.get("material_sig") or ""
         if recorded:

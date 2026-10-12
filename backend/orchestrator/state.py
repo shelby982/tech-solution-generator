@@ -42,6 +42,7 @@ class SpecState(TypedDict, total=False):
     parse_failed_files: list[str]      # 单份文件解析失败被跳过时的文件名（全失败才抛错）
     material_sig: str                  # 本次解析所依据的要求文件指纹（角色+文件名+大小）。
     material_files: list[str]          # 同上的文件名视图（旧 run 兜底比较用；可能含重复）。
+    material_ids: list[int]            # 本次运行**绑定**的材料 id：重跑派生按它取回原批文件。
 
 
 class MaterialsState(TypedDict, total=False):

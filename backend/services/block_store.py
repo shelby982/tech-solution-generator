@@ -123,21 +123,60 @@ async def list_materials(
     project_id: int,
 ) -> list[dict]:
     cursor = await db.execute(
-        f"SELECT * FROM materials WHERE project_id = ? ORDER BY {ROLE_PRIORITY_SQL}",
+        f"SELECT * FROM materials WHERE project_id = ? AND deleted_at IS NULL "
+        f"ORDER BY {ROLE_PRIORITY_SQL}",
         (project_id,)
     )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 
 
-async def delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
-    cursor = await db.execute("SELECT file_path FROM materials WHERE id = ?", (material_id,))
-    row = await cursor.fetchone()
-    if row is None:
-        return False
-    await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+async def soft_delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
+    """软删材料：只打时间戳，**不动磁盘文件**。
+
+    为什么不再真删：旧 run 的 checkpoint 里还留着它的 ``material_ids`` /
+    ``source_toc``，真删会让那批文件彻底找不回来 —— "重新上传"于是变成
+    "顺手毁掉上一次运行"。软删后：
+    - 界面/提炼不再看到它（查询过滤 deleted_at IS NULL）；
+    - 旧 run 重跑派生仍能按 id 把文件取回来。
+    磁盘清理交给单独的保留策略（暂不自动删）。
+    """
+    cursor = await db.execute(
+        "UPDATE materials SET deleted_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND deleted_at IS NULL",
+        (material_id,),
+    )
     await db.commit()
-    return True
+    return cursor.rowcount > 0
+
+
+async def list_materials_by_ids(
+    db: aiosqlite.Connection,
+    material_ids: list[int],
+) -> list[dict]:
+    """按 id 取材料（含已软删的）。
+
+    给"重跑派生"用：那次运行用过的文件必须原样取回，**与当前项目材料表无关** ——
+    否则用户换过文件之后，重拆会拿错原料（这正是"重新上传影响旧数据"的根源）。
+    """
+    ids = [int(i) for i in (material_ids or [])]
+    if not ids:
+        return []
+    placeholders = ",".join("?" * len(ids))
+    cursor = await db.execute(
+        f"SELECT * FROM materials WHERE id IN ({placeholders}) ORDER BY id",
+        tuple(ids),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
+    """兼容入口：现在等价于软删（见 ``soft_delete_material``）。
+
+    保留这个名字是因为调用点多，且**语义确实变了**：不再真删、不再动磁盘。
+    真删会让旧 run 的文件来源消失，而"重新上传"不该毁掉上一次运行。
+    """
+    return await soft_delete_material(db, material_id)
 
 
 async def update_material_parsed(

@@ -158,8 +158,14 @@ async def test_download_resolves_by_file_path_not_filename(upload_env):
 
 
 @pytest.mark.asyncio
-async def test_delete_material_removes_file_from_disk(upload_env):
-    """删材料要连盘上文件一起删（此前只删库，盘上成垃圾）。"""
+async def test_delete_material_is_soft_and_keeps_file(upload_env):
+    """删材料改为**软删**：界面看不到，但库记录与磁盘文件都保留。
+
+    为什么改语义（架构缺陷）：以前真删（库 + 盘一起清），于是"删旧文件、传新文件"
+    会把上一次运行的**文件来源**一并抹掉 —— 旧 checkpoint 还记着那批文件，
+    重新拆分却取不回来，只能拿旧解析结果糊弄；用户看到的就是"点了没反应/还是旧目录"。
+    软删后旧 run 仍能按 material_ids 取回自己的那批文件，新文件则各走各的运行。
+    """
     client, upload_root, pid = upload_env
     await _upload(client, pid, "评分表.pdf")
 
@@ -171,7 +177,18 @@ async def test_delete_material_removes_file_from_disk(upload_env):
 
     r = await client.delete(f"/api/materials/{row['id']}")
     assert r.status_code == 200
-    assert not stored.exists()
+    assert r.json().get("soft_deleted") is True
+
+    # 盘上文件保留（旧 run 还要用）
+    assert stored.is_file()
+
+    # 界面/提炼看不到它（list 过滤 deleted_at）
+    from services.block_store import list_materials, list_materials_by_ids
+    async with get_db() as db:
+        assert [m["id"] for m in await list_materials(db, pid)] == []
+        # 但按 id 仍能取回（重跑派生用）
+        got = await list_materials_by_ids(db, [row["id"]])
+        assert [m["id"] for m in got] == [row["id"]]
 
 
 @pytest.mark.asyncio
