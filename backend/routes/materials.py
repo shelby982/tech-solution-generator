@@ -42,7 +42,9 @@ router = APIRouter(tags=["materials"])
 # 到「拆分应答目录」才炸，表现为整次 run failed（要求类文件上传时还不解析，更难发现）。
 ALLOWED_SUFFIXES = {".pdf", ".docx", ".doc"}
 
-# 材料角色白名单（上传与 PATCH 共用）：未知角色会写入一条两个面板都不显示的僵尸记录
+# 材料角色白名单（上传与 PATCH 共用）：未知角色会写入一条两个面板都不显示的僵尸记录。
+# `spec` = **技术规范书 / 技术招标文件**（招标人给的附件，属要求类）；`source` = 我方技术素材。
+# 两者混用会让技术规范书漏出要求链路（实测踩到），口径与前端 material-roles.mjs 一致。
 ALLOWED_ROLES = {"spec", "main_rfp", "requirement", "scoring", "evaluation", "source"}
 UPLOAD_ROOT = Path(__file__).parent.parent / "data" / "uploads"
 

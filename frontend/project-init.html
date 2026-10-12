@@ -123,6 +123,24 @@
 .mat-role-select.role-scoring     { background: #fef3c7; color: #92400e; }
 .mat-role-select.role-evaluation  { background: #ede9fe; color: #5b21b6; }
 .mat-role-select:hover { filter: brightness(0.95); }
+/* 角色说明：写清"这份文件是谁给的、进哪条链路"，避免按"看起来像什么"选错
+   （实测技术规范书被当成我方素材上传，于是没进要求链路） */
+.mat-role-hint {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+  padding: 6px 2px 0;
+}
+.mat-role-warn {
+  margin: 6px 12px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: #fef3c7;
+  color: #92400e;
+  border-left: 3px solid #f59e0b;
+}
 .mat-parse-badge {
   font-size: 10.5px;
   padding: 2px 7px;
@@ -932,19 +950,22 @@ body[data-view="matching"] .match-detail { display: block; }
             <strong>应标要求</strong>
             <span class="mat-count" id="req-count">0 项</span>
           </div>
-          <p class="mat-sub">主招标文件 / 评分表 / 评审要素</p>
+          <p class="mat-sub">招标文件（评分口径）+ 技术规范书（技术内容）</p>
         </div>
         <div class="mat-divider"></div>
         <div class="mat-list" id="req-stack"></div>
         <div class="mat-add-row">
           <select id="req-role-select" class="role-select">
-            <option value="spec">规范书（投标文件）</option>
             <option value="main_rfp">主招标文件</option>
+            <option value="spec">技术规范书 / 技术招标文件</option>
             <option value="scoring">评分表</option>
             <option value="evaluation">评审要素</option>
+            <option value="requirement">其他要求文件</option>
           </select>
           <button class="btn-add-mat" id="btn-add-req" type="button">+ 添加</button>
         </div>
+        <p class="mat-role-hint" id="req-role-hint"></p>
+        <div id="req-role-warn"></div>
       </div>
       <div class="mat-section" id="mat-section-src">
         <div class="mat-section-top">
@@ -953,13 +974,15 @@ body[data-view="matching"] .match-detail { display: block; }
             <strong>原始素材</strong>
             <span class="mat-count" id="src-count">0 项</span>
           </div>
-          <p class="mat-sub">支持 PDF · DOCX · PPT · PPTX</p>
+          <p class="mat-sub">我方产品资料 / 方案 / 案例（PDF · DOCX）</p>
         </div>
         <div class="mat-divider"></div>
         <div class="mat-list" id="src-stack"></div>
         <div class="mat-add-row">
           <button class="btn-add-mat" id="btn-add-src" type="button">+ 添加原始素材</button>
         </div>
+        <p class="mat-role-hint">这些文件只用于「素材匹配」，不参与要求提炼与目录生成；
+招标人给的技术规范书请放到上面「应标要求」里。</p>
       </div>
       <div class="mat-section" id="mat-section-instruction">
         <div class="mat-section-top">
@@ -1100,7 +1123,10 @@ import { api } from './assets/api.js?v=20260921-dedupe';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
-import { workspace, renderWorkspaceChrome } from './assets/workspace.js?v=20260921-dedupe';
+import { workspace, renderWorkspaceChrome,
+         REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
+         roleMismatchWarning, inferRoleFromFilename,
+       } from './assets/workspace.js?v=20260921-role';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -1678,14 +1704,9 @@ function fmtSize(bytes) {
 }
 
 // ── 材料列表 ──
-const ROLE_LABEL = {
-  spec: '规范书',
-  main_rfp: '主招标',
-  requirement: '主招标',
-  scoring: '评分表',
-  evaluation: '评审要素',
-  source: '素材',
-};
+// 角色标签来自共享模块 assets/material-roles.mjs（与 node --test 同一份口径），
+// 不再在此处另写一套 —— 两套文案必然漂移，而角色决定文件进哪条链路。
+const ROLE_LABEL = { ...ROLE_LABEL_SHARED };
 async function loadMaterials() {
   const list = await api.materials.list(projectId);
   const reqRoles = ['spec', 'main_rfp', 'requirement', 'scoring', 'evaluation'];
@@ -1749,12 +1770,7 @@ function parseStatusBadge(status) {
 function renderMats(container, mats, showRole) {
   if (!mats.length) { container.innerHTML = ''; return; }
   // showRole 时把 role 渲染为可点击下拉，让用户修改已上传文件类型
-  const roleOptions = [
-    ['spec', '规范书'],
-    ['main_rfp', '主招标'],
-    ['scoring', '评分表'],
-    ['evaluation', '评审要素'],
-  ];
+  const roleOptions = REQUIREMENT_ROLES.map(r => [r, ROLE_LABEL_SHARED[r]]);
   container.innerHTML = mats.map(m => {
     const roleCell = showRole
       ? `<select class="mat-role-select role-${m.role}" data-id="${m.id}" title="修改文件类型">
@@ -4563,12 +4579,44 @@ async function confirmOutline() {
 }
 
 // ── 上传 ──
+// 分类纠错：文件名明显是招标人给的技术规范书，却被归到我方素材时给提示。
+// **不自动改写角色** —— 用户可能是故意把一份旧规范书当素材引用，拦下来即可。
+function renderRoleWarning(filename, role) {
+  const box = document.getElementById('req-role-warn');
+  if (!box) return;
+  const warn = roleMismatchWarning(role, filename);
+  box.innerHTML = warn
+    ? `<div class="mat-role-warn">「${escapeHtmlForRole(filename)}」${escapeHtmlForRole(warn)}</div>`
+    : '';
+}
+function escapeHtmlForRole(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 async function uploadFile(file, role, btn) {
   btn.disabled = true;
-  await api.materials.upload(projectId, file, role);
-  await loadMaterials();
-  btn.disabled = false;
+  renderRoleWarning(file.name, role);
+  try {
+    await api.materials.upload(projectId, file, role);
+    await loadMaterials();
+  } finally {
+    btn.disabled = false;
+    // 让 input 可再次选同一个文件
+    fileInputReq.value = ''; fileInputSrc.value = '';
+  }
 }
+
+// 角色说明随下拉联动
+(function bindRoleHint() {
+  const sel = document.getElementById('req-role-select');
+  const hint = document.getElementById('req-role-hint');
+  if (!sel || !hint) return;
+  const sync = () => { hint.textContent = ROLE_HINT_SHARED[sel.value] || ''; };
+  sel.addEventListener('change', sync);
+  sync();
+})();
 
 // ── 事件绑定 ──
 btnAddReq.addEventListener('click', () => fileInputReq.click());

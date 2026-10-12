@@ -172,3 +172,72 @@ async def test_delete_material_removes_file_from_disk(upload_env):
     r = await client.delete(f"/api/materials/{row['id']}")
     assert r.status_code == 200
     assert not stored.exists()
+
+
+@pytest.mark.asyncio
+async def test_spec_role_is_requirement_class_not_ours(upload_env):
+    """`spec`（技术规范书）必须归**要求类**，不能被当成我方素材。
+
+    实测踩到：项目 18 的技术规范书 `4_…技术招标文件.docx` 被传成 `source`，
+    于是它只躺在素材池里 —— 既没结构化，也没参与目录规划（`source` 不参与要求提炼）。
+    角色决定这份文件进哪条链路，所以这里把口径钉死：
+    - `spec` ∈ 要求类（`_load_spec_for_project` 取的就是这几个角色）；
+    - `source` ∉ 要求类；
+    - `REQUIREMENT_ROLES`（main.py 的取文件口径）与 `TENDER_MATERIAL_ROLES` 一致。
+    """
+    from main import REQUIREMENT_ROLES
+    from services.block_store import TENDER_MATERIAL_ROLES, OURS_MATERIAL_ROLES
+    from routes.materials import ALLOWED_ROLES
+
+    assert "spec" in REQUIREMENT_ROLES
+    assert "source" not in REQUIREMENT_ROLES
+    assert set(REQUIREMENT_ROLES) == set(TENDER_MATERIAL_ROLES)
+    assert "spec" in TENDER_MATERIAL_ROLES
+    assert OURS_MATERIAL_ROLES == ("source",)
+    # 两者互斥且合起来覆盖白名单，不留"两边都不算"的角色
+    assert set(TENDER_MATERIAL_ROLES).isdisjoint(OURS_MATERIAL_ROLES)
+    assert set(TENDER_MATERIAL_ROLES) | set(OURS_MATERIAL_ROLES) == ALLOWED_ROLES
+
+
+@pytest.mark.asyncio
+async def test_uploaded_spec_book_enters_requirement_loader(tmp_path, monkeypatch):
+    """技术规范书以 `spec` 上传后，要求文件加载器必须能取到它。
+
+    这条是"解析阶段引入"的端到端判据：**上传 → 落库 → `_load_spec_for_project` 取到**。
+
+    注：upload_env 夹具的上传根与 `main.DATA_DIR` 不是同一处，所以这里按
+    `test_main_requirement_loader.py` 的方式自建 tmp 上传根 —— 否则加载器会因
+    "磁盘上没有"而跳过（那本身是它的正确行为）。
+    """
+    import aiosqlite
+    import db as db_module
+    import main as main_module
+    from db import init_db
+
+    db_path = str(tmp_path / "roles.db")
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    data_dir = tmp_path / "data"
+    (data_dir / "uploads" / "1").mkdir(parents=True)
+    monkeypatch.setattr(main_module, "DATA_DIR", data_dir)
+
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        await init_db(conn)
+        await conn.execute("INSERT INTO projects (name) VALUES ('role 测试')")
+        # 技术规范书以 spec（要求类）入库；再放一份 source 作对照
+        for role, name in (("spec", "4_高可靠技术专题研究与验证-技术招标文件.docx"),
+                           ("source", "产品规格书.pdf")):
+            rel = f"uploads/1/{name}"
+            (data_dir / rel).write_bytes(b"%PDF-1.4 fake")
+            await conn.execute(
+                "INSERT INTO materials (project_id, filename, file_path, role) VALUES (1, ?, ?, ?)",
+                (name, rel, role),
+            )
+        await conn.commit()
+
+    docs = await main_module._load_spec_for_project(1)
+    names = [name for _, _, name in docs]     # (BytesIO, suffix, filename)
+
+    assert any("技术招标文件" in n for n in names), f"要求加载器没取到技术规范书：{names}"
+    # 我方素材不得混进要求链路
+    assert all("产品规格书" not in n for n in names), f"素材混进了要求链路：{names}"

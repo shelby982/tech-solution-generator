@@ -1,4 +1,12 @@
 // Pure projections shared by navigation, chapter tree and quality review.
+// 材料角色体系（角色决定文件进哪条链路：要求类 vs 我方素材）——
+// 从 material-roles.mjs 再导出，页面统一经本模块取，避免多处各写一套文案。
+export {
+  REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
+  ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
+  isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
+} from './material-roles.mjs';
+
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
   reviewing: '复审中', generating: '修订中', passed: '已通过',

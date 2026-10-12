@@ -744,7 +744,12 @@ async def update_block_source(db, block_id: int, rows: list[dict]) -> dict | Non
     return await get_block(db, block_id)
 
 
-# 素材池角色常量：与 infra.retrieval.assign.TENDER_ROLES 对应（避免调用方各写一份）
+# 材料角色分两类，决定这份文件进哪条链路（与前端 assets/material-roles.mjs 同一口径）：
+#   要求类（TENDER_）→ 解析 → 提炼 → 目录 → 评分覆盖
+#   素材类（OURS_）  → 只作为"我方技术素材"被检索匹配，**不参与要求提炼**
+# `spec` 指**技术规范书 / 技术招标文件**（招标人随招标文件发出的附件，招标文件原文：
+# 「二、技术规范书 详见招标文件附件"技术招标文件"」），不是投标人写的文件 ——
+# 实测曾被当成 source（我方素材）上传，于是既没结构化、也没参与目录规划。
 TENDER_MATERIAL_ROLES = ("spec", "main_rfp", "requirement", "scoring", "evaluation")
 OURS_MATERIAL_ROLES = ("source",)
 
