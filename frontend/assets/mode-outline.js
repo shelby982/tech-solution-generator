@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v31';
+import { api } from './api.js?v=20261014-v32';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v31';
+       } from './workspace.js?v=20261014-v32';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v31';
+       } from './workspace-model.mjs?v=20261014-v32';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v31';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v32';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2779,20 +2779,73 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
   // ── 内容区：按三段式组织 ──
   // 拆解层三个块（商务评分点 / 技术评分点 / 技术规范书拆解）+ 待确认 + 产物两个
+  /**
+   * 把评分口径解析成**结构化的得分条件**。
+   *
+   * 用户反馈：「评分口径的内容能不能更加结构化一些？目前一堆文字展示在这里体验不好」。
+   * 招标文件的评分口径其实是"编号条件 + 得分"的规则文本，例如
+   *   （1）团队不少于 35 人得 3 分；（2）每提供一个案例得 1 分，最多 5 分。
+   * 直接整段铺出来没法读，所以按编号/分号切成条件条目，并把分值抽出来单独成标签。
+   * **不丢内容**：每条的原文完整保留，整段原文也放在「原文」折叠里。
+   */
+  function parseCriterion(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return { clauses: [], raw: '' };
+    // 归一化全角标点，便于统一切分
+    let t = raw.replace(/[\uFF08]/g, '(').replace(/[\uFF09]/g, ')')
+               .replace(/[\uFF1B]/g, ';').replace(/[\uFF0C]/g, ',');
+    // ① 优先按编号切： (1) / 1) / 1. / ①-⑳ / 一、二、
+    const numRe = /(?:\(\d{1,2}\)|\d{1,2}[).、]|[\u2460-\u2473]|[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]{1,3}[、.])/g;
+    let parts = [];
+    const marks = [...t.matchAll(numRe)];
+    if (marks.length >= 2) {
+      marks.forEach((m, i) => {
+        const start = m.index;
+        const end = i + 1 < marks.length ? marks[i + 1].index : t.length;
+        parts.push(t.slice(start, end));
+      });
+    } else {
+      // ② 退化为按分号/换行切（仍比一整段好读）
+      parts = t.split(/[;\n]+/).map(x => x.trim()).filter(Boolean);
+      if (parts.length < 2) parts = [t];
+    }
+    const clauses = parts.map((seg) => {
+      const seg2 = seg.replace(/^[\s,;:.-]+/, '').trim();
+      // 抽分值：优先"得 N 分"，其次"N 分"（含"最多 N 分"）
+      const m = seg2.match(/(?:得|计|加)?\s*(\d+(?:\.\d+)?)\s*分/);
+      const cap = /最[多高]\s*(\d+(?:\.\d+)?)\s*分/.exec(seg2);
+      const label = m ? `${cap && cap[1] !== m[1] ? `最多 ${cap[1]}` : m[1]} 分` : '';
+      return { text: seg2, score: label, cap: !!(cap && m && cap[1] !== m[1]) };
+    }).filter(c => c.text);
+    return { clauses, raw };
+  }
+
+  const critCard = (it) => {
+    const pc = parseCriterion(it.criterion);
+    return `<div class="pc-card">
+      <div class="pc-head">
+        <span class="pc-factor">${escapeHtml(it.factor || '—')}</span>
+        <span class="pc-item">${escapeHtml(it.item || '')}</span>
+        <span class="pc-score">${it.points != null ? `${it.points} 分` : '—'}</span>
+      </div>
+      ${pc.clauses.length > 1 ? `<ul class="pc-list">${pc.clauses.map(c => `
+        <li><span class="pc-text">${escapeHtml(c.text)}</span>${
+          c.score ? `<span class="pc-band ${c.cap ? 'cap' : ''}">${escapeHtml(c.score)}</span>` : ''}</li>`).join('')}
+      </ul>` : `<div class="pc-body">${escapeHtml(pc.raw || '—')}</div>`}
+      ${pc.clauses.length > 1 ? `<details class="pc-raw"><summary>原文</summary>
+        <div class="pc-body">${escapeHtml(pc.raw)}</div></details>` : ''}
+    </div>`;
+  };
+
   const catTable = (stat, catLabel) => {
     if (!stat || !(stat.items || []).length) {
       return `<div class="sr-empty">该标包没有解析到${catLabel}评分点。</div>`;
     }
     return `
       <div class="sr-note">来自<b>招标文件</b>的${catLabel}评分表：
-        <b>${stat.count} 个评分点 · 合计 ${stat.score} 分</b>（评分口径完整展示）。</div>
-      <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th>
-        <th class="sr-num">分值</th><th>评分口径</th></tr></thead>
-        <tbody>${(stat.items || []).map(it => `
-          <tr><td>${escapeHtml(it.factor || '')}</td><td>${escapeHtml(it.item || '')}</td>
-              <td class="sr-num">${it.points != null ? it.points : '—'}</td>
-              <td class="sr-crit">${escapeHtml(it.criterion || '—')}</td></tr>`).join('')}
-        </tbody></table>`;
+        <b>${stat.count} 个评分点 · 合计 ${stat.score} 分</b>。
+        评分口径已按"得分条件"逐条结构化，分值单列；需要看完整原文时展开每条的「原文」。</div>
+      ${(stat.items || []).map(critCard).join('')}`;
   };
 
   const notAnalyzedHint = (what) => `
@@ -3033,6 +3086,25 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:#fff}
   .sr-cat input{accent-color:#2563eb}
   .sr-sec{margin:14px 0 4px;font-size:12.5px;font-weight:600;color:var(--text)}
+  /* 评分口径的结构化卡片：编号条件成列表，分值单独成标签，原文可展开 */
+  .pc-card{border:1px solid var(--line);border-radius:9px;margin:7px 0;background:#fff}
+  .pc-head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:var(--surface-2,#faf9f7);border-radius:9px 9px 0 0}
+  .pc-factor{font-size:11.5px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;
+    border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .pc-item{font-weight:600;font-size:12.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pc-score{font-weight:600;font-size:12.5px;color:#047857;white-space:nowrap}
+  .pc-list{margin:6px 0 4px;padding-left:22px}
+  .pc-list li{margin:3px 0;font-size:12.5px;color:var(--text);line-height:1.55;
+    display:flex;gap:8px;align-items:flex-start}
+  .pc-text{flex:1;word-break:break-word}
+  .pc-band{flex:0 0 auto;font-size:11.5px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;
+    border-radius:999px;padding:0 7px;white-space:nowrap}
+  .pc-band.cap{color:#92400e;background:#fffbeb;border-color:#fcd34d}
+  .pc-body{padding:8px 10px;font-size:12.5px;color:var(--muted);line-height:1.6;word-break:break-word}
+  .pc-raw{margin:0 10px 8px}
+  .pc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--muted)}
+  .pc-raw .pc-body{padding:6px 0}
   .sr-tab.disabled{opacity:.45;cursor:not-allowed}
   .sr-scope-chip{font-size:11.5px;font-weight:400;color:#1d4ed8;background:#eff6ff;
     border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px;margin-left:4px}
