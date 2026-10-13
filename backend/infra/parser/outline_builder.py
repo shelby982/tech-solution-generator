@@ -435,7 +435,8 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
                   max_spec_level: int = 99,
                   subpoints_by_criterion: Optional[dict] = None,
                   placement_targets: Iterable[str] = (),
-                  requirement_ids_by_title: Optional[dict] = None) -> list[OutlineNode]:
+                  requirement_ids_by_title: Optional[dict] = None,
+                  requirement_groups: Optional[list] = None) -> list[OutlineNode]:
     """**主入口**：评分侧骨架 + 规范书结合点，输出一份稳定可复现的目录。
 
     ``placement_targets``：从提炼要求里解析出的"把规范书内容放到 X 下"的目标表述
@@ -534,6 +535,63 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
         pruned = dict(node)
         pruned["children"] = kids
         return pruned
+
+    # ③ 规范书**标星项**（★/▲）必须进目录：它们是招标人点名的硬要求，
+    #    此前只用于 grounding（继承给 8 字段提炼），目录里一个字都看不到 ——
+    #    实测标的1 的「3.4.2. 自主可控要求」带★却完全没进 161 节目录。
+    marked = [s for s in (spec_sections or [])
+              if (s.get("special_marks") if isinstance(s, dict)
+                  else getattr(s, "special_marks", None))]
+    for sec in marked:
+        title = (sec.get("title") if isinstance(sec, dict) else getattr(sec, "title", "")) or ""
+        marks = (sec.get("special_marks") if isinstance(sec, dict)
+                 else getattr(sec, "special_marks", [])) or []
+        keys = _topic_keys(title)
+        best, best_score = None, 0
+        for node in scoring_nodes:
+            target = _normalize(" ".join([node.title, node.factor, node.item, node.criterion]))
+            score = sum(1 for k in keys if k in target)
+            if score > best_score:
+                best, best_score = node, score
+        marked_node = OutlineNode(
+            level=(best.level + 1) if best else 2,
+            title=f"{''.join(marks)} {title}".strip(), source="marked",
+            review_point_id=(best.review_point_id if best else ""),
+        )
+        if best is not None:
+            idx = nodes.index(best) + 1 + _subtree_len(nodes, best)
+            nodes.insert(idx, marked_node)
+        else:
+            nodes.append(marked_node)      # 匹配不到也要出现，不能丢
+
+    # ④ 技术规范书**要求内容**按主题挂到对应章节。
+    #    411 条要求逐条成章会让目录爆掉（客户档案管理模块一个主题就 282 条），
+    #    所以按主题聚合、把 requirement_id 全部挂在该节点的链上 ——
+    #    这样目录里有落点、覆盖度可计算、写作时能按 id 取回每一条要求。
+    for group in (requirement_groups or []):
+        topic = str(group.get("topic") or "").strip()
+        ids = list(group.get("ids") or [])
+        if not topic or not ids:
+            continue
+        keys = _topic_keys(topic)
+        best, best_score = None, 0
+        for node in scoring_nodes:
+            target = _normalize(" ".join([node.title, node.factor, node.item, node.criterion]))
+            score = sum(1 for k in keys if k in target)
+            if score > best_score:
+                best, best_score = node, score
+        host = best if best_score else None
+        node = OutlineNode(
+            level=(host.level + 1) if host else 2,
+            title=f"{topic}（规范要求 {len(ids)} 条）",
+            source="spec", spec_requirement_ids=ids,
+            review_point_id=(host.review_point_id if host else ""),
+        )
+        if host is not None:
+            idx = nodes.index(host) + 1 + _subtree_len(nodes, host)
+            nodes.insert(idx, node)
+        else:
+            nodes.append(node)             # 匹配不到的主题进"要求应答"板块
 
     leftovers = [p for p in (_prune(t) for t in forest) if p]
     if leftovers:

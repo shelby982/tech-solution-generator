@@ -90,6 +90,15 @@ def _render_toc_text(sections: list[DomainSection]) -> str:
     return "\n".join(lines)
 
 
+def _marks_of(section) -> list[str]:
+    """读一个来源章节的标星标记（★/▲）。dict / dataclass 两种形态都要兼容。"""
+    if section is None:
+        return []
+    if isinstance(section, dict):
+        return list(section.get("special_marks") or [])
+    return list(getattr(section, "special_marks", None) or [])
+
+
 def _ground_sections(
     sections: list[DomainSection],
     source_sections: list[DomainSection],
@@ -418,7 +427,10 @@ class ZhangHengAgent:
         # 整份文件灌进去时，招标公告/资格要求/合同范本会把真正要的章节挤出预算。
         flat = [
             {"title": s.title, "content": s.raw_content, "level": s.level,
-             "source_file": getattr(s, "source_file", "") or ""}
+             "source_file": getattr(s, "source_file", "") or "",
+             # special_marks（★/▲）必须带过来：用户要求"把标星项补充到对应目录结构"，
+             # 而这里漏了它 → 标星项在目录里 0 个（实测标的1 的★项没出现）。
+             "special_marks": list(getattr(s, "special_marks", None) or [])}
             for s in source_toc
         ]
         # ── 确定性路径：材料里有评分表时，目录结构由规则定，模型只抽细项 ──
@@ -573,7 +585,13 @@ class ZhangHengAgent:
         if not spec_files:
             spec_files = sorted({s["source_file"] for s in flat
                                  if s.get("source_file") and s["source_file"] != review_file})
-        spec_sections = [s for s in sections_in if s.get("source_file") in spec_files]
+        # 标星（★/▲）必须一路带到目录构建：它们此前只用于 grounding（给 8 字段
+        # 提炼继承原文），目录里看不到 —— 用户明确要求"把标星项补充到对应目录结构"。
+        spec_sections = [
+            {**s, "special_marks": list(_marks_of(flat[i]))}
+            for i, s in enumerate(sections_in)
+            if s.get("source_file") in spec_files
+        ]
 
         # L3 细项：模型抽取（带接地校验 + 内容哈希缓存），失败回落规则拆分
         from agents.subpoints import extract_points
@@ -631,11 +649,23 @@ class ZhangHengAgent:
         # ⚠️ 用**生效后**的过滤条件：容错放宽了 picked（13 条），若这里还传原来的
         # package_no="1"，build_scoring_skeleton 会**再过滤一遍**清空骨架 ——
         # 结果只剩 1 个顶级节点、判定结构不完整、退回模型路径（实测踩到）。
+        # 技术规范书要求内容按主题分组 → 挂到对应章节（用户要求"将技术规范书要求
+        # 内容补充到对应的目录结构"）。逐条成章会让目录爆掉（一个模块主题就 282 条），
+        # 所以按主题聚合、requirement_id 全挂在节点链上。
+        groups: dict[str, list[str]] = {}
+        for r in requirements:
+            topic = str(getattr(r, "topic", "") or "").strip()
+            rid = str(getattr(r, "stable_id", "") or getattr(r, "requirement_id", "") or "")
+            if topic and rid:
+                groups.setdefault(topic, []).append(rid)
+        requirement_groups = [{"topic": t, "ids": ids} for t, ids in groups.items()]
+
         outline = build_outline(picked, spec_sections=spec_sections,
                                 category=effective_category, package_no=effective_package_no,
                                 subpoints_by_criterion=subpoints or None,
                                 placement_targets=placement,
-                                requirement_ids_by_title=requirement_ids_by_title(requirements))
+                                requirement_ids_by_title=requirement_ids_by_title(requirements),
+                                requirement_groups=requirement_groups)
         if not outline:
             return None
 

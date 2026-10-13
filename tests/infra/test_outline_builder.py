@@ -188,3 +188,73 @@ def test_filters_by_category_and_package():
     titles = [n.title for n in nodes]
     assert "商务响应" not in titles
     assert titles.count("技术方案") == 1
+
+
+# ── 用户明确要求的算法：标星项 + 规范书要求内容都要进目录 ──────────
+# 「先根据技术评分点拆分章节目录（大评分点为主目录，详细评分要求为子目录），
+#   再根据技术规范书内容，将**标星项**和技术规范书**要求内容**补充到对应目录结构中」
+
+def _spec_marked(id_, level, title, content="", marks=("★",)):
+    s = _spec(id_, level, title, content)
+    return {**s, "special_marks": list(marks)}
+
+
+def test_starred_spec_section_lands_in_outline():
+    """标星项（★/▲）是招标人点名的硬要求，必须出现在目录里。
+
+    改造前它只被用于 grounding（给 8 字段提炼继承原文），目录里一个字都看不到 ——
+    实测标的1 的「3.4.2. 自主可控要求」带★，161 节目录里 0 个带★。
+    """
+    from infra.parser.outline_builder import build_outline
+
+    rp = _rp("技术方案", "技术方案", "1、技术方案可行性：架构合理得 10 分。")
+    outline = build_outline(
+        [rp],
+        spec_sections=[_spec_marked("s1", 3, "自主可控要求", "应满足自主可控要求")],
+    )
+    starred = [n for n in outline if "★" in n.title]
+    assert starred, "标星项没有进目录"
+    assert "自主可控要求" in starred[0].title
+
+
+def test_starred_section_never_dropped_when_unmatched():
+    """匹配不到任何评分点时也必须出现（宁可挂在要求应答板块，也不能丢）。"""
+    from infra.parser.outline_builder import build_outline
+
+    rp = _rp("技术方案", "技术方案", "1、技术方案可行性：架构合理得 10 分。")
+    outline = build_outline(
+        [rp],
+        spec_sections=[_spec_marked("s1", 3, "完全无关的某个专题名称", "", marks=("▲",))],
+    )
+    assert any("▲" in n.title and "完全无关的某个专题名称" in n.title for n in outline)
+
+
+def test_requirement_groups_attach_to_matching_chapter_with_ids():
+    """规范书要求内容按主题挂到对应章节，并把 requirement_id 挂到节点链上。
+
+    覆盖度靠这些 id 计算；逐条成章会让目录爆掉（一个模块主题就有 282 条），
+    所以按主题聚合、条数写在标题里。
+    """
+    from infra.parser.outline_builder import build_outline, compute_coverage
+
+    rp = _rp("技术方案", "技术方案可行性", "1、技术方案可行性：实施计划详细得 30 分。")
+    outline = build_outline(
+        [rp],
+        requirement_groups=[
+            {"topic": "技术方案可行性", "ids": ["sr-1", "sr-2"]},
+            {"topic": "完全不相关的主题", "ids": ["sr-9"]},
+        ],
+    )
+    hit = [n for n in outline if "（规范要求 2 条）" in n.title]
+    assert hit and hit[0].spec_requirement_ids == ["sr-1", "sr-2"]
+    # 挂到匹配章节下（比它深一级），而不是另起一个顶级章节
+    assert hit[0].level > 1
+    # 匹配不到的主题也保留
+    assert any("完全不相关的主题" in n.title for n in outline)
+
+    class _R:
+        def __init__(self, sid, title):
+            self.stable_id, self.title, self.topic = sid, title, ""
+    cov = compute_coverage(outline, [rp],
+                           [_R("sr-1", "a"), _R("sr-2", "b"), _R("sr-9", "c")])
+    assert cov["requirements_landed"] == 3      # 三个 id 都有落点
