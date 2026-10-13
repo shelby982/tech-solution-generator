@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v50';
+import { api } from './api.js?v=20261015-v51';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v50';
+       } from './workspace.js?v=20261015-v51';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v50';
+       } from './workspace-model.mjs?v=20261015-v51';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v50';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v51';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2955,9 +2955,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     price: catTable(priceStat, '报价'),
     spec: specHtml,
   };
+  // 产物子页签的角标：**没生成就不显示数字**。截图里"目录 134 / 映射 8"和
+  // "产物还没到出现的时候"并列，数字来自上一次运行，会让人以为已经生成好了。
   const prodSubs = [
-    { id: 'directory', label: '目录', n: su.unit_count || 0 },
-    { id: 'map', label: '技术与评分点映射矩阵', n: (mp.point_to_requirement || []).length },
+    { id: 'directory', label: '目录', n: generated ? (su.unit_count || 0) : '—' },
+    { id: 'map', label: '技术与评分点映射矩阵',
+      n: generated ? (mp.point_to_requirement || []).length : '—' },
   ];
   const prodPanes = {
     directory: productsGate || `
@@ -3134,8 +3137,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-spinner{width:14px;height:14px;border-radius:50%;border:2px solid #bfdbfe;
     border-top-color:#2563eb;animation:sr-spin .8s linear infinite;display:inline-block}
   @keyframes sr-spin{to{transform:rotate(360deg)}}
-  .sr-body{display:flex;align-items:stretch;min-height:520px}
-  .sr-rail{flex:0 0 172px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0}
+  /* 不再固定 520px 高：产物点未生成时内容只有两行，固定高度会留一大片空白（用户反馈） */
+  .sr-body{display:flex;align-items:stretch;min-height:0}
+  .sr-rail{flex:0 0 172px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0;
+    align-self:stretch}
   .sr-rail-item{position:relative;display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer}
   .sr-rail-item + .sr-rail-item{margin-top:2px}
   .sr-dot{flex:0 0 20px;height:20px;border-radius:50%;border:1.5px solid var(--line);background:#fff;
