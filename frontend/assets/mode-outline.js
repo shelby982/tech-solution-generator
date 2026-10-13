@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v32';
+import { api } from './api.js?v=20261014-v33';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v32';
+       } from './workspace.js?v=20261014-v33';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v32';
+       } from './workspace-model.mjs?v=20261014-v33';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v32';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v33';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2832,8 +2832,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
         <li><span class="pc-text">${escapeHtml(c.text)}</span>${
           c.score ? `<span class="pc-band ${c.cap ? 'cap' : ''}">${escapeHtml(c.score)}</span>` : ''}</li>`).join('')}
       </ul>` : `<div class="pc-body">${escapeHtml(pc.raw || '—')}</div>`}
-      ${pc.clauses.length > 1 ? `<details class="pc-raw"><summary>原文</summary>
-        <div class="pc-body">${escapeHtml(pc.raw)}</div></details>` : ''}
     </div>`;
   };
 
@@ -2844,7 +2842,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     return `
       <div class="sr-note">来自<b>招标文件</b>的${catLabel}评分表：
         <b>${stat.count} 个评分点 · 合计 ${stat.score} 分</b>。
-        评分口径已按"得分条件"逐条结构化，分值单列；需要看完整原文时展开每条的「原文」。</div>
+        评分口径已按"得分条件"逐条展开，分值单列。</div>
       ${(stat.items || []).map(critCard).join('')}`;
   };
 
@@ -3102,9 +3100,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     border-radius:999px;padding:0 7px;white-space:nowrap}
   .pc-band.cap{color:#92400e;background:#fffbeb;border-color:#fcd34d}
   .pc-body{padding:8px 10px;font-size:12.5px;color:var(--muted);line-height:1.6;word-break:break-word}
-  .pc-raw{margin:0 10px 8px}
-  .pc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--muted)}
-  .pc-raw .pc-body{padding:6px 0}
   .sr-tab.disabled{opacity:.45;cursor:not-allowed}
   .sr-scope-chip{font-size:11.5px;font-weight:400;color:#1d4ed8;background:#eff6ff;
     border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px;margin-left:4px}
