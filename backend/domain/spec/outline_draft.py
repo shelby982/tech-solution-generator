@@ -8,7 +8,7 @@
 子树丢失；扁平数组截断后前缀仍是合法 JSON，可降级为「部分成功」。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .models import Section
 
@@ -24,6 +24,10 @@ class NormalizedNode:
     level: int
     title: str
     parent: int | None
+    # 来源链等自定义字段（如 review_point_id / spec_requirement_ids / score_weight /
+    # criterion_text / spec_topic）。目录节点不只是标题：它是"评分点/规范要求 → 章节"
+    # 这条链的落点，链路必须能透传到 blocks（用户确定的核心数据关系）。
+    extra: dict = field(default_factory=dict)
 
 
 def _coerce_int(value) -> int | None:
@@ -100,7 +104,10 @@ def normalize_nodes(
         seen_siblings.add(key)
 
         raw_to_accepted[raw_idx] = len(accepted)
-        accepted.append(NormalizedNode(level=level, title=title, parent=parent_idx))
+        extra = {k: v for k, v in raw.items()
+                 if k not in ("level", "title", "parent", "children")}
+        accepted.append(NormalizedNode(level=level, title=title, parent=parent_idx,
+                                       extra=extra))
 
     if dropped_dup:
         warnings.append(f"丢弃同级重名节点 {dropped_dup} 个")
@@ -159,7 +166,8 @@ def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
             section_id = f"{section_id}-{suffix}"
         used_ids.add(section_id)
 
-        sections.append(Section(id=section_id, level=level, title=node.title))
+        sections.append(Section(id=section_id, level=level, title=node.title,
+                                chain=dict(getattr(node, "extra", {}) or {})))
 
     return sections
 

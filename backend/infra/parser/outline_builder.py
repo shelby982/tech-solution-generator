@@ -60,6 +60,11 @@ class OutlineNode:
     points: Optional[float] = None   # 该评分点分值（放在最近的有分值节点上）
     criterion: str = ""              # 对应的分项要素原文（写作时的评分口径）
     spec_refs: list[str] = field(default_factory=list)   # 并入的规范书章节标题
+    # ── 来源链（用户确定的核心数据关系）──────────────────────────
+    #   招标评分点 ↔ 技术规范要求 ↔ 应标章节
+    # 没有它就只能靠 8 段散文猜"这章为哪个评分点得分、响应了哪条规范要求"。
+    review_point_id: str = ""              # 该节点由哪条评分点派生（rp-xxxx）
+    spec_requirement_ids: list[str] = field(default_factory=list)   # 承载的规范要求 id
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +76,8 @@ class OutlineNode:
             "points": self.points,
             "criterion": self.criterion,
             "spec_refs": list(self.spec_refs),
+            "review_point_id": self.review_point_id,
+            "spec_requirement_ids": list(self.spec_requirement_ids),
         }
 
 
@@ -238,18 +245,22 @@ def build_scoring_skeleton(review_points: Iterable, *, category: str = "tech",
         criterion = getattr(p, "criterion", "") or ""
         pts = getattr(p, "points", None)
 
+        point_id = getattr(p, "point_id", "") or ""
         l1 = seen_l1.get(factor)
         if l1 is None:
-            l1 = OutlineNode(level=1, title=factor, source="scoring", factor=factor)
+            l1 = OutlineNode(level=1, title=factor, source="scoring", factor=factor,
+                             review_point_id=point_id)
             seen_l1[factor] = l1
             nodes.append(l1)
+        elif point_id and not l1.review_point_id:
+            l1.review_point_id = point_id
 
         parent_level = 1
         parent_title = factor
         if item and _normalize(item) != _normalize(factor):
             nodes.append(OutlineNode(level=2, title=item, source="scoring",
                                      factor=factor, item=item, points=pts,
-                                     criterion=criterion))
+                                     criterion=criterion, review_point_id=point_id))
             parent_level = 2
             parent_title = item
 
@@ -280,6 +291,7 @@ def build_scoring_skeleton(review_points: Iterable, *, category: str = "tech",
                 factor=factor, item=item or parent_title,
                 points=pts if parent_level == 1 else None,
                 criterion=body or criterion,
+                review_point_id=point_id,
             ))
     return nodes
 
@@ -422,7 +434,8 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
                   category: str = "tech", package_no: str = "",
                   max_spec_level: int = 99,
                   subpoints_by_criterion: Optional[dict] = None,
-                  placement_targets: Iterable[str] = ()) -> list[OutlineNode]:
+                  placement_targets: Iterable[str] = (),
+                  requirement_ids_by_title: Optional[dict] = None) -> list[OutlineNode]:
     """**主入口**：评分侧骨架 + 规范书结合点，输出一份稳定可复现的目录。
 
     ``placement_targets``：从提炼要求里解析出的"把规范书内容放到 X 下"的目标表述
@@ -457,7 +470,9 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
         追加到末尾会让子节点在视觉上挂到**别的**父节点下面（实测：方案先进性的
         信创/云原生/容灾被渲染成挂在「服务团队」下）。必须插在父节点之后。
         """
-        out = [OutlineNode(level=min(6, level), title=node["title"], source="spec")]
+        refs = list((requirement_ids_by_title or {}).get((node.get("title") or "").strip(), []))
+        out = [OutlineNode(level=min(6, level), title=node["title"], source="spec",
+                           spec_requirement_ids=refs)]
         parent.spec_refs.append(node["title"])
         for child in node.get("children", []):
             out.extend(_attach(child, parent, level + 1))
@@ -525,8 +540,11 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
         nodes.append(OutlineNode(level=1, title="技术规范书要求应答", source="spec"))
 
         def _emit(node: dict, level: int) -> None:
+            # 残留板块的节点同样要带 requirement id —— 否则它们的规范要求会被算成
+            # "未落点"（实测覆盖率因此虚低：人员要求/保密要求/交付项明明已进目录）。
+            refs = list((requirement_ids_by_title or {}).get((node.get("title") or "").strip(), []))
             nodes.append(OutlineNode(level=min(6, level), title=node["title"], source="spec",
-                                     spec_refs=[node["title"]]))
+                                     spec_refs=[node["title"]], spec_requirement_ids=refs))
             for c in node.get("children", []):
                 _emit(c, level + 1)
 
@@ -628,6 +646,57 @@ def _build_forest(spec_nodes: list[dict]) -> list[dict]:
             forest.append(node)
         stack.append(node)
     return forest
+
+
+def compute_coverage(nodes: list[OutlineNode], review_points: Iterable,
+                     requirements: Iterable = ()) -> dict:
+    """覆盖率自检：目录是否真的把"该得的分 / 该响应的要求"都安排上了。
+
+    为什么要它：在这之前，规范书里没被结合的节点会被**静默**收进
+    「技术规范书要求应答」板块，评分点漏了也没有任何提示 —— 用户只能自己逐条数。
+    分值合计尤其有用：漏一个评分点，合计就不到 100，一眼可见。
+
+    返回的 ``review_points_missing`` / ``requirements_missing`` 是**清单**（带可读标签），
+    闸门直接展示，用户能立刻看到缺口并决定是否调整提炼要求。
+    """
+    nodes = list(nodes or [])
+    points = list(review_points or [])
+    reqs = list(requirements or [])
+
+    # 评分点：既要有节点引用它，还最好被拆出了下级章节（"是否真的拆开"）
+    referenced = {n.review_point_id for n in nodes if n.review_point_id}
+    decomposed = set()
+    for i, n in enumerate(nodes):
+        if n.review_point_id and i + 1 < len(nodes) and nodes[i + 1].level > n.level:
+            decomposed.add(n.review_point_id)
+
+    total_score = sum(float(getattr(p, "points", 0) or 0) for p in points)
+    covered_score = sum(float(getattr(p, "points", 0) or 0) for p in points
+                        if getattr(p, "point_id", "") in referenced)
+
+    missing_points = [
+        "／".join(x for x in (str(getattr(p, "factor", "") or ""),
+                              str(getattr(p, "item", "") or "")) if x)
+        for p in points if getattr(p, "point_id", "") not in referenced
+    ]
+
+    all_req = {getattr(r, "stable_id", "") for r in reqs if getattr(r, "stable_id", "")}
+    landed = {rid for n in nodes for rid in n.spec_requirement_ids}
+    missing_reqs = [str(getattr(r, "title", "") or getattr(r, "requirement_text", ""))[:40]
+                    for r in reqs if getattr(r, "stable_id", "") not in landed]
+
+    return {
+        "review_points_total": len(points),
+        "review_points_covered": len(referenced & {getattr(p, "point_id", "") for p in points}),
+        "review_points_decomposed": len(decomposed),
+        "review_points_missing": missing_points,
+        "score_total": round(total_score, 2),
+        "score_covered": round(covered_score, 2),
+        "requirements_total": len(all_req),
+        "requirements_landed": len(all_req & landed) if all_req else 0,
+        "requirements_missing": missing_reqs[:20],
+        "sections": len(nodes),
+    }
 
 
 def render_outline_text(nodes: Iterable[OutlineNode]) -> str:

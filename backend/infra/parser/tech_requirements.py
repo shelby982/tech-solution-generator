@@ -173,6 +173,53 @@ def _topic_of(section_path: list[str]) -> str:
     return (section_path[-1] if section_path else "")
 
 
+# 叙述性/说明性文本的识别。为什么必须滤：这类段落会被当成"技术要求"抽出来，
+# 覆盖率里的分母被污染 —— 实测 208 条里混进「本技术招标文件适用于…」
+# 「可供投标人编写投标文件之用」等说明句，落点率因此虚低（131/208），
+# 用户看到的是一个假缺口（覆盖率自检把它暴露了出来）。
+_NARRATIVE_PREFIXES = (
+    "本技术招标文件", "本招标文件", "本规范", "本文", "本文件", "本章",
+    "投标人应按照本技术招标文件", "投标人提交的项目交付物除了",
+)
+# 可执行性信号：出现任一才认为是"要去响应/满足"的要求
+_ACTIONABLE = ("应", "须", "需", "必须", "不得", "不少于", "不低于", "不超过",
+               "提供", "提交", "工作项", "研究", "验证", "工具", "指标", "成果",
+               "交付", "承诺", "满足", "符合", "得", "分")
+
+
+# 术语定义：`招标方：广东电网有限责任公司。`（实测被抽成"技术要求"）
+_DEFINITION_RE = re.compile(
+    r"^(招标方|投标方|中标方|甲方|乙方|招标人|投标人|采购人|供应商)\s*[：:]"
+    r"|指响应投标|指经过评标|被授予合同的投标人|指响应招标"
+)
+
+
+# 上下文节：只提供背景，不是"要去响应"的要求。它们（尤其"定义"）的正文常是编号列表，
+# 会被载体②逐条抽成"技术要求" —— 实测混进「招标方：广东电网有限责任公司。」
+# 「投标方：指响应投标、参加投标竞争的法人。」这类术语定义，污染覆盖率分母。
+_CONTEXT_SECTION_TITLES = ("总则", "概述", "定义", "术语", "招标范围", "遵循标准",
+                           "项目背景", "项目目标", "项目描述")
+
+
+def _is_context_section(title: str) -> bool:
+    t = (title or "").strip()
+    return any(x in t for x in _CONTEXT_SECTION_TITLES)
+
+
+def _is_narrative(text: str) -> bool:
+    t = (text or "").strip()
+    if any(t.startswith(p) for p in _NARRATIVE_PREFIXES):
+        return True
+    if _DEFINITION_RE.search(t):
+        return True
+    if "可供投标人编写投标文件之用" in t:
+        return True
+    # 长句且没有任何可执行性措辞 → 当叙述处理
+    if len(t) >= 40 and not any(w in t for w in _ACTIONABLE):
+        return True
+    return False
+
+
 def extract_tech_requirements(
     sections: list,
     *,
@@ -222,6 +269,8 @@ def extract_tech_requirements(
         text = (text or "").strip()
         if not text:
             return
+        if _is_narrative(text):
+            return
         # 去重：交付物表里存在重复行（实测信创适配「工作项4」出现两次），
         # 同一内容只保留第一次，避免矩阵里出现两条一模一样的可响应条目。
         key = re.sub(r"\s+", "", text)
@@ -253,6 +302,11 @@ def extract_tech_requirements(
             path.append("")
         path.append(title)
         topic = _topic_of(path)
+
+        # 上下文节（总则/概述/定义/术语/招标范围/遵循标准/项目背景/项目目标）：
+        # 只维护章节路径，不产出"技术要求" —— 它们不是要去响应的要求。
+        if _is_context_section(title):
+            continue
 
         if not content.strip():
             continue                       # 纯容器节：不是要求

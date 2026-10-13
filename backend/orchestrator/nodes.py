@@ -302,6 +302,8 @@ async def zhang_heng_outline_draft_node(
         instruction=str(config.get("outline_instruction") or ""),
         doc_summary=str(spec.get("doc_summary") or ""),
         previous_toc=previous_toc,
+        project_id=project_id,
+        thread_id=str(state.get("thread_id") or ""),
     )
 
     toc_dicts = [_section_to_dict(s) for s in result.sections]
@@ -343,6 +345,8 @@ async def zhang_heng_outline_draft_node(
             # 「这段提炼要求有没有用上」——此前从不写它，于是用过之后页面仍然提示
             # "这段提炼要求还没有用于生成目录"，用户以为点了没生效（实测反馈）。
             "outline_instruction": str(config.get("outline_instruction") or ""),
+            # 覆盖率自检：评分点/规范要求的落点与分值合计（闸门展示，缺什么一眼可见）
+            "outline_coverage": dict(result.coverage or {}),
         },
     }
 
@@ -1349,6 +1353,7 @@ def _section_to_dict(s: DomainSection) -> dict:
         "raw_content": s.raw_content,
         "special_marks": list(s.special_marks),
         "source_file": s.source_file,
+        "chain": dict(getattr(s, "chain", {}) or {}),
     }
 
 

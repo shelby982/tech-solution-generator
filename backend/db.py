@@ -72,6 +72,49 @@ CREATE TABLE IF NOT EXISTS blocks (
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS review_points (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER REFERENCES projects(id),
+    run_thread_id TEXT,
+    -- point_id：**内容派生的稳定 id**。重出目录时同一条评分点必须还是同一个 id，
+    -- 否则章节上的 review_point_ids 会对不上，"这章为哪个评分点得分"就断了。
+    point_id    TEXT,
+    package_no  TEXT,
+    category    TEXT,
+    clause      TEXT,
+    seq         TEXT,
+    factor      TEXT,
+    item        TEXT,
+    criterion   TEXT,
+    points      REAL,
+    bands       TEXT,
+    objective   INTEGER DEFAULT 0,
+    source_file TEXT,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_points_run ON review_points(run_thread_id);
+
+CREATE TABLE IF NOT EXISTS spec_requirements (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER REFERENCES projects(id),
+    run_thread_id TEXT,
+    -- requirement_id：稳定 id，同上；章节靠它反查"要响应什么"
+    requirement_id TEXT,
+    topic       TEXT,
+    title       TEXT,
+    text        TEXT,
+    level       INTEGER,
+    parent_id   TEXT,
+    mandatory_level TEXT,
+    verification_method TEXT,
+    source_file TEXT,
+    order_idx   INTEGER,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_spec_requirements_run ON spec_requirements(run_thread_id);
+
 CREATE TABLE IF NOT EXISTS block_revisions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     block_id    INTEGER REFERENCES blocks(id),
@@ -169,6 +212,16 @@ async def init_db(conn: aiosqlite.Connection) -> None:
                 "error", "error_kind"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
+    # 来源链（2026-10-13，用户确定的核心数据关系）：
+    #   招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
+    # 在此之前评分点/规范要求只在本轮派生中内存存活，章节只有 8 段散文，
+    # 于是"这章为哪个评分点得分、响应了哪条规范要求"无法反查、覆盖度算不出来。
+    for col in ("review_point_ids", "spec_requirement_ids", "criterion_text", "spec_topic"):
+        if col not in existing_cols:
+            await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
+    if "score_weight" not in existing_cols:
+        await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
+
     # material_chunks.page：出处页码（PDF 有；Word 无页码概念，留 0）
     cursor = await conn.execute("PRAGMA table_info(material_chunks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}

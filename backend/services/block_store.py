@@ -420,6 +420,33 @@ def _is_same_section(row, title: str, level: int, order_idx: int) -> bool:
         return False
 
 
+async def _write_block_chain(db: aiosqlite.Connection, block_pk: int, chain: dict) -> None:
+    """把来源链写到 blocks 行上（评分点 / 规范要求 / 分值 / 评分口径 / 规范专题）。
+
+    这是用户确定的核心数据关系在存储层的落点：
+       招标评分点 ↔ 技术规范要求 ↔ **应标章节** ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
+    在此之前章节只有 8 段散文，"这章为哪个评分点得分、响应了哪条规范要求"无法反查。
+    """
+    import json as _json
+
+    def _ids(v):
+        if isinstance(v, (list, tuple)):
+            return _json.dumps([str(x) for x in v], ensure_ascii=False)
+        return _json.dumps([str(v)], ensure_ascii=False) if v else "[]"
+
+    await db.execute(
+        """UPDATE blocks SET review_point_ids = ?, spec_requirement_ids = ?,
+                             score_weight = ?, criterion_text = ?, spec_topic = ?
+           WHERE id = ?""",
+        (_ids(chain.get("review_point_id")),
+         _ids(chain.get("spec_requirement_ids")),
+         chain.get("score_weight"),
+         str(chain.get("criterion_text") or ""),
+         str(chain.get("spec_topic") or ""),
+         block_pk),
+    )
+
+
 async def upsert_outline_block(
     db: aiosqlite.Connection,
     project_id: int,
@@ -430,6 +457,7 @@ async def upsert_outline_block(
     order_idx: int,
     matrix: dict | None = None,
     run_thread_id: str | None = None,
+    chain: dict | None = None,
 ) -> dict:
     """按 (project_id, block_id, run_thread_id) upsert 大纲提炼结果。
 
@@ -474,6 +502,11 @@ async def upsert_outline_block(
                        WHERE id = ?""",
                     (title, level, order_idx, row["id"]),
                 )
+            # 已存在的行同样要刷新来源链 —— 项目里绝大多数行都是已存在的（重出目录时
+            # block_id 常与上一版相同），只写 INSERT 分支会让链条**永远落不了库**
+            # （实测：102 章、0 行带 review_point_ids）。
+            if chain:
+                await _write_block_chain(db, row["id"], chain)
             await db.commit()
             return await get_block(db, row["id"])
         cursor = await db.execute(
@@ -486,6 +519,8 @@ async def upsert_outline_block(
                        'recommended', '', '', '[]', ?, '', 'empty', ?)""",
             (project_id, block_id, level, title, title, order_idx, run_thread_id),
         )
+        if chain:
+            await _write_block_chain(db, cursor.lastrowid, chain)
         await db.commit()
         return await get_block(db, cursor.lastrowid)
 
@@ -597,6 +632,7 @@ async def sync_outline_placeholders(
             order_idx=idx,
             matrix=None,
             run_thread_id=run_thread_id,
+            chain=getattr(sec, "chain", None),
         )
 
     return {"removed": len(stale_ids), "created": len(sections), "kept": len(kept)}

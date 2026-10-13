@@ -114,6 +114,9 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
         "raw_content": "原文", "special_marks": ["★"],
         # source_file：多份要求文件拼接后，文件边界只剩这一处线索（按区段切段要用）
         "source_file": "",
+        # chain：来源链（评分点 / 规范要求 / 分值 / 评分口径 / 规范专题）。
+        # 用户确定的核心数据关系靠它落到 blocks 上；空字典 = 本条无关联来源。
+        "chain": {},
     }]
     assert len(agent.calls) == 1 and len(agent.calls[0]) == 1
     assert agent.calls[0][0][1:] == (".pdf", "spec.pdf")
@@ -1035,7 +1038,7 @@ class _OutlineDraftStub:
         self.calls = []
 
     async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None):
+                            previous_toc=None, project_id=None, thread_id=""):
         self.calls.append({
             "source_titles": [s.title for s in source_toc],
             "instruction": instruction,

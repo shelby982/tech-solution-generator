@@ -161,6 +161,9 @@ class OutlineDraftResult:
     """
     sections: list[DomainSection]
     error: str = ""
+    # 覆盖率自检结果（评分点是否都有章节、规范要求是否都落点、分值合计）。
+    # 闸门 1 直接展示 → 用户不必自己逐条数"漏没漏"。
+    coverage: dict = field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────
@@ -387,6 +390,8 @@ class ZhangHengAgent:
         instruction: str = "",
         doc_summary: str = "",
         previous_toc: Optional[list[DomainSection]] = None,
+        project_id: Optional[int] = None,
+        thread_id: str = "",
     ) -> OutlineDraftResult:
         """依据规范书目录 + 项目概述 + 用户提炼要求，派生「应答文件目录」。
 
@@ -423,12 +428,14 @@ class ZhangHengAgent:
         #   L3 分项要素细分点 ← 模型只做抽取（接地校验 + 内容哈希缓存），失败回落规则
         det = await self._try_deterministic_outline(
             flat, source_toc, instruction, configs, rr_start,
+            project_id=project_id, thread_id=thread_id,
         )
         if det is not None:
-            sections, det_note = det
+            sections, det_note, coverage = det
             if count_top_level(sections) >= MIN_TOP_LEVEL_NODES:
                 _ground_sections(sections, source_toc)
-                return OutlineDraftResult(sections=sections, error=det_note)
+                return OutlineDraftResult(sections=sections, error=det_note,
+                                          coverage=coverage)
 
         digest_sections, follow_structure, locate_note = await self._locate_for_digest(
             flat, instruction, configs, rr_start,
@@ -503,6 +510,9 @@ class ZhangHengAgent:
         instruction: str,
         configs: list,
         rr_start: int,
+        *,
+        project_id: Optional[int] = None,
+        thread_id: str = "",
     ):
         """材料里有评分表时，用**确定性骨架**产出目录。
 
@@ -565,12 +575,44 @@ class ZhangHengAgent:
                 subpoints[criterion_lookup_key(criterion)] = points
                 logger.info(f"张衡：评分点细项 {len(points)} 条（来源 {source}）")
 
+        # ── 落库链条左半边：评分点 / 规范要求（内容派生的稳定 id 作连接键）──
+        # 用户确定的核心数据关系：招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ …
+        # 在此之前这两样只在内存里活一轮，章节无法反查"为哪个评分点得分、响应了哪条要求"。
+        point_rows: dict = {}
+        req_rows: dict = {}
+        requirements: list = []
+        try:
+            from db import get_db
+            from infra.parser.tech_requirements import extract_tech_requirements
+            from services.point_store import (
+                replace_review_points, replace_spec_requirements,
+                requirement_ids_by_title,
+            )
+
+            async with get_db() as db:
+                point_rows = await replace_review_points(db, project_id, thread_id, picked)
+                if spec_sections:
+                    requirements = extract_tech_requirements(
+                        [{"title": sec.get("title", ""),
+                          "raw_content": sec.get("raw_content", ""),
+                          "content": sec.get("raw_content", ""),
+                          "level": sec.get("level", 1),
+                          "source_file": sec.get("source_file", "")}
+                         for sec in spec_sections],
+                        package_id=str(package_no or ""),
+                    )
+                    req_rows = await replace_spec_requirements(db, project_id, thread_id,
+                                                               requirements)
+        except Exception as e:      # 落库失败不阻断目录生成（链条能力降级，但目录照出）
+            logger.warning(f"张衡：评分点/规范要求落库失败（{e}），继续生成目录")
+
         from infra.parser.outline_builder import parse_placement_targets
         placement = parse_placement_targets(instruction)
         outline = build_outline(picked, spec_sections=spec_sections,
                                 category=category, package_no=package_no,
                                 subpoints_by_criterion=subpoints or None,
-                                placement_targets=placement)
+                                placement_targets=placement,
+                                requirement_ids_by_title=requirement_ids_by_title(requirements))
         if not outline:
             return None
 
@@ -585,17 +627,35 @@ class ZhangHengAgent:
             item = {"level": n.level, "title": n.title}
             if stack_idx:
                 item["parent"] = stack_idx[-1]
+            # 来源链透传到 blocks（评分点 / 规范要求 / 分值 / 评分口径 / 规范专题）
+            if n.review_point_id:
+                item["review_point_id"] = n.review_point_id
+            if n.spec_requirement_ids:
+                item["spec_requirement_ids"] = list(n.spec_requirement_ids)
+            if n.points is not None:
+                item["score_weight"] = n.points
+            if n.criterion:
+                item["criterion_text"] = n.criterion
+            if n.spec_refs:
+                item["spec_topic"] = "、".join(n.spec_refs)[:200]
             raw_nodes.append(item)
             stack_idx.append(len(raw_nodes) - 1)
         nodes, warnings = normalize_nodes(raw_nodes)
         sections = build_sections(nodes)
+        from infra.parser.outline_builder import compute_coverage
+        coverage = compute_coverage(outline, picked, requirements)
         note = ("目录按评分表结构生成：评分因素 → 详细评审项 → 分项要素要点，"
                 "并已并入技术规范书对应专题与工作项")
         if placement:
             note += f"；已按提炼要求把规范书专题放入「{'、'.join(placement[:3])}」"
+        # 覆盖率写进闸门可读的一句话：漏没漏一眼可见（分值合计最能暴露漏评分点）
+        note += (f"；覆盖：评分点 {coverage['review_points_covered']}/"
+                 f"{coverage['review_points_total']}（已拆细 {coverage['review_points_decomposed']}），"
+                 f"分值 {coverage['score_covered']:g}/{coverage['score_total']:g}，"
+                 f"规范要求 {coverage['requirements_landed']}/{coverage['requirements_total']}")
         if warnings:
             note += "；" + "；".join(warnings)
-        return sections, note
+        return sections, note, coverage
 
     async def _locate_for_digest(
         self,

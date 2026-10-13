@@ -75,7 +75,7 @@ class _StubZhangHeng:
         )
 
     async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None):
+                            previous_toc=None, project_id=None, thread_id=""):
         """stub 沿用规范书目录（等价降级路径），保持既有 block_id 断言不变。"""
         from agents.zhang_heng import OutlineDraftResult
         return OutlineDraftResult(

@@ -178,6 +178,9 @@ class ReviewPoint:
     objective: bool = False          # 客观可核查材料项
     source_section_id: str = ""
     source_file: str = ""
+    # 内容派生的稳定 id（`services/point_store.stable_review_point_id` 回写）。
+    # 章节靠它反查"这章为哪个评分点得分"；不用顺序编号是因为增删一条会让后面全移位。
+    point_id: str = ""
 
     @property
     def key(self) -> str:

@@ -24,6 +24,11 @@ class Section:
     # 按区段定位（segment.py）必须按文件分别切段，否则最后一个锚点到文末的那一段
     # 会把其后所有文件的正文整段吞进来（实测：选中段 20275 字符里只有 ~200 属实）。
     source_file: str = ""
+    # 来源链：{"review_point_id": "rp-…", "spec_requirement_ids": [...],
+    #          "score_weight": 30.0, "criterion_text": "…", "spec_topic": "…"}
+    # 见 services/point_store.py 顶部：用户确定的核心数据关系
+    #   招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
+    chain: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -33,6 +38,7 @@ class Section:
             "raw_content": self.raw_content,
             "special_marks": list(self.special_marks),
             "source_file": self.source_file,
+            "chain": dict(self.chain or {}),
         }
 
     @classmethod
@@ -44,6 +50,7 @@ class Section:
             raw_content=d.get("raw_content", ""),
             special_marks=list(d.get("special_marks", [])),
             source_file=d.get("source_file", ""),
+            chain=dict(d.get("chain") or {}),
         )
 
 

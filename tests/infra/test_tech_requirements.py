@@ -221,3 +221,49 @@ def test_real_spec_book_yields_requirements_for_all_five_topics():
     # 条目可追溯：ID 连续、出处非空
     assert reqs[0].requirement_id == "R01"
     assert all(r.source_location for r in reqs)
+
+
+# ── 精度：叙述/定义/上下文节不是"技术要求" ──────────────────────
+# 覆盖率自检把这些噪音暴露了出来：208 条里混进「本技术招标文件适用于…」
+# 「招标方：广东电网有限责任公司。」等说明句，落点率因此虚低（131/208）。
+
+def _sec(title, content, level=3):
+    return {"title": title, "raw_content": content, "level": level,
+            "source_file": "规范书.docx"}
+
+
+def test_narrative_paragraphs_are_not_requirements():
+    from infra.parser.tech_requirements import extract_tech_requirements
+
+    secs = [
+        _sec("总则", "本技术招标文件适用于广东电网有限责任公司2026年项目。\n"
+                     "本技术招标文件提出了本次招标项目的技术服务工作要求可供投标人编写投标文件之用。"),
+        _sec("项目内容", "1、投标人应按本技术招标文件的要求提供详细、完整的技术投标书。"),
+    ]
+    texts = [r.requirement_text for r in extract_tech_requirements(secs)]
+    assert not any("本技术招标文件适用于" in t for t in texts)
+    assert not any("可供投标人编写投标文件之用" in t for t in texts)
+    # 真正的响应要求要留下
+    assert any("应按本技术招标文件的要求提供" in t for t in texts)
+
+
+def test_definitions_are_not_requirements():
+    """「招标方：广东电网有限责任公司。」是术语定义，不是要去响应的要求。"""
+    from infra.parser.tech_requirements import extract_tech_requirements
+
+    secs = [_sec("定义", "1、招标方：广东电网有限责任公司。\n"
+                         "2、投标方：指响应投标、参加投标竞争的法人。")]
+    assert extract_tech_requirements(secs) == []
+
+
+def test_context_sections_skipped_but_requirements_kept():
+    from infra.parser.tech_requirements import extract_tech_requirements
+
+    secs = [
+        _sec("遵循标准", "1、GB/T 22239 信息安全技术网络安全等级保护基本要求"),
+        _sec("高可靠技术专题研究与验证", "1、开展安全设计（含数据安全）研究，形成专项方案。", level=5),
+    ]
+    reqs = extract_tech_requirements(secs)
+    texts = [r.requirement_text for r in reqs]
+    assert not any("GB/T 22239" in t for t in texts)      # 上下文节被跳过
+    assert any("开展安全设计" in t for t in texts)          # 研究任务保留
