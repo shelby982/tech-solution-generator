@@ -662,78 +662,15 @@
         </div>
 
         <div class="modal-body">
-          <!-- 项目名称 -->
+          <!-- 只保留项目名称：上传材料与模型选择都移到工作台里做（用户要求） -->
           <div>
             <div class="field-label">项目名称</div>
             <input type="text" class="field-input" id="project-name-input" placeholder="输入项目名称" />
           </div>
-
-          <!-- 应标要求上传 -->
-          <div>
-            <div class="upload-section-header">
-              <div>
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <span class="upload-section-num">01</span>
-                  <span class="upload-section-title">应标要求</span>
-                </div>
-                <div class="upload-section-sub">招标文件（评分口径）+ 技术规范书（技术内容）</div>
-              </div>
-              <span class="upload-count-badge" id="req-count-badge" hidden>0 项</span>
-            </div>
-
-            <!-- 空状态：拖拽区 -->
-            <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="添加应标要求">
-              <div class="drop-zone-icon">＋</div>
-              <div class="drop-zone-label">添加应标要求</div>
-              <div class="drop-zone-hint">点击或拖拽文件到此处</div>
-            </div>
-
-            <!-- 有文件：文件列表 -->
-            <div id="req-file-section" hidden>
-              <div class="file-list" id="req-file-list"></div>
-              <button class="btn-add-more" id="btn-add-more" style="margin-top:6px;">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M6 1V11M1 6H11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                </svg>
-                添加应标要求
-              </button>
-            </div>
-          </div>
         </div>
 
-        <!-- 底部：提炼大纲 + 模型选择 -->
         <div class="modal-footer-inner">
-          <button class="btn-distill" id="btn-distill" disabled>
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-              <path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/>
-            </svg>
-            提炼大纲
-          </button>
-          <div class="footer-hint-row">
-            <p class="footer-hint-text">依据应标要求生成章节结构，原始素材用于补充各模块内容</p>
-            <div class="model-selector-wrap">
-              <button class="model-selector-btn" id="model-selector-btn">
-                <span class="model-dot"></span>
-                <span id="model-selector-label">Sonnet 4.6</span>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                </svg>
-              </button>
-              <div class="model-dropdown" id="model-dropdown">
-                <div class="model-dropdown-header">选择模型</div>
-                <div class="model-list" id="model-list"></div>
-                <div class="model-dropdown-footer">
-                  <button class="btn-add-config" id="btn-add-config">
-                    <span class="btn-add-config-left">
-                      <span class="btn-add-config-plus">＋</span>
-                      添加配置
-                    </span>
-                    <span class="btn-add-config-api">API · KEY ›</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <button class="btn-distill" id="btn-distill" disabled>创建项目</button>
         </div>
       </div>
     </div>
@@ -982,6 +919,9 @@
       }
 
       function renderFileList() {
+        // 上传区已从新建弹窗移除（只保留项目名称）；这里保留函数以兼容其余调用点，
+        // 元素不存在时直接返回，避免整页 JS 因 null 而崩。
+        if (!dropZone || !reqSection || !reqFileList || !reqCountBadge) return;
         const hasFiles = reqFiles.length > 0;
         dropZone.hidden = hasFiles;
         reqSection.hidden = !hasFiles;
@@ -1016,29 +956,29 @@
         }
       }
 
+      // 新建弹窗只收项目名称：文件在工作台上传，这里只要名字非空即可创建
       function updateDistillBtn() {
-        const hasName = nameInput.value.trim().length > 0;
-        const hasFiles = reqFiles.length > 0;
-        btnDistill.disabled = !(hasName && hasFiles);
+        btnDistill.disabled = nameInput.value.trim().length === 0;
       }
 
       // 拖拽
-      dropZone.addEventListener('click', () => fileInput.click());
-      dropZone.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') fileInput.click(); });
-      dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-      dropZone.addEventListener('drop', e => {
+      // 拖拽上传区已移除：可选项全部空值保护（元素为 null 时不再绑定）
+      dropZone?.addEventListener('click', () => fileInput?.click());
+      dropZone?.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') fileInput?.click(); });
+      dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+      dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone?.addEventListener('drop', e => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         addFiles(e.dataTransfer.files);
       });
 
-      fileInput.addEventListener('change', () => {
+      fileInput?.addEventListener('change', () => {
         addFiles(fileInput.files);
         fileInput.value = '';
       });
 
-      btnAddMore.addEventListener('click', () => fileInput.click());
+      btnAddMore?.addEventListener('click', () => fileInput?.click());
       nameInput.addEventListener('input', updateDistillBtn);
 
       // ── 模型选择 ──
@@ -1104,13 +1044,13 @@
         });
       }
 
-      modelBtn.addEventListener('click', e => {
+      modelBtn?.addEventListener('click', e => {
         e.stopPropagation();
         const isOpen = modelDropdown.classList.toggle('open');
         if (isOpen) loadModels();
       });
-      document.addEventListener('click', () => modelDropdown.classList.remove('open'));
-      modelDropdown.addEventListener('click', e => e.stopPropagation());
+      document.addEventListener('click', () => modelDropdown?.classList.remove('open'));
+      modelDropdown?.addEventListener('click', e => e.stopPropagation());
 
       // ── API 配置弹窗 ──
       const apiBackdrop  = document.getElementById('api-modal-backdrop');
@@ -1267,34 +1207,28 @@
       });
       apiBackdrop.addEventListener('click', e => { if (e.target === apiBackdrop) closeApiModal(); });
 
-      document.getElementById('btn-add-config').addEventListener('click', openApiModal);
+      document.getElementById('btn-add-config')?.addEventListener('click', openApiModal);
 
-      // ── 提炼大纲 ──
+      // ── 创建项目（只收项目名称）──
+      // 上传应标文件与模型选择都在工作台里做：这个弹窗只负责"起个名字"。
       btnDistill.addEventListener('click', async () => {
         const name = nameInput.value.trim();
-        if (!name || reqFiles.length === 0) return;
+        if (!name) return;
 
         btnDistill.disabled = true;
         btnDistill.textContent = '创建项目中…';
 
         try {
-          // 1. 创建项目
           const project = await api.projects.create({ name });
           if (!project?.id) throw new Error('创建项目失败');
           createdProjectId = project.id;
-
-          // 2. 上传应标文件（按用户选定的 role 分类上传）
-          btnDistill.textContent = '上传文件中…';
-          for (const f of reqFiles) {
-            await api.materials.upload(project.id, f.file, f.role || 'spec');
-          }
-
-          // 3. 跳转到提炼大纲页
-          location.href = `/project-init?projectId=${project.id}`;
+          // 直接进工作台：下一步在那里上传招标文件/技术规范书并「拆解评分点」
+          location.href = `/three-mode?projectId=${project.id}`;
         } catch (err) {
           console.error(err);
           btnDistill.disabled = false;
-          btnDistill.innerHTML = `<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.2 5.3L12.5 6.5L8.2 7.7L7 12L5.8 7.7L1.5 6.5L5.8 5.3L7 1Z" fill="currentColor"/></svg> 提炼大纲`;
+          btnDistill.textContent = '创建项目';
+          alert('创建项目失败：' + (err?.message || err));
         }
       });
 
