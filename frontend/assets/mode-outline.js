@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v30';
+import { api } from './api.js?v=20261014-v31';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v30';
+       } from './workspace.js?v=20261014-v31';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v30';
+       } from './workspace-model.mjs?v=20261014-v31';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v30';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v31';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2550,22 +2550,49 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   // 产物（骨架/要求/映射）只有在"筛的就是当前已生成的标包"时才存在
   const hasProducts = isRunScope;
   const matrixRows = data.package_matrix || [];
-  // 页签按**流水线**排：范围选择 → 依据（两份输入）→ 产物（派生结果）→ 待确认。
-  // 以前"评分点/评分单元/技术要求矩阵/映射矩阵"并列，混了三种不同范围的东西
-  // （某标包的一次派生结果 / 该标包的规范书要求 / 待办），所以看不懂。
+  // ── 三段式门控（用户口径）──
+  //   ① 拆解：商务评分点 / 技术评分点 / 技术规范书拆解（三个并列块，都是"依据"）
+  //   ② 待确认：三块都拆完才出现（内容是本步真正要用户决定的）
+  //   ③ 产物：**确认完成后**才出现 —— 目录 + 技术与评分点映射矩阵
+  // 用户原话：「目前"两个产物"和"待确认"的内容在这一步是没有意义的。必须等商务和技术的
+  //   评分点、以及技术规范书的拆分完成，并且根据待确认的内容确认完成后，才会有对应的两个产物。」
+  const pkgGroups = viewPkgStat?.groups || [];
+  const catStat = (c) => pkgGroups.find(g => g.category === c) || null;
+  const commerceStat = catStat('commerce');
+  const techStat = catStat('tech');
+  const priceStat = catStat('price');
+  const specCount = Number(tm.count || 0);
+  // 该标包**实际有的**类别 → 决定显示哪些拆解页签（没有的不显示空页签）
+  const pointTabs = [
+    commerceStat ? { id: 'commerce', label: '商务评分点', badge: `${commerceStat.count}` } : null,
+    techStat ? { id: 'tech', label: '技术评分点', badge: `${techStat.count}` } : null,
+    priceStat ? { id: 'price', label: '报价评分点', badge: `${priceStat.count}` } : null,
+  ].filter(Boolean);
+  // "三块都拆完" = 该标包的各类评分点都在 + 技术规范书拆解有内容
+  const analyzedAll = pointTabs.length > 0 && specCount > 0;
+  // "已确认" = 运行级作答里已经有 categories（要生成哪些类别）
+  const confirmedCats = ((data.answers || {}).categories || {}).categories || [];
+  const categoriesConfirmed = confirmedCats.length > 0;
+  // "已生成" = 目录已派生（outline_pending 为假且有章节）
+  const generated = !outlinePending && (totalBlocks || 0) > 0;
+
   const tabs = [
-    { id: 'points', label: '依据 · 招标文件评分点', badge: `${pkgs.length || rp.count || 0}` },
-    { id: 'tech', label: '依据 · 技术规范书要求', badge: `${tm.count || 0}` },
-    { id: 'units', label: '产物 · 目录骨架', badge: `${su.unit_count || 0}` },
-    { id: 'map', label: '产物 · 映射矩阵', badge: `${(mp.point_to_requirement || []).length}` },
-    { id: 'basis', label: '待确认', badge: pending.length ? `${pending.length} 项` : '已完成' },
+    ...pointTabs,
+    { id: 'spec', label: '技术规范书拆解', badge: `${specCount}` },
+    { id: 'confirm', label: '待确认', disabled: !analyzedAll,
+      badge: !analyzedAll ? '待拆解完成' : (pending.length ? `${pending.length} 项` : '已确认') },
+    ...(categoriesConfirmed ? [
+      { id: 'directory', label: '产物 · 目录', badge: generated ? `${su.unit_count || 0}` : '生成中' },
+      { id: 'map', label: '产物 · 技术与评分点映射矩阵',
+        badge: generated ? `${(mp.point_to_requirement || []).length}` : '生成中' },
+    ] : []),
   ];
-  // 默认停在「拆解结果」：这是入口 —— 先看清各标包的商务/技术/报价评分点，
-  // 再由用户选择生成哪一份目录（用户明确要求的结构）。
-  // 默认停在「依据 · 招标文件评分点」：筛选已置顶，"先看筛出来的评分点"才是主路径
-  const activeTab = tab || 'points';
+  const firstEnabled = tabs.find(t => !t.disabled)?.id || 'commerce';
+  const activeTab = tab && tabs.some(t => t.id === tab && !t.disabled) ? tab : firstEnabled;
   const tabHtml = tabs.map(t => `
-    <button class="sr-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">
+    <button class="sr-tab ${t.id === activeTab ? 'active' : ''} ${t.disabled ? 'disabled' : ''}"
+      data-tab="${t.id}" ${t.disabled ? 'disabled' : ''}
+      title="${t.disabled ? '等三块拆解完成后再确认' : ''}">
       ${t.label}<span class="sr-tab-badge">${escapeHtml(String(t.badge))}</span></button>`).join('');
 
   const confItem = (c) => {
@@ -2649,24 +2676,26 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     ? viewCats.map(c => ({ tech: '技术', commerce: '商务', price: '报价', other: '其他' }[c] || c)).join('、')
     : '未选类别';
   const metrics = [
-    { label: '评分点', value: `${viewPointCount} 个`,
-      sub: `${viewCatsLabel} · 合计 ${viewPointScore} 分`,
-      cls: viewPointCount ? 'ok' : 'warn' },
-    { label: '目录骨架', value: hasProducts ? `${su.unit_count || 0} 个` : '—',
-      sub: hasProducts ? `${su.sub_item_count || 0} 详细项 / ${su.check_item_count || 0} 子项`
-                       : '该范围还没生成目录',
-      cls: hasProducts ? '' : 'pending' },
-    { label: '技术要求', value: hasProducts ? `${tm.count || 0} 条` : '—',
-      sub: hasProducts ? `${tm.topic_count || 0} 个主题` : '该范围还没生成目录',
-      cls: hasProducts ? '' : 'pending' },
-    { label: '映射', value: hasProducts ? `${(mp.point_to_requirement || []).length} 个评分点` : '—',
-      sub: hasProducts ? `未落点 ${(mp.unmapped_requirements || []).length} 条` : '该范围还没生成目录',
-      cls: hasProducts ? '' : 'pending' },
-    { label: '评分表', value: `${viewMatrixRow?.cells?.length || 0} 类`,
-      sub: viewMatrixRow ? `${(viewMatrixRow.cells || []).map(c => `${c.label} ${c.count}`).join(' / ')}` : '—',
-      cls: '' },
-    { label: '待确认', value: `${pending.length} 项`, sub: pending.length ? '需要你确认' : '依据已确认',
-      cls: pending.length ? 'warn' : 'ok' },
+    { label: '商务评分点', value: commerceStat ? `${commerceStat.count} 个` : '—',
+      sub: commerceStat ? `合计 ${commerceStat.score} 分` : '该标包无商务评分点',
+      cls: commerceStat ? 'ok' : 'pending' },
+    { label: '技术评分点', value: techStat ? `${techStat.count} 个` : '—',
+      sub: techStat ? `合计 ${techStat.score} 分` : '该标包无技术评分点',
+      cls: techStat ? 'ok' : 'pending' },
+    { label: '技术规范书拆解', value: specCount ? `${specCount} 条` : '—',
+      sub: specCount ? `${tm.topic_count || 0} 个主题` : '还没拆出要求',
+      cls: specCount ? 'ok' : 'pending' },
+    { label: '待确认', value: analyzedAll ? `${pending.length} 项` : '未就绪',
+      sub: analyzedAll ? (pending.length ? '需要你确认' : '已确认') : '等三块拆解完成',
+      cls: analyzedAll ? (pending.length ? 'warn' : 'ok') : 'pending' },
+    { label: '产物 · 目录', value: generated ? `${su.unit_count || 0} 个` : '—',
+      sub: generated ? `${su.sub_item_count || 0} 详细项`
+                     : (categoriesConfirmed ? '生成中 / 未生成' : '确认后生成'),
+      cls: generated ? '' : 'pending' },
+    { label: '产物 · 映射矩阵', value: generated ? `${(mp.point_to_requirement || []).length} 个评分点` : '—',
+      sub: generated ? `未落点 ${(mp.unmapped_requirements || []).length} 条`
+                     : (categoriesConfirmed ? '生成中 / 未生成' : '确认后生成'),
+      cls: generated ? '' : 'pending' },
   ];
   const metricHtml = metrics.map(m => `
     <div class="sr-metric ${m.cls}">
@@ -2748,49 +2777,112 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
   splitPanelFlashKind = '';
   const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
+  // ── 内容区：按三段式组织 ──
+  // 拆解层三个块（商务评分点 / 技术评分点 / 技术规范书拆解）+ 待确认 + 产物两个
+  const catTable = (stat, catLabel) => {
+    if (!stat || !(stat.items || []).length) {
+      return `<div class="sr-empty">该标包没有解析到${catLabel}评分点。</div>`;
+    }
+    return `
+      <div class="sr-note">来自<b>招标文件</b>的${catLabel}评分表：
+        <b>${stat.count} 个评分点 · 合计 ${stat.score} 分</b>（评分口径完整展示）。</div>
+      <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th>
+        <th class="sr-num">分值</th><th>评分口径</th></tr></thead>
+        <tbody>${(stat.items || []).map(it => `
+          <tr><td>${escapeHtml(it.factor || '')}</td><td>${escapeHtml(it.item || '')}</td>
+              <td class="sr-num">${it.points != null ? it.points : '—'}</td>
+              <td class="sr-crit">${escapeHtml(it.criterion || '—')}</td></tr>`).join('')}
+        </tbody></table>`;
+  };
+
+  const notAnalyzedHint = (what) => `
+    <div class="sr-empty">${escapeHtml(viewLabel)} 的${what}还没拆解出来。
+      <div class="sr-dim" style="margin-top:5px">先点左下「拆解评分点」按该标包重新拆解。</div>
+    </div>`;
+
+  // ② 待确认：唯一需要用户决定的界面；确认后才会出现产物
+  const confirmPane = !analyzedAll ? `
+      <div class="sr-empty">
+        <b>待确认还差一步</b>：三块拆解（${pointTabs.map(t => t.label).join(' / ')} / 技术规范书拆解）
+        都完成后，这里才会出现需要你确认的内容。
+        <div class="sr-dim" style="margin-top:5px">
+          ${pointTabs.length ? `评分点已拆出 ${pointTabs.map(t => `${t.label} ${t.badge} 个`).join('、')}；` : ''}
+          技术规范书拆解 ${specCount ? `已拆出 ${specCount} 条` : '还没拆出'}。
+        </div>
+      </div>` : `
+      <h4>待确认：确认后生成产物</h4>
+      <div class="sr-note">产物的定义（用户口径）：<b>(a) 对应的目录</b>、
+        <b>(b) 最终的技术与评分点映射矩阵</b>。它们只在确认完成后出现。</div>
+
+      <h5 class="sr-sec">① 投标范围（标包）</h5>
+      <div class="sr-answer"><span class="sr-scope-chip">${escapeHtml(viewLabel)}</span>
+        <span class="sr-dim">要改就在面板顶部「筛选 · 标包」切换</span></div>
+
+      <h5 class="sr-sec">② 要生成哪些类别</h5>
+      <div class="sr-answer">
+        ${pointTabs.map(t => `
+          <label class="sr-cat"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
+            ${((confirmedCats.length ? confirmedCats : pointTabs.map(x => x.id)).includes(t.id)) ? 'checked' : ''}>
+            ${escapeHtml(t.label.replace('评分点', ''))}</label>`).join('')}
+        <span class="sr-dim">勾选的类别会合成这一份应答目录</span>
+      </div>
+
+      <h5 class="sr-sec">③ 技术规范书主题归属（可选）</h5>
+      ${(pending.filter(c => c.answer_key === 'topic_placement').map(confItem).join('')
+        || '<div class="sr-dim">没有未归属的主题。</div>')}
+
+      <h5 class="sr-sec">④ 其他待确认项</h5>
+      ${(pending.filter(c => c.answer_key !== 'topic_placement').map(confItem).join('')
+        || '<div class="sr-dim">没有其他待确认项。</div>')}
+
+      <div class="sr-answer" style="margin-top:12px">
+        <button class="mw-btn primary" data-act="confirm-generate">确认，生成目录与映射矩阵</button>
+        <span class="sr-dim">确认即生成（生成中会显示进度；产物页签随确认出现）</span>
+      </div>
+      <div class="sr-dim" data-flash-for="generate"></div>`;
+
+  // ③ 产物
+  const productsGate = !categoriesConfirmed ? `
+      <div class="sr-empty">产物还没到出现的时候。
+        <div class="sr-dim" style="margin-top:5px">
+          先在「待确认」里确认范围与类别，产物（目录 / 映射矩阵）才会生成。</div>
+      </div>` : (!generated ? `
+      <div class="sr-empty">正在生成 / 还没生成目录。
+        <div class="sr-dim" style="margin-top:5px">
+          已确认：${escapeHtml(viewLabel)} · ${(confirmedCats || []).join('、')}。
+          可在「待确认」里重新确认，或点左下「拆解评分点」重跑。</div>
+      </div>` : '');
+
   const panes = {
-    basis: `
-      ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
-      <h4>待确认（${pending.length}）</h4>
-      ${pending.length ? pending.map(confItem).join('') : '<div class="sr-empty">没有待确认项，拆分依据已闭合。</div>'}
-      <h4>已识别（${settled.length}）</h4>
-      ${settled.map(confItem).join('')}
-      <h4>评分地图（全部标包的评分表概览）</h4>
-      <div class="sr-note">每张评分表对应一个标包。要看某个标包的评分点，用面板上方的「筛选 · 标包」。</div>
-      <table class="sr-table"><thead><tr><th>表</th><th>标的/标包</th><th>名称</th><th>类别构成</th><th>来源文件</th></tr></thead>
-        <tbody>${scopeRows}</tbody></table>
-      <div class="sr-note">${escapeHtml(smap.selection?.reason || '')}${
-        smap.selection?.by ? `（依据：${escapeHtml(smap.selection.by)}）` : ''}
-        未选中的表不属于本次投标范围，因此不参与本次拆分。</div>`,
-    points: pkgs.length ? `
-      <h4>依据 · 招标文件评分点　<span class="sr-scope-chip">${escapeHtml(viewLabel)}</span></h4>
-      <div class="sr-note">评分点来自<b>招标文件的评分表</b>，天然按「标包 × 类别」划分
-        （共 ${pkgs.length} 个标包）。此处显示的是 <b>${escapeHtml(viewLabel)}</b> 的评分点；
-        换标包用面板上方的「查看范围」下拉。</div>
-      ${pkgBlocks}` : `
-      <h4>② 评分点明细（${rp.count || 0} 个，合计 ${rp.score_total != null ? rp.score_total : '—'} 分）</h4>
-      <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th><th class="sr-num">分值</th><th>类别</th><th>标包</th><th>评分口径</th></tr></thead>
-        <tbody>${rpRows}</tbody></table>`,
-    units: !isRunScope ? notGenerated('目录骨架') : `
-      <h4>产物 · 目录骨架　<span class="sr-scope-chip">${escapeHtml(viewLabel)}</span></h4>
-      <div class="sr-note">由本标包的评分点层级展开而来（评分因素 → 详细评审项 → 细项）：
-        ${su.unit_count || 0} 单元 / ${su.sub_item_count || 0} 详细项 / ${su.check_item_count || 0} 子项。</div>
-      <table class="sr-table"><thead><tr><th>评分单元 / 详细评审项</th><th class="sr-num">分值</th><th class="sr-num">子项数</th><th>子检查项</th></tr></thead>
+    commerce: catTable(commerceStat, '商务'),
+    tech: catTable(techStat, '技术'),
+    price: catTable(priceStat, '报价'),
+    spec: specCount || tm.topics?.length ? `
+      <h4>技术规范书拆解　<span class="sr-scope-chip">${escapeHtml(viewLabel)}</span></h4>
+      <div class="sr-note">来自<b>技术规范书</b>，按标包/标的归属：
+        <b>${specCount} 条要求 / ${tm.topic_count || 0} 个主题</b>${
+        (tm.source_files || []).length
+          ? `　来源：${(tm.source_files || []).map(escapeHtml).join('、')}` : ''}。</div>
+      <table class="sr-table"><thead><tr><th>主题</th><th class="sr-num">条数</th>
+        <th>要求</th><th>来源文件</th></tr></thead>
+        <tbody>${techRows}</tbody></table>` : notAnalyzedHint('技术规范书拆解'),
+    confirm: confirmPane,
+    directory: productsGate || `
+      <h4>产物 · 目录　<span class="sr-scope-chip">${escapeHtml(runLabel)}</span></h4>
+      <div class="sr-note">这是按确认的范围与类别派生出的应答目录骨架
+        （评分因素 → 详细评审项 → 细项）：${su.unit_count || 0} 单元 /
+        ${su.sub_item_count || 0} 详细项 / ${su.check_item_count || 0} 子项。
+        目录树在面板下方的目录区；覆盖率自检待目录稳定后再补。</div>
+      <table class="sr-table"><thead><tr><th>评分单元 / 详细评审项</th><th class="sr-num">分值</th>
+        <th class="sr-num">子项数</th><th>子检查项</th></tr></thead>
         <tbody>${unitRows}</tbody></table>`,
-    tech: !isRunScope ? notGenerated('技术要求') : `
-      <h4>依据 · 技术规范书要求　<span class="sr-scope-chip">${escapeHtml(viewLabel)}</span></h4>
-      <div class="sr-note">技术要求来自<b>技术规范书</b>，按标包/标的归属
-        （本标包 ${tm.count || 0} 条 / ${tm.topic_count || 0} 个主题${(tm.source_files || []).length
-          ? `　来源：${(tm.source_files || []).map(escapeHtml).join('、')}` : ''}）。</div>
-      <table class="sr-table"><thead><tr><th>主题</th><th class="sr-num">条数</th><th>要求示例</th><th>来源文件</th></tr></thead>
-        <tbody>${techRows}</tbody></table>`,
-    map: !isRunScope ? notGenerated('映射矩阵') : `
-      <h4>产物 · 映射矩阵　<span class="sr-scope-chip">${escapeHtml(viewLabel)}</span></h4>
-      <table class="sr-table"><thead><tr><th>评分点</th><th class="sr-num">分值</th><th class="sr-num">章节数</th><th class="sr-num">关联要求数</th><th>要求主题</th></tr></thead>
+    map: productsGate || `
+      <h4>产物 · 技术与评分点映射矩阵　<span class="sr-scope-chip">${escapeHtml(runLabel)}</span></h4>
+      <table class="sr-table"><thead><tr><th>评分点</th><th class="sr-num">分值</th>
+        <th class="sr-num">章节数</th><th class="sr-num">关联要求数</th><th>要求主题</th></tr></thead>
         <tbody>${mapRows}</tbody></table>
       <div class="sr-note">未落点要求 ${(mp.unmapped_requirements || []).length} 条；
-        未关联评分点的要求 ${(mp.requirements_without_point || []).length} 条。
-        需要调整归属或范围时，在「拆分依据」里作答后重新拆分即可。</div>`,
+        未关联评分点的要求 ${(mp.requirements_without_point || []).length} 条。</div>`,
   };
 
   const el = document.getElementById('split-panel-inline') || (() => {
@@ -2828,16 +2920,11 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
             }).join('')}
           </select>
         </label>
-        <span class="sr-filter-k">类别</span>
-        ${viewCatsAvail.map(c => `
-          <label class="sr-cat"><input type="checkbox" data-vcat="${escapeHtml(c)}"
-            ${viewCats.includes(c) ? 'checked' : ''}>${escapeHtml(
-              { tech: '技术', commerce: '商务', price: '报价', other: '其他' }[c] || c)}</label>`).join('')}
         <span class="sr-dim">当前目录：${escapeHtml(runLabel)}${
           (data.current_categories || []).length
             ? ` · ${(data.current_categories || []).map(catLabelOf).join('、')}`
             : '（还没生成）'}</span>
-        <button class="mw-btn primary" data-act="generate">按此筛选生成目录</button>
+        <span class="sr-dim">选好标包后，到「待确认」确认类别再生成</span>
       </div>
       <div class="sr-metrics">${metricHtml}</div>
       <div class="sr-tabs">${tabHtml}</div>
@@ -2945,6 +3032,8 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   .sr-cat{display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;
     border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:#fff}
   .sr-cat input{accent-color:#2563eb}
+  .sr-sec{margin:14px 0 4px;font-size:12.5px;font-weight:600;color:var(--text)}
+  .sr-tab.disabled{opacity:.45;cursor:not-allowed}
   .sr-scope-chip{font-size:11.5px;font-weight:400;color:#1d4ed8;background:#eff6ff;
     border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px;margin-left:4px}
   .sr-topic-list{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:8px;
@@ -2960,40 +3049,10 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.6}`;
     document.head.appendChild(st);
   }
-  // **内联展开**（不再是浮层）：填在目录上方的静态容器里，确认后收起、露出目录。
-  // 用户要求：「直接将解析面板展开确认后再收起，展示目录」。
-  // 展开期间隐藏"待确认"横幅（它只是引导用户来看这个面板，展开后重复）
-  const banner = document.getElementById('split-confirm-banner');
-  if (banner) banner.hidden = true;
-  // 面板展开时把"待生成"占位收起：它和面板页脚说的是同一件事，
-  // 留着既重复又多出一屏（用户还得往下滚才看得见）。
-  const pendingNote = document.getElementById('blocks-pending');
-  if (pendingNote && outlinePending) pendingNote.hidden = true;
-  // 滚动策略：面板在内容区**顶部**，上面还有「目录覆盖率」等关键信息。
-  // `scrollIntoView({block:'start'})` 会把页面滚到面板顶部，覆盖率被顶出视野；
-  // `{block:'nearest'}` 更糟 —— 它滚的是**内层容器**（实测 #blocks-scroll.scrollTop=85），
-  // 覆盖率同样被滚掉一半。所以直接把承载容器滚到顶：覆盖率和面板一起可见。
+  // 面板始终展示（用户要求：不要"展开/收起"这类操作）；滚动位置回到顶部，
+  // 让"筛选 → 指标 → 页签 → 明细"从上到下完整可见。
   const scroller = el.closest('#blocks-scroll') || el.closest('.blocks-scroll');
   if (scroller) scroller.scrollTop = 0;
-  else el.scrollIntoView({ block: 'nearest' });
-
-  // ── 查看范围切换：**只切视角**，不重跑（用户确认的方案 A）──
-  // 该标包已生成过目录 → 显示它的产物；没生成过 → 产物页显示空态 + 一键生成。
-  // 筛选变化 → **原地刷新下面所有内容**，停在同一个页签（不跳页、不重跑）
-  const currentTab = () => el.querySelector('.sr-tab.active')?.dataset.tab || 'points';
-  el.querySelector('#sr-view-pkg')?.addEventListener('change', (ev) => {
-    const [t, n] = String(ev.target.value || '').split('|');
-    panelViewPkg = { target: t || '', package_no: n || '' };
-    panelViewCats = null;           // 换标包 → 类别回到该标包的默认
-    openSplitReport({ tab: currentTab() });
-  });
-  // 类别勾选：同样原地刷新（指标里的"评分点/合计分值"随类别变化）
-  el.querySelectorAll('[data-vcat]').forEach((box) => {
-    box.addEventListener('change', () => {
-      panelViewCats = [...el.querySelectorAll('[data-vcat]:checked')].map(x => x.dataset.vcat);
-      openSplitReport({ tab: currentTab() });
-    });
-  });
 
   el.querySelectorAll('.sr-tab').forEach(tab => tab.addEventListener('click', () => {
     el.querySelectorAll('.sr-tab').forEach(t => t.classList.toggle('active', t === tab));
@@ -3012,47 +3071,42 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
       return;
     }
 
-    // 「按所选生成应答目录」：设投标范围 → 存类别选择 → 重新派生
-    if (e.target.closest?.('[data-act="generate"]')) {
-      const btnG = e.target.closest('[data-act="generate"]');
+    // 「确认，生成目录与映射矩阵」：确认即生成（用户确认的方案）
+    //   ① 写回投标范围 ② 存"要生成哪些类别" ③ 触发派生 → 产物页签随确认出现
+    if (e.target.closest?.('[data-act="confirm-generate"]')) {
+      const btnC = e.target.closest('[data-act="confirm-generate"]');
       const slot = document.querySelector('[data-flash-for="generate"]');
-      // 范围来源：优先"查看范围"（顶部标包下拉 / 矩阵单选，两者已同步）
-      const target = viewPkg.target || '';
-      const no = viewPkg.package_no || '';
-      if (!no && !target) {
-        if (slot) { slot.textContent = '请先选择一个标包与类别。'; slot.className = 'sr-dim sr-inline-err'; }
-        return;
-      }
-      const row = (data.package_matrix || []).find(r =>
-        r.target === target && String(r.package_no) === String(no)) || {};
-      const cats = [...document.querySelectorAll('#split-panel-inline [data-vcat]:checked')]
-        .map(x => x.dataset.vcat);
+      const cats = [...document.querySelectorAll('#split-panel-inline [data-confirm-cat]:checked')]
+        .map(x => x.dataset.confirmCat);
       if (!cats.length) {
-        if (slot) { slot.textContent = '请至少勾选一个类别（技术 / 商务 / 报价）。'; slot.className = 'sr-dim sr-inline-err'; }
+        if (slot) { slot.textContent = '请至少勾选一个类别。'; slot.className = 'sr-dim sr-inline-err'; }
         return;
       }
-      btnG.disabled = true;
-      if (slot) { slot.textContent = '正在保存选择…'; slot.className = 'sr-dim'; }
+      btnC.disabled = true;
+      if (slot) { slot.textContent = '正在确认并生成…'; slot.className = 'sr-dim'; }
       try {
         await api.workflow.setScope(projectId, {
-          target: target || '', package_no: no || '',
-          package_name: row.package_name || '',
+          target: viewPkg.target || '', package_no: viewPkg.package_no || '',
+          package_name: viewPkgStat?.package_name || '',
         });
-        const tidG = await resolvePanelThreadId(null);
+        const tidC = await resolvePanelThreadId(null);
         await api.workflow.answerSplit(projectId, {
-          key: 'categories', value: { categories: cats }, threadId: tidG,
+          key: 'categories', value: { categories: cats }, threadId: tidC,
         });
-        const label = row.cells.filter(c => cats.includes(c.category)).map(c => c.label).join('+');
-        splitPanelFlash = `已选择 ${target}/标包${no} · ${label}，正在按此生成应答目录…`;
-        if (slot) { slot.textContent = splitPanelFlash; slot.className = 'sr-dim'; }
-        // 复用状态栏入口（带后端预检；原料变过时会引导到「重新提炼」）
+        const labels = cats.map(c => ({ tech: '技术', commerce: '商务', price: '报价' }[c] || c)).join('、');
+        splitPanelFlash = `已确认：${viewLabel} · ${labels}。正在生成目录与映射矩阵…`;
+        await openSplitReport({ tab: 'directory' });   // 产物页签此时已出现
         await redraftOutline();
       } catch (err) {
-        btnG.disabled = false;
-        if (slot) { slot.textContent = '生成失败：' + String(err?.message || err).slice(0, 120); slot.className = 'sr-dim sr-inline-err'; }
+        btnC.disabled = false;
+        if (slot) {
+          slot.textContent = '生成失败：' + String(err?.message || err).slice(0, 120);
+          slot.className = 'sr-dim sr-inline-err';
+        }
       }
       return;
     }
+
 
     // 「跳过（暂不指定）」：可选项标记为已处理，不影响后续确认
     if (e.target.closest?.('[data-save="skip"]')) {
