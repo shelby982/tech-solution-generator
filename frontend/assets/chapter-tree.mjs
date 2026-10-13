@@ -20,7 +20,7 @@ import {
   CHAPTER_STAGE_LABELS,
   escapeHtml,
   buildOutlineTree,
-} from './workspace-model.mjs?v=20261014-v21';
+} from './workspace-model.mjs?v=20261014-v22';
 
 /** 章节徽标：状态 + 依据 N + 覆盖 x/y。三个模式共用这一份拼装。 */
 export function chapterBadgesHtml(block, { evidenceCount = 0, coverage = null, status = 'pending', label = '' } = {}) {

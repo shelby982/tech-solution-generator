@@ -2,18 +2,18 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261014-v21';
+import { GenerateSession } from './generate-session.js?v=20261014-v22';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261014-v21';
-import { initContextPanel } from './context-panel.js?v=20261014-v21';
-import { api } from './api.js?v=20261014-v21';
-import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261014-v21';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261014-v22';
+import { initContextPanel } from './context-panel.js?v=20261014-v22';
+import { api } from './api.js?v=20261014-v22';
+import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261014-v22';
 // 提炼字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
 // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261014-v21';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261014-v22';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；

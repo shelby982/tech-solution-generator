@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v21';
+import { api } from './api.js?v=20261014-v22';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v21';
+       } from './workspace.js?v=20261014-v22';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v21';
+       } from './workspace-model.mjs?v=20261014-v22';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v21';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v22';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2376,6 +2376,16 @@ document.addEventListener('keydown', (e) => {
  * 漏一个评分点，100 立刻变 90，一眼可见，不用自己逐条数。
  * 渲染在树栏内部（流式元素），不动全局布局。
  */
+/** 覆盖率/目录说的"范围"标签：当前目录用的是哪个标包 + 类别。
+ *  不加这句会看着矛盾 —— 覆盖率说"8 个评分点"，面板在看另一个标包的 13 个。 */
+function ovScopeLabel() {
+  const t = lastCoverageScope || {};
+  const pkg = `${t.target || '未设定'} / 标包${t.package_no || '—'}`;
+  const cats = (t.categories || []).map(c => ({ tech: '技术', commerce: '商务',
+    price: '报价', other: '其他' }[c] || c)).join('、');
+  return cats ? `${pkg} · ${cats}` : pkg;
+}
+
 function renderOutlineCoverage(coverage) {
   // 就地填充**静态容器**（three-mode.html 里预置）：插入式 append 会把目录往下推，
   // 表现为进页面时抖动（用户反馈）。容器不存在（旧页面）时退回创建。
@@ -2400,6 +2410,7 @@ function renderOutlineCoverage(coverage) {
     box.innerHTML = `
       <div class="ov-panel-head">
         <span class="ov-panel-title">目录覆盖率</span>
+        <span class="ov-scope">当前目录范围：${escapeHtml(ovScopeLabel())}</span>
         <span class="ov-metric pending">评分点已拆出 <b>${coverage.review_points_total}</b>
           <span class="ov-sub">合计 ${coverage.score_total} 分</span></span>
         <span class="ov-metric pending">规范要求 <b>${coverage.requirements_total}</b> 条
@@ -2416,6 +2427,7 @@ function renderOutlineCoverage(coverage) {
   box.innerHTML = `
     <div class="ov-panel-head">
       <span class="ov-panel-title">目录覆盖率</span>
+      <span class="ov-scope">当前目录范围：${escapeHtml(ovScopeLabel())}</span>
       <span class="ov-metric ${cls(coverage.review_points_covered, coverage.review_points_total)}"
         title="每个评分点都要有章节承载；已拆细 = 该评分点下还分了子检查项">
         评分点 <b>${coverage.review_points_covered}/${coverage.review_points_total}</b>
@@ -2503,6 +2515,11 @@ async function refreshOutlineCoverage(tid) {
       api.workflow.getScope(projectId).catch(() => null),
     ]);
     outlinePending = !!(st && st.spec && st.spec.outline_pending);
+    lastCoverageScope = {
+      target: (scope || report?.project_scope || {}).target || '',
+      package_no: (scope || report?.project_scope || {}).package_no || '',
+      categories: (report || {}).current_categories || [],
+    };
     renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
     fillScopeSelector(report, scope);
   } catch (e) {
@@ -2535,6 +2552,8 @@ let splitPanelFlashKind = '';      // '' | 'err'
 // loadExistingBlocks 据此自动展开「拆解结果」—— 启动时 thread 还没解析出来，
 // 光靠 restoreSettledThread 那条路会漏掉这个提示（实测面板不出现）。
 let outlinePending = false;
+// 覆盖率渲染用的上下文（当前目录对应的标包 + 类别），由 refreshOutlineCoverage 写入
+let lastCoverageScope = null;
 // 面板的「查看范围」：标包下拉切换的是**看哪个标包**（不自动重跑）。
 // 用户口径：技术要求也按标包归属，不存在共享；切换后若该标包还没生成目录，
 // 相关页签必须显示空态 + 一键生成，绝不能继续显示上一个标包的目录。
@@ -3047,6 +3066,8 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   #blocks-pending p{margin:0}
   #blocks-pending p+p{margin-top:5px}
   .ov-metric.pending{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
+  .ov-scope{font-size:11.5px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;
+    border-radius:999px;padding:1px 8px}
   .pp-pkg{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:var(--surface-2,#faf9f7)}
   .pp-pkg>summary{cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .pp-pkg>summary::marker{color:var(--muted)}
