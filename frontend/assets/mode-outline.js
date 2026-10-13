@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v26';
+import { api } from './api.js?v=20261014-v27';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v26';
+       } from './workspace.js?v=20261014-v27';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v26';
+       } from './workspace-model.mjs?v=20261014-v27';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v26';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v27';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2783,7 +2783,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
         <td class="sr-num">${r.points != null ? r.points : '—'}</td>
         <td>${r.category ? `<span class="sr-chip">${escapeHtml(r.category)}</span>` : '—'}</td>
         <td>${escapeHtml(r.package_no || '—')}</td>
-        <td class="sr-crit" title="${escapeHtml(r.criterion || '')}">${escapeHtml((r.criterion || '').slice(0, 70))}${(r.criterion || '').length > 70 ? '…' : ''}</td></tr>`).join('');
+        <td class="sr-crit">${escapeHtml(r.criterion || '—')}</td></tr>`).join('');
 
   // 指标条：一眼看清"这份目录是什么规模、依据确认到什么程度"
   // ── 指标**随筛选变化**（用户口径：筛选在最上层，下面全部由它派生）──
@@ -2833,9 +2833,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
       <tr><td>${escapeHtml(it.factor || '')}</td><td>${escapeHtml(it.item || '')}</td>
           <td class="sr-num">${it.points != null ? it.points : '—'}</td>
           <td><span class="sr-chip">${escapeHtml(g.label)}</span></td>
-          <td class="sr-crit" title="${escapeHtml(it.criterion || '')}">${
-            escapeHtml((it.criterion || '').slice(0, 70))}${
-            (it.criterion || '').length > 70 ? '…' : ''}</td></tr>`)).join('');
+          <td class="sr-crit">${escapeHtml(it.criterion || '—')}</td></tr>`)).join('');
     return `<details class="pp-pkg" ${isCur ? 'open' : ''}>
       <summary><b>${escapeHtml(pkgLabel(p))}</b>
         <span class="pp-name">${escapeHtml(p.package_name || '')}</span>
@@ -3044,7 +3042,11 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   .sr-table td.sr-num,.sr-table th.sr-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .sr-unit td{background:var(--surface-2,#faf9f7);font-weight:600}
   .sr-sub td{color:var(--muted)}
-  .sr-crit{color:var(--muted);line-height:1.5;max-width:520px}
+  /* 评分口径/要求原文：**完整展示**，允许换行；不再靠 title 提示看全文。
+     给足宽度（表格里最长的一列），并允许长串折断，避免撑破面板。 */
+  .sr-crit{color:var(--muted);line-height:1.55;white-space:normal;word-break:break-word;
+    min-width:240px}
+  .sr-table td.sr-crit{max-width:none}
   .sr-dim{color:var(--muted);font-size:11.5px}
   .sr-chip{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;
     background:var(--surface-2,#f1f0ee);color:var(--muted)}

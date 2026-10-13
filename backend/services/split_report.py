@@ -114,7 +114,8 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "category": p.get("category") or "",
             "package_no": p.get("package_no") or "",
             "package_label": p.get("package_label") or "",
-            "criterion": (p.get("criterion") or "")[:600],
+            # 评分口径**不截断**：用户要求完整展示（此前 [:600] 会被截掉尾巴）
+            "criterion": p.get("criterion") or "",
         })
     rp_total = sum(float(r["points"] or 0) for r in rp_rows)
 
@@ -128,7 +129,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         by_topic.setdefault(topic, []).append({
             "requirement_id": r.get("requirement_id") or "",
             "title": r.get("title") or "",
-            "text": (r.get("text") or "")[:400],
+            "text": r.get("text") or "",            # 要求原文同样不截断
             "mandatory_level": r.get("mandatory_level") or "",
             "source_file": r.get("source_file") or "",
             # package_no：这条技术要求属于哪个标包（用户口径：技术要求按标包/标的归属，
@@ -311,7 +312,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
                 "items": [{
                     "factor": p.factor, "item": p.item, "points": p.points,
                     "clause": p.clause, "seq": p.seq,
-                    "criterion": (p.criterion or "")[:400],
+                    "criterion": p.criterion or "",     # 不截断（用户要求完整展示）
                 } for p in rows],
             })
         package_points.append({
