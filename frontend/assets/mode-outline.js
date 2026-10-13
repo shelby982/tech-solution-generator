@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v1';
+import { api } from './api.js?v=20261013-v2';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v1';
+       } from './workspace.js?v=20261013-v2';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v1';
+       } from './workspace-model.mjs?v=20261013-v2';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v1';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v2';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2492,6 +2492,8 @@ async function refreshOutlineCoverage(tid) {
 // 拆分清单是否展开。容器现在是**静态占位**（一直在 DOM 里，只是 hidden），
 // 所以不能再用"元素是否存在"判断状态 —— 否则按钮永远显示"收起清单"。
 let splitPanelExpanded = false;
+// 保存后的即时反馈（面板会重开以刷新状态，用它把"刚才那步成功了"带回来）
+let splitPanelFlash = '';
 
 function confirmedRevisionKey() {
   const tid = currentThreadId || params.get('threadId') || getThread(projectId) || 'latest';
@@ -2538,7 +2540,16 @@ async function openSplitReport({ auto = false } = {}) {
   const rp = data.review_points || {}, su = data.scoring_units || {};
   const tm = data.tech_matrix || {}, mp = data.mapping || {};
   const smap = data.scoring_map || {};
-  const conf = data.confirmations || [];
+  // 「评分点确认」必须按**当前版本**判定：重新拆解产生新版本后，
+  // 旧版本的作答不算数 —— 否则该项一直显示"已作答"、确认按钮再也不出现，
+  // 用户只剩页脚那个按钮可点（实测反馈"这个我要怎么确认？"）。
+  const rpAns = (data.answers || {}).review_points || {};
+  const rpCurrent = !!rpAns.confirmed
+    && Number(rpAns.revision || 0) === Number(draftRevision || 0);
+  const conf = (data.confirmations || []).map(c =>
+    (c.key === 'review_points' && !rpCurrent)
+      ? { ...c, answered: false, needs_confirm: true }
+      : c);
   const pending = conf.filter(c => c.needs_confirm);
   const settled = conf.filter(c => !c.needs_confirm);
 
@@ -2546,9 +2557,7 @@ async function openSplitReport({ auto = false } = {}) {
   // 点「拆解评分点」→ 解析 → 评分点面板（本面板的「评分点」页）→ 确认评分点
   // → 再确认目录结构 → 收起、展示最终应答目录。
   const answers = data.answers || {};
-  const rpAnswer = answers.review_points || {};
-  const pointsConfirmed = !!rpAnswer.confirmed
-    && Number(rpAnswer.revision || 0) === Number(draftRevision || 0);
+  const pointsConfirmed = rpCurrent;      // 同一判定，避免两处口径不一致
   const stage = pointsConfirmed ? 'structure' : 'points';
 
   // 指标条：一眼看清"这份目录是什么规模、依据确认到什么程度"
@@ -2590,15 +2599,26 @@ async function openSplitReport({ auto = false } = {}) {
     const opts = (c.options || []).map(o => `
       <option value="${o.table_no}">表${o.table_no} ${escapeHtml(o.label)}（技术 ${o.tech_count} 条 / ${o.tech_score} 分）</option>`).join('');
     let ctrl = '';
-    if (c.answer_key === 'scope' && opts) {
+    if (c.answer_key === 'review_points') {
+      // 第①步的确认按钮就在这里 —— 之前这一项**没有任何控件**，
+      // 用户看到"待确认"却无从下手（实测反馈："这个我要怎么确认？"）。
+      ctrl = `<div class="sr-answer">
+        <button class="mw-btn primary" data-save="review_points">确认评分点清单无误</button>
+        <span class="sr-dim">确认后进入第②步：确认目录拆分</span></div>`;
+    } else if (c.answer_key === 'scope' && opts) {
       ctrl = `<div class="sr-answer"><select data-answer="scope">${opts}</select>
         <button class="mw-btn" data-save="scope">按此表拆分</button></div>`;
     } else if (c.answer_key === 'scope') {
       ctrl = `<div class="sr-answer"><span class="sr-dim">已在项目「投标范围」里设定，可到覆盖率面板修改</span></div>`;
     } else if (c.answer_key === 'topic_placement') {
-      ctrl = `<div class="sr-answer"><textarea data-answer="topic_placement" rows="2"
-        placeholder="主题=章节标题（每行一条），例如：3.2.1. 客户档案管理模块=功能要求"></textarea>
-        <button class="mw-btn" data-save="topic_placement">保存归属</button></div>`;
+      // 这一项是**可选**：不确定就跳过，不影响确认目录。
+      ctrl = `<div class="sr-answer">
+        <textarea data-answer="topic_placement" rows="2"
+          placeholder="主题=章节标题（每行一条），例如：3.2.1. 客户档案管理模块=功能要求"></textarea>
+        <button class="mw-btn" data-save="topic_placement">保存归属</button>
+        <button class="mw-btn" data-save="skip" data-key="topic_placement">跳过（暂不指定）</button>
+        </div>
+        <div class="sr-dim" data-flash-for="topic_placement"></div>`;
     } else if (c.answer_key === 'structure') {
       ctrl = `<div class="sr-answer"><button class="mw-btn" data-save="structure">结构没问题，确认</button></div>`;
     }
@@ -2655,8 +2675,11 @@ async function openSplitReport({ auto = false } = {}) {
       <td class="sr-crit">${(e.source_files || [e.source_file]).filter(Boolean).map(f => escapeHtml(String(f).slice(0, 18))).join('、') || '—'}</td></tr>`;
   }).join('');
 
+  const flashNow = splitPanelFlash;
+  splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
   const panes = {
     basis: `
+      ${flashNow ? `<div class="sr-flash">${escapeHtml(flashNow)}</div>` : ''}
       <h4>待确认（${pending.length}）</h4>
       ${pending.length ? pending.map(confItem).join('') : '<div class="sr-empty">没有待确认项，拆分依据已闭合。</div>'}
       <h4>已识别（${settled.length}）</h4>
@@ -2785,6 +2808,9 @@ async function openSplitReport({ auto = false } = {}) {
     border:1px solid var(--line);border-radius:6px;max-width:100%}
   .sr-answer textarea{flex:1;min-width:300px}
   .sr-empty{color:var(--muted);font-size:12.5px;padding:6px 0}
+  .sr-flash{margin:8px 0;padding:7px 11px;border-radius:7px;font-size:12.5px;
+    background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
+  .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--surface-2,#faf9f7)}
   .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -2816,9 +2842,32 @@ async function openSplitReport({ auto = false } = {}) {
       return;
     }
 
-    // 第 ① 步：确认评分点 → 落库 review_points，重开面板进入第 ② 步
-    if (e.target.closest?.('[data-act="confirm-points"]')) {
-      const btnP = e.target.closest('[data-act="confirm-points"]');
+    // 「跳过（暂不指定）」：可选项标记为已处理，不影响后续确认
+    if (e.target.closest?.('[data-save="skip"]')) {
+      const key = e.target.closest('[data-save="skip"]').dataset.key;
+      try {
+        const tidS = await resolvePanelThreadId(null);
+        await api.workflow.answerSplit(projectId, {
+          key, value: { skipped: true }, threadId: tidS,
+        });
+        splitPanelFlash = '已跳过该项（不指定归属，拆分照常进行）';
+      } catch (err) {
+        splitPanelFlash = '';
+        alert('保存失败：' + String(err).slice(0, 120));
+        return;
+      }
+      document.getElementById('split-panel-inline')?.remove();
+      splitPanelExpanded = false;
+      await openSplitReport();
+      return;
+    }
+
+    // 第 ① 步：确认评分点（面板里的按钮与页脚主按钮走同一条路径）
+    // → 落库 review_points，重开面板进入第 ② 步
+    if (e.target.closest?.('[data-act="confirm-points"]')
+        || e.target.closest?.('[data-save="review_points"]')) {
+      const btnP = e.target.closest('[data-act="confirm-points"]')
+        || e.target.closest('[data-save="review_points"]');
       btnP.disabled = true;
       try {
         const tidP = await resolvePanelThreadId(null);
@@ -2828,6 +2877,8 @@ async function openSplitReport({ auto = false } = {}) {
                    count: Number(rp.count || 0), score: rp.score_total },
           threadId: tidP,
         });
+        splitPanelFlash = `已确认评分点清单（${rp.count || 0} 个，合计 ${
+          rp.score_total != null ? rp.score_total : '—'} 分）。请继续确认目录拆分。`;
       } catch (err) {
         btnP.disabled = false;
         alert('保存失败：' + String(err).slice(0, 120));
@@ -2867,21 +2918,38 @@ async function openSplitReport({ auto = false } = {}) {
     if (kind === 'scope') {
       value = { table_no: Number(host.querySelector('[data-answer="scope"]').value) };
     } else if (kind === 'topic_placement') {
+      const raw = host.querySelector('[data-answer="topic_placement"]').value || '';
       const map = {};
-      host.querySelector('[data-answer="topic_placement"]').value.split('\n').forEach(line => {
-        const [topic, target] = line.split('=').map(x => (x || '').trim());
-        if (topic && target) map[topic] = target;
+      const bad = [];
+      raw.split('\n').forEach(line => {
+        const t = line.trim();
+        if (!t) return;
+        const parts = t.split('=');
+        if (parts.length < 2 || !parts[0].trim() || !parts[1].trim()) { bad.push(t); return; }
+        map[parts[0].trim()] = parts.slice(1).join('=').trim();
       });
+      const n = Object.keys(map).length;
+      // 不静默吞掉格式错误：说不出问题在哪，用户只会以为"点了没反应"
+      if (!n) {
+        alert(bad.length
+          ? `格式不对：\n${bad.slice(0, 3).join('\n')}\n\n请按「主题=章节标题」每行一条，例如：\n3.2.1. 客户档案管理模块=功能要求`
+          : '请先填写要指定的归属，或点「跳过（暂不指定）」。（本项可选，不影响确认目录）');
+        return;
+      }
       value = map;
+      splitPanelFlash = `已保存 ${n} 条主题归属${bad.length ? `，另有 ${bad.length} 行格式不正确已忽略` : ''}；`
+        + '下次「拆解评分点」按它挂载。';
     } else if (kind === 'structure') {
       value = { confirmed: true };
+      splitPanelFlash = '结构已确认。';
     }
     btn.disabled = true;
     try {
       const tid2 = await resolvePanelThreadId(null);
       await api.workflow.answerSplit(projectId, { key: kind, value, threadId: tid2 });
-      el.remove();
-      await openSplitReport();          // 重新拉取：作答已反映到确认项
+      document.getElementById('split-panel-inline')?.remove();
+      splitPanelExpanded = false;
+      await openSplitReport();          // 重新拉取：作答已反映到确认项（flash 会带回来）
     } catch (err) {
       btn.disabled = false;
       alert('保存失败：' + String(err).slice(0, 120));

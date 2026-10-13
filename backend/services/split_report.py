@@ -347,7 +347,7 @@ def _confirmations(points: list[dict], rp_rows: list[dict], rp_total: float,
         "question": "规范书要求主题该挂到哪些章节？",
         "detected": (f"{len(tech_matrix)} 个主题、{sum(t['count'] for t in tech_matrix)} 条要求；"
                      f"{len(no_point)} 个评分点名下没有挂到要求"),
-        "detail": "匹配不到的会进「技术规范书要求应答」板块；如需指定归属，可在提炼要求里写明",
+        "detail": "匹配不到的会进「技术规范书要求应答」板块。如需指定归属，在下方按「主题=章节标题」填写即可（本项可选，也可跳过）",
         "needs_confirm": bool(no_point),
     })
 
