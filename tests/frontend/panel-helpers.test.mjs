@@ -57,18 +57,33 @@ test('模块内调用的 UI 辅助函数都有定义（防止整段替换误删�
 test('关键面板函数都存在（本会话新增的能力，逐个钉住）', () => {
   const defined = definedNames();
   const critical = [
-    'openSplitReport',        // 拆分清单面板
-    'fillScopeSelector',      // 投标范围选项（原 bindScopeSelector，已并入一次性渲染）
-    'showConfirmedBanner',    // 两阶段提示
-    'maybeAutoOpenSplitReport', // 拆分完自动展示
+    'openSplitReport',        // 拆解面板
+    'maybeAutoOpenSplitReport', // 拆解完自动展示
     'markRevisionConfirmed',
     'getConfirmedRevision',
     'resolvePanelThreadId',
-    'renderOutlineCoverage',
-    'refreshOutlineCoverage',
+    'refreshOutlineCoverage',   // 只负责读状态（覆盖率渲染已按用户要求删除）
     'toggleScoringRisk',
     'loadExistingBlocks',
   ];
   const missing = critical.filter(n => !defined.has(n));
   assert.deepEqual(missing, [], `缺少关键函数：${missing.join(', ')}`);
+});
+
+
+test('已按用户要求删除的能力不得复活（覆盖率模块 / 确认横幅 / 展开收起操作）', () => {
+  const src = readFileSync(new URL('../../frontend/assets/mode-outline.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../../frontend/three-mode.html', import.meta.url), 'utf8');
+  // 用户原话：「页面上"目录覆盖率"的模块直接删掉吧。目前还没有目录，留一个"目录覆盖率"是什么意思呢？」
+  // 用户原话：「不保留"展开拆分清单"之类的操作」→ 面板默认展示全部内容。
+  const banned = [
+    ['目录覆盖率指标', src.includes('ov-panel-title')],
+    ['覆盖率渲染函数 renderOutlineCoverage', src.includes('renderOutlineCoverage(')],
+    ['覆盖率容器 #outline-coverage-panel', html.includes('outline-coverage-panel')],
+    ['展开/收起拆分清单 toggleSplitPanel', src.includes('toggleSplitPanel')],
+    ['收起面板 collapseSplitPanel', src.includes('collapseSplitPanel')],
+    ['确认横幅 #split-confirm-banner', html.includes('split-confirm-banner') || src.includes('showConfirmedBanner')],
+  ];
+  const alive = banned.filter(([, hit]) => hit).map(([label]) => label);
+  assert.deepEqual(alive, [], `这些能力已被用户要求删除，不要复活：${alive.join('、')}`);
 });

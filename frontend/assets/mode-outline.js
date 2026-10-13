@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v27';
+import { api } from './api.js?v=20261014-v30';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v27';
+       } from './workspace.js?v=20261014-v30';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v27';
+       } from './workspace-model.mjs?v=20261014-v30';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -85,24 +85,6 @@ const blocksList  = document.getElementById('blocks-list');
 // 覆盖率面板 / 得分风险面板的样式。刻意用**行内流式元素**，不 prepend 到 shell ——
 // 之前那条 43px 横幅就是因为插到整页最前面把布局顶下去了。
 document.head.insertAdjacentHTML('beforeend', `<style>
-.ov-panel{margin:8px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
-  background:var(--surface);font-size:12.5px;line-height:1.6}
-.ov-panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ov-panel-title{font-weight:600;font-size:13px}
-.ov-metric{display:inline-flex;align-items:baseline;gap:4px;padding:2px 8px;border-radius:999px;
-  background:var(--surface-2,#f6f6f4);border:1px solid var(--line)}
-.ov-metric b{font-size:13px}
-.ov-metric.ok{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
-.ov-metric.warn{background:#fffbeb;border-color:#fcd34d;color:#92400e}
-.ov-metric.bad{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
-.ov-gaps{margin-top:6px;color:#92400e}
-.ov-actions{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;
-  border-top:1px dashed var(--line)}
-.ov-actions .mw-btn{margin-left:auto}
-.ov-sub{color:var(--muted);font-size:11.5px}
-.ov-scope{display:inline-flex;align-items:center;gap:5px;font-size:12px}
-.ov-scope select{font:inherit;font-size:12px;padding:2px 4px;border:1px solid var(--line);
-  border-radius:6px;max-width:260px}
 .split-banner{display:flex;flex-direction:column;gap:3px;margin:8px 12px;padding:9px 12px;
   border-radius:8px;font-size:12.5px;border:1px solid var(--line)}
 .split-banner strong{font-size:13px}
@@ -127,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v27';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v30';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2376,84 +2358,6 @@ document.addEventListener('keydown', (e) => {
  * 漏一个评分点，100 立刻变 90，一眼可见，不用自己逐条数。
  * 渲染在树栏内部（流式元素），不动全局布局。
  */
-/** 覆盖率/目录说的"范围"标签：当前目录用的是哪个标包 + 类别。
- *  不加这句会看着矛盾 —— 覆盖率说"8 个评分点"，面板在看另一个标包的 13 个。 */
-function ovScopeLabel() {
-  const t = lastCoverageScope || {};
-  const pkg = `${t.target || '未设定'} / 标包${t.package_no || '—'}`;
-  const cats = (t.categories || []).map(c => ({ tech: '技术', commerce: '商务',
-    price: '报价', other: '其他' }[c] || c)).join('、');
-  return cats ? `${pkg} · ${cats}` : pkg;
-}
-
-function renderOutlineCoverage(coverage) {
-  // 就地填充**静态容器**（three-mode.html 里预置）：插入式 append 会把目录往下推，
-  // 表现为进页面时抖动（用户反馈）。容器不存在（旧页面）时退回创建。
-  let box = document.getElementById('outline-coverage-panel');
-  if (!box) {
-    const host = document.getElementById('blocks-scroll') || blocksList?.parentElement;
-    if (!host) return;
-    box = document.createElement('div');
-    box.id = 'outline-coverage-panel';
-    host.insertBefore(box, host.firstChild);
-  }
-  if (!coverage || !coverage.review_points_total) {
-    box.innerHTML = '';
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
-  box.className = 'ov-panel';
-  // 目录还没生成时，覆盖率必然是 0/13、0/153 —— 显示成红色"全部未覆盖"很像失败了，
-  // 其实只是"还没生成目录"。这时换成中性口径：已拆出多少评分点 + 待生成提示。
-  if (coverage.outline_pending) {
-    box.innerHTML = `
-      <div class="ov-panel-head">
-        <span class="ov-panel-title">目录覆盖率</span>
-        <span class="ov-scope">当前目录范围：${escapeHtml(ovScopeLabel())}</span>
-        <span class="ov-metric pending">评分点已拆出 <b>${coverage.review_points_total}</b>
-          <span class="ov-sub">合计 ${coverage.score_total} 分</span></span>
-        <span class="ov-metric pending">规范要求 <b>${coverage.requirements_total}</b> 条
-          <span class="ov-sub">待挂载</span></span>
-        <span class="ov-sub" style="margin-left:auto">目录还没生成：在下面选标包 + 类别后点「按所选生成应答目录」，生成后这里显示覆盖率</span>
-      </div>`;
-    return;
-  }
-  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-  const cls = (a, b) => (a >= b ? 'ok' : a ? 'warn' : 'bad');
-  const gaps = []
-    .concat((coverage.review_points_missing || []).map(x => `评分点未成章：${x}`))
-    .concat((coverage.requirements_missing || []).slice(0, 4).map(x => `规范要求未落点：${x}`));
-  box.innerHTML = `
-    <div class="ov-panel-head">
-      <span class="ov-panel-title">目录覆盖率</span>
-      <span class="ov-scope">当前目录范围：${escapeHtml(ovScopeLabel())}</span>
-      <span class="ov-metric ${cls(coverage.review_points_covered, coverage.review_points_total)}"
-        title="每个评分点都要有章节承载；已拆细 = 该评分点下还分了子检查项">
-        评分点 <b>${coverage.review_points_covered}/${coverage.review_points_total}</b>
-        <span class="ov-sub">已拆细 ${coverage.review_points_decomposed}</span></span>
-      <span class="ov-metric ${cls(coverage.score_covered, coverage.score_total)}"
-        title="分值合计是最实用的完整性校验：漏一个评分点，100 立刻变 90">
-        分值 <b>${coverage.score_covered}/${coverage.score_total}</b></span>
-      <span class="ov-metric ${cls(coverage.requirements_landed, coverage.requirements_total)}"
-        title="技术规范书要求是否都在目录里有落点">
-        规范要求 <b>${coverage.requirements_landed}/${coverage.requirements_total}</b>
-        <span class="ov-sub">${pct(coverage.requirements_landed, coverage.requirements_total)}%</span></span>
-    </div>
-    <div class="ov-actions">
-      <span class="ov-scope" id="ov-scope-box" title="投标范围（投标人视角）：一次设定，拆分与报告都按它执行">
-        <span class="ov-sub">投标范围</span>
-        <select id="ov-scope-select" style="min-width:220px;"><option value=""></option></select>
-        <span class="ov-sub" id="ov-scope-hint" style="color:#047857"></span>
-      </span>
-      <button class="mw-btn" id="ov-split-report"
-        title="展开/收起拆分清单：拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
-        ${splitPanelExpanded ? '收起清单' : '展开拆分清单'}</button>
-    </div>
-    ${gaps.length ? `<div class="ov-gaps">缺口：${gaps.slice(0, 6).map(escapeHtml).join('；')}</div>` : ''}`;
-  box.querySelector('#ov-split-report')?.addEventListener('click', () => toggleSplitPanel());
-}
-
 async function resolvePanelThreadId(tid) {
   if (tid) return tid;
   try { return await api.workflow.latestRunThreadId(projectId); } catch (e) { return null; }
@@ -2469,39 +2373,6 @@ async function resolvePanelThreadId(tid) {
  * 报错又被下面的 try/catch 吞了 —— 界面只表现为"投标范围一直加载中"。
  * 所以本函数失败时必须**留痕**（console.warn），不能静默。
  */
-/** 用已取到的数据**同步**填充投标范围选项（不再自己发请求、不再显示"加载中…"）。 */
-function fillScopeSelector(report, scope) {
-  const sel = document.getElementById('ov-scope-select');
-  if (!sel) return;
-  const idx = (report && report.scoring_map && report.scoring_map.index) || [];
-  const opts = ['<option value="">未设定（按提炼要求推断）</option>'];
-  idx.forEach(t => (t.packages || []).forEach(p => {
-    opts.push(`<option value="${escapeHtml(`${t.target}|${p.no}`)}">${
-      escapeHtml(`${t.target} / 标包${p.no}｜${p.name}`)}</option>`);
-  }));
-  sel.innerHTML = opts.join('');
-  if (scope && (scope.target || scope.package_no)) {
-    sel.value = `${scope.target}|${scope.package_no}`;
-  }
-  if (!sel.dataset.bound) {
-    sel.dataset.bound = '1';
-    sel.addEventListener('change', async () => {
-      const [target, no] = (sel.value || '').split('|');
-      const pack = (idx.find(t => t.target === target) || {}).packages?.find(p => p.no === no);
-      await api.workflow.setScope(projectId, {
-        target: target || '', package_no: no || '',
-        package_name: (pack && pack.name) || '',
-      });
-      await refreshOutlineCoverage(null);
-      // 内联提示代替弹窗：保存是高频操作，弹窗每次都打断
-      const hint = document.getElementById('ov-scope-hint');
-      if (hint) {
-        hint.textContent = '已保存；下次「拆解评分点」按它执行';
-        window.setTimeout(() => { if (hint) hint.textContent = ''; }, 4000);
-      }
-    });
-  }
-}
 
 async function refreshOutlineCoverage(tid) {
   tid = await resolvePanelThreadId(tid);
@@ -2520,8 +2391,6 @@ async function refreshOutlineCoverage(tid) {
       package_no: (scope || report?.project_scope || {}).package_no || '',
       categories: (report || {}).current_categories || [],
     };
-    renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
-    fillScopeSelector(report, scope);
   } catch (e) {
     // 面板是增强信息，但不许静默 —— 之前正是静默吞掉了 "bindScopeSelector is not defined"，
     // 让"投标范围一直加载中"这种问题查了很久。
@@ -2544,7 +2413,7 @@ async function refreshOutlineCoverage(tid) {
  */
 // 拆分清单是否展开。容器现在是**静态占位**（一直在 DOM 里，只是 hidden），
 // 所以不能再用"元素是否存在"判断状态 —— 否则按钮永远显示"收起清单"。
-let splitPanelExpanded = false;
+let splitPanelExpanded = true;   // 面板默认展开（用户要求：不要"收起"这类操作）
 // 保存后的即时反馈（面板会重开以刷新状态，用它把"刚才那步成功了"带回来）
 let splitPanelFlash = '';
 let splitPanelFlashKind = '';      // '' | 'err'
@@ -2565,7 +2434,7 @@ function inlineFlashFromSave(err) {
   const msg = '保存失败：' + String(err?.message || err).slice(0, 140);
   const slot = document.querySelector('[data-flash-for="topic_placement"]');
   if (slot) { slot.textContent = msg; slot.className = 'sr-dim sr-inline-err'; }
-  else { const el = document.getElementById('split-panel-inline'); if (el) el.remove(); splitPanelExpanded = false; openSplitReport(); }
+  else { const el = document.getElementById('split-panel-inline'); if (el) el.remove(); openSplitReport(); }
 }
 
 /** 把提示写到对应确认项下方（有就地容器就就地显示，否则落回顶部反馈条）。 */
@@ -2599,21 +2468,6 @@ async function maybeAutoOpenSplitReport() {
 }
 
 /** 收起拆分清单：拆下面板、恢复"待确认"横幅、露出目录。 */
-function collapseSplitPanel() {
-  // 目录还没生成时，收起面板要把"待生成"指引露出来（否则页面只剩空白）
-  const note = document.getElementById('blocks-pending');
-  if (note && outlinePending) note.hidden = false;
-  splitPanelExpanded = false;
-  const el = document.getElementById('split-panel-inline');
-  if (el) { el.hidden = true; el.innerHTML = ''; }
-  showConfirmedBanner();      // 按当前确认状态刷新横幅文案（并取消隐藏）
-}
-
-/** 展开 / 收起切换（覆盖率面板上的「拆分清单」按钮）。 */
-async function toggleSplitPanel() {
-  if (splitPanelExpanded) { collapseSplitPanel(); return; }
-  await openSplitReport();
-}
 
 async function openSplitReport({ auto = false, tab = '' } = {}) {
   // 非"切范围"引起的重开（首次展开/自动展开/收起后再开）→ 查看范围跟随当前目录
@@ -2627,9 +2481,8 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     if (host) {
       host.hidden = false;
       host.innerHTML = `<div class="sr-box"><div class="sr-head"><b>拆解评分点</b>
-        <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button></div>
+        <span class="sr-dim" style="margin-left:auto;">拆解结果</span></div>
         <div style="padding:14px 18px" class="sr-flash err">拆分清单暂时取不到（接口未返回）。请稍后重试，或点「重新拆解评分点」。</div></div>`;
-      host.querySelector('[data-act="collapse"]')?.addEventListener('click', () => collapseSplitPanel());
       splitPanelExpanded = true;
     }
     return;
@@ -2956,7 +2809,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
         <span class="sr-step-arrow">→</span>
         <span class="sr-step ${outlinePending ? '' : 'on'}">② 生成应答目录</span>
         <span class="sr-dim" id="sr-sub">${escapeHtml(smap.selection?.reason || '')}</span>
-        <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button>
+        <span class="sr-dim" style="margin-left:auto;">拆解结果</span>
       </div>
       <div class="sr-filter">
         <span class="sr-filter-k">筛选</span>
@@ -2997,7 +2850,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
           : `目录已生成${draftRevision ? `（第 ${draftRevision} 版）` : ''}：${su.unit_count || 0} 个评分单元 / ${su.sub_item_count || 0} 个详细评审项。
              需要换一份（技术 ⇄ 商务）就回「① 拆解结果」改选后重新生成。`}</span>
         <button class="mw-btn" data-act="redraft">重新拆解评分点</button>
-        ${outlinePending ? '' : '<button class="mw-btn primary" data-act="collapse">收起，看目录</button>'}
+        ${outlinePending ? '' : '<span class="sr-dim">产物 · 目录已生成（在下方「产物」页查看）</span>'}
       </div>
     </div>`;
 
@@ -3075,9 +2928,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
     background:var(--surface-2,#faf9f7);border:1px dashed var(--line);border-radius:9px}
   #blocks-pending p{margin:0}
   #blocks-pending p+p{margin-top:5px}
-  .ov-metric.pending{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
-  .ov-scope{font-size:11.5px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;
-    border-radius:999px;padding:1px 8px}
+  /* 目录区顶部工具条：只放入口与投标范围（覆盖率模块已按用户要求删除） */
   .pp-pkg{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:var(--surface-2,#faf9f7)}
   .pp-pkg>summary{cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .pp-pkg>summary::marker{color:var(--muted)}
@@ -3152,7 +3003,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
 
   el.addEventListener('click', async (e) => {
     // 收起：拆下面板，露出目录（确认与否都能收起，收起不等于确认）
-    if (e.target.closest?.('[data-act="collapse"]')) { collapseSplitPanel(); return; }
 
     // 重新拆分：复用状态栏那个入口（带后端预检，原料变过时引导到「重新提炼」）
     if (e.target.closest?.('[data-act="redraft"]')) {
@@ -3220,7 +3070,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
         return;
       }
       document.getElementById('split-panel-inline')?.remove();
-      splitPanelExpanded = false;
+      splitPanelExpanded = true;    // 面板始终展示（用户要求：不要"展开/收起"这类操作）
       await openSplitReport();
       return;
     }
@@ -3266,11 +3116,8 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
         });
       } catch (err) { /* 落库失败也放行：确认首先是本地状态，不能把用户卡住 */ }
       markRevisionConfirmed(draftRevision);
-      // 确认 → **收起面板，展示目录**（用户要的就是这个动作序列）
-      collapseSplitPanel();
       await loadExistingBlocks({ silent: true, keepSelection: true });
-      showConfirmedBanner();
-      document.querySelector('.chapter-tree-head')?.scrollIntoView({ block: 'start' })
+          document.querySelector('.chapter-tree-head')?.scrollIntoView({ block: 'start' })
         || blocksList?.scrollIntoView({ block: 'start' });
       return;
     }
@@ -3306,7 +3153,7 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
       const tid2 = await resolvePanelThreadId(null);
       await api.workflow.answerSplit(projectId, { key: kind, value, threadId: tid2 });
       document.getElementById('split-panel-inline')?.remove();
-      splitPanelExpanded = false;
+      splitPanelExpanded = true;    // 面板始终展示（用户要求：不要"展开/收起"这类操作）
       await openSplitReport();          // 重新拉取：作答已反映到确认项（flash 会带回来）
     } catch (err) {
       btn.disabled = false;
@@ -3336,26 +3183,6 @@ async function warnIfOutlineNotDerived(tid) {
   blocksList.parentElement?.insertBefore(box, blocksList);
 }
 
-/** 两阶段提示：确认前"以下目录待确认"，确认后"这是最终应答目录"。 */
-function showConfirmedBanner() {
-  const box = document.getElementById('split-confirm-banner');
-  if (!box) return;
-  if (!blocksList || !totalBlocks) { box.hidden = true; box.innerHTML = ''; return; }
-  const rev = Number(draftRevision || 0);
-  const confirmed = rev > 0 && rev <= getConfirmedRevision();
-  box.hidden = false;
-  box.className = confirmed ? 'split-banner done' : 'split-banner todo';
-  box.innerHTML = confirmed
-    ? `<strong>拆分结果已确认${rev ? `（第 ${rev} 版）` : ''}，以下是最终应答目录。</strong>
-       <span>需要调整范围或主题归属时，点右上「拆分清单」重新确认。</span>`
-    : `<strong>以下目录待确认 —— 确认后才是最终应答目录。</strong>
-       <span>点右上「拆分清单」查看评分点 / 评分单元与子检查项 / 技术要求矩阵 / 映射矩阵，并确认。</span>`;
-  if (!box.dataset.bound) {
-    box.dataset.bound = '1';
-    box.addEventListener('click', () => openSplitReport());
-    box.style.cursor = 'pointer';
-  }
-}
 
 async function loadExistingBlocks({ silent = false, keepSelection = false } = {}) {
   // 这里自己解析 threadId（优先级同 boot 段：内存 → URL → sessionStorage），
@@ -3421,8 +3248,6 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   const isDone = isDoneBlock;
 
   totalBlocks = blocks.length;
-  // 横幅文案依赖 totalBlocks，必须在赋值**之后**渲染（放前面会导致横幅永不出现）
-  showConfirmedBanner();
   doneBlocks = blocks.filter(isDone).length;
   blocks.forEach(b => {
     const blockId = b.block_id || b.id;
@@ -3440,13 +3265,20 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   refreshChapterEvidenceIndex();
   // 第①步（只拆评分点）之后：目录尚未生成 →
   //   1) **隐藏上一版目录**（否则和"只拆评分点"自相矛盾：下面还挂着旧目录）；
-  //   2) 显示占位指引；3) 展开「拆解结果」让用户选标包+类别。
+  //   2) 显示占位指引；3) 展开「拆解评分点」面板（默认展示全部内容，无需再点"展开"）。
   // 必须放在**树渲染之后**：早于树渲染会被后续的构建/切换盖掉（实测面板不出现）。
   const pendingEl = document.getElementById('blocks-pending');
   if (outlinePending) {
     blocksList.hidden = true;
     blocksList.style.display = 'none';
     if (pendingEl) pendingEl.hidden = false;
+    splitPanelAutoOpenedFor = 0;
+    openSplitReport();
+  } else if (totalBlocks) {
+    // 已生成目录 → 也直接展示面板（产物在面板里看；用户要求不要"展开/收起"操作）
+    blocksList.hidden = false;
+    blocksList.style.display = '';
+    if (pendingEl) pendingEl.hidden = true;
     splitPanelAutoOpenedFor = 0;
     openSplitReport();
   } else {
@@ -3850,7 +3682,6 @@ function attachStream(threadId) {
       // 两阶段 UI 的**主入口**：目录一到手就展示拆分清单。
       // 不能只挂在 gate_open 上 —— 闸门早就开着时重拆不会再发 gate_open 帧，
       // 于是"拆分完直接展示"永远不触发（实测踩到）。
-      showConfirmedBanner();
       maybeAutoOpenSplitReport();
     },
     onMatchStart: (data) => {
@@ -5201,11 +5032,9 @@ window.__reloadOutlineTree = () => {
 // （与 project-init 的 window.dsv 同一做法）。
 window.__ovPanels = {
   refreshCoverage: (tid) => refreshOutlineCoverage(tid || currentThreadId || getThread(projectId)),
-  renderCoverage: (cov) => renderOutlineCoverage(cov),
   risk: () => toggleScoringRisk(),
   report: (opts) => openSplitReport(opts || {}),
   autoOpen: () => maybeAutoOpenSplitReport(),
-  banner: () => showConfirmedBanner(),
   setRevision: (n) => { draftRevision = Number(n) || 0; },
   confirmedRevision: () => getConfirmedRevision(),
 };
