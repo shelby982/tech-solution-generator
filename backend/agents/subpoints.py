@@ -48,6 +48,12 @@ _CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cache" / "subpo
 
 # ── 缓存 ──────────────────────────────────────────────────────
 
+# 送进模型的原文上限。超长分项要素（实测「服务团队」那类混着价格公式的段落）
+# 会让模型长篇复述、把 JSON 挤掉（日志里就是 "未找到 JSON 起始 {"）。
+# 注意：**缓存键仍用完整原文**，只是送给模型的部分截断。
+_MODEL_INPUT_LIMIT = 1500
+
+
 def criterion_key(criterion: str) -> str:
     """缓存键：分项要素正文 + 抽取口径版本。"""
     norm = re.sub(r"\s+", "", criterion or "")
@@ -167,7 +173,7 @@ async def extract_points(
 
     if llm_extract is not None:
         try:
-            raw = await llm_extract(text)
+            raw = await llm_extract(text[:_MODEL_INPUT_LIMIT])
             if isinstance(raw, dict):
                 raw = raw.get("points")
             pts = validate_points(raw, text)

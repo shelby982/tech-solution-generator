@@ -565,17 +565,34 @@ class ZhangHengAgent:
                 subpoints[criterion_lookup_key(criterion)] = points
                 logger.info(f"张衡：评分点细项 {len(points)} 条（来源 {source}）")
 
+        from infra.parser.outline_builder import parse_placement_targets
+        placement = parse_placement_targets(instruction)
         outline = build_outline(picked, spec_sections=spec_sections,
                                 category=category, package_no=package_no,
-                                subpoints_by_criterion=subpoints or None)
+                                subpoints_by_criterion=subpoints or None,
+                                placement_targets=placement)
         if not outline:
             return None
 
-        raw_nodes = [{"level": n.level, "title": n.title} for n in outline]
+        # 显式给出 parent 下标：本骨架的顺序与层级本就自洽，不给 parent 的话
+        # normalize_nodes 会把每个节点都算作"重挂"，在闸门上显示
+        # "重挂层级不自洽的节点 94 个"这种吓人的假告警（结构其实没问题）。
+        raw_nodes: list[dict] = []
+        stack_idx: list[int] = []
+        for n in outline:
+            while stack_idx and outline[stack_idx[-1]].level >= n.level:
+                stack_idx.pop()
+            item = {"level": n.level, "title": n.title}
+            if stack_idx:
+                item["parent"] = stack_idx[-1]
+            raw_nodes.append(item)
+            stack_idx.append(len(raw_nodes) - 1)
         nodes, warnings = normalize_nodes(raw_nodes)
         sections = build_sections(nodes)
         note = ("目录按评分表结构生成：评分因素 → 详细评审项 → 分项要素要点，"
                 "并已并入技术规范书对应专题与工作项")
+        if placement:
+            note += f"；已按提炼要求把规范书专题放入「{'、'.join(placement[:3])}」"
         if warnings:
             note += "；" + "；".join(warnings)
         return sections, note

@@ -485,12 +485,12 @@ async def dispatch_subpoints_json(
             logger.info(f"使用 API [{config.provider}/{config.model}] 抽取评分点细项")
             if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                 result = await clients.generate_oneshot_openai(
-                    config, SUBPOINTS_SYSTEM, user, max_tokens=800,
+                    config, SUBPOINTS_SYSTEM, user, max_tokens=1500,
                     call_site="outline_subpoints",
                 )
             else:
                 result = await clients.generate_oneshot_claude(
-                    config, SUBPOINTS_SYSTEM, user, max_tokens=800,
+                    config, SUBPOINTS_SYSTEM, user, max_tokens=1500,
                     call_site="outline_subpoints",
                 )
             obj = _extract_json_object(result)

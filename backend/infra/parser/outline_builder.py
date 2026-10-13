@@ -360,11 +360,73 @@ def _topic_keys(title: str) -> list[str]:
     return keys
 
 
+# 「放到哪里」类结构指令：用户会直接指派位置，例如
+# 「技术规范书里面的五个专题内容需要融合在技术方案里面，在技术方案可行性里面需要体现技术方案内容」
+# 这类要求必须被**执行**，否则用户改了提炼要求、目录却一模一样 —— 实测反馈的正是这个。
+# ⚠️ 尾部**不能全可选**：写成 `([^，。；、]{2,16}?)\s*(?:里面|...)?\s*[，。；、]?` 时，
+# 懒惰组只需两个字就能满足整个模式，实测把「融合在技术方案里面」解析成了「技术」。
+# 必须要求"方位词"出现，才能把目标限定住。
+_PLACEMENT_PATTERNS = (
+    # 「在 X 里面/中/下 …动词…」——允许方位词与动词之间夹少量词（"里面需要体现"）
+    re.compile(r"(?:在|到|于)\s*([^，。；、]{2,16}?)\s*(?:里面|里|中|内|下)\s*[^，。；、]{0,8}?"
+               r"(?:体现|融合|包含|结合|写|展开|呈现|说明)"),
+    # 「融合/并入/放到 X 里面」——方位词必需
+    re.compile(r"(?:融合|并入|放到|放进|归入|纳入|安排)\s*(?:到|在|进)?\s*([^，。；、]{2,16}?)"
+               r"\s*(?:里面|里|中|内|下)"),
+)
+
+
+def parse_placement_targets(instruction: str) -> list[str]:
+    """从提炼要求里解析"把内容放到 X 下"的目标表述（按出现顺序、去重）。"""
+    text = instruction or ""
+    out: list[str] = []
+    for pat in _PLACEMENT_PATTERNS:
+        for m in pat.finditer(text):
+            t = (m.group(1) or "").strip(" 　的")
+            if 2 <= len(t) <= 16 and t not in out:
+                out.append(t)
+    return out
+
+
+def _resolve_target(target: str, nodes: list[OutlineNode]) -> Optional[OutlineNode]:
+    """把指令里的目标表述解析到具体的目录节点。
+
+    匹配用双向包含（"技术方案可行性" ↔ 节点同名；"技术方案" ↔ 更浅的节点），
+    并列时取**层级最深**的那个（指令越具体，越该命中具体章节）。
+    """
+    key = _normalize(target)
+    if not key:
+        return None
+    best: Optional[OutlineNode] = None
+    best_score: tuple[int, int, int] = (-1, -1, -1)
+    for n in nodes:
+        nk = _normalize(n.title)
+        if not nk:
+            continue
+        if not (nk == key or nk in key or key in nk):
+            continue
+        # 排序依据（**不是**简单的"层级最深"）：
+        #   1) 精确匹配优先；
+        #   2) 其次比标题长度 —— 更具体的赢；
+        #   3) 层级只作最后 tiebreak。
+        # 为什么：指令写「技术方案可行性」时，短标题「方案可行性」（它同时是
+        # 实施方案下的一个 L3）是目标串的子串且层级更深，按"最深"会选中它 ——
+        # 实测专题就被挂到了「实施方案 → 方案可行性」下。
+        score = (1 if nk == key else 0, len(nk), n.level)
+        if score > best_score:
+            best, best_score = n, score
+    return best
+
+
 def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
                   category: str = "tech", package_no: str = "",
                   max_spec_level: int = 99,
-                  subpoints_by_criterion: Optional[dict] = None) -> list[OutlineNode]:
+                  subpoints_by_criterion: Optional[dict] = None,
+                  placement_targets: Iterable[str] = ()) -> list[OutlineNode]:
     """**主入口**：评分侧骨架 + 规范书结合点，输出一份稳定可复现的目录。
+
+    ``placement_targets``：从提炼要求里解析出的"把规范书内容放到 X 下"的目标表述
+    （见 ``parse_placement_targets``）。用户明确指派的位置**优先于**关键词猜测。
 
     规范书的归属（全部确定性规则）：
     1. 先按主题词匹配到某个评分节点（从最深的 L3 往回找，就近挂载）；
@@ -401,11 +463,31 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
             out.extend(_attach(child, parent, level + 1))
         return out
 
-    # 归属规则：**每个具体主题只挂到唯一最佳的评分节点**（重叠主题词最多者，
-    # 并列时取更深的节点 —— 就近挂载）。这样每个专题只出现一次、也不会吞掉别人。
     scoring_nodes = [n for n in nodes if n.source == "scoring"]
+
+    # ① 先执行用户的**结构指令**：指令点名了"放到 X 里"时，规范书的具体主题一律挂到 X 下。
+    #    为什么放在主题匹配之前：用户的明确指派优先于系统的关键词猜测 ——
+    #    否则"我写了要求却没有任何变化"（实测反馈）。
+    placed_by_instruction = False
+    resolved: list[OutlineNode] = []
+    for target in placement_targets or ():
+        node = _resolve_target(target, scoring_nodes)
+        if node is not None and node not in resolved:
+            resolved.append(node)
+    if resolved:
+        host = max(resolved, key=lambda n: n.level)
+        for topic in _walk(forest):
+            if topic["id"] in used or not _is_research_topic(topic):
+                continue
+            _mark_used(topic)
+            idx = nodes.index(host) + 1 + _subtree_len(nodes, host)
+            for offset, child in enumerate(_attach(topic, host, host.level + 1)):
+                nodes.insert(idx + offset, child)
+        placed_by_instruction = True
+
+    # ② 没有指令时（或指令没解析出目标）：按主题词就近挂载
     for topic in _walk(forest):
-        if topic["id"] in used or not _is_specific_topic(topic):
+        if placed_by_instruction or topic["id"] in used or not _is_specific_topic(topic):
             continue
         keys = _topic_keys(topic["title"])
         if not keys:
@@ -512,6 +594,16 @@ def _dedupe_forest(forest: list[dict]) -> list[dict]:
         return out
 
     return _walk_dedupe(forest, False)
+
+
+def _is_research_topic(node: dict) -> bool:
+    """是不是"研究 / 验证 / 工具"类专题。
+
+    结构指令("把五个专题放进技术方案")只该搬这些；`人员要求 / 保密要求` 这类
+    通用要求不属于"专题"，实测会被一起拖进目标章节里（污染目录）。
+    """
+    title = (node.get("title") or "")
+    return any(w in title for w in ("研究", "验证", "工具")) and not title.startswith("工作项")
 
 
 def _walk(forest: list[dict]) -> Iterable[dict]:

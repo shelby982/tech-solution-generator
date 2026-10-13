@@ -339,6 +339,10 @@ async def zhang_heng_outline_draft_node(
             "outline_matrix": {},
             "outline_revision": revision,
             "outline_error": result.error,
+            # **本次实际用于派生的提炼要求**。前端靠比对它与输入框内容来判断
+            # 「这段提炼要求有没有用上」——此前从不写它，于是用过之后页面仍然提示
+            # "这段提炼要求还没有用于生成目录"，用户以为点了没生效（实测反馈）。
+            "outline_instruction": str(config.get("outline_instruction") or ""),
         },
     }
 
