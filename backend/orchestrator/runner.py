@@ -579,8 +579,14 @@ class WorkflowRunner:
                 logger.exception(f"runner: thread {r.thread_id} redraft_outline 异常")
                 await r.emitter.emit(events.error(str(e), retryable=False))
 
+        # 请求没带提炼要求时**保留已存的那份**：输入面板已从 UI 移除，
+        # 若把空串写进 config.outline_instruction，会把之前写好的拆分依据
+        # （标的/标包范围、专题归属等）一起抹掉，后续派生就"失忆"了。
+        effective_instruction = (instruction or "").strip() or str(
+            (state.get("config") or {}).get("outline_instruction") or "")
+
         run.task = asyncio.create_task(
-            _redraft(run, instruction or ""),
+            _redraft(run, effective_instruction),
             name=f"wf-{thread_id}-redraft-outline",
         )
 

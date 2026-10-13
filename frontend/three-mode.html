@@ -465,26 +465,6 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .ot-node > .block-card { display: none; margin-top: 8px; }
 .ot-node.open > .block-card { display: block; }
 
-/* 提炼要求输入（左侧面板底部，「原始素材」之下） */
-.outline-instruction-input {
-  width: 100%;
-  min-height: 76px;
-  resize: vertical;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--text);
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.6;
-  box-sizing: border-box;
-}
-.outline-instruction-input:focus { outline: none; border-color: var(--text); }
-.outline-instruction-input:disabled { opacity: 0.6; }
-/* 「改过但还没应用」的提示：提炼要求只影响派生，不改它就不会生效 */
-.outline-instruction-dirty { color: #b45309; margin: 6px 2px 0; }
-
 /* 模块卡片 */
 .block-card {
   background: var(--bg);
@@ -3291,19 +3271,6 @@ body[data-view="matching"] .match-detail { display: block; }
         <p class="mat-role-hint">这些文件只用于「素材匹配」，不参与要求提炼与目录生成；
 招标人给的技术规范书请放到上面「应标要求」里。</p>
       </div>
-      <div class="mat-section" id="mat-section-instruction">
-        <div class="mat-section-top">
-          <div class="mat-section-header">
-            <span class="mat-index">03</span>
-            <strong>提炼要求</strong>
-          </div>
-          <p class="mat-sub">写给张衡的大纲拆分逻辑，留空则只依据上面上传的要求文件</p>
-        </div>
-        <div class="mat-divider"></div>
-        <textarea id="outline-instruction" class="outline-instruction-input" rows="4"
-          placeholder="示例：按评分表条目组织章节，技术方案拆到三级，突出实施与售后"></textarea>
-        <p class="mat-sub outline-instruction-dirty" id="outline-instruction-dirty" hidden></p>
-      </div>
     </div>
     <div class="materials-footer">
       <button class="btn-extract" id="btn-extract" type="button">✦ 拆解评分点</button>
@@ -3846,11 +3813,11 @@ body[data-view="matching"] .match-detail { display: block; }
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
     <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
          抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
-    <script type="module" src="./assets/workbench.js?v=20261013-noshift"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261013-noshift"></script>
+    <script type="module" src="./assets/workbench.js?v=20261013-noinstr"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261013-noinstr"></script>
     <script type="module">
-      import './assets/mode-outline.js?v=20261013-noshift';
-      import './assets/mode-editor.js?v=20261013-noshift';
+      import './assets/mode-outline.js?v=20261013-noinstr';
+      import './assets/mode-editor.js?v=20261013-noinstr';
     </script>
   <script type="module" src="./assets/workspace.js?v=20261013-noconfirm"></script>
   </body>
