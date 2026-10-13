@@ -107,6 +107,9 @@ class TechRequirement:
     related_scoring_ids: list[str] = field(default_factory=list)  # 由关联节点回填
     indicators: list[str] = field(default_factory=list)          # 原文里的量化指标
     topic: str = ""                     # 所属技术专题（用于对齐评分点 S03-B 这类）
+    # 来源文件：此前数据类没有这个字段，落库取 getattr(r,"source_file","") 恒为空 ——
+    # "技术要求矩阵"因此说不出每条要求来自哪份技术规范书（实测来源一列全空）。
+    source_file: str = ""               # 来自哪份技术规范书
 
     def to_dict(self) -> dict:
         return {
@@ -114,6 +117,7 @@ class TechRequirement:
             "requirement_type": self.requirement_type,
             "requirement_text": self.requirement_text,
             "package_id": self.package_id,
+            "source_file": self.source_file,
             "source_location": self.source_location,
             "mandatory_level": self.mandatory_level,
             "verification_method": self.verification_method,
@@ -280,6 +284,7 @@ def extract_tech_requirements(
         counter += 1
         out.append(TechRequirement(
             requirement_id=f"R{counter:02d}",
+            source_file=_current_source["file"] or source_file,
             requirement_type=rtype,
             requirement_text=text,
             package_id=package_id,
@@ -290,7 +295,10 @@ def extract_tech_requirements(
         ))
 
     path: list[str] = []
+    # `_add()` 在闭包里造条目，用可变槽把"当前节属于哪份技术规范书"带进去
+    _current_source: dict = {"file": ""}
     for sec in sections or []:
+        _current_source["file"] = (_get(sec, "source_file", "") or "") or source_file
         level = int(_get(sec, "level", 1) or 1)
         title = (_get(sec, "title", "") or "").strip()
         content = _get(sec, "raw_content", "") or ""

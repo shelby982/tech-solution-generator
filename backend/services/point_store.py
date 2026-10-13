@@ -143,16 +143,21 @@ async def replace_spec_requirements(db, project_id: int, run_thread_id: str | No
             "mandatory_level": str(getattr(r, "mandatory_level", "") or ""),
             "verification_method": str(getattr(r, "verification_method", "") or ""),
             "source_file": str(getattr(r, "source_file", "") or ""),
+            # package_no：技术要求按标包/标的归属（用户口径：不存在"全项目共享"）。
+            # 抽取时 TechRequirement.package_id 已经有值，此前没落库 → 面板说不清归属。
+            "package_no": str(getattr(r, "package_id", "") or ""),
             "order_idx": i,
         }
         await db.execute(
             """INSERT INTO spec_requirements
                (project_id, run_thread_id, requirement_id, topic, title, text, level,
-                parent_id, mandatory_level, verification_method, source_file, order_idx)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                parent_id, mandatory_level, verification_method, source_file, package_no,
+                order_idx)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (project_id, run_thread_id, row["requirement_id"], row["topic"], row["title"],
              row["text"], row["level"], row["parent_id"], row["mandatory_level"],
-             row["verification_method"], row["source_file"], row["order_idx"]),
+             row["verification_method"], row["source_file"], row["package_no"],
+             row["order_idx"]),
         )
         out[rid] = row
     await db.commit()

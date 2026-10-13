@@ -243,6 +243,13 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if "score_weight" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
 
+    # spec_requirements.package_no（2026-10-13）：技术要求按标包/标的归属
+    # （用户口径：不存在"全项目共享"）。旧库需补列，否则落库写入直接报错。
+    _sr_cols = {row[1] for row in await (await conn.execute(
+        "PRAGMA table_info(spec_requirements)")).fetchall()}
+    if _sr_cols and "package_no" not in _sr_cols:
+        await conn.execute("ALTER TABLE spec_requirements ADD COLUMN package_no TEXT")
+
     # reviews：对齐评分口径的判断（审查是否真正满足要求）。
     #   criterion_text 评审依据的评分口径；satisfied 满足度；
     #   covered_points / missing_points 命中的与缺失的得分要点（JSON 数组）

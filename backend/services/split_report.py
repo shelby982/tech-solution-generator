@@ -131,9 +131,17 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "text": (r.get("text") or "")[:400],
             "mandatory_level": r.get("mandatory_level") or "",
             "source_file": r.get("source_file") or "",
+            # package_no：这条技术要求属于哪个标包（用户口径：技术要求按标包/标的归属，
+            # 不存在"全项目共享"）。以前不落库 → 面板说不清归属。
+            "package_no": r.get("package_no") or "",
         })
-    tech_matrix = [{"topic": t, "count": len(v), "requirements": v}
-                   for t, v in by_topic.items()]
+    tech_matrix = [{
+        "topic": t, "count": len(v), "requirements": v,
+        "source_files": sorted({x.get("source_file") for x in v if x.get("source_file")}),
+        "package_no": next((x.get("package_no") for x in v if x.get("package_no")), ""),
+    } for t, v in by_topic.items()]
+    req_source_files = sorted({r.get("source_file") for r in reqs if r.get("source_file")})
+    req_package_nos = sorted({r.get("package_no") for r in reqs if r.get("package_no")})
 
     # ── ④ 评分 ↔ 技术要求 映射矩阵（章节链上的 id 就是连接键）──
     req_by_id = {r["requirement_id"]: r for r in reqs}
@@ -336,6 +344,9 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         },
         "tech_matrix": {
             "topics": tech_matrix,
+            # 这批要求的归属与来源（面板据此标注，不再说"共享"）
+            "package_nos": req_package_nos,
+            "source_files": req_source_files,
             "count": len(reqs),
             "topic_count": len(tech_matrix),
         },
