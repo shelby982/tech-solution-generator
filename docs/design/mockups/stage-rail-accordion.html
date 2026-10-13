@@ -157,16 +157,6 @@
       <span class="note">选好标包后，到「待确认」确认类别再生成</span>
     </div>
 
-    <!-- 指标（随阶段变化；这里展示"评审点"阶段的指标） -->
-    <div class="metrics">
-      <div class="m ok"><div class="l">商务评分点</div><div class="v">8 个</div><div class="s">合计 100 分</div></div>
-      <div class="m ok"><div class="l">技术评分点</div><div class="v">8 个</div><div class="s">合计 100 分</div></div>
-      <div class="m ok"><div class="l">技术规范书拆解</div><div class="v">153 条</div><div class="s">19 个主题</div></div>
-      <div class="m pending"><div class="l">待确认</div><div class="v">3 项</div><div class="s">需要你确认</div></div>
-      <div class="m pending"><div class="l">产物 · 目录</div><div class="v">—</div><div class="s">确认后生成</div></div>
-      <div class="m pending"><div class="l">产物 · 映射矩阵</div><div class="v">—</div><div class="s">确认后生成</div></div>
-    </div>
-
     <div class="body">
       <!-- ── 左侧竖条三阶段导航 ── -->
       <nav class="rail">
@@ -235,11 +225,11 @@
           <div class="acc-head">
             <span class="idx">2</span>
             <span class="title">待确认</span>
-            <span class="summary">评审点已拆出，等你确认范围与类别（3 项）</span>
+            <span class="summary">3 项待确认：范围 · 类别 · 主题归属</span>
             <span class="right"><span class="caret">▸</span></span>
           </div>
           <div class="acc-body">
-            <div class="note">确认完才会输出产物（目录 / 映射矩阵）。</div>
+            <div class="note">共 <b>3 项</b>待确认；确认完才会输出产物（目录 / 映射矩阵）。</div>
             <div class="row"><span class="k">① 投标范围</span>
               <span class="box">标的1 / 标包2 · 高可靠技术专题研究与验证标包</span>
               <span class="note">要改就在上方「筛选 · 标包」切换</span></div>
@@ -263,7 +253,7 @@
           <div class="acc-head">
             <span class="idx">3</span>
             <span class="title">产物点</span>
-            <span class="summary">确认后展示：目录 + 技术与评分点映射矩阵</span>
+            <span class="summary">确认后展示：目录 · 技术与评分点映射矩阵（共 16 个评分点）</span>
             <span class="right"><span class="caret">▸</span></span>
           </div>
           <div class="acc-body">
@@ -304,8 +294,8 @@
         // 收起后把结论压成一行摘要，保持可读
         const s = a.querySelector('.summary');
         if (a.dataset.stage === '1') s.textContent = '已拆：商务评分点 8 · 技术评分点 8 · 技术规范书拆解 153 条';
-        if (a.dataset.stage === '2') s.textContent = '点击确认后进入（确认范围与类别）';
-        if (a.dataset.stage === '3') s.textContent = '确认后展示：目录 + 技术与评分点映射矩阵';
+        if (a.dataset.stage === '2') s.textContent = '3 项待确认：范围 · 类别 · 主题归属';
+        if (a.dataset.stage === '3') s.textContent = '确认后展示：目录 · 技术与评分点映射矩阵（共 16 个评分点）';
       }
     });
     rails.forEach(r => r.classList.toggle('on', r.dataset.stage === String(stage)));
