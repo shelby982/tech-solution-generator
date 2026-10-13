@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v45';
+import { api } from './api.js?v=20261015-v48';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v45';
+       } from './workspace.js?v=20261015-v48';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v45';
+       } from './workspace-model.mjs?v=20261015-v48';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v45';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v48';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -825,7 +825,7 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   // 解析阶段总数还是未知（后端给 -1）→ 不要显示 "0/-1 模块"，读者以为出错了
   statusPct.textContent = Number(totalB) > 0
     ? `${doneB}/${totalB} 模块 · ${pct}%`
-    : '正在解析';
+    : (outlineDrafting ? '梳理目录' : (splitInProgress ? '正在解析' : '—'));
   // 注意：**不要**在这里无条件清空按钮。清空 = 每次 setStatusBar 都重建节点，
   // 用户按下的瞬间节点可能刚被替换 → click 落在已移除的节点上，"点了没反应"。
   // 各分支用 setStatusActions(签名, html, bind) 渲染，同签名时只留现有节点。
@@ -3414,6 +3414,18 @@ async function warnIfOutlineNotDerived(tid) {
 
 
 async function loadExistingBlocks({ silent = false, keepSelection = false } = {}) {
+  // ── 拆分进行中：**什么都不渲染** ──
+  // 只保留面板里的加载态（"⟳ 正在拆分评审点…"）。以前这个拦截放在函数末尾，
+  // 而"库里没有章节"的分支在它之前就执行了 → 拆分期间底部又会冒出
+  // 「上传应标文件后点击「拆分评审点」开始」，与"正在拆分"自相矛盾（用户反馈）。
+  if (splitInProgress) {
+    if (blocksList) { blocksList.hidden = true; blocksList.style.display = 'none'; }
+    const ee0 = document.getElementById('blocks-empty');
+    if (ee0) { ee0.hidden = true; ee0.innerHTML = ''; }
+    const le0 = document.getElementById('blocks-loading');
+    if (le0) le0.hidden = true;
+    return;
+  }
   // 这里自己解析 threadId（优先级同 boot 段：内存 → URL → sessionStorage），
   // 因为 boot 里首次调用发生在 currentThreadId 赋值之前 —— 只读它会把 URL
   // 指定的 run 丢掉，拿到服务端的「最新 run」。
@@ -3701,10 +3713,15 @@ async function recoverStreamAfterDrop() {
   }
   // 图确实停在中途、进程也不认得它（alive=false）：才值得试一次 recover 把 _Run 建回来
   if (!RECOVERABLE_STAGES.has(currentStage) || streamRecoverCount >= MAX_STREAM_RECOVER) {
+    // 任务已不存在：**必须解除加载态**，否则面板会永远停在「正在拆分评审点…」
+    // （实测：后端重启把运行清掉后，页面就卡成转圈，而顶部已经在提示"请刷新页面重试"）。
+    splitInProgress = false;
+    outlineDrafting = false;
     await resyncFromDb();
-    setStatusBar('extracting',
+    setStatusBar('failed',
       '事件流已断开，且按检查点也接不回来（该任务可能已被清理）。请刷新页面后重试。',
       totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
+    showSplitPanelRetry('这次拆分已中断（任务已被清理）');
     return;
   }
   streamRecoverCount++;
@@ -3715,9 +3732,12 @@ async function recoverStreamAfterDrop() {
     attachStream(tid); // emitter 是新的，必须重连才能收到后续帧
   } catch (e) {
     console.warn('[workflow] 断线恢复失败', e);
-    setStatusBar('extracting',
+    splitInProgress = false;
+    outlineDrafting = false;
+    setStatusBar('failed',
       '事件流已断开，按检查点恢复也失败（该任务可能已被清理）。请刷新页面后重试。',
       0, totalBlocks, doneBlocks);
+    showSplitPanelRetry('这次拆分已中断（恢复失败）');
   }
 }
 
@@ -4182,6 +4202,24 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
 // 会连起两个运行 —— 实测日志里一次点击出现两次 POST /api/workflow/start。
 let restartInFlight = false;
 let lastRestartAt = 0;
+
+/** 拆分中断（任务被清理 / 恢复失败）：面板给出明确说明 + 一键重试。
+ *  不能继续显示加载态转圈 —— 那会让人以为还在跑。 */
+function showSplitPanelRetry(reason) {
+  splitInProgress = false;
+  const el = document.getElementById('split-panel-inline');
+  if (!el) return;
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="sr-box">
+      <div class="sr-head"><b>拆分评审点</b>
+        <span class="sr-step-arrow">左侧选阶段：评审点 → 待确认 → 产物点</span>
+        <button class="mw-btn" data-act="redraft" style="margin-left:auto;">重新拆分评审点</button></div>
+      <div class="sr-flash err" style="margin:12px 15px;">
+        ${escapeHtml(reason)}。可以点右上「重新拆分评审点」重跑，或刷新页面后重试。</div>
+    </div>`;
+  el.querySelector('[data-act="redraft"]')?.addEventListener('click', () => restartExtraction());
+}
 
 /** 面板的**加载态**：重新拆分 / 首次拆分期间显示，避免旧内容残留在右侧。
  *  位置与正式面板一致（同一个容器），拆完由 openSplitReport 覆盖重绘。 */
