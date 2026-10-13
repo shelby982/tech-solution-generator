@@ -73,6 +73,29 @@ const progressBar   = document.getElementById('progress-bar');
 const statusPct     = document.getElementById('status-pct');
 const statusActions = document.getElementById('status-actions');
 const blocksList  = document.getElementById('blocks-list');
+// 覆盖率面板 / 得分风险面板的样式。刻意用**行内流式元素**，不 prepend 到 shell ——
+// 之前那条 43px 横幅就是因为插到整页最前面把布局顶下去了。
+document.head.insertAdjacentHTML('beforeend', `<style>
+.ov-panel{margin:8px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);font-size:12.5px;line-height:1.6}
+.ov-panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ov-panel-title{font-weight:600;font-size:13px}
+.ov-metric{display:inline-flex;align-items:baseline;gap:4px;padding:2px 8px;border-radius:999px;
+  background:var(--surface-2,#f6f6f4);border:1px solid var(--line)}
+.ov-metric b{font-size:13px}
+.ov-metric.ok{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+.ov-metric.warn{background:#fffbeb;border-color:#fcd34d;color:#92400e}
+.ov-metric.bad{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
+.ov-gaps{margin-top:6px;color:#92400e}
+.ov-risk-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.ov-risk-table th,.ov-risk-table td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+.ov-risk-table th{color:var(--muted);font-weight:500}
+.ov-tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11.5px;border:1px solid}
+.ov-tag.high{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
+.ov-tag.medium{background:#fffbeb;border-color:#fcd34d;color:#92400e}
+.ov-tag.ok{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+.ov-tag.unreviewed{background:var(--surface-2,#f6f6f4);border-color:var(--line);color:var(--muted)}
+</style>`);
 // 「原始目录 vs 应答目录」的提示条样式（见 warnIfOutlineNotDerived）
 document.head.insertAdjacentHTML('beforeend', `<style>
 .raw-toc-warn{display:flex;flex-direction:column;gap:4px;margin:8px 12px;padding:10px 12px;
@@ -1139,6 +1162,7 @@ function renderMatchSummary() {
   el.innerHTML = `${stat}
     <span class="ms-chips">
       <button class="chap-btn" id="ms-matrix">覆盖矩阵</button>
+      <button class="chap-btn" id="ms-risk" title="按评分点汇总审查结论：哪些评分点的应答还不达标、缺什么">得分风险</button>
       <button class="ms-primary" id="ms-match" title="按当前章节结构把素材归属到条目（零模型调用，只处理新上传的素材）">分析素材归属</button>
     </span>`;
 }
@@ -1442,6 +1466,7 @@ function bindMatchSummary() {
   if (!el) return;
   el.addEventListener('click', (e) => {
     if (e.target.closest?.('#ms-matrix')) { toggleCoverageMatrix(); return; }
+    if (e.target.closest?.('#ms-risk')) { toggleScoringRisk(); return; }
     if (e.target.closest?.('#ms-match')) startMatching();
   });
 }
@@ -1564,6 +1589,53 @@ function refreshChapterEvidenceIndex() {
   chapterEvidence = evidenceByChapter(blocksByOrder);
 }
 
+/**
+ * **得分风险面板**：把逐章审查结论按评分点聚合后的决策视图。
+ *
+ * 回答的问题不是"素材够不够"，而是你链条里最后那一环：
+ * 「这几个评分点，哪些的应答还不达标？分别缺什么？」
+ * 与覆盖矩阵并列放在素材库视图的右栏（同一个 `#match-detail` 容器，互斥切换）。
+ */
+async function toggleScoringRisk() {
+  const el = document.getElementById('match-detail');
+  if (!el) return;
+  if (el.dataset.risk === '1') { el.dataset.risk = ''; renderMatchDetail(); return; }
+  el.dataset.risk = '1';
+  el.dataset.matrix = '';
+  el.innerHTML = `<div class="mw-empty">正在汇总得分风险…</div>`;
+  const tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  let data = null;
+  try { data = await api.workflow.scoringRisk(projectId, tid); } catch (e) { data = null; }
+  const rows = (data?.points || []).map(p => `
+    <tr data-point="${escapeHtml(p.point_id)}">
+      <td><span class="ov-tag ${p.risk}">${escapeHtml(p.risk_label || p.risk)}</span></td>
+      <td>${escapeHtml(p.factor || '')}<div style="color:var(--muted);font-size:11.5px;">${escapeHtml(p.item || '')}</div></td>
+      <td>${p.points != null ? p.points : '—'}</td>
+      <td>${p.chapters_reviewed}/${p.chapters_total}</td>
+      <td>${(p.missing_points || []).slice(0, 4).map(escapeHtml).join('；') || '<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`).join('');
+  const s = data?.summary || {};
+  el.innerHTML = `
+    <div class="mw-head">
+      <div class="mw-title">得分风险（按评分点）</div>
+      <div class="mw-meta">
+        <span>不满足 ${s.high || 0}</span>
+        <span>有缺口 ${s.medium || 0}</span>
+        <span>未审查 ${s.unreviewed || 0}</span>
+        <span>正常 ${s.ok || 0}</span>
+        <span style="margin-left:auto;"><button class="mw-btn" data-act="close-risk">返回详情</button></span>
+      </div>
+    </div>
+    <div class="mw-body">
+      ${rows ? `<table class="ov-risk-table">
+        <thead><tr><th>风险</th><th>评分点</th><th>分值</th><th>已审章节</th><th>缺口（未响应的得分要点）</th></tr></thead>
+        <tbody>${rows}</tbody></table>` : '<div class="mw-empty">还没有审查结论。先在「方案编辑」生成正文，再跑审查。</div>'}
+    </div>`;
+  el.querySelector('[data-act="close-risk"]')?.addEventListener('click', () => {
+    el.dataset.risk = ''; renderMatchDetail();
+  });
+}
+
 // 覆盖矩阵（跨章节一屏看全）：行 = 章节，列 = 提炼 / 依据 / 条目覆盖 / 正文。
 // 挂在素材库视图上：它回答的正是"哪些章节还没找到素材"。
 function toggleCoverageMatrix() {
@@ -1571,6 +1643,7 @@ function toggleCoverageMatrix() {
   if (!el) return;
   if (el.dataset.matrix === '1') { el.dataset.matrix = ''; renderMatchDetail(); return; }
   el.dataset.matrix = '1';
+  el.dataset.risk = '';        // 与得分风险面板互斥
   const ov = matchOverview;
   if (!ov) { el.innerHTML = `<div class="mw-empty">正在统计…</div>`; return; }
   const rows = ov.chapters_detail.map(c => {
@@ -2251,8 +2324,62 @@ document.addEventListener('keydown', (e) => {
  * 判据用后端预检的 `has_outline`（= outline_revision 有没有值），比在前端
  * 比对 source_toc 与 toc 更可靠。
  */
+/**
+ * 闸门上的**覆盖率面板**：评分点覆盖 / 分值合计 / 规范要求落点 + 缺口清单。
+ *
+ * 为什么放闸门：这是用户决定"目录结构能不能定下来"的地方。分值合计最实用 ——
+ * 漏一个评分点，100 立刻变 90，一眼可见，不用自己逐条数。
+ * 渲染在树栏内部（流式元素），不动全局布局。
+ */
+function renderOutlineCoverage(coverage) {
+  const host = document.getElementById('blocks-scroll') || blocksList?.parentElement;
+  if (!host) return;
+  let box = document.getElementById('outline-coverage-panel');
+  if (!coverage || !coverage.review_points_total) { box?.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'outline-coverage-panel';
+    box.className = 'ov-panel';
+    host.insertBefore(box, host.firstChild);
+  }
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const cls = (a, b) => (a >= b ? 'ok' : a ? 'warn' : 'bad');
+  const gaps = []
+    .concat((coverage.review_points_missing || []).map(x => `评分点未成章：${x}`))
+    .concat((coverage.requirements_missing || []).slice(0, 4).map(x => `规范要求未落点：${x}`));
+  box.innerHTML = `
+    <div class="ov-panel-head">
+      <span class="ov-panel-title">目录覆盖率</span>
+      <span class="ov-metric ${cls(coverage.review_points_covered, coverage.review_points_total)}">
+        评分点 <b>${coverage.review_points_covered}/${coverage.review_points_total}</b>
+        <span style="color:var(--muted)">已拆细 ${coverage.review_points_decomposed}</span></span>
+      <span class="ov-metric ${cls(coverage.score_covered, coverage.score_total)}">
+        分值 <b>${coverage.score_covered}/${coverage.score_total}</b></span>
+      <span class="ov-metric ${cls(coverage.requirements_landed, coverage.requirements_total)}">
+        规范要求 <b>${coverage.requirements_landed}/${coverage.requirements_total}</b>
+        <span style="color:var(--muted)">${pct(coverage.requirements_landed, coverage.requirements_total)}%</span></span>
+    </div>
+    ${gaps.length ? `<div class="ov-gaps">缺口：${gaps.slice(0, 6).map(escapeHtml).join('；')}</div>` : ''}`;
+}
+
+async function resolvePanelThreadId(tid) {
+  if (tid) return tid;
+  try { return await api.workflow.latestRunThreadId(projectId); } catch (e) { return null; }
+}
+
+async function refreshOutlineCoverage(tid) {
+  tid = await resolvePanelThreadId(tid);
+  if (!tid) return;
+  try {
+    const st = await api.workflow.state(tid);
+    renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
+  } catch (e) { /* 覆盖率面板是增强信息，拿不到就不显示 */ }
+}
+
 async function warnIfOutlineNotDerived(tid) {
-  if (!tid || !blocksList) return;
+  if (!blocksList) return;
+  tid = await resolvePanelThreadId(tid);
+  if (!tid) return;
   let chk = null;
   try { chk = await api.workflow.redraftCheck(tid); } catch { return; }
   const stale = document.getElementById('raw-toc-warn');
@@ -2276,6 +2403,8 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   const blocks = await api.blocks.list(projectId, tid);
   // 目录可能还没派生（运行在解析阶段中断）——先把这件事告诉用户，再谈其它
   warnIfOutlineNotDerived(tid);
+  // 覆盖率面板：闸门上的"我该拿的分/该响应的要求都安排上了吗"
+  refreshOutlineCoverage(tid);
   if (!blocks?.length) {
     // 库里没有任何章节：清掉列表与计数。早退会把上一次运行的残留视图（卡片、进度环、
     // 状态栏）留在页面上，与「刷新后看到的样子」不一致。
@@ -3913,4 +4042,13 @@ window.__reloadOutlineTree = () => {
   try { loadExistingBlocks({ silent: true, keepSelection: true }); } catch (err) {
     console.warn('[outline] 模式切换重绘失败', err);
   }
+};
+
+
+// 调试入口：面板类函数做成窗口钩子，便于在控制台直接验证/排查
+// （与 project-init 的 window.dsv 同一做法）。
+window.__ovPanels = {
+  refreshCoverage: (tid) => refreshOutlineCoverage(tid || currentThreadId || getThread(projectId)),
+  renderCoverage: (cov) => renderOutlineCoverage(cov),
+  risk: () => toggleScoringRisk(),
 };

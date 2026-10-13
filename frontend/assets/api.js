@@ -211,6 +211,10 @@ export const api = {
     abort: (threadId) =>
       fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
 
+    // 得分风险：把逐章审查结论按评分点聚合（审查对齐评分口径后的决策视图）
+    scoringRisk: (projectId, threadId) =>
+      fetch(`/api/projects/${projectId}/scoring-risk${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),
+
     // 重出目录前的预检：原料变过 / 已过闸门时，后端会说明该做什么。
     // 前端拿它决定"重拆"还是"必须重新提炼"，避免点下去 200 却什么都没变。
     redraftCheck: (threadId) =>
@@ -269,6 +273,17 @@ export const api = {
       if (!r.ok) return null;
       const runs = await r.json().catch(() => []);
       return Array.isArray(runs) && runs.length ? (runs[0]?.stage || null) : null;
+    },
+
+    // 项目最近一次 run 的 thread_id。
+    // 为什么需要：页面首次加载时 URL 往往没带 threadId、sessionStorage 也是空的，
+    // 而 /blocks 接口会回退到"最新 run"（目录照样显示），于是依赖 tid 的面板
+    // （覆盖率、目录未派生提示）会静默什么都不做 —— 实测就是这个坑。
+    latestRunThreadId: async (projectId) => {
+      const r = await fetch(`/api/projects/${projectId}/workflow-runs`);
+      if (!r.ok) return null;
+      const runs = await r.json().catch(() => []);
+      return Array.isArray(runs) && runs.length ? (runs[0]?.thread_id || null) : null;
     },
 
     // SSE — 用 EventSource。返回 EventSource，调用方可主动 .close()
