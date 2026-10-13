@@ -2358,8 +2358,12 @@ function renderOutlineCoverage(coverage) {
       <span class="ov-metric ${cls(coverage.requirements_landed, coverage.requirements_total)}">
         规范要求 <b>${coverage.requirements_landed}/${coverage.requirements_total}</b>
         <span style="color:var(--muted)">${pct(coverage.requirements_landed, coverage.requirements_total)}%</span></span>
+      <button class="mw-btn" id="ov-split-report" style="margin-left:auto;"
+        title="拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
+        拆分清单</button>
     </div>
     ${gaps.length ? `<div class="ov-gaps">缺口：${gaps.slice(0, 6).map(escapeHtml).join('；')}</div>` : ''}`;
+  box.querySelector('#ov-split-report')?.addEventListener('click', openSplitReport);
 }
 
 async function resolvePanelThreadId(tid) {
@@ -2374,6 +2378,111 @@ async function refreshOutlineCoverage(tid) {
     const st = await api.workflow.state(tid);
     renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
   } catch (e) { /* 覆盖率面板是增强信息，拿不到就不显示 */ }
+}
+
+/**
+ * **拆分清单**面板：拆目录的依据（待确认项）+ 拆完的四张表。
+ *
+ * 用户要求（固定流程）：拆分时把需要确认的内容与用户沟通；拆分完成后列出
+ * 完整的评分点及数量、评分单元与子检查项、技术要求矩阵、评分↔技术要求映射矩阵。
+ * 用整页浮层呈现（四张大表在侧栏里看不完），不占布局、关掉即走。
+ */
+async function openSplitReport() {
+  const tid = await resolvePanelThreadId(null);
+  let data = null;
+  try { data = await api.workflow.splitReport(projectId, tid); } catch (e) { data = null; }
+  if (!data) { alert('拆分清单暂时取不到，请稍后重试'); return; }
+
+  const rp = data.review_points || {}, su = data.scoring_units || {};
+  const tm = data.tech_matrix || {}, mp = data.mapping || {};
+  const conf = data.confirmations || [];
+  const pending = conf.filter(c => c.needs_confirm);
+
+  const confHtml = conf.map(c => `
+    <div class="sr-conf ${c.needs_confirm ? 'warn' : 'ok'}">
+      <div class="sr-conf-q">${c.needs_confirm ? '待确认' : '已识别'} · ${escapeHtml(c.question)}</div>
+      <div class="sr-conf-a">${escapeHtml(c.detected)}</div>
+      <div class="sr-conf-d">${escapeHtml(c.detail || '')}</div>
+    </div>`).join('');
+
+  const rpRows = (rp.items || []).map(r => `
+    <tr><td>${escapeHtml(r.factor)}</td><td>${escapeHtml(r.item)}</td>
+        <td>${r.points != null ? r.points : '—'}</td>
+        <td>${escapeHtml(r.category || '—')}</td>
+        <td>${escapeHtml(r.package_no || '—')}</td>
+        <td class="sr-crit">${escapeHtml((r.criterion || '').slice(0, 90))}</td></tr>`).join('');
+
+  const unitRows = (su.items || []).map(u => `
+    <tr><td><b>${escapeHtml(u.title)}</b></td><td>${u.score_weight != null ? u.score_weight : '—'}</td>
+        <td>${(u.items || []).length}</td>
+        <td>${(u.items || []).map(i => escapeHtml(i.title)).join('、')}</td></tr>
+    ${(u.items || []).map(i => `
+      <tr class="sr-sub"><td>　└ ${escapeHtml(i.title)}</td><td>—</td>
+          <td>${(i.sub_items || []).length}</td>
+          <td>${(i.sub_items || []).map(x => escapeHtml(x.title)).join('、')}</td></tr>`).join('')}`).join('');
+
+  const techRows = (tm.topics || []).map(t => `
+    <tr><td>${escapeHtml(t.topic)}</td><td>${t.count}</td>
+        <td class="sr-crit">${(t.requirements || []).slice(0, 3).map(r => escapeHtml(r.title || r.text.slice(0, 40))).join('；')}</td></tr>`).join('');
+
+  const mapRows = (mp.point_to_requirement || []).map(m => `
+    <tr><td>${escapeHtml(m.factor)}<div class="sr-dim">${escapeHtml(m.item)}</div></td>
+        <td>${m.points != null ? m.points : '—'}</td><td>${m.chapter_count}</td>
+        <td>${m.requirement_count}</td>
+        <td class="sr-crit">${(m.requirement_topics || []).map(escapeHtml).join('、') || '<span class="sr-dim">未挂到要求</span>'}</td></tr>`).join('');
+
+  const el = document.createElement('div');
+  el.id = 'split-report-overlay';
+  el.innerHTML = `
+    <div class="sr-box">
+      <div class="sr-head">
+        <b>拆分清单</b>
+        <span class="sr-dim">评分点 ${rp.count || 0} 个 · 合计 ${rp.score_total != null ? rp.score_total : '—'} 分
+          · 评分单元 ${su.unit_count || 0} 个 · 技术要求 ${tm.count || 0} 条/${tm.topic_count || 0} 主题</span>
+        ${pending.length ? `<span class="sr-pending">待确认 ${pending.length} 项</span>` : '<span class="sr-oktag">依据已确认</span>'}
+        <button class="mw-btn" data-act="close" style="margin-left:auto;">关闭</button>
+      </div>
+      <div class="sr-body">
+        <h4>拆分依据（需要确认的内容）</h4>${confHtml}
+        <h4>① 评分点清单（${rp.count || 0} 个，合计 ${rp.score_total != null ? rp.score_total : '—'} 分）</h4>
+        <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th><th>分值</th><th>类别</th><th>标包</th><th>评分口径</th></tr></thead><tbody>${rpRows}</tbody></table>
+        <h4>② 评分单元与子检查项（${su.unit_count || 0} 个单元 / ${su.sub_item_count || 0} 个详细评审项 / ${su.check_item_count || 0} 个子检查项）</h4>
+        <table class="sr-table"><thead><tr><th>评分单元 / 详细评审项</th><th>分值</th><th>子项数</th><th>子检查项</th></tr></thead><tbody>${unitRows}</tbody></table>
+        <h4>③ 技术要求矩阵（${tm.count || 0} 条要求 / ${tm.topic_count || 0} 个主题）</h4>
+        <table class="sr-table"><thead><tr><th>主题</th><th>条数</th><th>要求示例</th></tr></thead><tbody>${techRows}</tbody></table>
+        <h4>④ 评分 ↔ 技术要求映射矩阵</h4>
+        <table class="sr-table"><thead><tr><th>评分点</th><th>分值</th><th>章节数</th><th>关联要求数</th><th>要求主题</th></tr></thead><tbody>${mapRows}</tbody></table>
+        <div class="sr-note">
+          未落点要求 ${(mp.unmapped_requirements || []).length} 条；未关联评分点的要求 ${(mp.requirements_without_point || []).length} 条。
+          需要调整归属或范围时，改「提炼要求」后点「重新拆分目录」即可（拆分流程与本次一致）。
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  document.head.insertAdjacentHTML('beforeend', `<style>
+  #split-report-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center}
+  .sr-box{background:var(--surface,#fff);width:min(1180px,94vw);max-height:88vh;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  .sr-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .sr-body{overflow:auto;padding:10px 16px 18px}
+  .sr-body h4{margin:16px 0 6px;font-size:13px}
+  .sr-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .sr-table th,.sr-table td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  .sr-table th{color:var(--muted);font-weight:500}
+  .sr-sub td{background:var(--surface-2,#faf9f7);color:var(--muted)}
+  .sr-crit{color:var(--muted)}
+  .sr-dim{color:var(--muted);font-size:11.5px}
+  .sr-conf{padding:6px 10px;border-radius:6px;margin:4px 0;font-size:12.5px;border:1px solid var(--line)}
+  .sr-conf.warn{background:#fffbeb;border-color:#fcd34d}
+  .sr-conf.ok{background:#f8fafc}
+  .sr-conf-q{font-weight:600}
+  .sr-conf-d{color:var(--muted);font-size:11.5px}
+  .sr-pending{background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:1px 8px;border-radius:999px;font-size:12px}
+  .sr-oktag{background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;padding:1px 8px;border-radius:999px;font-size:12px}
+  .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px}
+  </style>`);
+  el.addEventListener('click', (e) => {
+    if (e.target === el || e.target.closest?.('[data-act="close"]')) el.remove();
+  });
 }
 
 async function warnIfOutlineNotDerived(tid) {

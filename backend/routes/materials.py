@@ -135,6 +135,23 @@ def _split_for_scoring_evaluation(parsed) -> list[str]:
     return chunks
 
 
+@router.get("/projects/{project_id}/split-report")
+async def get_split_report(project_id: int, threadId: str | None = None):
+    """**拆分报告**：拆目录的依据（待确认项）+ 拆完的四张清单。
+
+    用户要求（固定流程）：
+    - 拆分时把需要确认的内容与用户沟通（标包/类别识别、范围放宽、主题归属、分值合计）；
+    - 拆分完成后列出：评分点及数量、评分单元与子检查项、技术要求矩阵、评分↔技术要求映射矩阵。
+    """
+    from services.block_store import current_run_thread_id
+    from services.split_report import build_split_report
+
+    async with get_db() as db:
+        tid = threadId or await current_run_thread_id(db, project_id)
+        report = await build_split_report(db, project_id, tid)
+    return JSONResponse(content=report)
+
+
 @router.get("/projects/{project_id}/scoring-risk")
 async def get_scoring_risk(project_id: int, threadId: str | None = None):
     """**得分风险**：把逐章审查结论按评分点聚合。

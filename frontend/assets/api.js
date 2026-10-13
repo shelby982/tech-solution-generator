@@ -211,6 +211,10 @@ export const api = {
     abort: (threadId) =>
       fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
 
+    // 拆分报告：拆分依据（待确认项）+ 评分点/评分单元/技术要求矩阵/映射矩阵
+    splitReport: (projectId, threadId) =>
+      fetch(`/api/projects/${projectId}/split-report${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),
+
     // 得分风险：把逐章审查结论按评分点聚合（审查对齐评分口径后的决策视图）
     scoringRisk: (projectId, threadId) =>
       fetch(`/api/projects/${projectId}/scoring-risk${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),

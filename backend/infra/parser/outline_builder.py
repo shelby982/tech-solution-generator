@@ -580,7 +580,33 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
             score = sum(1 for k in keys if k in target)
             if score > best_score:
                 best, best_score = node, score
-        host = best if best_score else None
+        # 二级兜底：评分节点匹配不上时，与**目录里已有的章节标题**匹配（取最深的一个）。
+        # 为什么需要：规范书的功能模块类主题（如「客户档案管理模块」）在评分表里没有
+        # 同名评分点，只有「开发要求/功能要求」这一项 —— 一级匹配全落空，
+        # 411 条要求里 390 条就被算成"无评分点"（映射矩阵形同虚设）。
+        if best is None:
+            # ⚠️ 只在**带评分点的节点**里找宿主。若不限制，规范书主题会匹配到
+            # 「它自己」（同名节点先由规范书主题树建好），而那个节点没有评分点 ——
+            # 于是主题拿不到评分点、映射矩阵里 390 条要求成了"无评分点"（实测）。
+            snapshot = [n for n in nodes if n.review_point_id]
+            for node in snapshot:
+                score = sum(1 for k in keys if k in _normalize(node.title))
+                if score > best_score or (score == best_score and score
+                                          and node.level > (best.level if best else 0)):
+                    best, best_score = node, score
+            # 功能模块类主题：挂到**最像"功能要求"的那个章节**。
+            # 不能取文档顺序第一个含「功能/开发」的节点 —— 实测「功能实现方案」在
+            # 「项目重难点」下面先出现，141 条功能模块要求全挂错了地方。
+            # 优先标题就是「功能要求」这类评分项，其次取层级最浅的（越靠上越像归属）。
+            if best is None and ("模块" in topic or "功能" in topic):
+                cands = [n for n in snapshot
+                         if "功能" in _normalize(n.title) or "开发" in _normalize(n.title)]
+                cands.sort(key=lambda n: (0 if "功能要求" in _normalize(n.title) else 1, n.level))
+                if cands:
+                    best = cands[0]
+            if best is not None and not str(best.review_point_id or ""):
+                best = None            # 兜底仍未拿到评分点 → 宁可不挂，也不挂错
+        host = best if best_score or best is not None else None
         node = OutlineNode(
             level=(host.level + 1) if host else 2,
             title=f"{topic}（规范要求 {len(ids)} 条）",
