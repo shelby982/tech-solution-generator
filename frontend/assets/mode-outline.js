@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v4';
+import { api } from './api.js?v=20261013-v5';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v4';
+       } from './workspace.js?v=20261013-v5';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v4';
+       } from './workspace-model.mjs?v=20261013-v5';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v4';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v5';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2617,15 +2617,18 @@ async function openSplitReport({ auto = false } = {}) {
     </div>`).join('');
 
   // ── 标签页：四张清单 + 拆分依据，各自独立滚动（原来全挤在一页里滚不完）──
+  const matrixRows = data.package_matrix || [];
   const tabs = [
+    { id: 'matrix', label: '① 拆解结果', badge: `${matrixRows.length} 个标包` },
     { id: 'basis', label: '拆分依据', badge: pending.length ? `${pending.length} 待确认` : '已确认' },
-    { id: 'points', label: '① 评分点', badge: pointsConfirmed ? '已确认' : `${rp.count || 0}` },
-    { id: 'units', label: '② 评分单元', badge: `${su.unit_count || 0}` },
+    { id: 'points', label: '② 评分点', badge: pointsConfirmed ? '已确认' : `${rp.count || 0}` },
+    { id: 'units', label: '③ 评分单元', badge: `${su.unit_count || 0}` },
     { id: 'tech', label: '技术要求矩阵', badge: `${tm.topic_count || 0}` },
     { id: 'map', label: '映射矩阵', badge: `${(mp.point_to_requirement || []).length}` },
   ];
-  // 第一阶段停在「评分点」（用户要先确认评分点）；第二阶段停在「评分单元」（要确认目录结构）
-  const activeTab = stage === 'points' ? 'points' : 'units';
+  // 默认停在「拆解结果」：这是入口 —— 先看清各标包的商务/技术/报价评分点，
+  // 再由用户选择生成哪一份目录（用户明确要求的结构）。
+  const activeTab = 'matrix';
   const tabHtml = tabs.map(t => `
     <button class="sr-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">
       ${t.label}<span class="sr-tab-badge">${escapeHtml(String(t.badge))}</span></button>`).join('');
@@ -2735,7 +2738,46 @@ async function openSplitReport({ auto = false } = {}) {
   const flashKind = splitPanelFlashKind;
   splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
   splitPanelFlashKind = '';
+  const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
+  const curScope = data.project_scope || {};
+  const rowHtml = (row) => {
+    const isCurScope = String(curScope.target || '') === row.target
+      && String(curScope.package_no || '') === String(row.package_no);
+    const cells = (row.cells || []).map(c => {
+      const checked = isCurScope && (data.current_categories || []).includes(c.category);
+      return `<label class="pm-cell ${checked ? 'on' : ''}">
+        <input type="checkbox" data-cat="${c.category}" ${checked ? 'checked' : ''}>
+        <span class="pm-cell-label">${escapeHtml(c.label)}</span>
+        <span class="pm-cell-num">${c.count} 个评分点 · ${c.score} 分</span>
+        <span class="pm-cell-target">${escapeHtml(CAT_HINT[c.category] || '')}</span>
+      </label>`;
+    }).join('');
+    return `<div class="pm-row ${isCurScope ? 'cur' : ''}" data-row="${escapeHtml(row.target + '|' + row.package_no)}">
+      <label class="pm-pick">
+        <input type="radio" name="pm-scope" value="${escapeHtml(row.target + '|' + row.package_no)}" ${isCurScope ? 'checked' : ''}>
+        <span class="pm-scope">${escapeHtml(row.target)} / 标包${escapeHtml(row.package_no)}</span>
+        <span class="pm-name" title="${escapeHtml(row.package_name)}">${escapeHtml(row.package_name)}</span>
+        ${isCurScope ? '<span class="sr-chip sel">当前</span>' : ''}
+      </label>
+      <div class="pm-cells">${cells}</div>
+    </div>`;
+  };
+  const matrixHtml = matrixRows.length
+    ? matrixRows.map(rowHtml).join('')
+    : '<div class="sr-empty">没有解析到评分表。请先上传招标文件与技术规范书，再点左下「拆解评分点」。</div>';
+
   const panes = {
+    matrix: `
+      <h4>拆解结果：每个标包的商务 / 技术 / 报价评分点</h4>
+      ${matrixHtml}
+      <div class="sr-answer" style="margin-top:10px">
+        <button class="mw-btn primary" data-act="generate">按所选生成应答目录</button>
+        <span class="sr-dim">选一个标包 + 勾选要生成的类别（可多选）。生成后可回到本页切换成另一份目录。</span>
+      </div>
+      <div class="sr-dim" data-flash-for="generate"></div>
+      <div class="sr-note">当前目录包含：${
+        (data.current_categories || []).map(c => CAT_HINT[c] || c).join('、') || '—'}
+        ｜投标范围：${escapeHtml((curScope.target || '未设定') + ' / 标包' + (curScope.package_no || '—'))}</div>`,
     basis: `
       ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
       <h4>待确认（${pending.length}）</h4>
@@ -2876,6 +2918,20 @@ async function openSplitReport({ auto = false } = {}) {
   .sr-topic-name{flex:0 0 46%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sr-topic-row select{flex:1;font:inherit;font-size:12.5px;padding:2px 6px;
     border:1px solid var(--line);border-radius:6px;background:#fff}
+  .pm-row{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:7px 0;
+    background:var(--surface-2,#faf9f7)}
+  .pm-row.cur{border-color:#bfdbfe;background:#f0f7ff}
+  .pm-pick{display:flex;align-items:center;gap:8px;cursor:pointer}
+  .pm-scope{font-weight:600;font-size:12.5px;white-space:nowrap}
+  .pm-name{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pm-cells{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
+  .pm-cell{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;
+    padding:5px 9px;background:#fff;cursor:pointer;font-size:12.5px}
+  .pm-cell.on{border-color:#2563eb;background:#eff6ff}
+  .pm-cell-label{font-weight:600}
+  .pm-cell-num{color:var(--muted)}
+  .pm-cell-target{color:#1d4ed8;font-size:11.5px}
+  .pm-cell input{accent-color:#2563eb}
   .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--surface-2,#faf9f7)}
   .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -2904,6 +2960,47 @@ async function openSplitReport({ auto = false } = {}) {
     if (e.target.closest?.('[data-act="redraft"]')) {
       el.remove();
       await redraftOutline();
+      return;
+    }
+
+    // 「按所选生成应答目录」：设投标范围 → 存类别选择 → 重新派生
+    if (e.target.closest?.('[data-act="generate"]')) {
+      const btnG = e.target.closest('[data-act="generate"]');
+      const slot = document.querySelector('[data-flash-for="generate"]');
+      const pickedRow = document.querySelector('#split-panel-inline input[name="pm-scope"]:checked');
+      if (!pickedRow) {
+        if (slot) { slot.textContent = '请先选择一个标包。'; slot.className = 'sr-dim sr-inline-err'; }
+        return;
+      }
+      const [target, no] = pickedRow.value.split('|');
+      const row = (data.package_matrix || []).find(r =>
+        r.target === target && String(r.package_no) === String(no)) || {};
+      const cats = [...document.querySelectorAll('#split-panel-inline [data-cat]:checked')]
+        .map(x => x.dataset.cat);
+      if (!cats.length) {
+        if (slot) { slot.textContent = '请至少勾选一个类别（技术 / 商务 / 报价）。'; slot.className = 'sr-dim sr-inline-err'; }
+        return;
+      }
+      btnG.disabled = true;
+      if (slot) { slot.textContent = '正在保存选择…'; slot.className = 'sr-dim'; }
+      try {
+        await api.workflow.setScope(projectId, {
+          target: target || '', package_no: no || '',
+          package_name: row.package_name || '',
+        });
+        const tidG = await resolvePanelThreadId(null);
+        await api.workflow.answerSplit(projectId, {
+          key: 'categories', value: { categories: cats }, threadId: tidG,
+        });
+        const label = row.cells.filter(c => cats.includes(c.category)).map(c => c.label).join('+');
+        splitPanelFlash = `已选择 ${target}/标包${no} · ${label}，正在按此生成应答目录…`;
+        if (slot) { slot.textContent = splitPanelFlash; slot.className = 'sr-dim'; }
+        // 复用状态栏入口（带后端预检；原料变过时会引导到「重新提炼」）
+        await redraftOutline();
+      } catch (err) {
+        btnG.disabled = false;
+        if (slot) { slot.textContent = '生成失败：' + String(err?.message || err).slice(0, 120); slot.className = 'sr-dim sr-inline-err'; }
+      }
       return;
     }
 

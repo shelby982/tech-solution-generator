@@ -253,6 +253,39 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         except Exception as e:      # 地图是增强信息，失败不影响其余四张清单
             logger.warning(f"split_report：评分地图构建失败（{e}）")
 
+    # ── 拆解结果矩阵：**标包 × 类别**（商务/技术/报价）──
+    # 用户要的结构：进来先看清"每个标包各自的商务/技术/报价评分点各是什么"，
+    # 再自己选择生成哪一份目录（选技术→技术应答目录，选商务→商务应答目录）。
+    # 之前只按"技术"硬派生 + 一堆"系统识别、请用户确认"的条目，结构反而看不见。
+    CAT_LABEL = {"tech": "技术", "commerce": "商务", "price": "报价", "other": "其他"}
+    CAT_ORDER = ["tech", "commerce", "price", "other"]
+    matrix: list[dict] = []
+    for e in (scoring_map or {}).get("entries", []):
+        if not e.get("resolved"):
+            continue   # 范围没认出来的表不进矩阵（避免误选）
+        cells = []
+        for c in sorted(e.get("categories") or [],
+                        key=lambda x: CAT_ORDER.index(x["category"])
+                        if x.get("category") in CAT_ORDER else 99):
+            cells.append({
+                "category": c["category"],
+                "label": CAT_LABEL.get(c["category"], c["category"] or "未分类"),
+                "count": c["count"],
+                "score": c["score"],
+            })
+        matrix.append({
+            "target": e.get("target") or "",
+            "package_no": e.get("package_no") or "",
+            "package_name": e.get("package_name") or e.get("scope_label") or "",
+            "cells": cells,
+            "total_count": e.get("total_count"),
+            "total_score": e.get("total_score"),
+            "sources": [x.get("source_file") for x in (e.get("sources") or []) if x.get("source_file")],
+        })
+    # 当前这次运行**实际用了**哪些类别（从落库的评分点反推），供前端回显勾选
+    current_categories = sorted({(p.get("category") or "") for p in points if p.get("category")})
+
+
     return {
         "review_points": {
             "items": rp_rows,
@@ -280,6 +313,8 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "unmapped_requirements": [r["requirement_id"] for r in req_rows if not r["landed"]],
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
+        "package_matrix": matrix,
+        "current_categories": current_categories,
         "topic_options": topic_options,
         "chapter_options": chapter_options,
         "scoring_map": scoring_map,

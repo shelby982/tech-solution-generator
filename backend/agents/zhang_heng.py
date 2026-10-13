@@ -565,9 +565,11 @@ class ZhangHengAgent:
             except Exception as e:
                 logger.warning(f"张衡：读取拆分作答失败（{e}），按推断执行")
 
+        # 类别选择（用户按标包勾选）：**集合**语义，不是"取第一个"。
+        # 用户要的是"选技术就出技术应答目录、选商务就出商务应答目录，也可两者都要"，
+        # 所以这里保留集合、下游按集合过滤，并把结果写进 note 便于核对。
         category = extract_category(instruction) or "tech"
-        if answer_categories:
-            category = answer_categories[0] if len(answer_categories) == 1 else ""
+        selected_categories = [c for c in (answer_categories or []) if c] or [category]
 
         # 范围词优先取提炼要求；要求里没写就从**技术规范书文件名**里推 ——
         # 文件名常写着「标的1」「标包2」，是现成的强信号（实测该项目文件名即
@@ -613,7 +615,7 @@ class ZhangHengAgent:
             return None
 
         picked = [p for p in pts
-                  if (not category or p.category == category)
+                  if (p.category or "") in selected_categories
                   and (not package_no or str(p.package_no or "") == package_no)]
         # 范围过滤要**容错**，不能一过滤为空就退回模型自由生成 —— 那是"目录变差"的根源。
         # 实测：南网中台那份招标文件的标包是「适用标包：<名称>」写法（没有编号），
@@ -623,12 +625,12 @@ class ZhangHengAgent:
         effective_package_no = package_no
         effective_category = category
         if not picked and pts:
-            by_cat = [p for p in pts if not category or p.category == category]
+            by_cat = [p for p in pts if (p.category or "") in selected_categories]
             if by_cat:
                 picked = by_cat
                 effective_package_no = ""      # 放宽后下游不能再按标包过滤
                 scope_note = (f"材料里的标包没有编号（无法对应「{package_no}」），"
-                              f"已按「{category or '全部'}」类的全部评分点拆解")
+                              f"已按「{'、'.join(selected_categories)}」类的全部评分点拆解")
             else:
                 picked = list(pts)
                 effective_package_no = ""
@@ -722,8 +724,10 @@ class ZhangHengAgent:
                 groups.setdefault(topic, []).append(rid)
         requirement_groups = [{"topic": t, "ids": ids} for t, ids in groups.items()]
 
+        # 注意：类别过滤已在上面按**集合**完成，这里不能再传单类别
+        # （传了会把多选的第二类重新过滤掉）。
         outline = build_outline(picked, spec_sections=spec_sections,
-                                category=effective_category, package_no=effective_package_no,
+                                category="", package_no=effective_package_no,
                                 subpoints_by_criterion=subpoints or None,
                                 placement_targets=placement,
                                 requirement_ids_by_title=requirement_ids_by_title(requirements),
@@ -771,6 +775,13 @@ class ZhangHengAgent:
             note += f"；{scope_note}"
         if map_note:
             note += f"；{map_note}"
+        if len(selected_categories) > 1 or selected_categories != ["tech"]:
+            cnt = {}
+            for p in picked:
+                cnt[p.category] = cnt.get(p.category, 0) + 1
+            label = {"tech": "技术", "commerce": "商务", "price": "报价", "other": "其他"}
+            note += "；本次目录包含：" + "、".join(
+                f"{label.get(c, c)} {n} 个评分点" for c, n in sorted(cnt.items()))
         # 覆盖率写进闸门可读的一句话：漏没漏一眼可见（分值合计最能暴露漏评分点）
         note += (f"；覆盖：评分点 {coverage['review_points_covered']}/"
                  f"{coverage['review_points_total']}（已拆细 {coverage['review_points_decomposed']}），"
