@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261015-v40';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261015-v40';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261015-v42';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261015-v42';
 const $ = id => document.getElementById(id);
 let activeId = new URLSearchParams(location.search).get('blockId');
 let mode = 'current', visibleLimit = 100;

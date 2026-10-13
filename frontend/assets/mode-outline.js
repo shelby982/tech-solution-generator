@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v40';
+import { api } from './api.js?v=20261015-v42';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v40';
+       } from './workspace.js?v=20261015-v42';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v40';
+       } from './workspace-model.mjs?v=20261015-v42';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v40';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v42';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -818,7 +818,10 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   }
   progressTrack.style.display = 'block';
   progressBar.style.width = pct + '%';
-  statusPct.textContent = `${doneB}/${totalB} 模块 · ${pct}%`;
+  // 解析阶段总数还是未知（后端给 -1）→ 不要显示 "0/-1 模块"，读者以为出错了
+  statusPct.textContent = Number(totalB) > 0
+    ? `${doneB}/${totalB} 模块 · ${pct}%`
+    : '正在解析';
   // 注意：**不要**在这里无条件清空按钮。清空 = 每次 setStatusBar 都重建节点，
   // 用户按下的瞬间节点可能刚被替换 → click 落在已移除的节点上，"点了没反应"。
   // 各分支用 setStatusActions(签名, html, bind) 渲染，同签名时只留现有节点。
@@ -3105,10 +3108,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-inline-err{color:#b91c1c}
-  #blocks-pending{margin:0 12px 12px;padding:10px 12px;text-align:left;align-items:flex-start;
-    background:var(--surface-2,#faf9f7);border:1px dashed var(--line);border-radius:9px}
-  #blocks-pending p{margin:0}
-  #blocks-pending p+p{margin-top:5px}
   /* 目录区顶部工具条：只放入口与投标范围（覆盖率模块已按用户要求删除） */
   .pp-pkg{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:var(--surface-2,#faf9f7)}
   .pp-pkg>summary{cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -3118,6 +3117,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .pp-pkg .sr-table{margin:0}
   /* 筛选条：**最顶层**，下面所有内容（指标→页签→明细）都由它派生 */
   /* ── 主体：左侧竖条三阶段 + 右侧当前阶段内容（点击切换，不展开/收起）── */
+  /* 重新拆分 / 首次拆分期间的加载态（替代旧内容，避免"旧数据还挂着"） */
+  .sr-loading{display:flex;align-items:center;gap:10px;padding:22px 18px;flex-wrap:wrap}
+  .sr-loading>span:nth-child(2){font-size:13px;font-weight:600}
+  .sr-spinner{width:14px;height:14px;border-radius:50%;border:2px solid #bfdbfe;
+    border-top-color:#2563eb;animation:sr-spin .8s linear infinite;display:inline-block}
+  @keyframes sr-spin{to{transform:rotate(360deg)}}
   .sr-body{display:flex;align-items:stretch;min-height:520px}
   .sr-rail{flex:0 0 172px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0}
   .sr-rail-item{position:relative;display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer}
@@ -3480,24 +3485,22 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   //   1) **隐藏上一版目录**（否则和"只拆评分点"自相矛盾：下面还挂着旧目录）；
   //   2) 显示占位指引；3) 展开「拆解评分点」面板（默认展示全部内容，无需再点"展开"）。
   // 必须放在**树渲染之后**：早于树渲染会被后续的构建/切换盖掉（实测面板不出现）。
-  const pendingEl = document.getElementById('blocks-pending');
+  // 说明：原来这里还有一个「评分点已拆出，目录还没生成…」的占位块（#blocks-pending），
+  // 它与面板里的说明**完全重复**（用户反馈），已删除；需要引导时由面板自身承担。
   if (outlinePending) {
     blocksList.hidden = true;
     blocksList.style.display = 'none';
-    if (pendingEl) pendingEl.hidden = false;
     splitPanelAutoOpenedFor = 0;
     openSplitReport();
   } else if (totalBlocks) {
     // 已生成目录 → 也直接展示面板（产物在面板里看；用户要求不要"展开/收起"操作）
     blocksList.hidden = false;
     blocksList.style.display = '';
-    if (pendingEl) pendingEl.hidden = true;
     splitPanelAutoOpenedFor = 0;
     openSplitReport();
   } else {
     blocksList.hidden = false;
     blocksList.style.display = '';
-    if (pendingEl) pendingEl.hidden = true;
   }
   applyPageView();             // 先定视图：下面的总览/筛选/详情都按当前视图渲染
   renderMatchSummary();
@@ -4153,6 +4156,28 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
 let restartInFlight = false;
 let lastRestartAt = 0;
 
+/** 面板的**加载态**：重新拆分 / 首次拆分期间显示，避免旧内容残留在右侧。
+ *  位置与正式面板一致（同一个容器），拆完由 openSplitReport 覆盖重绘。 */
+function showSplitPanelLoading(text) {
+  const el = document.getElementById('split-panel-inline');
+  if (!el) return;
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="sr-box">
+      <div class="sr-head"><b>拆分评审点</b>
+        <span class="sr-step-arrow">左侧选阶段：评审点 → 待确认 → 产物点</span></div>
+      <div class="sr-loading">
+        <span class="sr-spinner"></span>
+        <span>${escapeHtml(text)}</span>
+        <span class="sr-dim">正在解析材料并按标包拆分商务 / 技术评分点与技术规范书要求，完成后在这里展示。</span>
+      </div>
+    </div>`;
+  // 旧目录一并藏起来：它是上一次的成果，重拆期间显示会让人以为已经被新结果覆盖
+  if (blocksList) { blocksList.hidden = true; blocksList.style.display = 'none'; }
+  const empty = document.getElementById('blocks-empty');
+  if (empty) empty.hidden = true;
+}
+
 async function restartExtraction() {
   if (restartInFlight) {
     console.info('[workflow] 上一次"重新拆解"还在进行中，忽略这次点击');
@@ -4170,7 +4195,11 @@ async function restartExtraction() {
   restartInFlight = true;
   const btn = document.getElementById('btn-extract');
   if (btn) btn.disabled = true;
-  setStatusBar('extracting', '正在清空上次的拆解结果…', 0, 0, 0);
+  setStatusBar('extracting', '正在清空上次的拆分结果…', 0, 0, 0);
+  // **立刻把旧内容换掉**：重新拆分时右侧还挂着上一次的评分点/规范书要求，
+  // 与"正在重新拆分"矛盾、也让人误以为已经拆好了（用户反馈）。这里换成加载态，
+  // 新的结果由 loadExistingBlocks → openSplitReport 在同一位置重绘。
+  showSplitPanelLoading('正在重新拆分评审点…');
   // **先取消正在跑的任务**再清库：否则旧任务会边跑边往库里写，
   // 清完之后又冒出残行（清了等于没清）。
   if (currentThreadId) {
@@ -4220,8 +4249,10 @@ async function startExtraction(forceRestart = false) {
     } catch {}
     applyPageView();
   }
-  setStatusBar('extracting', '准备提炼…', 0, 0, 0);
+  setStatusBar('extracting', '准备拆分…', 0, 0, 0);
   setExtractDisabled(true);
+  // 首次拆分同样先给加载态：避免上一次残留内容与新任务并存
+  showSplitPanelLoading('正在拆分评审点…');
 
   try {
     if (forceRestart && currentThreadId) {
