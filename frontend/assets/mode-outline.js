@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v2';
+import { api } from './api.js?v=20261013-v3';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v2';
+       } from './workspace.js?v=20261013-v3';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v2';
+       } from './workspace-model.mjs?v=20261013-v3';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v2';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v3';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2403,6 +2403,7 @@ function renderOutlineCoverage(coverage) {
       <span class="ov-scope" id="ov-scope-box" title="投标范围（投标人视角）：一次设定，拆分与报告都按它执行">
         <span class="ov-sub">投标范围</span>
         <select id="ov-scope-select" style="min-width:220px;"><option value=""></option></select>
+        <span class="ov-sub" id="ov-scope-hint" style="color:#047857"></span>
       </span>
       <button class="mw-btn" id="ov-split-report"
         title="展开/收起拆分清单：拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
@@ -2451,7 +2452,12 @@ function fillScopeSelector(report, scope) {
         package_name: (pack && pack.name) || '',
       });
       await refreshOutlineCoverage(null);
-      alert('投标范围已保存。下次「重新拆解评分点」按它执行。');
+      // 内联提示代替弹窗：保存是高频操作，弹窗每次都打断
+      const hint = document.getElementById('ov-scope-hint');
+      if (hint) {
+        hint.textContent = '已保存；下次「拆解评分点」按它执行';
+        window.setTimeout(() => { if (hint) hint.textContent = ''; }, 4000);
+      }
     });
   }
 }
@@ -2494,6 +2500,38 @@ async function refreshOutlineCoverage(tid) {
 let splitPanelExpanded = false;
 // 保存后的即时反馈（面板会重开以刷新状态，用它把"刚才那步成功了"带回来）
 let splitPanelFlash = '';
+let splitPanelFlashKind = '';      // '' | 'err'
+
+/** 解析「主题=章节标题」：分隔符不限 `=`，也认 `：` `:` `→` `->` 制表符与两空格以上。
+ *  只写主题不写归属是常见输入，给内联提示即可，不该用阻断式弹窗。 */
+function parseTopicPlacement(raw) {
+  const map = {};
+  const bad = [];
+  String(raw || '').split('\n').forEach((line) => {
+    let t = line.trim().replace(/^[-*•·]\s*/, '');
+    if (!t) return;
+    const m = t.match(/^(.+?)\s*(?:=|＝|：|:|→|->|\t|\s{2,})\s*(.+)$/);
+    if (!m || !m[1].trim() || !m[2].trim()) { bad.push(t); return; }
+    map[m[1].trim()] = m[2].trim();
+  });
+  return { map, bad };
+}
+
+/** 保存失败：就地显示（找不到就地容器时，重开面板让顶部 flash 显示）。 */
+function inlineFlashFromSave(err) {
+  const msg = '保存失败：' + String(err?.message || err).slice(0, 140);
+  const slot = document.querySelector('[data-flash-for="topic_placement"]');
+  if (slot) { slot.textContent = msg; slot.className = 'sr-dim sr-inline-err'; }
+  else { const el = document.getElementById('split-panel-inline'); if (el) el.remove(); splitPanelExpanded = false; openSplitReport(); }
+}
+
+/** 把提示写到对应确认项下方（有就地容器就就地显示，否则落回顶部反馈条）。 */
+function inlineFlash(host, text, kind = '') {
+  const slot = host?.parentElement?.querySelector('[data-flash-for="topic_placement"]');
+  if (!slot) return;
+  slot.textContent = text;
+  slot.className = kind === 'err' ? 'sr-dim sr-inline-err' : 'sr-dim';
+}
 
 function confirmedRevisionKey() {
   const tid = currentThreadId || params.get('threadId') || getThread(projectId) || 'latest';
@@ -2535,7 +2573,19 @@ async function openSplitReport({ auto = false } = {}) {
   const tid = await resolvePanelThreadId(null);
   let data = null;
   try { data = await api.workflow.splitReport(projectId, tid); } catch (e) { data = null; }
-  if (!data) { alert('拆分清单暂时取不到，请稍后重试'); return; }
+  if (!data) {
+    // 不弹窗：把失败写进面板容器（用户点开的地方），一眼能看到
+    const host = document.getElementById('split-panel-inline');
+    if (host) {
+      host.hidden = false;
+      host.innerHTML = `<div class="sr-box"><div class="sr-head"><b>拆解评分点</b>
+        <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button></div>
+        <div style="padding:14px 18px" class="sr-flash err">拆分清单暂时取不到（接口未返回）。请稍后重试，或点「重新拆解评分点」。</div></div>`;
+      host.querySelector('[data-act="collapse"]')?.addEventListener('click', () => collapseSplitPanel());
+      splitPanelExpanded = true;
+    }
+    return;
+  }
 
   const rp = data.review_points || {}, su = data.scoring_units || {};
   const tm = data.tech_matrix || {}, mp = data.mapping || {};
@@ -2676,10 +2726,12 @@ async function openSplitReport({ auto = false } = {}) {
   }).join('');
 
   const flashNow = splitPanelFlash;
+  const flashKind = splitPanelFlashKind;
   splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
+  splitPanelFlashKind = '';
   const panes = {
     basis: `
-      ${flashNow ? `<div class="sr-flash">${escapeHtml(flashNow)}</div>` : ''}
+      ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
       <h4>待确认（${pending.length}）</h4>
       ${pending.length ? pending.map(confItem).join('') : '<div class="sr-empty">没有待确认项，拆分依据已闭合。</div>'}
       <h4>已识别（${settled.length}）</h4>
@@ -2811,6 +2863,7 @@ async function openSplitReport({ auto = false } = {}) {
   .sr-flash{margin:8px 0;padding:7px 11px;border-radius:7px;font-size:12.5px;
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
+  .sr-inline-err{color:#b91c1c}
   .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--surface-2,#faf9f7)}
   .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -2852,8 +2905,9 @@ async function openSplitReport({ auto = false } = {}) {
         });
         splitPanelFlash = '已跳过该项（不指定归属，拆分照常进行）';
       } catch (err) {
-        splitPanelFlash = '';
-        alert('保存失败：' + String(err).slice(0, 120));
+        splitPanelFlash = '保存失败：' + String(err).slice(0, 120);
+        splitPanelFlashKind = 'err';
+        inlineFlashFromSave(err);
         return;
       }
       document.getElementById('split-panel-inline')?.remove();
@@ -2881,7 +2935,9 @@ async function openSplitReport({ auto = false } = {}) {
           rp.score_total != null ? rp.score_total : '—'} 分）。请继续确认目录拆分。`;
       } catch (err) {
         btnP.disabled = false;
-        alert('保存失败：' + String(err).slice(0, 120));
+        splitPanelFlash = '保存失败：' + String(err).slice(0, 120);
+        splitPanelFlashKind = 'err';
+        inlineFlashFromSave(err);
         return;
       }
       await openSplitReport();          // 重开：此时阶段已是"确认目录拆分"
@@ -2919,25 +2975,20 @@ async function openSplitReport({ auto = false } = {}) {
       value = { table_no: Number(host.querySelector('[data-answer="scope"]').value) };
     } else if (kind === 'topic_placement') {
       const raw = host.querySelector('[data-answer="topic_placement"]').value || '';
-      const map = {};
-      const bad = [];
-      raw.split('\n').forEach(line => {
-        const t = line.trim();
-        if (!t) return;
-        const parts = t.split('=');
-        if (parts.length < 2 || !parts[0].trim() || !parts[1].trim()) { bad.push(t); return; }
-        map[parts[0].trim()] = parts.slice(1).join('=').trim();
-      });
+      const { map, bad } = parseTopicPlacement(raw);
       const n = Object.keys(map).length;
-      // 不静默吞掉格式错误：说不出问题在哪，用户只会以为"点了没反应"
+      // **不弹 alert**：原生弹窗会打断操作，而且只写主题不写归属是很自然的尝试。
+      // 改为面板内联提示，并把能解析的照常保存（部分成功也给明确结果）。
       if (!n) {
-        alert(bad.length
-          ? `格式不对：\n${bad.slice(0, 3).join('\n')}\n\n请按「主题=章节标题」每行一条，例如：\n3.2.1. 客户档案管理模块=功能要求`
-          : '请先填写要指定的归属，或点「跳过（暂不指定）」。（本项可选，不影响确认目录）');
+        splitPanelFlash = bad.length
+          ? `没认出可用的归属：${bad.slice(0, 2).join('；')}。请写成「主题=章节标题」，例如 3.2.1. 客户档案管理模块=功能要求`
+          : '还没填内容。想指定归属就写「主题=章节标题」；不想指定可直接点「跳过（暂不指定）」——本项可选，不影响确认目录。';
+        splitPanelFlashKind = bad.length ? 'err' : '';
+        inlineFlash(host, splitPanelFlash, splitPanelFlashKind);
         return;
       }
       value = map;
-      splitPanelFlash = `已保存 ${n} 条主题归属${bad.length ? `，另有 ${bad.length} 行格式不正确已忽略` : ''}；`
+      splitPanelFlash = `已保存 ${n} 条主题归属${bad.length ? `（另有 ${bad.length} 行未识别，已忽略）` : ''}；`
         + '下次「拆解评分点」按它挂载。';
     } else if (kind === 'structure') {
       value = { confirmed: true };
@@ -2952,7 +3003,9 @@ async function openSplitReport({ auto = false } = {}) {
       await openSplitReport();          // 重新拉取：作答已反映到确认项（flash 会带回来）
     } catch (err) {
       btn.disabled = false;
-      alert('保存失败：' + String(err).slice(0, 120));
+      splitPanelFlash = '保存失败：' + String(err).slice(0, 120);
+      splitPanelFlashKind = 'err';
+      inlineFlashFromSave(err);
     }
   });
 }
