@@ -27,7 +27,24 @@ CREATE TABLE IF NOT EXISTS projects (
     summary     TEXT,
     base_snapshot_id INTEGER,
     target_pages INTEGER,
+    -- 投标范围（投标人视角）：我们投的是哪个标的/标包。
+    -- 这是"一次设定、贯穿全程"的属性，不该每次靠提炼要求里的文字去推 ——
+    -- 实测多标包文件里推错范围=整份技术应答目录错。
+    scope_target        TEXT DEFAULT '',
+    scope_package_no    TEXT DEFAULT '',
+    scope_package_name  TEXT DEFAULT '',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 待确认项的作答：拆分时把"识别到了什么"摆给用户，用户的回答落库，
+-- 下一次拆分（以及报告）按回答执行 —— 不再是"看得到但改不了"。
+CREATE TABLE IF NOT EXISTS split_answers (
+    project_id  INTEGER NOT NULL,
+    thread_id   TEXT DEFAULT '',
+    key         TEXT NOT NULL,
+    value       TEXT DEFAULT '{}',
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, thread_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS materials (
@@ -229,6 +246,12 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # reviews：对齐评分口径的判断（审查是否真正满足要求）。
     #   criterion_text 评审依据的评分口径；satisfied 满足度；
     #   covered_points / missing_points 命中的与缺失的得分要点（JSON 数组）
+    cursor = await conn.execute("PRAGMA table_info(projects)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    for col in ("scope_target", "scope_package_no", "scope_package_name"):
+        if col not in existing_cols:
+            await conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT DEFAULT ''")
+
     cursor = await conn.execute("PRAGMA table_info(reviews)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
     for col in ("criterion_text", "satisfied", "covered_points", "missing_points"):

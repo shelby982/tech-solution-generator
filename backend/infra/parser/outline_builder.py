@@ -436,7 +436,8 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
                   subpoints_by_criterion: Optional[dict] = None,
                   placement_targets: Iterable[str] = (),
                   requirement_ids_by_title: Optional[dict] = None,
-                  requirement_groups: Optional[list] = None) -> list[OutlineNode]:
+                  requirement_groups: Optional[list] = None,
+                  topic_placement: Optional[dict] = None) -> list[OutlineNode]:
     """**主入口**：评分侧骨架 + 规范书结合点，输出一份稳定可复现的目录。
 
     ``placement_targets``：从提炼要求里解析出的"把规范书内容放到 X 下"的目标表述
@@ -573,6 +574,30 @@ def build_outline(review_points: Iterable, *, spec_sections: Iterable = (),
         ids = list(group.get("ids") or [])
         if not topic or not ids:
             continue
+        # 用户作答优先：显式指定归属（章节标题或 block_id）时不再猜。
+        # 这是"待确认项可作答"的落点 —— 自动匹配总有猜错的时候（实测功能模块
+        # 曾全挂到"项目重难点"下），用户一句指定比任何启发式都可靠。
+        forced_host = (topic_placement or {}).get(topic)
+        if forced_host is not None:
+            if str(forced_host) in ("__extra__", "", None):
+                host = None
+            else:
+                key = _normalize(str(forced_host))
+                host = next((n for n in nodes
+                             if _normalize(n.title) == key or n.title == str(forced_host)), None)
+            node = OutlineNode(
+                level=(host.level + 1) if host else 2,
+                title=f"{topic}（规范要求 {len(ids)} 条）",
+                source="spec", spec_requirement_ids=ids,
+                review_point_id=(host.review_point_id if host else ""),
+            )
+            if host is not None:
+                idx = nodes.index(host) + 1 + _subtree_len(nodes, host)
+                nodes.insert(idx, node)
+            else:
+                nodes.append(node)
+            continue
+
         keys = _topic_keys(topic)
         best, best_score = None, 0
         for node in scoring_nodes:

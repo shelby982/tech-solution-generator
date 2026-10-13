@@ -3836,11 +3836,11 @@ body[data-view="matching"] .match-detail { display: block; }
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
     <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
          抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
-    <script type="module" src="./assets/workbench.js?v=20261013-splitreport"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261013-splitreport"></script>
+    <script type="module" src="./assets/workbench.js?v=20261013-answers"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261013-answers"></script>
     <script type="module">
-      import './assets/mode-outline.js?v=20261013-splitreport';
-      import './assets/mode-editor.js?v=20261013-splitreport';
+      import './assets/mode-outline.js?v=20261013-answers';
+      import './assets/mode-editor.js?v=20261013-answers';
     </script>
   <script type="module" src="./assets/workspace.js?v=20261013-noconfirm"></script>
   </body>

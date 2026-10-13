@@ -211,6 +211,23 @@ export const api = {
     abort: (threadId) =>
       fetch(`/api/workflow/${threadId}/abort`, { method: 'POST' }).then(r => r.json()),
 
+    // 项目级投标范围（投标人视角）：我投哪个标的/标包
+    getScope: (projectId) =>
+      fetch(`/api/projects/${projectId}/scope`).then(r => r.json()),
+    setScope: (projectId, payload) =>
+      fetch(`/api/projects/${projectId}/scope`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(r => r.json()),
+    // 拆分确认项的作答（落库后下次拆分生效）
+    getSplitAnswers: (projectId, threadId) =>
+      fetch(`/api/projects/${projectId}/split-answers${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),
+    answerSplit: (projectId, payload) =>
+      fetch(`/api/projects/${projectId}/split-answers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(r => r.json()),
+
     // 拆分报告：拆分依据（待确认项）+ 评分点/评分单元/技术要求矩阵/映射矩阵
     splitReport: (projectId, threadId) =>
       fetch(`/api/projects/${projectId}/split-report${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(r => r.json()),

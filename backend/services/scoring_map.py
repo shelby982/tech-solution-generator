@@ -38,7 +38,7 @@ def _extract_per_table(tables: list[dict]) -> list[dict]:
     return out
 
 
-def build_scoring_map(sections, instruction: str = "") -> dict:
+def build_scoring_map(sections, instruction: str = "", *, forced_scope: dict | None = None) -> dict:
     """产出评分地图 + 选中/未选中结论。
 
     返回::
@@ -66,6 +66,11 @@ def build_scoring_map(sections, instruction: str = "") -> dict:
             extracted = [{"scope_label": "", "section_id": "", "title": "",
                           "source_file": "", "content": "", "points": list(table.points)}]
 
+    # ── 按 (标的, 标包) 聚合**跨文件**来源 ──
+    # 同一标包的技术评分表可能一半在主招标文件、一半在技术规范书（前置表/附件）。
+    # 不聚合的话地图里会出现两张同名表，用户无从判断"哪张才算"，
+    # 分值合计也会被拆成两半、校验失效。
+    merged: dict[str, dict] = {}
     entries = []
     for i, tb in enumerate(extracted, start=1):
         scope = resolve_scope(tb.get("scope_label") or "", index)
@@ -75,6 +80,31 @@ def build_scoring_map(sections, instruction: str = "") -> dict:
             slot = cats.setdefault(cat, {"count": 0, "score": 0.0})
             slot["count"] += 1
             slot["score"] += float(p.points or 0)
+        key = (f"{scope.get('target')}|{scope.get('package_no')}"
+               if scope["resolved"] else f"__unresolved__{i}")
+        src = {"table_no": i, "source_file": tb.get("source_file") or "",
+               "section_id": tb.get("section_id") or "",
+               "scope_from_file": bool(tb.get("scope_from_file"))}
+        if key in merged:
+            m = merged[key]
+            m["sources"].append(src)
+            m["total_count"] += len(tb["points"])
+            m["total_score"] = round(m["total_score"] + sum(
+                float(p.points or 0) for p in tb["points"]), 2)
+            m["points"].extend(tb["points"])
+            for c, v in cats.items():
+                slot = next((x for x in m["categories"] if x["category"] == c), None)
+                if slot is None:
+                    m["categories"].append({"category": c,
+                                            "label": CATEGORY_LABEL.get(c, c),
+                                            "count": v["count"],
+                                            "score": round(v["score"], 2)})
+                else:
+                    slot["count"] += v["count"]
+                    slot["score"] = round(slot["score"] + v["score"], 2)
+            m["categories"].sort(key=lambda x: -x["score"])
+            continue
+
         entries.append({
             "table_no": i,
             "scope_label": tb.get("scope_label") or "",
@@ -95,13 +125,51 @@ def build_scoring_map(sections, instruction: str = "") -> dict:
             "total_count": len(tb["points"]),
             "total_score": round(sum(float(p.points or 0) for p in tb["points"]), 2),
             "points": tb["points"],
+            "sources": [src],
+            "multi_file": False,
         })
+        merged[key] = entries[-1]
+
+    for e in entries:
+        if len(e["sources"]) > 1:
+            e["multi_file"] = True
+            e["source_files"] = sorted({x["source_file"] for x in e["sources"] if x["source_file"]})
 
     # ── 定向筛选 ──
     tokens = parse_target_tokens(instruction)
     selected = None
     selection = {"by": "", "reason": ""}
-    for token in tokens:
+
+    # 最高优先级：用户的**作答**或**项目级投标范围**（投标人视角：我投哪个标包）。
+    # 这比从提炼要求里猜范围可靠得多 —— 猜错范围=整份技术应答目录错。
+    forced = forced_scope or {}
+    # 前端提交的是「选第几张表」（{table_no}），流程内部用 (标的, 标包) ——
+    # 两种写法都要认，否则用户的作答会被**静默忽略**（以为生效了、其实按推断走）。
+    if forced.get("table_no") and not (forced.get("target") or forced.get("package_no")):
+        for e in entries:
+            if e["table_no"] == int(forced["table_no"]):
+                selected = e
+                selection = {"by": "作答指定",
+                             "reason": f"按你的作答选中表{e['table_no']}（{e.get('package_name') or e.get('scope_label') or '未归属'}）"}
+                break
+    if selected is None and (forced.get("target") or forced.get("package_no")):
+        for e in entries:
+            if not e["resolved"]:
+                continue
+            if forced.get("package_no") and e["package_no"] == str(forced["package_no"]) \
+                    and (not forced.get("target") or e["target"] == forced["target"]):
+                selected = e
+                break
+            if not forced.get("package_no") and forced.get("target") == e["target"]:
+                selected = e
+                break
+        if selected is not None:
+            selection = {"by": "项目/作答设定",
+                         "reason": (f"按设定的投标范围「{forced.get('target') or ''}"
+                                    f"标包{forced.get('package_no') or ''}」选中该评分表")}
+    # 已被"作答/项目范围"选中就不再按提炼要求的范围词覆盖 ——
+    # 否则用户明确选了第 2 张表，仍会被要求里的「标的1」抢回去（实测踩到）。
+    for token in ([] if selected is not None else tokens):
         kind, num = token[:2], token[2:]
         for e in entries:
             if not e["resolved"]:
@@ -120,7 +188,9 @@ def build_scoring_map(sections, instruction: str = "") -> dict:
             break
 
     issues: list[dict] = []
-    if selected is None and len(entries) == 1:
+    if selected is not None:
+        pass
+    elif len(entries) == 1:
         selected = entries[0]
         selection = {"by": "唯一评分表", "reason": "全文只有一张评分表"}
     if selected is None:

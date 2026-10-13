@@ -2358,12 +2358,17 @@ function renderOutlineCoverage(coverage) {
       <span class="ov-metric ${cls(coverage.requirements_landed, coverage.requirements_total)}">
         规范要求 <b>${coverage.requirements_landed}/${coverage.requirements_total}</b>
         <span style="color:var(--muted)">${pct(coverage.requirements_landed, coverage.requirements_total)}%</span></span>
+      <span class="ov-scope" id="ov-scope-box" title="投标范围（投标人视角）：一次设定，拆分与报告都按它执行">
+        <span style="color:var(--muted)">投标范围</span>
+        <select id="ov-scope-select"><option value="">加载中…</option></select>
+      </span>
       <button class="mw-btn" id="ov-split-report" style="margin-left:auto;"
         title="拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
         拆分清单</button>
     </div>
     ${gaps.length ? `<div class="ov-gaps">缺口：${gaps.slice(0, 6).map(escapeHtml).join('；')}</div>` : ''}`;
   box.querySelector('#ov-split-report')?.addEventListener('click', openSplitReport);
+  bindScopeSelector();
 }
 
 async function resolvePanelThreadId(tid) {
@@ -2398,12 +2403,32 @@ async function openSplitReport() {
   const conf = data.confirmations || [];
   const pending = conf.filter(c => c.needs_confirm);
 
-  const confHtml = conf.map(c => `
-    <div class="sr-conf ${c.needs_confirm ? 'warn' : 'ok'}">
-      <div class="sr-conf-q">${c.needs_confirm ? '待确认' : '已识别'} · ${escapeHtml(c.question)}</div>
+  const smap = data.scoring_map || {};
+  const confHtml = conf.map(c => {
+    const opts = (c.options || []).map(o => `
+      <option value="${o.table_no}">表${o.table_no} ${escapeHtml(o.label)}（技术 ${o.tech_count} 条 / ${o.tech_score} 分）</option>`).join('');
+    let ctrl = '';
+    if (c.answer_key === 'scope' && opts) {
+      ctrl = `<div class="sr-answer"><select data-answer="scope">${opts}</select>
+        <button class="mw-btn" data-save="scope">按此表拆分</button></div>`;
+    } else if (c.answer_key === 'scope') {
+      ctrl = `<div class="sr-answer"><span class="sr-dim">已在项目「投标范围」里设定，可到页面顶部修改</span></div>`;
+    } else if (c.answer_key === 'topic_placement') {
+      ctrl = `<div class="sr-answer"><textarea data-answer="topic_placement" rows="2"
+        placeholder="主题=章节标题（每行一条），例如：3.2.1. 客户档案管理模块=功能要求"></textarea>
+        <button class="mw-btn" data-save="topic_placement">保存归属</button></div>`;
+    } else if (c.answer_key === 'structure') {
+      ctrl = `<div class="sr-answer"><button class="mw-btn" data-save="structure">结构没问题，确认</button></div>`;
+    }
+    const badge = c.answered ? '已作答' : (c.needs_confirm ? '待确认' : '已识别');
+    const cls = c.answered ? 'done' : (c.needs_confirm ? 'warn' : 'ok');
+    return `<div class="sr-conf ${cls}">
+      <div class="sr-conf-q">${badge} · ${escapeHtml(c.question)}</div>
       <div class="sr-conf-a">${escapeHtml(c.detected)}</div>
       <div class="sr-conf-d">${escapeHtml(c.detail || '')}</div>
-    </div>`).join('');
+      ${ctrl}
+    </div>`;
+  }).join('');
 
   const rpRows = (rp.items || []).map(r => `
     <tr><td>${escapeHtml(r.factor)}</td><td>${escapeHtml(r.item)}</td>
@@ -2479,10 +2504,83 @@ async function openSplitReport() {
   .sr-pending{background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:1px 8px;border-radius:999px;font-size:12px}
   .sr-oktag{background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;padding:1px 8px;border-radius:999px;font-size:12px}
   .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px}
+  .sr-conf.done{background:#ecfdf5;border-color:#a7f3d0}
+  .sr-answer{margin-top:6px;display:flex;gap:8px;align-items:flex-start}
+  .sr-answer select,.sr-answer textarea{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--line);border-radius:6px}
+  .sr-answer textarea{flex:1;min-width:320px}
   </style>`);
-  el.addEventListener('click', (e) => {
-    if (e.target === el || e.target.closest?.('[data-act="close"]')) el.remove();
+  el.addEventListener('click', async (e) => {
+    if (e.target === el || e.target.closest?.('[data-act="close"]')) { el.remove(); return; }
+    const btn = e.target.closest?.('[data-save]');
+    if (!btn) return;
+    const kind = btn.dataset.save;
+    const host = btn.closest('.sr-answer');
+    let value = {};
+    if (kind === 'scope') {
+      value = { table_no: Number(host.querySelector('[data-answer="scope"]').value) };
+    } else if (kind === 'topic_placement') {
+      const map = {};
+      host.querySelector('[data-answer="topic_placement"]').value.split('\n').forEach(line => {
+        const [topic, target] = line.split('=').map(x => (x || '').trim());
+        if (topic && target) map[topic] = target;
+      });
+      value = map;
+    } else if (kind === 'structure') {
+      value = { confirmed: true };
+    }
+    btn.disabled = true;
+    try {
+      const tid = await resolvePanelThreadId(null);
+      await api.workflow.answerSplit(projectId, { key: kind, value, threadId: tid });
+      el.remove();
+      await openSplitReport();          // 重新拉取：作答已反映到确认项
+    } catch (err) {
+      btn.disabled = false;
+      alert('保存失败：' + String(err).slice(0, 120));
+    }
   });
+}
+
+/**
+ * 投标范围选择器：**一次设定、贯穿全程**。
+ *
+ * "我们投哪个标包"是投标人的属性，不该每次从提炼要求里的文字去猜 ——
+ * 实测多标包文件里推错范围 = 整份技术应答目录错。选项来自评分地图的标包索引。
+ */
+async function bindScopeSelector() {
+  const sel = document.getElementById('ov-scope-select');
+  if (!sel || sel.dataset.bound === '1') return;
+  sel.dataset.bound = '1';
+  try {
+    const tid = await resolvePanelThreadId(null);
+    const [report, scope] = await Promise.all([
+      api.workflow.splitReport(projectId, tid).catch(() => null),
+      api.workflow.getScope(projectId).catch(() => null),
+    ]);
+    const idx = (report && report.scoring_map && report.scoring_map.index) || [];
+    const opts = ['<option value="">未设定（按提炼要求推断）</option>'];
+    idx.forEach(t => (t.packages || []).forEach(p => {
+      const val = `${t.target}|${p.no}`;
+      const label = `${t.target} / 标包${p.no}｜${p.name}`;
+      opts.push(`<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`);
+    }));
+    sel.innerHTML = opts.join('');
+    if (scope && (scope.target || scope.package_no)) {
+      sel.value = `${scope.target}|${scope.package_no}`;
+    }
+    sel.addEventListener('change', async () => {
+      const [target, no] = (sel.value || '').split('|');
+      const pack = idx.find(t => t.target === target)?.packages?.find(p => p.no === no);
+      await api.workflow.setScope(projectId, {
+        target: target || '', package_no: no || '',
+        package_name: (pack && pack.name) || '',
+      });
+      await refreshOutlineCoverage(tid);
+      alert('投标范围已保存。下次「重新拆分目录」按它执行。');
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="">范围选项加载失败</option>';
+  }
 }
 
 async function warnIfOutlineNotDerived(tid) {

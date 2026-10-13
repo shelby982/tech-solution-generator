@@ -144,11 +144,23 @@ def split_scoring_tables(sections: Iterable) -> list[dict]:
             text = "\n".join(seg["lines"]).strip()
             if not text:
                 continue
+            source_file = _get(sec, "source_file", "") or ""
+            scope_label = seg["scope_label"]
+            scope_from_file = False
+            if not scope_label:
+                # 跨文件场景：技术评分表可能整张放在技术规范书里、没有「适用标包」声明，
+                # 但文件名常写着「标的1」「标包2」—— 用它兜底归属，否则这张表会被
+                # 当成"无范围"，与该标的其他表各自为政（实测多文件项目）。
+                toks = parse_target_tokens(source_file)
+                if toks:
+                    scope_label = toks[0]
+                    scope_from_file = True
             tables.append({
-                "scope_label": seg["scope_label"],
+                "scope_label": scope_label,
+                "scope_from_file": scope_from_file,
                 "section_id": _get(sec, "id", "") or "",
                 "title": _get(sec, "title", "") or "",
-                "source_file": _get(sec, "source_file", "") or "",
+                "source_file": source_file,
                 "content": text,
             })
     return tables

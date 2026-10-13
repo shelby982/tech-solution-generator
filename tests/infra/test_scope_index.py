@@ -117,3 +117,52 @@ def test_scoring_map_asks_when_scope_unresolved():
     assert m["selected_table_no"] is None
     issue = next(i for i in m["issues"] if i["key"] == "scope_unresolved")
     assert len(issue["options"]) == 3          # 三张表都摆出来让用户选
+
+
+# ── ⑶ 跨文件：技术评分表可能整张在技术规范书里（无「适用标包」声明）──
+
+def test_scope_inferred_from_file_name_when_table_has_no_declaration():
+    """文件名写着「标的1」时，表就该归属标的1，而不是"无范围"。
+
+    跨文件项目里技术评分表常在技术规范书里，且整张没有「适用标包」声明 ——
+    不兜底的话它会与主文件里的表各自为政，分值合计被拆成两半、校验失效。
+    """
+    sec = _scoring_section()
+    sec["source_file"] = "2_标的1：2026年南方电网应用中台档案管理认证系统开发.docx"
+    # 去掉所有「适用标包」声明
+    sec["raw_content"] = "\n".join(
+        l for l in sec["raw_content"].splitlines() if "适用标包" not in l)
+    tables = split_scoring_tables([sec])
+    assert tables and all(t["scope_from_file"] for t in tables)
+    assert all(t["scope_label"] == "标的1" for t in tables)
+
+
+def test_scoring_map_merges_same_package_across_files():
+    """同一标包分散在两个文件里的评分表要合成一条（含来源清单）。"""
+    from services.scoring_map import build_scoring_map
+
+    def one_table(item, pkg):
+        return {"id": "s1", "level": 2, "title": "评分表", "source_file": "招标文件.pdf",
+                "raw_content": "\n".join([
+                    f"| 适用标包：{pkg} |  |  |  |  |",
+                    "| 序号 | 评分因素 | 详细评审项 | 详细评审分项要素 | 分值 |",
+                    "| --- | --- | --- | --- | --- |",
+                    "| （二）、技术评审（100）分 |  |  |  |  |",
+                    f"| 1 | 技术方案 | {item} | 完整得 4 分 | 4 |",
+                ])}
+
+    pkg = "应用中台客户档案管理认证系统开发实施服务"
+    a = one_table("需求理解完整性", pkg)
+    a["source_file"] = "主招标文件.pdf"
+    b = one_table("方案科学性", pkg)
+    b["source_file"] = "技术规范书.docx"
+    b["id"] = "s2"
+
+    m = build_scoring_map([a, b, INDEX_SECTION], "按标的 1 拆分")
+    assert len(m["entries"]) == 1, "同一标包的表没有合并"
+    e = m["entries"][0]
+    assert e["multi_file"] is True
+    assert e["source_files"] == ["主招标文件.pdf", "技术规范书.docx"]
+    assert e["total_count"] == 2                    # 两张表的评分点合起来了
+    tech = [p for p in m["_selected_points"] if p.category == "tech"]
+    assert {p.item for p in tech} == {"需求理解完整性", "方案科学性"}

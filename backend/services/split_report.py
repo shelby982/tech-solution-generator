@@ -185,6 +185,15 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
 
     scored_ids = {m["point_id"] for m in mapping}
 
+    # 作答 + 项目范围：让确认项显示"已经答过了"，并把范围喂给评分地图
+    ctx = {"answers": {}, "project_scope": {}}
+    try:
+        from services.split_answers import resolve_split_context
+        ctx = await resolve_split_context(db, project_id, thread_id)
+    except Exception as e:
+        logger.warning(f"split_report：读取作答失败（{e}）")
+    answers = ctx.get("answers") or {}
+
     # ── ⑤ 评分地图：全文有几张评分表、选中了哪张、其余为什么没选中 ──
     # 用户提出的困难：多个标的/标包 + 商务/技术混排。地图把"干扰"变成"有归属但未选中"。
     scoring_map = None
@@ -209,7 +218,8 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
                     inferred += parse_target_tokens(str(fname))
                 if inferred:
                     instruction = (instruction + " " + " ".join(inferred)).strip()
-            full = build_scoring_map(source_toc, instruction)
+            full = build_scoring_map(source_toc, instruction,
+                                     forced_scope=answers.get("scope") or None)
             scoring_map = {k: v for k, v in full.items() if k != "_selected_points"}
             scoring_map["_issues"] = full.get("issues") or []
         except Exception as e:      # 地图是增强信息，失败不影响其余四张清单
@@ -243,10 +253,36 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
         "scoring_map": scoring_map,
-        "confirmations": (_confirmations(points, rp_rows, rp_total, tech_matrix, mapping,
-                                        units, {**(spec or {}), "chapters": chapters})
-                          + list((scoring_map or {}).get("_issues") or [])),
+        "answers": answers,
+        "project_scope": ctx.get("project_scope") or {},
+        "confirmations": _apply_answers(
+            _confirmations(points, rp_rows, rp_total, tech_matrix, mapping,
+                           units, {**(spec or {}), "chapters": chapters})
+            + list((scoring_map or {}).get("_issues") or []),
+            answers,
+        ),
     }
+
+
+ANSWERABLE = {"scope": "scope", "category": "categories", "scope_unresolved": "scope",
+              "topic_placement": "topic_placement", "structure": "structure",
+              "scope_excluded": "scope"}
+
+
+def _apply_answers(items: list[dict], answers: dict) -> list[dict]:
+    """用户已作答的确认项 → 标为已识别，并把作答内容回显出来。"""
+    out = []
+    for it in items:
+        key = str(it.get("key") or "")
+        ans_key = ANSWERABLE.get(key)
+        answered = bool(ans_key and answers.get(ans_key))
+        merged = {**it, "answer_key": ans_key, "answered": answered}
+        if answered:
+            merged["needs_confirm"] = False
+            merged["answer"] = answers.get(ans_key)
+            merged["detail"] = (str(it.get("detail") or "") + "｜已按你的作答执行").strip("｜")
+        out.append(merged)
+    return out
 
 
 def _confirmations(points: list[dict], rp_rows: list[dict], rp_total: float,

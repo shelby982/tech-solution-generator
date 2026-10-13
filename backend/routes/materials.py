@@ -135,6 +135,56 @@ def _split_for_scoring_evaluation(parsed) -> list[str]:
     return chunks
 
 
+@router.get("/projects/{project_id}/scope")
+async def get_project_scope(project_id: int):
+    """项目级**投标范围**（投标人视角：我投哪个标的/标包）。"""
+    from services.split_answers import get_project_scope as _get
+    async with get_db() as db:
+        return JSONResponse(content=await _get(db, project_id))
+
+
+@router.put("/projects/{project_id}/scope")
+async def put_project_scope(project_id: int, payload: dict):
+    """设定投标范围。一次设定、贯穿拆分与报告 —— 不再每次靠提炼要求里的文字去猜。"""
+    from services.split_answers import set_project_scope as _set
+    async with get_db() as db:
+        return JSONResponse(content=await _set(
+            db, project_id,
+            target=str(payload.get("target") or ""),
+            package_no=str(payload.get("package_no") or ""),
+            package_name=str(payload.get("package_name") or ""),
+        ))
+
+
+@router.get("/projects/{project_id}/split-answers")
+async def get_split_answers(project_id: int, threadId: str | None = None):
+    """读拆分确认项的作答（run 级优先，缺省回落到项目级）。"""
+    from services.split_answers import resolve_split_context
+    async with get_db() as db:
+        ctx = await resolve_split_context(db, project_id, threadId)
+    return JSONResponse(content=ctx)
+
+
+@router.post("/projects/{project_id}/split-answers")
+async def post_split_answer(project_id: int, payload: dict):
+    """作答某一项待确认内容：``{key, value, threadId?}``。
+
+    key ∈ scope / categories / topic_placement / structure；
+    作答在**下一次拆分**与报告中生效（例如把某个规范书主题指定挂到某一章）。
+    """
+    from services.split_answers import set_answer
+    key = str(payload.get("key") or "")
+    if not key:
+        raise HTTPException(status_code=400, detail="缺少 key")
+    try:
+        async with get_db() as db:
+            saved = await set_answer(db, project_id, payload.get("threadId") or None,
+                                     key, payload.get("value") or {})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(content={**saved, "hint": "已保存，下次「重新拆分目录」生效"})
+
+
 @router.get("/projects/{project_id}/split-report")
 async def get_split_report(project_id: int, threadId: str | None = None):
     """**拆分报告**：拆目录的依据（待确认项）+ 拆完的四张清单。

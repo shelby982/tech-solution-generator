@@ -545,7 +545,29 @@ class ZhangHengAgent:
         ]
         # 这是**技术**应答目录：提炼要求没写类别时默认技术类，绝不能把商务/报价
         # 评分点一起并进来（实测：要求为空时 25 个评分点 / 350 分全混进了技术目录）。
+        # ── 用户的**作答**与**项目级投标范围**：优先于任何推断 ──
+        # "我们投哪个标包"是投标人的属性，不该每次从提炼要求里猜；
+        # 主题归属这类东西用自然语言表达也很别扭，所以给确定的问答协议。
+        answer_scope: dict = {}
+        topic_placement: dict = {}
+        answer_categories: list = []
+        if project_id:
+            try:
+                from db import get_db
+                from services.split_answers import resolve_split_context
+                async with get_db() as _db:
+                    ctx = await resolve_split_context(_db, int(project_id), thread_id or "")
+                answers = ctx.get("answers") or {}
+                answer_scope = answers.get("scope") or {}
+                topic_placement = answers.get("topic_placement") or {}
+                cats = (answers.get("categories") or {}).get("categories") or []
+                answer_categories = [str(c) for c in cats if c]
+            except Exception as e:
+                logger.warning(f"张衡：读取拆分作答失败（{e}），按推断执行")
+
         category = extract_category(instruction) or "tech"
+        if answer_categories:
+            category = answer_categories[0] if len(answer_categories) == 1 else ""
 
         # 范围词优先取提炼要求；要求里没写就从**技术规范书文件名**里推 ——
         # 文件名常写着「标的1」「标包2」，是现成的强信号（实测该项目文件名即
@@ -567,7 +589,8 @@ class ZhangHengAgent:
         # ── 评分地图：先看清全文有几张评分表，再定向选中一张 ──
         # 必须在范围推断**之后**构建（它要用 scope_instruction）。
         from services.scoring_map import build_scoring_map
-        smap = build_scoring_map(sections_in, scope_instruction or instruction)
+        smap = build_scoring_map(sections_in, scope_instruction or instruction,
+                                 forced_scope=answer_scope)
         selected_points = list(smap.get("_selected_points") or [])
         map_note = ""
         if smap.get("selected_table_no") and selected_points:
@@ -704,7 +727,8 @@ class ZhangHengAgent:
                                 subpoints_by_criterion=subpoints or None,
                                 placement_targets=placement,
                                 requirement_ids_by_title=requirement_ids_by_title(requirements),
-                                requirement_groups=requirement_groups)
+                                requirement_groups=requirement_groups,
+                                topic_placement=topic_placement or None)
         if not outline:
             return None
 

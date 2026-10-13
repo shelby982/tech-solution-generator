@@ -258,3 +258,19 @@ def test_requirement_groups_attach_to_matching_chapter_with_ids():
     cov = compute_coverage(outline, [rp],
                            [_R("sr-1", "a"), _R("sr-2", "b"), _R("sr-9", "c")])
     assert cov["requirements_landed"] == 3      # 三个 id 都有落点
+
+
+def test_topic_placement_answer_overrides_automatic_match():
+    """用户指定主题归属时不再猜 —— 自动匹配总有猜错的时候（实测功能模块挂错过）。"""
+    from infra.parser.outline_builder import build_outline
+
+    rp = _rp("技术方案", "技术方案可行性", "1、技术方案可行性：实施计划详细得 30 分。")
+    groups = [{"topic": "客户档案管理模块", "ids": ["sr-1"]}]
+    for target, expect_under in (("技术方案可行性", True), ("__extra__", False)):
+        outline = build_outline([rp], requirement_groups=groups,
+                                topic_placement={"客户档案管理模块": target})
+        node = next(n for n in outline if "客户档案管理模块" in n.title)
+        if expect_under:
+            assert node.level > 1 and node.review_point_id == rp.point_id
+        else:
+            assert not node.review_point_id      # 强制进"要求应答"板块
