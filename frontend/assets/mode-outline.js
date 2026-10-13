@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v37';
+import { api } from './api.js?v=20261015-v40';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v37';
+       } from './workspace.js?v=20261015-v40';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v37';
+       } from './workspace-model.mjs?v=20261015-v40';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v37';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v40';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -782,8 +782,12 @@ function syncHeaderStageLabel(state) {
 let statusActionsKey = '';
 
 function setStatusActions(key, html, bind) {
-  if (key === statusActionsKey && statusActions.innerHTML) {
-    return;      // 同一组按钮：保留现有节点与监听器
+  // 同一组按钮**且这次也带按钮**时保留现有节点与监听器
+  // （避免用户按下瞬间节点被替换 → "点了没反应"）。
+  // 注意必须放过 `html === ''`：那是"这一态不该有按钮"，
+  // 若也走早退，上一态留下的按钮会一直挂着（实测：「取消」在梳理目录阶段删不掉）。
+  if (key === statusActionsKey && statusActions.innerHTML && html) {
+    return;
   }
   statusActionsKey = key;
   statusActions.innerHTML = html;
@@ -819,10 +823,21 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   // 用户按下的瞬间节点可能刚被替换 → click 落在已移除的节点上，"点了没反应"。
   // 各分支用 setStatusActions(签名, html, bind) 渲染，同签名时只留现有节点。
   if (state === 'extracting') {
-    setStatusActions('extracting',
-      `<button class="btn-status-secondary" id="btn-cancel"
-        title="取消在**当前章节**跑完后生效（正在进行的这一次模型调用不会被打断）">取消</button>`,
-      () => document.getElementById('btn-cancel').addEventListener('click', cancelExtraction));
+    // 「取消」只在**逐节提炼**这类长任务里给：它停止后续模型调用、保留已提炼的章节，
+    // 「继续提炼」会用 skip_ids 接着跑（每章一次调用，中途停下能省额度）。
+    // 「梳理应答目录」是秒级短任务：取消它保不住任何东西，只会让人以为必须点它才能重跑，
+    // 所以那个阶段不显示（用户反馈后调整）。
+    // 只在"真的提炼出过章节"时才给「取消」：解析阶段、梳理目录阶段取消都保不住东西
+    // （解析还没产出章节，梳理是秒级短任务），给了反而让用户以为重跑必须先点它。
+    const hasProgress = Number(doneBlocks) > 0 || Number(totalBlocks) > 0;
+    if (outlineDrafting || !hasProgress) {
+      setStatusActions('extracting', '', () => {});
+    } else {
+      setStatusActions('extracting',
+        `<button class="btn-status-secondary" id="btn-cancel"
+          title="取消在**当前章节**跑完后生效（正在进行的这一次模型调用不会被打断）">取消</button>`,
+        () => document.getElementById('btn-cancel').addEventListener('click', cancelExtraction));
+    }
   } else if (state === 'points_pending') {
     // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆解结果」）。
     // 这里**不能**给「确认目录，开始提炼要点」——那会用上一版目录继续提炼（自相矛盾）。
@@ -836,11 +851,11 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       });
     });
   } else if (state === 'gate_outline') {
+    // 闸门 1 不再给「取消」：运行已停住、不消耗资源，点它只会把 run 标成作废；
+    // 要重来用「重新拆分目录」。
     setStatusActions('gate_outline', `
-      <button class="btn-status-secondary" id="btn-cancel">取消</button>
       <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
       <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`, () => {
-      document.getElementById('btn-cancel').addEventListener('click', cancelExtraction);
       document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
       document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
     });
@@ -2430,6 +2445,10 @@ let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当�
 let panelViewCats = null;     // 筛选的类别（null = 跟随当前目录）
 // 面板当前所在阶段（'1' 评审点 / '2' 待确认 / '3' 产物点）与其内的子页签
 let panelStage = '1';
+// 是否正在「梳理应答目录」这一**短任务**阶段（派生目录：秒级~1 分钟）。
+// 该阶段不显示「取消」：取消它既保不住什么，也只会让用户以为必须点它才能重跑
+// （用户反馈：右上角的"取消"在这个阶段还有什么意义）。
+let outlineDrafting = false;
 let panelSub = '';
 
 /** 保存失败：就地显示（找不到就地容器时，重开面板让顶部 flash 显示）。 */
@@ -3839,6 +3858,7 @@ function attachStream(threadId) {
       sidebarToc.innerHTML = '';
       draftRevision = Number(data?.revision) || draftRevision;
       const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
+      outlineDrafting = true;
       setStatusBar('extracting', `张衡梳理应答目录${ver}…`, 0, totalBlocks, doneBlocks);
       blocksEmpty.innerHTML = '<p>正在依据要求文件与提炼要求梳理应答目录…</p>';
       blocksEmpty.style.display = 'block';
@@ -4771,6 +4791,7 @@ async function redraftOutline() {
     currentThreadId = tid;
     // runner 会重建 emitter，旧 SSE 连接收不到新一版的帧
     attachStream(tid);
+    outlineDrafting = true;
     setStatusBar('extracting', '已提交提炼要求，张衡重新梳理应答目录…', 0, totalBlocks, doneBlocks);
   } catch (e) {
     console.error('[workflow] redraftOutline 失败', e);
@@ -5164,7 +5185,8 @@ bindMatchDetailActions();
         //     入口（extract 会跳过已完成的章节）。
         const running = await longPhaseRunning(s);
         if (running === 'extracting') {
-          setStatusBar('extracting', '张衡提炼章节要求中…',
+          outlineDrafting = false;      // 进入逐节提炼：长任务，允许「取消」
+      setStatusBar('extracting', '张衡提炼章节要求中…',
                        Math.round(doneBlocks / Math.max(totalBlocks, 1) * 100), totalBlocks, doneBlocks);
           attachStream(tid);
           return;
