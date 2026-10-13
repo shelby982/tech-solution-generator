@@ -933,11 +933,9 @@
               <span class="file-type-badge ${f.ext || 'default'}">${f.ext.toUpperCase() || 'FILE'}</span>
               <span class="file-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
               <select class="file-role-select" data-idx="${i}" title="文件类型">
+                <option value="main_rfp" ${f.role === 'main_rfp' ? 'selected' : ''}>招标文件</option>
                 <option value="spec" ${f.role === 'spec' ? 'selected' : ''}>技术规范书</option>
-                <option value="main_rfp" ${f.role === 'main_rfp' ? 'selected' : ''}>主招标文件</option>
-                <option value="scoring" ${f.role === 'scoring' ? 'selected' : ''}>评分表</option>
-                <option value="evaluation" ${f.role === 'evaluation' ? 'selected' : ''}>评审要素</option>
-                <option value="requirement" ${f.role === 'requirement' ? 'selected' : ''}>其他要求文件</option>
+                <option value="requirement" ${f.role === 'requirement' ? 'selected' : ''}>其他</option>
               </select>
               <span class="file-size">${fmtSize(f.size)}</span>
               <button class="file-remove" data-idx="${i}" title="移除">✕</button>

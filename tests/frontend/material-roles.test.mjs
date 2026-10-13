@@ -75,3 +75,19 @@ test('提示文案本身不含 HTML（文件名由页面另行转义后拼接）
   assert.ok(!warn.includes('<img>'), '模块不应把文件名回显进提示');
   assert.ok(!/[<>]/.test(warn), '提示文案里不应出现尖括号');
 });
+
+// ── 界面只给三类可选（用户要求：招标文件 / 技术规范书 / 其他）──────────
+// 语义全集 REQUIREMENT_ROLES 仍保留 scoring/evaluation：那是**历史数据里已存在**的
+// 分类，从语义集合里删掉会让那些材料掉出要求链路（不再参与解析/目录）。
+test('界面可选的要求类只有三类，且语义全集仍覆盖历史分类', async () => {
+  const { SELECTABLE_REQUIREMENT_ROLES, REQUIREMENT_ROLES, ROLE_LABEL } = await import(
+    '../../frontend/assets/material-roles.mjs');
+  assert.deepEqual(SELECTABLE_REQUIREMENT_ROLES, ['main_rfp', 'spec', 'requirement']);
+  assert.deepEqual(SELECTABLE_REQUIREMENT_ROLES.map(r => ROLE_LABEL[r]),
+    ['招标文件', '技术规范书', '其他']);
+  // 可选项必须是语义全集的子集；历史分类仍在全集里
+  for (const r of SELECTABLE_REQUIREMENT_ROLES) assert.ok(REQUIREMENT_ROLES.includes(r));
+  for (const r of ['scoring', 'evaluation']) assert.ok(REQUIREMENT_ROLES.includes(r));
+  assert.equal(ROLE_LABEL.requirement, '其他');
+  assert.equal(ROLE_LABEL.main_rfp, '招标文件');
+});

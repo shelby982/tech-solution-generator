@@ -15,8 +15,13 @@
  *      在界面上给出纠正提示（不静默改写用户的选择）。
  */
 
-/** 要求类角色（决定评分与目录，走解析/提炼链路）。顺序即界面展示顺序。 */
+/** 要求类角色（决定评分与目录，走解析/提炼链路）。**语义全集**，勿删项：
+ *  `scoring` / `evaluation` 是历史数据里已存在的分类，删掉会让那些材料掉出要求链路。 */
 export const REQUIREMENT_ROLES = ['main_rfp', 'spec', 'scoring', 'evaluation', 'requirement'];
+
+/** 界面上**可选的**要求类角色（用户要求只保留三类：招标文件 / 技术规范书 / 其他）。
+ *  与上面的语义全集分开：老材料仍能正确归类显示，但新上传时不再让人面对五种选择。 */
+export const SELECTABLE_REQUIREMENT_ROLES = ['main_rfp', 'spec', 'requirement'];
 
 /** 我方素材角色（只参与检索匹配，不参与要求提炼）。 */
 export const SOURCE_ROLES = ['source'];
@@ -28,21 +33,21 @@ export const ALL_MATERIAL_ROLES = [...REQUIREMENT_ROLES, ...SOURCE_ROLES];
  * 避免用户按"看起来像什么"来选。
  */
 export const ROLE_LABEL = {
-  main_rfp: '主招标文件',
+  main_rfp: '招标文件',
   spec: '技术规范书',
   scoring: '评分表',
   evaluation: '评审要素',
-  requirement: '其他要求文件',
+  requirement: '其他',
   source: '我方技术素材',
 };
 
 /** 角色 → 一句话说明（上传弹窗/选择器下的提示用）。 */
 export const ROLE_HINT = {
-  main_rfp: '招标公告与投标人须知（含评分办法），定义章节骨架',
-  spec: '招标文件附件「技术规范书 / 技术招标文件」，定义每章要写的技术内容',
-  scoring: '评分表 / 评标办法，按评分项拆章时用',
-  evaluation: '评审要素材料，逐条评审要求的来源',
-  requirement: '其他要求类文件（澄清、补充通知等）',
+  main_rfp: '招标公告、投标人须知、评分办法——定义章节骨架与评分点',
+  spec: '招标文件附件「技术规范书 / 技术招标文件」——定义每章要写的技术内容',
+  scoring: '评分表 / 评标办法（历史分类，新上传请并入「招标文件」）',
+  evaluation: '评审要素材料（历史分类，新上传请并入「其他」）',
+  requirement: '澄清、补充通知等其他要求文件',
   source: '我方产品资料、方案、案例——只用于素材匹配，不参与要求提炼',
 };
 

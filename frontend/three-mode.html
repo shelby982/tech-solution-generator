@@ -3243,11 +3243,9 @@ body[data-view="matching"] .match-detail { display: block; }
         <div class="mat-list" id="req-stack"></div>
         <div class="mat-add-row">
           <select id="req-role-select" class="role-select">
-            <option value="main_rfp">主招标文件</option>
-            <option value="spec">技术规范书 / 技术招标文件</option>
-            <option value="scoring">评分表</option>
-            <option value="evaluation">评审要素</option>
-            <option value="requirement">其他要求文件</option>
+            <option value="main_rfp">招标文件</option>
+            <option value="spec">技术规范书</option>
+            <option value="requirement">其他</option>
           </select>
           <button class="btn-add-mat" id="btn-add-req" type="button">+ 添加</button>
         </div>
@@ -3813,11 +3811,11 @@ body[data-view="matching"] .match-detail { display: block; }
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
     <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
          抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
-    <script type="module" src="./assets/workbench.js?v=20261013-noinstr"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261013-noinstr"></script>
+    <script type="module" src="./assets/workbench.js?v=20261013-3roles2"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261013-3roles2"></script>
     <script type="module">
-      import './assets/mode-outline.js?v=20261013-noinstr';
-      import './assets/mode-editor.js?v=20261013-noinstr';
+      import './assets/mode-outline.js?v=20261013-3roles2';
+      import './assets/mode-editor.js?v=20261013-3roles2';
     </script>
   <script type="module" src="./assets/workspace.js?v=20261013-noconfirm"></script>
   </body>

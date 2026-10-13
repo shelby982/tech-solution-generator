@@ -7,7 +7,7 @@ import { api } from './api.js?v=20261013-noconfirm';
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
-         REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
+         REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
        } from './workspace.js?v=20261013-noconfirm';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
@@ -713,11 +713,19 @@ function parseStatusBadge(status) {
 function renderMats(container, mats, showRole) {
   if (!mats.length) { container.innerHTML = ''; return; }
   // showRole 时把 role 渲染为可点击下拉，让用户修改已上传文件类型
-  const roleOptions = REQUIREMENT_ROLES.map(r => [r, ROLE_LABEL_SHARED[r]]);
+  // 只给三类可选：招标文件 / 技术规范书 / 其他（用户要求）。
+  // 语义全集 REQUIREMENT_ROLES 仍保留 scoring/evaluation，用于老材料的正确归类显示。
+  const roleOptions = SELECTABLE_REQUIREMENT_ROLES.map(r => [r, ROLE_LABEL_SHARED[r]]);
   container.innerHTML = mats.map(m => {
+    // 老材料可能是 scoring/evaluation 这类"历史分类"（已不在可选列表里）：
+    // 补一个只读的当前项，**如实显示**它现在是什么，而不是悄悄显示成列表第一项。
+    const opts = roleOptions.slice();
+    if (!opts.some(([v]) => v === m.role)) {
+      opts.unshift([m.role, ROLE_LABEL_SHARED[m.role] || m.role]);
+    }
     const roleCell = showRole
       ? `<select class="mat-role-select role-${m.role}" data-id="${m.id}" title="修改文件类型">
-           ${roleOptions.map(([v, l]) => `<option value="${v}" ${m.role === v || (v === 'main_rfp' && m.role === 'requirement') ? 'selected' : ''}>${l}</option>`).join('')}
+           ${opts.map(([v, l]) => `<option value="${v}" ${m.role === v ? 'selected' : ''}>${l}</option>`).join('')}
          </select>`
       : '';
     return `<div class="mat-row">

@@ -2,7 +2,7 @@ import {projectChapters, summarize, statusLabels, stageLabels, activeStages, run
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
-  REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
+  REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
 } from './material-roles.mjs';
