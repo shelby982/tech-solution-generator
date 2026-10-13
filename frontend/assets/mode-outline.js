@@ -2390,11 +2390,11 @@ function renderOutlineCoverage(coverage) {
         <select id="ov-scope-select"><option value="">加载中…</option></select>
       </span>
       <button class="mw-btn" id="ov-split-report"
-        title="拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
-        拆分清单</button>
+        title="展开/收起拆分清单：拆分依据（需确认项）+ 评分点 / 评分单元与子检查项 / 技术要求矩阵 / 评分↔技术要求映射矩阵">
+        ${document.getElementById('split-panel-inline') ? '收起清单' : '展开拆分清单'}</button>
     </div>
     ${gaps.length ? `<div class="ov-gaps">缺口：${gaps.slice(0, 6).map(escapeHtml).join('；')}</div>` : ''}`;
-  box.querySelector('#ov-split-report')?.addEventListener('click', openSplitReport);
+  box.querySelector('#ov-split-report')?.addEventListener('click', () => toggleSplitPanel());
   bindScopeSelector();
 }
 
@@ -2495,6 +2495,20 @@ async function maybeAutoOpenSplitReport() {
   if (splitPanelAutoOpenedFor === rev) return;      // 同一版只自动展示一次
   splitPanelAutoOpenedFor = rev;
   await openSplitReport({ auto: true });
+}
+
+/** 收起拆分清单：拆下面板、恢复"待确认"横幅、露出目录。 */
+function collapseSplitPanel() {
+  document.getElementById('split-panel-inline')?.remove();
+  const banner = document.getElementById('split-confirm-banner');
+  if (banner) banner.style.display = '';
+  showConfirmedBanner();      // 按当前确认状态刷新横幅文案
+}
+
+/** 展开 / 收起切换（覆盖率面板上的「拆分清单」按钮）。 */
+async function toggleSplitPanel() {
+  if (document.getElementById('split-panel-inline')) { collapseSplitPanel(); return; }
+  await openSplitReport();
 }
 
 async function openSplitReport({ auto = false } = {}) {
@@ -2646,13 +2660,13 @@ async function openSplitReport({ auto = false } = {}) {
   };
 
   const el = document.createElement('div');
-  el.id = 'split-report-overlay';
+  el.id = 'split-panel-inline';
   el.innerHTML = `
     <div class="sr-box">
       <div class="sr-head">
         <b>拆分清单</b>
         <span class="sr-dim" id="sr-sub">${escapeHtml(smap.selection?.reason || '')}</span>
-        <button class="mw-btn" data-act="close" style="margin-left:auto;">关闭</button>
+        <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button>
       </div>
       <div class="sr-metrics">${metricHtml}</div>
       <div class="sr-tabs">${tabHtml}</div>
@@ -2672,9 +2686,10 @@ async function openSplitReport({ auto = false } = {}) {
     const st = document.createElement('style');
     st.id = 'sr-style';
     st.textContent = `
-  #split-report-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center}
-  .sr-box{background:var(--surface,#fff);width:min(1220px,95vw);height:min(88vh,900px);border-radius:12px;
-    display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+  /* 内联展开（不再是浮层）：占满目录栏宽度，确认后收起露出目录 */
+  #split-panel-inline{margin:8px 12px 12px}
+  .sr-box{background:var(--surface,#fff);border:1px solid var(--line);border-radius:10px;
+    display:flex;flex-direction:column;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}
   .sr-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}
   .sr-head b{font-size:14px}
   .sr-metrics{display:flex;gap:10px;padding:12px 18px 0;flex-wrap:wrap}
@@ -2692,8 +2707,9 @@ async function openSplitReport({ auto = false } = {}) {
   .sr-tab-badge{background:var(--surface-2,#f1f0ee);border-radius:999px;padding:0 6px;font-size:11px;
     color:var(--muted);margin-left:2px}
   .sr-tab.active .sr-tab-badge{background:#e0edff;color:#1d4ed8}
-  .sr-panes{flex:1;overflow:hidden;display:flex}
-  .sr-pane{display:none;overflow:auto;padding:6px 18px 18px;width:100%}
+  /* 内联展开时用视口高度的一半多，一屏内看完大部分表格；超出则面板内部滚动 */
+  .sr-panes{overflow:hidden;display:flex;max-height:58vh}
+  .sr-pane{display:none;overflow:auto;padding:6px 18px 18px;width:100%;max-height:58vh}
   .sr-pane.active{display:block}
   .sr-pane h4{margin:14px 0 6px;font-size:12.5px;color:var(--muted);font-weight:600}
   .sr-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
@@ -2732,7 +2748,16 @@ async function openSplitReport({ auto = false } = {}) {
   .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.6}`;
     document.head.appendChild(st);
   }
-  document.body.appendChild(el);
+  // **内联展开**（不再是浮层）：插在目录上方，确认后收起、露出目录。
+  // 用户要求：「直接将解析面板展开确认后再收起，展示目录」。
+  document.getElementById('split-panel-inline')?.remove();
+  const laneHost = blocksList?.parentElement;
+  if (laneHost && blocksList) laneHost.insertBefore(el, blocksList);
+  else document.body.appendChild(el);
+  // 展开期间隐藏"待确认"横幅（它只是引导用户来看这个面板，展开后重复）
+  const banner = document.getElementById('split-confirm-banner');
+  if (banner) banner.style.display = 'none';
+  el.scrollIntoView({ block: 'start' });
 
   el.querySelectorAll('.sr-tab').forEach(tab => tab.addEventListener('click', () => {
     el.querySelectorAll('.sr-tab').forEach(t => t.classList.toggle('active', t === tab));
@@ -2741,7 +2766,8 @@ async function openSplitReport({ auto = false } = {}) {
   }));
 
   el.addEventListener('click', async (e) => {
-    if (e.target === el || e.target.closest?.('[data-act="close"]')) { el.remove(); return; }
+    // 收起：拆下面板，露出目录（确认与否都能收起，收起不等于确认）
+    if (e.target.closest?.('[data-act="collapse"]')) { collapseSplitPanel(); return; }
 
     // 重新拆分：复用状态栏那个入口（带后端预检，原料变过时引导到「重新提炼」）
     if (e.target.closest?.('[data-act="redraft"]')) {
@@ -2763,9 +2789,12 @@ async function openSplitReport({ auto = false } = {}) {
         });
       } catch (err) { /* 落库失败也放行：确认首先是本地状态，不能把用户卡住 */ }
       markRevisionConfirmed(draftRevision);
-      el.remove();
+      // 确认 → **收起面板，展示目录**（用户要的就是这个动作序列）
+      collapseSplitPanel();
       await loadExistingBlocks({ silent: true, keepSelection: true });
       showConfirmedBanner();
+      document.querySelector('.chapter-tree-head')?.scrollIntoView({ block: 'start' })
+        || blocksList?.scrollIntoView({ block: 'start' });
       return;
     }
 

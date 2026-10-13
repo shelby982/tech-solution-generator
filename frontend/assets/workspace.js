@@ -130,8 +130,13 @@ export async function refreshWorkspace() {
     if (workspace.projectId) {
       // 每次刷新都读一次 workflow_runs：运行期阶段（extracting/matching）只有这张表是准的
       const runs = await request(`/api/projects/${workspace.projectId}/workflow-runs`).catch(() => []);
-      workspace.runStage = runs?.[0]?.stage || null;
-      if (!workspace.threadId) workspace.threadId = runs?.[0]?.thread_id || null;
+      // **跳过已作废/失败的运行**：runs 是按创建时间倒序的，最新那个可能已作废，
+      // 照着它取 blocks 会让顶栏数字与目录树不一致（实测顶栏显示 0/276、
+      // 而目录树是有效运行的 212 节 —— 同一页面两个数字打架）。
+      const alive = runs.find(r => r.stage !== 'aborted' && r.stage !== 'failed');
+      const chosen = runs.find(r => r.thread_id === workspace.threadId) || alive || runs?.[0] || null;
+      if (!workspace.threadId) workspace.threadId = chosen?.thread_id || null;
+      workspace.runStage = (runs.find(r => r.thread_id === workspace.threadId) || chosen)?.stage || null;
     }
     const state = workspace.threadId ? await request(`/api/workflow/${encodeURIComponent(workspace.threadId)}/state`) : {};
     workspace.state = state;
