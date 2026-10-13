@@ -354,10 +354,9 @@ _refreshGoReviewBtn();
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
         banner.innerHTML = `项目尚未到达「方案撰写」阶段，请先完成 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}" style="color:#1d4ed8;text-decoration:underline;">前置步骤</a>。`;
-        const stageBar = document.getElementById('stage-progress');
-        const main = document.querySelector('.workspace-main-shell') || document.body;
-        if (stageBar?.parentNode) stageBar.parentNode.insertBefore(banner, stageBar.nextSibling);
-        else main.insertBefore(banner, main.firstChild);
+        // 合并页里三个模式都在同一页，"回前置步骤"的引导没有意义，且这条横幅
+        // 会把头部整体下推（实测刷新后布局变样的元凶）。改为不插入。
+        if (!isMergedPage()) insertNotice(banner);
       } catch {}
       return;
     case 'materials_review':
@@ -374,10 +373,7 @@ _refreshGoReviewBtn();
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
         banner.innerHTML = `素材匹配尚未确认，请先回 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&view=matching" style="color:#1d4ed8;text-decoration:underline;">素材匹配页面</a> 点击「确认素材，进入撰写」。`;
-        const stageBar = document.getElementById('stage-progress');
-        const main = document.querySelector('.workspace-main-shell') || document.body;
-        if (stageBar?.parentNode) stageBar.parentNode.insertBefore(banner, stageBar.nextSibling);
-        else main.insertBefore(banner, main.firstChild);
+        if (!isMergedPage()) insertNotice(banner);
       } catch {}
       return;
     case 'generating': {
@@ -430,17 +426,41 @@ async function autoStartWorkflowStream() {
   await startWorkflowGeneration();
 }
 
+// 合并页（一个页面承载三个模式）判定。这些"你走错页面了，请回前置步骤"的横幅
+// 在合并页里前提就不成立 —— 方案编辑就是同一个页面里的一个模式。
+function isMergedPage() {
+  return (document.body.dataset.modes || '').includes('editor');
+}
+
+/**
+ * 把横幅插到**不改变全局布局**的位置。
+ *
+ * 原实现是"插到 #stage-progress 之后，否则 prepend 到 body/shell"。但合并页里
+ * 从来没有 #stage-progress（它本来就是空引用），于是走了兜底 prepend ——
+ * 一条 43px 的橙色横幅被塞到整页最前面，把 header 和所有内容往下推。
+ * 实测：刷新后编辑器区从 619px 变成 576px，看起来就是"刷新之后样式变了"。
+ */
+function insertNotice(node) {
+  const stageBar = document.getElementById('stage-progress');
+  if (stageBar && stageBar.parentNode) {
+    stageBar.parentNode.insertBefore(node, stageBar.nextSibling);
+    return;
+  }
+  // 没有阶段条：**追加**到编辑器区内（不 prepend、不动全局布局）
+  const host = document.querySelector('.editor-pane')
+    || document.querySelector('.workspace-main-shell')
+    || document.body;
+  host.appendChild(node);
+}
+
 // stage routing 辅助函数 — aborted 状态横幅
 function showAbortedBanner() {
   const banner = document.createElement('div');
   banner.style.cssText = 'padding:12px 20px;background:#fee2e2;color:#991b1b;border-bottom:1px solid #fca5a5;font-size:13px;text-align:center;';
   banner.innerHTML = '工作流已作废。<a href="/projects" style="color:#1d4ed8;text-decoration:underline;margin-left:8px;">返回项目列表</a>';
-  const stageBar = document.getElementById('stage-progress');
-  if (stageBar && stageBar.parentNode) {
-    stageBar.insertAdjacentElement('afterend', banner);
-  } else {
-    document.body.prepend(banner);
-  }
+  // 合并页里不弹：作废状态已由工作区状态条说明，再顶一条横幅只会挤布局
+  if (isMergedPage()) return;
+  insertNotice(banner);
 }
 
 
@@ -706,7 +726,12 @@ function onWorkflowPaused(data) {
     card.id = 'paused-banner';
     card.style.cssText = 'padding:14px 20px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:8px;margin:12px 20px;font-size:13px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;';
     const banner = document.getElementById('generation-done-banner');
-    (banner?.parentNode || document.querySelector('.workspace-main-shell') || document.body).insertBefore(card, banner || null);
+    // 有 generation-done-banner 就插它前面（原地），否则**追加**到编辑器区，
+    // 不用 prepend：prepend 会把卡片塞到 shell 最前面、挤动整页布局。
+    if (banner?.parentNode) banner.parentNode.insertBefore(card, banner);
+    else (document.querySelector('.editor-pane')
+          || document.querySelector('.workspace-main-shell')
+          || document.body).appendChild(card);
   }
   const generated = data?.generated ?? 0;
   const total = data?.total ?? 0;
