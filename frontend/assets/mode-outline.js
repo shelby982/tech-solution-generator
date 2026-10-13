@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v3';
+import { api } from './api.js?v=20261013-v4';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v3';
+       } from './workspace.js?v=20261013-v4';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v3';
+       } from './workspace-model.mjs?v=20261013-v4';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v3';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v4';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2502,21 +2502,6 @@ let splitPanelExpanded = false;
 let splitPanelFlash = '';
 let splitPanelFlashKind = '';      // '' | 'err'
 
-/** 解析「主题=章节标题」：分隔符不限 `=`，也认 `：` `:` `→` `->` 制表符与两空格以上。
- *  只写主题不写归属是常见输入，给内联提示即可，不该用阻断式弹窗。 */
-function parseTopicPlacement(raw) {
-  const map = {};
-  const bad = [];
-  String(raw || '').split('\n').forEach((line) => {
-    let t = line.trim().replace(/^[-*•·]\s*/, '');
-    if (!t) return;
-    const m = t.match(/^(.+?)\s*(?:=|＝|：|:|→|->|\t|\s{2,})\s*(.+)$/);
-    if (!m || !m[1].trim() || !m[2].trim()) { bad.push(t); return; }
-    map[m[1].trim()] = m[2].trim();
-  });
-  return { map, bad };
-}
-
 /** 保存失败：就地显示（找不到就地容器时，重开面板让顶部 flash 显示）。 */
 function inlineFlashFromSave(err) {
   const msg = '保存失败：' + String(err?.message || err).slice(0, 140);
@@ -2661,14 +2646,35 @@ async function openSplitReport({ auto = false } = {}) {
     } else if (c.answer_key === 'scope') {
       ctrl = `<div class="sr-answer"><span class="sr-dim">已在项目「投标范围」里设定，可到覆盖率面板修改</span></div>`;
     } else if (c.answer_key === 'topic_placement') {
-      // 这一项是**可选**：不确定就跳过，不影响确认目录。
-      ctrl = `<div class="sr-answer">
-        <textarea data-answer="topic_placement" rows="2"
-          placeholder="主题=章节标题（每行一条），例如：3.2.1. 客户档案管理模块=功能要求"></textarea>
-        <button class="mw-btn" data-save="topic_placement">保存归属</button>
-        <button class="mw-btn" data-save="skip" data-key="topic_placement">跳过（暂不指定）</button>
-        </div>
-        <div class="sr-dim" data-flash-for="topic_placement"></div>`;
+      // **下拉选择，不让用户手打章节名** —— 实测手打必错（用户原话：
+      // "用户去输入一个名称，大概率都会输错"）。候选章节与未归属主题都由后端给出。
+      const topics = data.topic_options || [];
+      const chapters = data.chapter_options || [];
+      if (!topics.length) {
+        ctrl = `<div class="sr-answer"><span class="sr-dim">没有未归属的主题，无需处理。</span></div>`;
+      } else if (!chapters.length) {
+        ctrl = `<div class="sr-answer"><span class="sr-dim">目录里还没有可选章节，先拆出目录再指定归属。</span>
+          <button class="mw-btn" data-save="skip" data-key="topic_placement">跳过</button></div>`;
+      } else {
+        const opts = chapters.map(ch =>
+          `<option value="${escapeHtml(ch.title)}">${'　'.repeat(Math.max(0, ch.level - 2))}${escapeHtml(ch.title)}</option>`).join('');
+        const rows = topics.map(t => `
+          <div class="sr-topic-row">
+            <span class="sr-topic-name" title="${escapeHtml(t.topic)}">${escapeHtml(t.topic)}
+              <span class="sr-dim">（${t.count} 条）</span></span>
+            <select data-topic="${escapeHtml(t.topic)}">
+              <option value="">默认：进「技术规范书要求应答」</option>
+              ${opts}
+            </select>
+          </div>`).join('');
+        ctrl = `<div class="sr-topic-list">${rows}</div>
+          <div class="sr-answer">
+            <button class="mw-btn primary" data-save="topic_placement">保存归属</button>
+            <button class="mw-btn" data-save="skip" data-key="topic_placement">全部保持默认</button>
+            <span class="sr-dim">只对选中的主题生效，其余按默认处理</span>
+          </div>
+          <div class="sr-dim" data-flash-for="topic_placement"></div>`;
+      }
     } else if (c.answer_key === 'structure') {
       ctrl = `<div class="sr-answer"><button class="mw-btn" data-save="structure">结构没问题，确认</button></div>`;
     }
@@ -2864,6 +2870,12 @@ async function openSplitReport({ auto = false } = {}) {
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-inline-err{color:#b91c1c}
+  .sr-topic-list{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:8px;
+    padding:6px 8px;margin-top:6px;background:var(--surface-2,#faf9f7)}
+  .sr-topic-row{display:flex;align-items:center;gap:10px;padding:3px 0}
+  .sr-topic-name{flex:0 0 46%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-topic-row select{flex:1;font:inherit;font-size:12.5px;padding:2px 6px;
+    border:1px solid var(--line);border-radius:6px;background:#fff}
   .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--surface-2,#faf9f7)}
   .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -2974,22 +2986,20 @@ async function openSplitReport({ auto = false } = {}) {
     if (kind === 'scope') {
       value = { table_no: Number(host.querySelector('[data-answer="scope"]').value) };
     } else if (kind === 'topic_placement') {
-      const raw = host.querySelector('[data-answer="topic_placement"]').value || '';
-      const { map, bad } = parseTopicPlacement(raw);
+      // 下拉选择：只收集"选了具体章节"的那些主题
+      const map = {};
+      document.querySelectorAll('#split-panel-inline [data-topic]').forEach((sel) => {
+        if (sel.value) map[sel.dataset.topic] = sel.value;
+      });
       const n = Object.keys(map).length;
-      // **不弹 alert**：原生弹窗会打断操作，而且只写主题不写归属是很自然的尝试。
-      // 改为面板内联提示，并把能解析的照常保存（部分成功也给明确结果）。
       if (!n) {
-        splitPanelFlash = bad.length
-          ? `没认出可用的归属：${bad.slice(0, 2).join('；')}。请写成「主题=章节标题」，例如 3.2.1. 客户档案管理模块=功能要求`
-          : '还没填内容。想指定归属就写「主题=章节标题」；不想指定可直接点「跳过（暂不指定）」——本项可选，不影响确认目录。';
-        splitPanelFlashKind = bad.length ? 'err' : '';
+        splitPanelFlash = '还没有选择任何归属。想指定就在主题右侧选一章；不想指定就点「全部保持默认」。';
+        splitPanelFlashKind = 'err';
         inlineFlash(host, splitPanelFlash, splitPanelFlashKind);
         return;
       }
       value = map;
-      splitPanelFlash = `已保存 ${n} 条主题归属${bad.length ? `（另有 ${bad.length} 行未识别，已忽略）` : ''}；`
-        + '下次「拆解评分点」按它挂载。';
+      splitPanelFlash = `已保存 ${n} 个主题的归属；其余保持默认。下次「拆解评分点」按它挂载。`;
     } else if (kind === 'structure') {
       value = { confirmed: true };
       splitPanelFlash = '结构已确认。';

@@ -183,6 +183,34 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "landed": rid in req_landed,
         })
 
+    # ── 主题归属的**可选项**（前端用下拉选择，不让用户手打名称）──
+    # 未归属主题 = 该主题下的要求没有任何一条被"评分点章节"承载。
+    # 手打章节名极易写错（实测用户就写错了），所以把候选直接给出来。
+    point_of_req: dict[str, set] = {}
+    for r in req_rows:
+        point_of_req[r["requirement_id"]] = set(r.get("point_ids") or [])
+    topic_options = []
+    for grp in tech_matrix:
+        ids = [x["requirement_id"] for x in grp.get("requirements") or []]
+        if ids and not any(point_of_req.get(rid) for rid in ids):
+            topic_options.append({"topic": grp["topic"], "count": grp["count"]})
+
+    # 可选章节：带评分点的章节（排除"技术规范书要求应答"这类兜底板块），
+    # 用层级路径展示以便区分同名章节；值传**叶子标题**（派生按标题匹配）。
+    chapter_options = []
+    for ch in chapters:
+        if not ch["review_point_ids"]:
+            continue
+        if not ch["title"] or ch["title"].startswith("技术规范书要求应答"):
+            continue
+        if ch["level"] < 2:
+            continue
+        chapter_options.append({
+            "title": ch["title"],
+            "block_id": ch["block_id"],
+            "level": ch["level"],
+        })
+
     scored_ids = {m["point_id"] for m in mapping}
 
     # 作答 + 项目范围：让确认项显示"已经答过了"，并把范围喂给评分地图
@@ -252,6 +280,8 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "unmapped_requirements": [r["requirement_id"] for r in req_rows if not r["landed"]],
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
+        "topic_options": topic_options,
+        "chapter_options": chapter_options,
         "scoring_map": scoring_map,
         "answers": answers,
         "project_scope": ctx.get("project_scope") or {},
@@ -347,7 +377,7 @@ def _confirmations(points: list[dict], rp_rows: list[dict], rp_total: float,
         "question": "规范书要求主题该挂到哪些章节？",
         "detected": (f"{len(tech_matrix)} 个主题、{sum(t['count'] for t in tech_matrix)} 条要求；"
                      f"{len(no_point)} 个评分点名下没有挂到要求"),
-        "detail": "匹配不到的会进「技术规范书要求应答」板块。如需指定归属，在下方按「主题=章节标题」填写即可（本项可选，也可跳过）",
+        "detail": "匹配不到的会进「技术规范书要求应答」板块。如需指定归属，在下方每个主题右侧直接选章节（本项可选，不选就保持默认）",
         "needs_confirm": bool(no_point),
     })
 
