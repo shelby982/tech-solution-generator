@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>拆分面板 · 左侧竖条三阶段 + 手风琴（效果图）</title>
+<style>
+  /* 视觉沿用工作台的浅灰底 + 白卡片 + 蓝色强调 */
+  :root{
+    --bg:#f2f4f7; --surface:#fff; --line:#e5e7eb; --line2:#eef1f5;
+    --text:#16202c; --muted:#6b7280; --blue:#2563eb; --blue-soft:#eff6ff;
+    --green:#047857; --green-soft:#ecfdf5; --amber:#92400e; --amber-soft:#fffbeb;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .page{max-width:1240px;margin:0 auto;padding:14px}
+
+  /* 模拟工作台顶栏 */
+  .topbar{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--radius);padding:10px 14px;margin-bottom:12px}
+  .topbar .name{font-weight:600}
+  .topbar .tabs{margin-left:auto;display:flex;gap:6px}
+  .topbar .tabs span{padding:3px 10px;border-radius:999px;color:var(--muted);font-size:12.5px}
+  .topbar .tabs span.on{background:var(--blue-soft);color:var(--blue);font-weight:600}
+
+  /* 面板卡片 */
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:0 2px 10px rgba(16,24,40,.05);overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .panel-head b{font-size:14px}
+  .panel-head .hint{color:var(--muted);font-size:12px}
+  .panel-head .btn{margin-left:auto}
+
+  /* 筛选条 */
+  .filter{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#f8fafc;
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .filter .k{font-weight:600;font-size:12.5px;color:var(--muted)}
+  .filter select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+    border-radius:7px;background:#fff;max-width:340px}
+  .chip{font-size:11.5px;color:var(--blue);background:var(--blue-soft);border:1px solid #bfdbfe;
+    border-radius:999px;padding:1px 8px}
+
+  /* ── 主体：左侧竖条 + 右侧手风琴 ── */
+  .body{display:flex;align-items:stretch;min-height:560px}
+  .rail{flex:0 0 168px;border-right:1px solid var(--line);background:#fafbfc;padding:14px 0}
+  .rail-item{position:relative;display:flex;align-items:center;gap:9px;padding:9px 14px;cursor:pointer}
+  .rail-item + .rail-item{margin-top:2px}
+  .rail-item .dot{flex:0 0 20px;height:20px;border-radius:50%;border:1.5px solid var(--line);
+    background:#fff;color:var(--muted);font-size:11.5px;display:flex;align-items:center;
+    justify-content:center;font-weight:600}
+  .rail-item .lab{font-size:13px}
+  .rail-item .sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+  /* 连接线 */
+  .rail-item:not(:last-child)::after{content:"";position:absolute;left:23px;top:29px;bottom:-11px;
+    width:1.5px;background:var(--line)}
+  .rail-item.done .dot{background:var(--green-soft);border-color:#a7f3d0;color:var(--green)}
+  .rail-item.done:not(:last-child)::after{background:#a7f3d0}
+  .rail-item.on{background:var(--blue-soft)}
+  .rail-item.on .dot{background:var(--blue);border-color:var(--blue);color:#fff}
+  .rail-item.on .lab{font-weight:600;color:var(--blue)}
+  .rail-item.locked{opacity:.5;cursor:not-allowed}
+  .rail-foot{margin:16px 12px 0;padding:8px 10px;border:1px dashed var(--line);border-radius:8px;
+    font-size:11.5px;color:var(--muted)}
+
+  .stack{flex:1;min-width:0;padding:12px 14px 16px;background:#fcfcfd}
+  /* 手风琴条目 */
+  .acc{border:1px solid var(--line);border-radius:9px;background:#fff;margin-bottom:10px;overflow:hidden}
+  .acc.open{border-color:#bfdbfe;box-shadow:0 1px 6px rgba(37,99,235,.07)}
+  .acc-head{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer}
+  .acc-head .idx{flex:0 0 22px;height:22px;border-radius:6px;background:#f1f5f9;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+  .acc.open .acc-head .idx{background:var(--blue);color:#fff}
+  .acc-head .title{font-weight:600;font-size:13px}
+  .acc-head .summary{color:var(--muted);font-size:12px}
+  .acc-head .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .acc-head .caret{color:var(--muted);font-size:11px}
+  .acc-body{display:none;padding:0 13px 13px;border-top:1px solid var(--line2)}
+  .acc.open .acc-body{display:block}
+  /* 折叠态摘要（收起上一级后仍能一眼看到结论） */
+  .acc.collapsed-note .acc-head{background:#fafbfc}
+
+  /* 阶段内子页签 */
+  .subtabs{display:flex;gap:4px;margin:10px 0 8px;flex-wrap:wrap}
+  .subtabs span{font-size:12.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--muted);cursor:pointer}
+  .subtabs span.on{background:var(--blue-soft);border-color:#bfdbfe;color:var(--blue);font-weight:600}
+  .subtabs .n{color:var(--muted);font-weight:400;margin-left:4px}
+
+  /* 评分点卡片（结构化评分口径） */
+  .pc{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:#fff}
+  .pc-h{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:#fafbfc;border-radius:9px 9px 0 0}
+  .pc-h .f{font-size:11.5px;color:var(--blue);background:var(--blue-soft);border:1px solid #bfdbfe;
+    border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .pc-h .i{font-weight:600;font-size:12.5px;flex:1}
+  .pc-h .s{font-weight:600;font-size:12.5px;color:var(--green);white-space:nowrap}
+  .pc ul{margin:6px 0 8px;padding-left:22px}
+  .pc li{display:flex;gap:8px;align-items:flex-start;margin:3px 0;font-size:12.5px}
+  .pc li .t{flex:1}
+  .band{flex:0 0 auto;font-size:11.5px;color:var(--green);background:var(--green-soft);
+    border:1px solid #a7f3d0;border-radius:999px;padding:0 7px;white-space:nowrap}
+  .band.cap{color:var(--amber);background:var(--amber-soft);border-color:#fcd34d}
+
+  .row{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
+  .row .k{font-size:12.5px;font-weight:600;color:var(--muted);flex:0 0 92px}
+  .box{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;font-size:12.5px}
+  .cb{display:flex;align-items:center;gap:5px;font-size:12.5px;border:1px solid var(--line);
+    border-radius:8px;padding:4px 9px;background:#fff}
+  .primary{background:var(--blue);border:1px solid var(--blue);color:#fff;font:inherit;font-size:12.5px;
+    font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
+  .ghost{background:#fff;border:1px solid var(--line);color:var(--text);font:inherit;font-size:12.5px;
+    padding:6px 12px;border-radius:8px;cursor:pointer}
+  .note{color:var(--muted);font-size:11.5px}
+  .locked-note{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px;padding:10px 0}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line2)}
+  th{color:var(--muted);font-weight:600;background:#fafbfc}
+  .metrics{display:flex;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .m{flex:1 1 130px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fafbfc}
+  .m .l{font-size:11.5px;color:var(--muted)}
+  .m .v{font-size:15px;font-weight:600}
+  .m .s{font-size:11px;color:var(--muted)}
+  .m.ok{border-color:#a7f3d0;background:var(--green-soft)}
+  .m.pending{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
+  .legend{display:flex;gap:14px;color:var(--muted);font-size:11.5px;padding:8px 16px 0}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 模拟顶栏（真实页面已有） -->
+  <div class="topbar">
+    <span class="name">新建项目</span>
+    <div class="tabs">
+      <span class="on">要求与大纲</span><span>素材库</span><span>方案编辑</span><span>质量检查</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <b>拆分评审点</b>
+      <span class="hint">① 评审点 → ② 待确认 → ③ 产物点（确认后生成）</span>
+      <button class="ghost btn">重新拆分评审点</button>
+    </div>
+
+    <!-- 筛选：只留标包 -->
+    <div class="filter">
+      <span class="k">筛选</span>
+      <span class="k" style="font-weight:400">标包</span>
+      <select>
+        <option>标的1 / 标包2 · 高可靠技术专题研究与验证标包（技术8·商务8）</option>
+        <option>标的1 / 标包1 · 关键业务场景研究与验证标包（商务13）</option>
+        <option>标的1 / 标包3 · 主数据管理研究及全过程技术管控标包（商务8）</option>
+      </select>
+      <span class="chip">当前产物：标的1 / 标包2 · 商务+技术</span>
+      <span class="note">选好标包后，到「待确认」确认类别再生成</span>
+    </div>
+
+    <!-- 指标（随阶段变化；这里展示"评审点"阶段的指标） -->
+    <div class="metrics">
+      <div class="m ok"><div class="l">商务评分点</div><div class="v">8 个</div><div class="s">合计 100 分</div></div>
+      <div class="m ok"><div class="l">技术评分点</div><div class="v">8 个</div><div class="s">合计 100 分</div></div>
+      <div class="m ok"><div class="l">技术规范书拆解</div><div class="v">153 条</div><div class="s">19 个主题</div></div>
+      <div class="m pending"><div class="l">待确认</div><div class="v">3 项</div><div class="s">需要你确认</div></div>
+      <div class="m pending"><div class="l">产物 · 目录</div><div class="v">—</div><div class="s">确认后生成</div></div>
+      <div class="m pending"><div class="l">产物 · 映射矩阵</div><div class="v">—</div><div class="s">确认后生成</div></div>
+    </div>
+
+    <div class="body">
+      <!-- ── 左侧竖条三阶段导航 ── -->
+      <nav class="rail">
+        <div class="rail-item on" data-stage="1">
+          <span class="dot">1</span>
+          <span><span class="lab">评审点</span><span class="sub">已拆：商务 8 · 技术 8</span></span>
+        </div>
+        <div class="rail-item done" data-stage="2">
+          <span class="dot">2</span>
+          <span><span class="lab">待确认</span><span class="sub">评审后确认</span></span>
+        </div>
+        <div class="rail-item locked" data-stage="3">
+          <span class="dot">3</span>
+          <span><span class="lab">产物点</span><span class="sub">确认后展示</span></span>
+        </div>
+        <div class="rail-foot">
+          点开下一级时，上一级自动收起为一行摘要（可随时点回来展开）。
+        </div>
+      </nav>
+
+      <!-- ── 右侧：手风琴（当前阶段展开，上面的收起）── -->
+      <section class="stack">
+
+        <!-- ① 评审点 -->
+        <div class="acc open" data-stage="1">
+          <div class="acc-head">
+            <span class="idx">1</span>
+            <span class="title">评审点</span>
+            <span class="summary">商务评分点 8 · 技术评分点 8 · 技术规范书拆解 153 条</span>
+            <span class="right"><span class="caret">▾</span></span>
+          </div>
+          <div class="acc-body">
+            <div class="subtabs">
+              <span class="on">商务评分点<span class="n">8</span></span>
+              <span>技术评分点<span class="n">8</span></span>
+              <span>技术规范书拆解<span class="n">153</span></span>
+            </div>
+
+            <div class="note">来自<b>招标文件</b>的商务评分表：8 个评分点 · 合计 100 分。评分口径已按"得分条件"逐条展开，分值单列。</div>
+
+            <div class="pc">
+              <div class="pc-h">
+                <span class="f">商务投标文件质量</span><span class="i">投标文件章节内容</span><span class="s">5 分</span>
+              </div>
+              <ul>
+                <li><span class="t">1. 商务投标文件各章节内容准确对应招标文件格式要求的得5分;</span><span class="band">5 分</span></li>
+                <li><span class="t">2. 存在漏放、不按章节规定位置编写、提供与本章节要求无关内容的，每出现一处扣1分;</span><span class="band">1 分</span></li>
+                <li><span class="t">3. 本项最低得0分。</span><span class="band">0 分</span></li>
+              </ul>
+            </div>
+
+            <div class="pc">
+              <div class="pc-h">
+                <span class="f">财务状况</span><span class="i">营业净利率</span><span class="s">10 分</span>
+              </div>
+              <ul>
+                <li><span class="t">1. 提供近三年经审计的财务报告、资产负债表、现金流量表等佐证材料的得 10 分；</span><span class="band">10 分</span></li>
+                <li><span class="t">2. 材料不全的按缺项扣分，最低 0 分。</span><span class="band cap">最多 10 分</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- ② 待确认 -->
+        <div class="acc" data-stage="2">
+          <div class="acc-head">
+            <span class="idx">2</span>
+            <span class="title">待确认</span>
+            <span class="summary">评审点已拆出，等你确认范围与类别（3 项）</span>
+            <span class="right"><span class="caret">▸</span></span>
+          </div>
+          <div class="acc-body">
+            <div class="note">确认完才会输出产物（目录 / 映射矩阵）。</div>
+            <div class="row"><span class="k">① 投标范围</span>
+              <span class="box">标的1 / 标包2 · 高可靠技术专题研究与验证标包</span>
+              <span class="note">要改就在上方「筛选 · 标包」切换</span></div>
+            <div class="row"><span class="k">② 生成类别</span>
+              <span class="cb"><input type="checkbox" checked> 商务</span>
+              <span class="cb"><input type="checkbox" checked> 技术</span>
+              <span class="note">勾选的类别会合成这一份应答目录</span></div>
+            <div class="row"><span class="k">③ 主题归属</span>
+              <span class="box" style="flex:1;color:var(--muted)">可选：把未归属的技术规范书主题挂到指定章节（下拉选择）</span></div>
+            <div class="row"><span class="k">④ 其他</span>
+              <span class="box" style="flex:1;color:var(--muted)">分值合计自检 · 范围放宽提示 · 共 1 项</span></div>
+            <div class="row" style="margin-top:12px">
+              <button class="primary">确认，生成产物</button>
+              <span class="note">确认即生成；产物点随确认变为可点。</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ③ 产物点 -->
+        <div class="acc" data-stage="3">
+          <div class="acc-head">
+            <span class="idx">3</span>
+            <span class="title">产物点</span>
+            <span class="summary">确认后展示：目录 + 技术与评分点映射矩阵</span>
+            <span class="right"><span class="caret">▸</span></span>
+          </div>
+          <div class="acc-body">
+            <div class="subtabs">
+              <span class="on">目录<span class="n">15</span></span>
+              <span>技术与评分点映射矩阵<span class="n">16</span></span>
+            </div>
+            <table>
+              <thead><tr><th>评分因素</th><th>详细评审项</th><th>分值</th><th>章节</th></tr></thead>
+              <tbody>
+                <tr><td>商务投标文件质量</td><td>投标文件章节内容</td><td>5 分</td><td>1</td></tr>
+                <tr><td>财务状况</td><td>营业净利率</td><td>10 分</td><td>2</td></tr>
+                <tr><td>技术方案</td><td>技术方案可行性</td><td>12 分</td><td>3</td></tr>
+              </tbody>
+            </table>
+            <div class="note" style="margin-top:8px">目录树在面板下方的目录区；覆盖率自检等目录稳定后再补。</div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <span>● 蓝 = 当前阶段</span><span>● 绿 ✓ = 已完成</span><span>● 灰 = 未到期（置灰并写明"还差什么"）</span>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 手风琴：点开某一级 → 自动收起其它级（用户要求："每一级点开之后，可以将上一级收起来"）
+  const accs = [...document.querySelectorAll('.acc')];
+  const rails = [...document.querySelectorAll('.rail-item')];
+  function open(stage) {
+    accs.forEach(a => {
+      const on = a.dataset.stage === String(stage);
+      a.classList.toggle('open', on);
+      a.querySelector('.caret').textContent = on ? '▾' : '▸';
+      if (!on) {
+        // 收起后把结论压成一行摘要，保持可读
+        const s = a.querySelector('.summary');
+        if (a.dataset.stage === '1') s.textContent = '已拆：商务评分点 8 · 技术评分点 8 · 技术规范书拆解 153 条';
+        if (a.dataset.stage === '2') s.textContent = '点击确认后进入（确认范围与类别）';
+        if (a.dataset.stage === '3') s.textContent = '确认后展示：目录 + 技术与评分点映射矩阵';
+      }
+    });
+    rails.forEach(r => r.classList.toggle('on', r.dataset.stage === String(stage)));
+    document.querySelector('.rail-item[data-stage="2"]').classList.toggle('done', stage !== 2);
+  }
+  document.querySelectorAll('.acc-head, .rail-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const wrap = el.closest('.acc') || el;
+      const stage = wrap.dataset.stage;
+      if (el.classList.contains('locked')) return;      // 未到期：不响应
+      open(stage);
+    });
+  });
+  document.querySelectorAll('.subtabs').forEach(g => {
+    g.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'SPAN') return;
+      [...g.children].forEach(x => x.classList.remove('on'));
+      e.target.classList.add('on');
+    });
+  });
+</script>
+</body>
+</html>
