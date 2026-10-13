@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v11';
+import { api } from './api.js?v=20261013-v14';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v11';
+       } from './workspace.js?v=20261013-v14';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v11';
+       } from './workspace-model.mjs?v=20261013-v14';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v11';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v14';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2391,6 +2391,20 @@ function renderOutlineCoverage(coverage) {
   }
   box.hidden = false;
   box.className = 'ov-panel';
+  // 目录还没生成时，覆盖率必然是 0/13、0/153 —— 显示成红色"全部未覆盖"很像失败了，
+  // 其实只是"还没生成目录"。这时换成中性口径：已拆出多少评分点 + 待生成提示。
+  if (coverage.outline_pending) {
+    box.innerHTML = `
+      <div class="ov-panel-head">
+        <span class="ov-panel-title">目录覆盖率</span>
+        <span class="ov-metric pending">评分点已拆出 <b>${coverage.review_points_total}</b>
+          <span class="ov-sub">合计 ${coverage.score_total} 分</span></span>
+        <span class="ov-metric pending">规范要求 <b>${coverage.requirements_total}</b> 条
+          <span class="ov-sub">待挂载</span></span>
+        <span class="ov-sub" style="margin-left:auto">目录还没生成：在下面选标包 + 类别后点「按所选生成应答目录」，生成后这里显示覆盖率</span>
+      </div>`;
+    return;
+  }
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
   const cls = (a, b) => (a >= b ? 'ok' : a ? 'warn' : 'bad');
   const gaps = []
@@ -2559,6 +2573,9 @@ async function maybeAutoOpenSplitReport() {
 
 /** 收起拆分清单：拆下面板、恢复"待确认"横幅、露出目录。 */
 function collapseSplitPanel() {
+  // 目录还没生成时，收起面板要把"待生成"指引露出来（否则页面只剩空白）
+  const note = document.getElementById('blocks-pending');
+  if (note && outlinePending) note.hidden = false;
   splitPanelExpanded = false;
   const el = document.getElementById('split-panel-inline');
   if (el) { el.hidden = true; el.innerHTML = ''; }
@@ -2927,6 +2944,11 @@ async function openSplitReport({ auto = false } = {}) {
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-inline-err{color:#b91c1c}
+  #blocks-pending{margin:0 12px 12px;padding:10px 12px;text-align:left;align-items:flex-start;
+    background:var(--surface-2,#faf9f7);border:1px dashed var(--line);border-radius:9px}
+  #blocks-pending p{margin:0}
+  #blocks-pending p+p{margin-top:5px}
+  .ov-metric.pending{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
   .sr-topic-list{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:8px;
     padding:6px 8px;margin-top:6px;background:var(--surface-2,#faf9f7)}
   .sr-topic-row{display:flex;align-items:center;gap:10px;padding:3px 0}
@@ -2959,7 +2981,17 @@ async function openSplitReport({ auto = false } = {}) {
   // 展开期间隐藏"待确认"横幅（它只是引导用户来看这个面板，展开后重复）
   const banner = document.getElementById('split-confirm-banner');
   if (banner) banner.hidden = true;
-  el.scrollIntoView({ block: 'start' });
+  // 面板展开时把"待生成"占位收起：它和面板页脚说的是同一件事，
+  // 留着既重复又多出一屏（用户还得往下滚才看得见）。
+  const pendingNote = document.getElementById('blocks-pending');
+  if (pendingNote && outlinePending) pendingNote.hidden = true;
+  // 滚动策略：面板在内容区**顶部**，上面还有「目录覆盖率」等关键信息。
+  // `scrollIntoView({block:'start'})` 会把页面滚到面板顶部，覆盖率被顶出视野；
+  // `{block:'nearest'}` 更糟 —— 它滚的是**内层容器**（实测 #blocks-scroll.scrollTop=85），
+  // 覆盖率同样被滚掉一半。所以直接把承载容器滚到顶：覆盖率和面板一起可见。
+  const scroller = el.closest('#blocks-scroll') || el.closest('.blocks-scroll');
+  if (scroller) scroller.scrollTop = 0;
+  else el.scrollIntoView({ block: 'nearest' });
 
   el.querySelectorAll('.sr-tab').forEach(tab => tab.addEventListener('click', () => {
     el.querySelectorAll('.sr-tab').forEach(t => t.classList.toggle('active', t === tab));
