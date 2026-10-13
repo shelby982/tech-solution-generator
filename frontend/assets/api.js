@@ -300,6 +300,14 @@ export const api = {
     // 为什么需要：页面首次加载时 URL 往往没带 threadId、sessionStorage 也是空的，
     // 而 /blocks 接口会回退到"最新 run"（目录照样显示），于是依赖 tid 的面板
     // （覆盖率、目录未派生提示）会静默什么都不做 —— 实测就是这个坑。
+    // 项目全部 run（含 stage）：用于避开已作废/失败的线程
+    workflowRuns: async (projectId) => {
+      const r = await fetch(`/api/projects/${projectId}/workflow-runs`);
+      if (!r.ok) return [];
+      const runs = await r.json().catch(() => []);
+      return Array.isArray(runs) ? runs : [];
+    },
+
     latestRunThreadId: async (projectId) => {
       const r = await fetch(`/api/projects/${projectId}/workflow-runs`);
       if (!r.ok) return null;

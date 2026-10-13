@@ -87,6 +87,19 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .ov-metric.warn{background:#fffbeb;border-color:#fcd34d;color:#92400e}
 .ov-metric.bad{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
 .ov-gaps{margin-top:6px;color:#92400e}
+.ov-actions{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;
+  border-top:1px dashed var(--line)}
+.ov-actions .mw-btn{margin-left:auto}
+.ov-sub{color:var(--muted);font-size:11.5px}
+.ov-scope{display:inline-flex;align-items:center;gap:5px;font-size:12px}
+.ov-scope select{font:inherit;font-size:12px;padding:2px 4px;border:1px solid var(--line);
+  border-radius:6px;max-width:260px}
+.split-banner{display:flex;flex-direction:column;gap:3px;margin:8px 12px;padding:9px 12px;
+  border-radius:8px;font-size:12.5px;border:1px solid var(--line)}
+.split-banner strong{font-size:13px}
+.split-banner span{color:var(--muted)}
+.split-banner.todo{background:#fffbeb;border-color:#fcd34d}
+.split-banner.done{background:#f0fdf4;border-color:#a7f3d0}
 .ov-risk-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .ov-risk-table th,.ov-risk-table td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
 .ov-risk-table th{color:var(--muted);font-weight:500}
@@ -2396,7 +2409,36 @@ async function refreshOutlineCoverage(tid) {
  * 用户要求（固定流程）：拆分时把需要确认的内容与用户沟通；拆分完成后列出
  * 完整的评分点及数量、评分单元与子检查项、技术要求矩阵、评分↔技术要求映射矩阵。
  * 用整页浮层呈现（四张大表在侧栏里看不完），不占布局、关掉即走。
- */async function openSplitReport() {
+ */
+/** 拆分结果的确认状态：按 项目+run 记住"第几版已确认"。
+ *
+ * UI 逻辑（用户要求）：拆分完成 → **直接展示拆分清单**（评分点 / 评分单元 /
+ * 技术要求矩阵 / 映射矩阵）→ 确认之后才把目录当作最终应答目录输出。
+ * 所以要记住"这一版确认过没有"，否则每次目录更新都弹一次。
+ */
+function confirmedRevisionKey() {
+  const tid = currentThreadId || params.get('threadId') || getThread(projectId) || 'latest';
+  return `aibidding:split-confirmed:${projectId}:${tid}`;
+}
+function getConfirmedRevision() {
+  try { return Number(sessionStorage.getItem(confirmedRevisionKey()) || 0); } catch (e) { return 0; }
+}
+function markRevisionConfirmed(rev) {
+  try { sessionStorage.setItem(confirmedRevisionKey(), String(rev || 0)); } catch (e) { /* 忽略 */ }
+}
+
+/** 拆分完成时自动展示拆分清单 —— 确认之前不把目录当最终结果输出。 */
+let splitPanelAutoOpenedFor = 0;
+async function maybeAutoOpenSplitReport() {
+  const rev = Number(draftRevision || 0);
+  if (!rev) return;
+  if (rev <= getConfirmedRevision()) return;        // 这一版已确认过
+  if (splitPanelAutoOpenedFor === rev) return;      // 同一版只自动展示一次
+  splitPanelAutoOpenedFor = rev;
+  await openSplitReport({ auto: true });
+}
+
+async function openSplitReport({ auto = false } = {}) {
   const tid = await resolvePanelThreadId(null);
   let data = null;
   try { data = await api.workflow.splitReport(projectId, tid); } catch (e) { data = null; }
@@ -2557,6 +2599,14 @@ async function refreshOutlineCoverage(tid) {
       <div class="sr-tabs">${tabHtml}</div>
       <div class="sr-panes">${Object.entries(panes).map(([id, html]) =>
         `<div class="sr-pane ${id === 'basis' ? 'active' : ''}" data-pane="${id}">${html}</div>`).join('')}</div>
+      <div class="sr-foot">
+        <span class="sr-dim">${pending.length
+          ? `还有 ${pending.length} 项待确认；也可以直接确认，未确认项按当前识别结果执行。`
+          : '拆分依据已闭合，可以确认输出最终应答目录。'}</span>
+        <button class="mw-btn" data-act="redraft">重新拆分目录</button>
+        <button class="mw-btn primary" data-act="confirm">
+          确认无误，生成应答目录${draftRevision ? `（第 ${draftRevision} 版）` : ''}</button>
+      </div>
     </div>`;
 
   if (!document.getElementById('sr-style')) {
@@ -2616,6 +2666,10 @@ async function refreshOutlineCoverage(tid) {
     border:1px solid var(--line);border-radius:6px;max-width:100%}
   .sr-answer textarea{flex:1;min-width:300px}
   .sr-empty{color:var(--muted);font-size:12.5px;padding:6px 0}
+  .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
+    background:var(--surface-2,#faf9f7)}
+  .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+  .sr-foot .mw-btn.primary:hover{background:#1d4ed8}
   .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.6}`;
     document.head.appendChild(st);
   }
@@ -2629,6 +2683,33 @@ async function refreshOutlineCoverage(tid) {
 
   el.addEventListener('click', async (e) => {
     if (e.target === el || e.target.closest?.('[data-act="close"]')) { el.remove(); return; }
+
+    // 重新拆分：复用状态栏那个入口（带后端预检，原料变过时引导到「重新提炼」）
+    if (e.target.closest?.('[data-act="redraft"]')) {
+      el.remove();
+      await redraftOutline();
+      return;
+    }
+
+    // 确认：落库"结构已确认" + 记住这一版已确认 → 关闭面板，输出最终应答目录
+    if (e.target.closest?.('[data-act="confirm"]')) {
+      const confirmBtn = e.target.closest('[data-act="confirm"]');
+      confirmBtn.disabled = true;
+      try {
+        const tidC = await resolvePanelThreadId(null);
+        await api.workflow.answerSplit(projectId, {
+          key: 'structure',
+          value: { confirmed: true, revision: Number(draftRevision || 0) },
+          threadId: tidC,
+        });
+      } catch (err) { /* 落库失败也放行：确认首先是本地状态，不能把用户卡住 */ }
+      markRevisionConfirmed(draftRevision);
+      el.remove();
+      await loadExistingBlocks({ silent: true, keepSelection: true });
+      showConfirmedBanner();
+      return;
+    }
+
     const btn = e.target.closest?.('[data-save]');
     if (!btn) return;
     const kind = btn.dataset.save;
@@ -2678,16 +2759,60 @@ async function warnIfOutlineNotDerived(tid) {
   blocksList.parentElement?.insertBefore(box, blocksList);
 }
 
+/** 两阶段提示：确认前"以下目录待确认"，确认后"这是最终应答目录"。 */
+function showConfirmedBanner() {
+  const old = document.getElementById('split-confirm-banner');
+  if (old) old.remove();
+  if (!blocksList) return;
+  const rev = Number(draftRevision || 0);
+  const confirmed = rev > 0 && rev <= getConfirmedRevision();
+  const box = document.createElement('div');
+  box.id = 'split-confirm-banner';
+  box.className = confirmed ? 'split-banner done' : 'split-banner todo';
+  box.innerHTML = confirmed
+    ? `<strong>拆分结果已确认${rev ? `（第 ${rev} 版）` : ''}，以下是最终应答目录。</strong>
+       <span>需要调整范围或主题归属时，点右上「拆分清单」重新确认。</span>`
+    : `<strong>以下目录待确认 —— 确认后才是最终应答目录。</strong>
+       <span>点右上「拆分清单」查看评分点 / 评分单元与子检查项 / 技术要求矩阵 / 映射矩阵，并确认。</span>`;
+  box.addEventListener('click', () => openSplitReport());
+  box.style.cursor = 'pointer';
+  blocksList.parentElement?.insertBefore(box, blocksList);
+}
+
 async function loadExistingBlocks({ silent = false, keepSelection = false } = {}) {
   // 这里自己解析 threadId（优先级同 boot 段：内存 → URL → sessionStorage），
   // 因为 boot 里首次调用发生在 currentThreadId 赋值之前 —— 只读它会把 URL
   // 指定的 run 丢掉，拿到服务端的「最新 run」。
-  const tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  let tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  // 会话里记着的线程可能是**已作废/失败**的那次运行：它的 checkpoint 常停在中间态，
+  // 页面照着它渲染就会出现"目录混着商务报价评分点""确认过的目录却不是最终版"这类
+  // 自相矛盾（实测：页面显示 276 节 / 25 个评分点，而最新有效运行是 212 节 / 13 个）。
+  // 所以解析出的线程若已作废/失败，改用它之前最近的有效运行。
+  try {
+    const runs = await api.workflow.workflowRuns(projectId);
+    const cur = runs.find(r => r.thread_id === tid);
+    // 两种情况都要切：① 记着的线程已作废/失败；② **没有线程**（首访 / sessionStorage 空）——
+    // 后者服务端会回退到"最新 run"，而最新那个可能正是已作废的
+    //（实测：目录树渲染了 276 节的作废运行，而有效运行是 212 节，
+    //  覆盖率面板与目录树因此自相矛盾）。
+    const needSwitch = !tid || !cur
+      || cur.stage === 'aborted' || cur.stage === 'failed';
+    if (needSwitch) {
+      const alive = runs.find(r => r.stage !== 'aborted' && r.stage !== 'failed');
+      if (alive) {
+        tid = alive.thread_id;
+        currentThreadId = tid;
+        setThread(projectId, tid);
+      }
+    }
+  } catch (e) { /* 拿不到 run 列表就按原线程渲染 */ }
   const blocks = await api.blocks.list(projectId, tid);
   // 目录可能还没派生（运行在解析阶段中断）——先把这件事告诉用户，再谈其它
   warnIfOutlineNotDerived(tid);
   // 覆盖率面板：闸门上的"我该拿的分/该响应的要求都安排上了吗"
   refreshOutlineCoverage(tid);
+  // 两阶段 UI：确认前提示"确认后才是最终目录"，确认后说明"这是最终目录"
+  if (blocks?.length) showConfirmedBanner();
   if (!blocks?.length) {
     // 库里没有任何章节：清掉列表与计数。早退会把上一次运行的残留视图（卡片、进度环、
     // 状态栏）留在页面上，与「刷新后看到的样子」不一致。
@@ -3114,6 +3239,11 @@ function attachStream(threadId) {
       // 逐节提炼已移到闸门1 之后，此刻只有目录到手、什么都没在跑，不能写「正在提炼章节要求」
       setStatusBar('extracting', `目录已更新${ver ? `（${ver}）` : ''}…`,
         0, totalBlocks, 0);
+      // 两阶段 UI 的**主入口**：目录一到手就展示拆分清单。
+      // 不能只挂在 gate_open 上 —— 闸门早就开着时重拆不会再发 gate_open 帧，
+      // 于是"拆分完直接展示"永远不触发（实测踩到）。
+      showConfirmedBanner();
+      maybeAutoOpenSplitReport();
     },
     onMatchStart: (data) => {
       // 单 block 开始匹配：进度条切动画 + 自动滚动聚焦
@@ -4339,4 +4469,9 @@ window.__ovPanels = {
   refreshCoverage: (tid) => refreshOutlineCoverage(tid || currentThreadId || getThread(projectId)),
   renderCoverage: (cov) => renderOutlineCoverage(cov),
   risk: () => toggleScoringRisk(),
+  report: (opts) => openSplitReport(opts || {}),
+  autoOpen: () => maybeAutoOpenSplitReport(),
+  banner: () => showConfirmedBanner(),
+  setRevision: (n) => { draftRevision = Number(n) || 0; },
+  confirmedRevision: () => getConfirmedRevision(),
 };
