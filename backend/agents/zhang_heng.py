@@ -173,6 +173,9 @@ class OutlineDraftResult:
     # 覆盖率自检结果（评分点是否都有章节、规范要求是否都落点、分值合计）。
     # 闸门 1 直接展示 → 用户不必自己逐条数"漏没漏"。
     coverage: dict = field(default_factory=dict)
+    # 「只拆评分点」模式：落库评分点/规范要求，但**不产出目录**。
+    # 用户要求把流程拆成两步：① 先拆出评分点 → ② 按选择（技术/商务）再生成目录。
+    points_only: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -401,6 +404,7 @@ class ZhangHengAgent:
         previous_toc: Optional[list[DomainSection]] = None,
         project_id: Optional[int] = None,
         thread_id: str = "",
+        points_only: bool = False,
     ) -> OutlineDraftResult:
         """依据规范书目录 + 项目概述 + 用户提炼要求，派生「应答文件目录」。
 
@@ -440,10 +444,14 @@ class ZhangHengAgent:
         #   L3 分项要素细分点 ← 模型只做抽取（接地校验 + 内容哈希缓存），失败回落规则
         det = await self._try_deterministic_outline(
             flat, source_toc, instruction, configs, rr_start,
-            project_id=project_id, thread_id=thread_id,
+            project_id=project_id, thread_id=thread_id, points_only=points_only,
         )
         if det is not None:
             sections, det_note, coverage = det
+            # 只拆评分点：不再往下建目录（页面上先让用户确认评分点、再选择生成哪一类）
+            if points_only:
+                return OutlineDraftResult(sections=[], error=det_note,
+                                          coverage=coverage, points_only=True)
             if count_top_level(sections) >= MIN_TOP_LEVEL_NODES:
                 _ground_sections(sections, source_toc)
                 return OutlineDraftResult(sections=sections, error=det_note,
@@ -525,8 +533,11 @@ class ZhangHengAgent:
         *,
         project_id: Optional[int] = None,
         thread_id: str = "",
+        points_only: bool = False,
     ):
         """材料里有评分表时，用**确定性骨架**产出目录。
+
+        ``points_only=True``：只把评分点/规范要求落库（矩阵要用），**不建目录**。
 
         返回 ``(sections, note)``；材料里没有评分表（或骨架不完整）时返回 None，
         调用方走原来的模型派生路径 —— 两条路都不丢内容。
@@ -707,6 +718,33 @@ class ZhangHengAgent:
                                                                requirements)
         except Exception as e:      # 落库失败不阻断目录生成（链条能力降级，但目录照出）
             logger.warning(f"张衡：评分点/规范要求落库失败（{e}），继续生成目录")
+
+        # ── 只拆评分点：到这里已经落库（评分点 + 规范要求），**不再建目录** ──
+        # 用户要求的两步流程：第一步先把各标包的商务/技术/报价评分点拆出来给用户看，
+        # 第二步由用户选择（技术/商务）再生成对应目录。
+        if points_only:
+            total_score = sum(float(getattr(p, "points", 0) or 0) for p in picked)
+            cats: dict[str, int] = {}
+            for p in picked:
+                cats[p.category or ""] = cats.get(p.category or "", 0) + 1
+            label = {"tech": "技术", "commerce": "商务", "price": "报价", "other": "其他"}
+            summary = "、".join(f"{label.get(c, c or '未分类')} {n} 个" for c, n in sorted(cats.items()))
+            note = (f"已拆出评分点 {len(picked)} 个（合计 {total_score:g} 分）：{summary}。"
+                    "请在「拆解结果」里选择要生成的目录类别（技术 / 商务 / 报价）后再生成。")
+            if map_note:
+                note += f"；{map_note}"
+            logger.info("张衡：只拆评分点（%s），未生成目录", summary)
+            return [], note, {
+                "review_points_total": len(picked),
+                "review_points_covered": 0,
+                "review_points_decomposed": 0,
+                "review_points_missing": [],
+                "score_total": round(total_score, 2),
+                "score_covered": 0.0,
+                "requirements_total": len(requirements),
+                "requirements_landed": 0,
+                "outline_pending": True,
+            }
 
         from infra.parser.outline_builder import parse_placement_targets
         placement = parse_placement_targets(instruction)

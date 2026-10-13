@@ -116,7 +116,12 @@ class ReviewRepository:
 # 合法 stage 集合（与 spec §5 一致）
 # ─────────────────────────────────────────────────────────
 _VALID_STAGES = {
-    "idle", "parsing", "outline_review",
+    "idle", "parsing",
+    # points_review：第①步「只拆评分点」结束的停留态（评分点已拆出、目录还没生成）。
+    # 用户要求的两步流程需要这个中间态；不加会写库失败（被上层 except 吞掉），
+    # 前端按旧阶段恢复视图，于是"点了只拆评分点，页面却没变"（实测踩到）。
+    "points_review",
+    "outline_review",
     # extracting：闸门 1 放行后的逐节提炼（运行期 stage，由 runner 写入，见
     # orchestrator/state.py StageLiteral 的说明）。
     "extracting", "matching", "materials_review",

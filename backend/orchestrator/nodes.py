@@ -304,6 +304,7 @@ async def zhang_heng_outline_draft_node(
         previous_toc=previous_toc,
         project_id=project_id,
         thread_id=str(state.get("thread_id") or ""),
+        points_only=bool(config.get("points_only")),
     )
 
     toc_dicts = [_section_to_dict(s) for s in result.sections]
@@ -334,6 +335,20 @@ async def zhang_heng_outline_draft_node(
         error=result.error,
     ))
 
+    # ── 只拆评分点：不产出目录，停在「评分点」这一步 ──
+    # 用户要求的两步：先拆评分点 → 用户选择类别 → 再生成目录。
+    if getattr(result, "points_only", False):
+        new_spec = dict(spec)
+        new_spec.update({
+            "points_analyzed": True,
+            "outline_pending": True,          # 图路由据此直接结束，不去闸门 1
+            "outline_coverage": dict(result.coverage or {}),
+            "outline_instruction": str(config.get("outline_instruction") or ""),
+            "points_note": result.error,
+        })
+        await _emit_frame(emitter, events.outline_draft_start(revision - 1))  # 撤回"派生中"
+        return {"stage": "points_review", "spec": new_spec}
+
     return {
         "stage": "parsing",
         "spec": {
@@ -347,6 +362,8 @@ async def zhang_heng_outline_draft_node(
             "outline_instruction": str(config.get("outline_instruction") or ""),
             # 覆盖率自检：评分点/规范要求的落点与分值合计（闸门展示，缺什么一眼可见）
             "outline_coverage": dict(result.coverage or {}),
+            # 真正生成目录后清掉"待生成"标记（否则图会立刻结束、到不了闸门 1）
+            "outline_pending": False,
         },
     }
 

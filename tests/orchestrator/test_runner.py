@@ -47,7 +47,7 @@ class _StubZhang:
         )
 
     async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id=""):
+                            previous_toc=None, project_id=None, thread_id="", points_only=False):
         """stub 直接沿用规范书目录（等价于「模型不可用」的降级路径），
         这样现有用例断言的 block_id 仍是 s1，不受目录派生影响。"""
         from agents.zhang_heng import OutlineDraftResult
@@ -361,7 +361,7 @@ class _RecordingZhang(_StubZhang):
         self.draft_calls = []
 
     async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id=""):
+                            previous_toc=None, project_id=None, thread_id="", points_only=False):
         from agents.zhang_heng import OutlineDraftResult
         self.draft_calls.append({
             "instruction": instruction,

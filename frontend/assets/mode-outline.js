@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v5';
+import { api } from './api.js?v=20261013-v8';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v5';
+       } from './workspace.js?v=20261013-v8';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v5';
+       } from './workspace-model.mjs?v=20261013-v8';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v5';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v8';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2473,6 +2473,7 @@ async function refreshOutlineCoverage(tid) {
       api.workflow.splitReport(projectId, tid).catch(() => null),
       api.workflow.getScope(projectId).catch(() => null),
     ]);
+    outlinePending = !!(st && st.spec && st.spec.outline_pending);
     renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
     fillScopeSelector(report, scope);
   } catch (e) {
@@ -2501,6 +2502,10 @@ let splitPanelExpanded = false;
 // 保存后的即时反馈（面板会重开以刷新状态，用它把"刚才那步成功了"带回来）
 let splitPanelFlash = '';
 let splitPanelFlashKind = '';      // '' | 'err'
+// 目录是否"待生成"（第①步只拆评分点之后的中间态）。由 refreshOutlineCoverage 写入，
+// loadExistingBlocks 据此自动展开「拆解结果」—— 启动时 thread 还没解析出来，
+// 光靠 restoreSettledThread 那条路会漏掉这个提示（实测面板不出现）。
+let outlinePending = false;
 
 /** 保存失败：就地显示（找不到就地容器时，重开面板让顶部 flash 显示）。 */
 function inlineFlashFromSave(err) {
@@ -3238,6 +3243,12 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   refreshMaterialUsage();      // 素材列表的「供 N 章 · M 条」按刚加载的依据重算
   renderMatDrawer();           // 抽屉开着的话跟着更新（同一份 lastSrcMaterials）
   refreshChapterEvidenceIndex();
+  // 第①步（只拆评分点）之后：目录尚未生成 → 展开「拆解结果」让用户选标包+类别。
+  // 必须放在**树渲染之后**：早于树渲染会被后续的构建/切换盖掉（实测面板不出现）。
+  if (outlinePending) {
+    splitPanelAutoOpenedFor = 0;
+    openSplitReport();
+  }
   applyPageView();             // 先定视图：下面的总览/筛选/详情都按当前视图渲染
   renderMatchSummary();
   renderMatchTreeHead();
@@ -3748,7 +3759,25 @@ function attachStream(threadId) {
       // 运行结束但没进闸门（例如被后端中止 / 图跑到尽头）时同样要回读库，
       // 否则页面停在运行期的帧上，只有手动刷新才会对齐。
       // 收尾后把已提炼的章节保持展开：用户下一步就是核对这 8 个字段。
-      resyncFromDb().then(() => openAllExtractedNodes());
+      resyncFromDb().then(async () => {
+        const st = data?.stage || '';
+        // 第①步「只拆评分点」结束时：不生成目录、图直接收尾 —— 这时要主动把
+        // 「拆解结果」展开给用户（否则页面停在没有任何提示的状态）。
+        let pending = false;
+        try {
+          const tid = currentThreadId || getThread(projectId);
+          const snap = tid ? await api.workflow.state(tid).catch(() => null) : null;
+          pending = !!(snap?.spec || {}).outline_pending || st === 'points_review';
+          if (pending) draftRevision = Number((snap?.spec || {}).outline_revision || draftRevision) || draftRevision;
+        } catch (e) { /* 读不到就按原逻辑 */ }
+        if (pending) {
+          splitPanelAutoOpenedFor = 0;
+          refreshOutlineCoverage(null);
+          await openSplitReport();
+        } else {
+          openAllExtractedNodes();
+        }
+      });
     },
   });
 }
@@ -3756,10 +3785,12 @@ function attachStream(threadId) {
 // 停在闸门 / 终态的 thread 不会自己再往下走：recover 只是把 _Run 重建回来（停在闸门时
 // ainvoke(None) 是空跑），后端不会再发任何帧。这时照常 attachStream 等帧，页面就永远停在
 // 「准备提炼…」。必须直接按 state 恢复视图。
-const SETTLED_STAGES = new Set(['outline_review', 'materials_review', 'report_review', 'done', 'paused', 'aborted', 'failed']);   // failed：终态，没有帧可等，直接按 state 恢复视图
+const SETTLED_STAGES = new Set(['points_review', 'outline_review', 'materials_review', 'report_review', 'done', 'paused', 'aborted', 'failed']);   // failed：终态，没有帧可等，直接按 state 恢复视图
 
 // 需要「按 state 恢复视图」的停留态（闸门）。failed/done 除外：它们是终态。
-const GATE_STAGES = new Set(['outline_review', 'materials_review']);
+// points_review：第①步（只拆评分点）结束的停留态 —— 没有目录可确认，
+// 要把「拆解结果」打开让用户选类别，所以和闸门一样按 state 恢复视图。
+const GATE_STAGES = new Set(['points_review', 'outline_review', 'materials_review']);
 
 async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
   if (stage === 'aborted') {
@@ -3798,6 +3829,18 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
       return;
     }
     location.href = `/review?projectId=${projectId}&threadId=${encodeURIComponent(threadId)}`;
+    return;
+  }
+  if (stage === 'points_review') {
+    // 第①步（只拆评分点）的停留态：评分点已拆出、目录还没生成。
+    // 直接展开「拆解结果」，让用户选标包 + 类别后生成目录。
+    currentGate = null;
+    setStatusBar('gate_outline',
+      `评分点已拆出，请在「拆解结果」里选择要生成的目录类别（技术 / 商务 / 报价）${note ? `；${note}` : ''}`,
+      pct, totalBlocks, doneBlocks);
+    await refreshOutlineCoverage(threadId);
+    splitPanelAutoOpenedFor = 0;
+    await openSplitReport();
     return;
   }
   if (stage === 'outline_review') {
@@ -3889,6 +3932,9 @@ async function startExtraction(forceRestart = false) {
       const resp = await api.workflow.start(projectId, {
         model: selectedModel,
         outline_instruction: readOutlineInstruction(),
+        // 第①步「拆解评分点」：只把评分点拆出来（落库 + 出矩阵），**不生成目录**。
+        // 目录留到第②步由用户在「拆解结果」里选类别后再生成（用户明确要求的两步）。
+        points_only: true,
       });
       threadId = resp?.thread_id;
       if (!threadId) {

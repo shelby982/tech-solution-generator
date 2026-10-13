@@ -90,6 +90,8 @@ class ErrorEntry(TypedDict, total=False):
 
 # 合法 stage 集合（与 domain.review.repository._VALID_STAGES 同步）
 StageLiteral = Literal[
+    # 第①步「只拆评分点」的停留态（评分点已拆出、目录还没生成）
+    "points_review",
     "idle", "parsing", "outline_review",
     # extracting：闸门 1 放行后**逐节提炼 8 字段的运行期 stage**（每章一次模型调用，
     # 一份 400 章的要求文件要跑很久）。节点只能在自己**结束时**把 stage 写进

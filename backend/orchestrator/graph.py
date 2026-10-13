@@ -316,7 +316,17 @@ def build_graph(
     builder.add_edge(NODE_PARSE, NODE_OUTLINE_DRAFT)
     # 派生目录后**直接停闸门1**，逐节 8 字段提炼（每个派生节点一次模型调用）留到
     # 闸门1 放行后再跑。目录是用户要先看、先改的东西，不该每次都被提炼的账绑住。
-    builder.add_edge(NODE_OUTLINE_DRAFT, GATE_OUTLINE)
+    # 「只拆评分点」这一步不产出目录：直接收尾，别把用户引到闸门 1
+    # （否则闸门 1 让用户确认一份还不存在的目录）。
+    def _after_outline_draft(state: WorkflowState) -> str:
+        if (state.get("spec") or {}).get("outline_pending"):
+            return END
+        return GATE_OUTLINE
+
+    builder.add_conditional_edges(
+        NODE_OUTLINE_DRAFT, _after_outline_draft,
+        {GATE_OUTLINE: GATE_OUTLINE, END: END},
+    )
     builder.add_edge(GATE_OUTLINE, NODE_EXTRACT)
     # 提炼跑完**默认收尾**，停在「要求与大纲」：素材匹配是另一个视图（素材库）里的
     # 动作，由那边的「素材匹配」按钮显式触发 —— rerun_match 把 match_requested 置真

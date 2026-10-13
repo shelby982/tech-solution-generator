@@ -481,7 +481,8 @@ class WorkflowRunner:
             "source_sections": len(spec.get("source_toc") or []),
         }
 
-    async def redraft_outline(self, thread_id: str, instruction: str) -> None:
+    async def redraft_outline(self, thread_id: str, instruction: str, *,
+                              points_only: bool = False) -> None:
         """整版重出「应答文件目录」：换一份提炼要求，让张衡重新派生目录。
 
         与 ``rerun_match`` 同为「把状态指针拨回上游节点后 ainvoke」：
@@ -536,8 +537,8 @@ class WorkflowRunner:
 
         # 保留原来的"阶段"限制：已经进到生成/评审之后，改目录会让正文对不上。
         # 但 parsing / aborted 放行 —— 那时还没有派生目录，重拆正是唯一出路。
-        if state.get("stage") not in {"outline_review", "materials_review", "paused",
-                                      "failed", "parsing", "aborted", "idle"}:
+        if state.get("stage") not in {"points_review", "outline_review", "materials_review",
+                                      "paused", "failed", "parsing", "aborted", "idle"}:
             # 说清「为什么不行」与「该怎么办」。原来只写"请在…闸门处重出目录"，
             # 而 run 跑到 done 之后根本回不到那个闸门（实测用户点了 3 次，每次都只拿到
             # 这句话、无从下手）。而且**改要求文件本身也不能靠重出目录** ——
@@ -566,7 +567,7 @@ class WorkflowRunner:
                             config,
                             {
                                 "spec": {"outline_matrix": {}},
-                                "config": {"outline_instruction": text},
+                                "config": {"outline_instruction": text, "points_only": points_only},
                                 "user_choice": "",
                             },
                             as_node=NODE_PARSE,
@@ -1048,7 +1049,9 @@ class WorkflowRunner:
         """
         state = await self.state(thread_id)
         stage = state.get("stage", "idle")
-        if graph_done and stage != "paused":
+        # 主动暂停（paused）与"只拆评分点"（points_review）都不是"跑完"：
+        # 前者还有章节没提炼，后者目录还没生成 —— 都强制 done 会让页面显示完成。
+        if graph_done and stage not in ("paused", "points_review"):
             stage = "done"
         async with get_db() as db:
             await WorkflowRunRepository(db).update_stage(thread_id, stage)

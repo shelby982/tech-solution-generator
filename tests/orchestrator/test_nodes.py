@@ -1038,7 +1038,7 @@ class _OutlineDraftStub:
         self.calls = []
 
     async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id=""):
+                            previous_toc=None, project_id=None, thread_id="", points_only=False):
         self.calls.append({
             "source_titles": [s.title for s in source_toc],
             "instruction": instruction,
