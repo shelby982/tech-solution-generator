@@ -507,6 +507,16 @@ class WorkflowRunner:
             raise KeyError(thread_id)
         if state.get("stage") == "aborted":
             raise WorkflowAbortedError("该工作流已作废，请创建新的工作流")
+        # checkpoint 的 stage 与 workflow_runs.stage **可能不一致**：作废动作会写库，
+        # 但 checkpoint 只在节点结束时更新。实测：库里是 aborted、checkpoint 还是
+        # outline_review，于是这里放行、任务跑到某处静默结束 —— 用户看到"点了没反应"。
+        # 所以两张表都要看。
+        db_stage = await self._db_run_stage(thread_id)
+        if db_stage == "aborted":
+            raise WorkflowAbortedError(
+                "该次运行已作废（workflow_runs=aborted），重新拆分不会生效。\n"
+                "请点「重新提炼」新建一次运行并重新解析要求文件。"
+            )
         # 注意：**不**因 cancel_requested 拒绝。「取消」现在是"暂停"（提炼逐节停下、
         # 内容保留），用户接着改要求、重出目录是完全合理的下一步。
         # failed 也允许重出：目录派生失败后，重试派生是用户唯一的自救入口
@@ -899,6 +909,18 @@ class WorkflowRunner:
             self._resume_until_pause(run, {}),
             name=f"wf-{thread_id}-recover",
         )
+
+    async def _db_run_stage(self, thread_id: str) -> str:
+        """读 workflow_runs.stage（与 checkpoint 可能不一致，见 redraft 守卫注释）。"""
+        try:
+            from db import get_db
+            async with get_db() as db:
+                cur = await db.execute(
+                    "SELECT stage FROM workflow_runs WHERE thread_id = ?", (thread_id,))
+                row = await cur.fetchone()
+            return str((row["stage"] if row else "") or "")
+        except Exception:
+            return ""
 
     async def state(self, thread_id: str) -> WorkflowState:
         """读 checkpoint 当前 state；若无 checkpoint 则返回空 dict。"""

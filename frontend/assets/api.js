@@ -287,7 +287,11 @@ export const api = {
       const r = await fetch(`/api/projects/${projectId}/workflow-runs`);
       if (!r.ok) return null;
       const runs = await r.json().catch(() => []);
-      return Array.isArray(runs) && runs.length ? (runs[0]?.thread_id || null) : null;
+      if (!Array.isArray(runs) || !runs.length) return null;
+      // 跳过已作废 / 失败的 run：作废的运行 checkpoint 可能停在中间态，
+      // 页面跟过去只会显示"降级/半成品"数据（实测用户看到 25 个评分点混着商务报价）。
+      const alive = runs.find(x => x.stage !== 'aborted' && x.stage !== 'failed');
+      return (alive || runs[0])?.thread_id || null;
     },
 
     // SSE — 用 EventSource。返回 EventSource，调用方可主动 .close()

@@ -148,7 +148,20 @@ async def get_split_report(project_id: int, threadId: str | None = None):
 
     async with get_db() as db:
         tid = threadId or await current_run_thread_id(db, project_id)
-        report = await build_split_report(db, project_id, tid)
+
+    # 评分地图需要 source_toc（checkpoint 里的解析结果）与提炼要求。
+    # runner 由 main.py 在 lifespan 里注入（与 workflow 路由同一实例）。
+    spec = None
+    try:
+        import routes.workflow as _wf
+        runner = getattr(_wf, "_runner", None)
+        if runner is not None and tid:
+            spec = (await runner.state(tid)).get("spec") or None
+    except Exception as exc:        # 地图缺失不影响其余清单
+        logger.warning(f"split-report：读取 spec 失败（{exc}）")
+
+    async with get_db() as db:
+        report = await build_split_report(db, project_id, tid, spec=spec)
     return JSONResponse(content=report)
 
 

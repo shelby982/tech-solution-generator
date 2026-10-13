@@ -535,6 +535,7 @@ class ZhangHengAgent:
             build_outline, criterion_lookup_key,
         )
         from infra.parser.review_points import extract_review_points
+        from infra.parser.scope_index import parse_target_tokens
         from infra.retrieval.segment import extract_category, extract_scope_tokens
 
         sections_in = [
@@ -542,14 +543,52 @@ class ZhangHengAgent:
              "raw_content": s.get("content") or "", "source_file": s.get("source_file") or ""}
             for i, s in enumerate(flat, start=1)
         ]
-        table = extract_review_points(sections_in)
-        pts = list(table.points)
+        # 这是**技术**应答目录：提炼要求没写类别时默认技术类，绝不能把商务/报价
+        # 评分点一起并进来（实测：要求为空时 25 个评分点 / 350 分全混进了技术目录）。
+        category = extract_category(instruction) or "tech"
+
+        # 范围词优先取提炼要求；要求里没写就从**技术规范书文件名**里推 ——
+        # 文件名常写着「标的1」「标包2」，是现成的强信号（实测该项目文件名即
+        # 「2_标的1：…应用中台档案管理认证系统开…」）。拿不到再让评分地图提问。
+        scope_instruction = instruction
+        tokens = extract_scope_tokens(instruction)
+        if not tokens:
+            # 用**全部材料文件名**推范围，而不是 spec_files —— 后者是从 picked 反推的
+            # （review_file 取 picked 里最常见的来源文件），在这里用会形成循环依赖。
+            inferred = []
+            for fname in sorted({s.get("source_file") or "" for s in flat}):
+                inferred += parse_target_tokens(str(fname))
+            if inferred:
+                scope_instruction = (instruction + " " + " ".join(inferred)).strip()
+                logger.info(f"张衡：提炼要求没写范围，从技术规范书文件名推出 {'、'.join(inferred)}")
+                tokens = extract_scope_tokens(scope_instruction)
+        package_no = tokens[0][1] if tokens else ""
+
+        # ── 评分地图：先看清全文有几张评分表，再定向选中一张 ──
+        # 必须在范围推断**之后**构建（它要用 scope_instruction）。
+        from services.scoring_map import build_scoring_map
+        smap = build_scoring_map(sections_in, scope_instruction or instruction)
+        selected_points = list(smap.get("_selected_points") or [])
+        map_note = ""
+        if smap.get("selected_table_no") and selected_points:
+            sel = next((e for e in smap["entries"]
+                        if e["table_no"] == smap["selected_table_no"]), {})
+            scope_txt = (f"{sel.get('target')}/标包{sel.get('package_no')}"
+                         if sel.get("resolved") else (sel.get("scope_label") or "未归属表")[:40])
+            map_note = (f"评分地图：全文 {smap['stats']['tables']} 张评分表，"
+                        f"选中「{scope_txt}」（{smap['selection'].get('reason')}）")
+            excluded = smap["stats"]["tables"] - 1
+            if excluded > 0:
+                map_note += f"，另有 {excluded} 张未选中（不属于该标的/标包）"
+            pts = selected_points          # 用选中表去重后的评分点
+
+        # 拿不到选中表时退回全文抽取（老文件没有「适用标包」声明的情况）
+        if not selected_points:
+            table = extract_review_points(sections_in)
+            pts = list(table.points)
         if not pts:
             return None
 
-        category = extract_category(instruction)
-        tokens = extract_scope_tokens(instruction)
-        package_no = tokens[0][1] if tokens else ""
         picked = [p for p in pts
                   if (not category or p.category == category)
                   and (not package_no or str(p.package_no or "") == package_no)]
@@ -706,6 +745,8 @@ class ZhangHengAgent:
             note += f"；已按提炼要求把规范书专题放入「{'、'.join(placement[:3])}」"
         if scope_note:
             note += f"；{scope_note}"
+        if map_note:
+            note += f"；{map_note}"
         # 覆盖率写进闸门可读的一句话：漏没漏一眼可见（分值合计最能暴露漏评分点）
         note += (f"；覆盖：评分点 {coverage['review_points_covered']}/"
                  f"{coverage['review_points_total']}（已拆细 {coverage['review_points_decomposed']}），"

@@ -184,6 +184,37 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         })
 
     scored_ids = {m["point_id"] for m in mapping}
+
+    # ── ⑤ 评分地图：全文有几张评分表、选中了哪张、其余为什么没选中 ──
+    # 用户提出的困难：多个标的/标包 + 商务/技术混排。地图把"干扰"变成"有归属但未选中"。
+    scoring_map = None
+    source_toc = (spec or {}).get("source_toc") or []
+    if source_toc:
+        try:
+            from services.scoring_map import build_scoring_map
+            instruction = ""
+            cfg = (spec or {}).get("config") or {}
+            if isinstance(cfg, dict):
+                instruction = str(cfg.get("outline_instruction") or "")
+            instruction = instruction or str((spec or {}).get("outline_instruction") or "")
+            # 与派生时**同一套**范围推断：要求里没写范围词就从材料文件名推
+            # （文件名常写着「标的1」）。否则报告会显示"未选中"、而目录其实已按
+            # 标的1 选中 —— 两处口径不一致，用户看到的就是自相矛盾的页面。
+            from infra.parser.scope_index import parse_target_tokens
+            if not parse_target_tokens(instruction):
+                inferred: list[str] = []
+                for sec in source_toc:
+                    fname = (sec.get("source_file") if isinstance(sec, dict)
+                             else getattr(sec, "source_file", "")) or ""
+                    inferred += parse_target_tokens(str(fname))
+                if inferred:
+                    instruction = (instruction + " " + " ".join(inferred)).strip()
+            full = build_scoring_map(source_toc, instruction)
+            scoring_map = {k: v for k, v in full.items() if k != "_selected_points"}
+            scoring_map["_issues"] = full.get("issues") or []
+        except Exception as e:      # 地图是增强信息，失败不影响其余四张清单
+            logger.warning(f"split_report：评分地图构建失败（{e}）")
+
     return {
         "review_points": {
             "items": rp_rows,
@@ -211,8 +242,10 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "unmapped_requirements": [r["requirement_id"] for r in req_rows if not r["landed"]],
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
-        "confirmations": _confirmations(points, rp_rows, rp_total, tech_matrix, mapping,
-                                        units, {**(spec or {}), "chapters": chapters}),
+        "scoring_map": scoring_map,
+        "confirmations": (_confirmations(points, rp_rows, rp_total, tech_matrix, mapping,
+                                        units, {**(spec or {}), "chapters": chapters})
+                          + list((scoring_map or {}).get("_issues") or [])),
     }
 
 
