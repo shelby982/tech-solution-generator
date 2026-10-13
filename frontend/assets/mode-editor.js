@@ -2,10 +2,10 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js';
+import { GenerateSession } from './generate-session.js?v=20261013-v1';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
 import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261013-v1';
-import { initContextPanel } from './context-panel.js';
+import { initContextPanel } from './context-panel.js?v=20261013-v1';
 import { api } from './api.js?v=20261013-v1';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261013-v1';
 // 提炼字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：

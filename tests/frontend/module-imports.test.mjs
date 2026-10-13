@@ -130,3 +130,30 @@ test('模块引用共用同一个版本号（避免缓存里新旧混用）', ()
     `模块版本号不统一（共 ${versions.size} 种）：\n` +
     [...versions.entries()].map(([v, fs]) => `  ?v=${v} ← ${fs.length} 个文件，例如 ${fs[0]}`).join('\n'));
 });
+
+// ── 每个相对导入都必须带版本号 ────────────────────────────────────────
+// 真实事故：`workspace.js` 里 `export { … } from './material-roles.mjs'` **没有 ?v=**，
+// 于是浏览器命中缓存里的旧 material-roles.mjs（缺 SELECTABLE_REQUIREMENT_ROLES）
+// → 链接期错误 → 整页脚本不执行。上一轮"统一版本号"只改了本来就带 ?v= 的引用，
+// **裸路径漏了** —— 所以这条规则必须独立存在，不能只校验"已带的那些是否一致"。
+test('每个相对导入都带 ?v=（裸路径会命中缓存里的旧模块）', () => {
+  const frontend = join(here, '..', '..', 'frontend');
+  const files = [
+    ...[ 'three-mode.html', 'projects.html', 'project-init.html', 'workbench.html',
+         'review.html', 'diff-review.html' ].map(f => join(frontend, f)),
+    ...[ 'mode-outline.js', 'mode-editor.js', 'mode-dispatch.js', 'workspace.js',
+         'workbench.js', 'context-panel.js', 'review.js', 'generate-session.js',
+         'api.js' ].map(f => join(frontend, 'assets', f)),
+  ];
+  const bad = [];
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(/(?:from|import)\s*\(?\s*['"](\.\/[^'"]+\.(?:js|mjs))(\?[^'"]*)?['"]/g)) {
+      if (!m[2] || !/^\?v=[A-Za-z0-9._-]+$/.test(m[2])) {
+        bad.push(`${file.slice(frontend.length + 1)} → ${m[1]}${m[2] || ''}`);
+      }
+    }
+  }
+  assert.deepEqual(bad, [], '以下相对导入没有版本号：\n' + bad.join('\n'));
+});
