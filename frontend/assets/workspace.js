@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261015-v49';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261015-v50';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261015-v49';
+} from './material-roles.mjs?v=20261015-v50';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -78,13 +78,17 @@ function renderChrome() {
   // 不能再跳到 /project-init、/workbench —— 那样就又回到"整页跳转 + 丢选中章节"的老样子。
   // 判定放在这里而不是各页面，因为导航的渲染权本来就属于本模块（它还渲染状态条）。
   const inPlace = (document.body.dataset.modes || '').includes('editor');
-  nav.innerHTML = [['outline','要求与大纲'],['matching','素材库'],['editor','方案编辑'],['review','质量检查']].map(([key,label]) => {
-    const jump = !inPlace || key === 'review';
-    const href = jump ? esc(workspaceUrl(key)) : '#';
-    const modeAttr = jump ? '' : ` data-mode="${key}"`;
-    const active = currentView() === key ? 'aria-current="page"' : '';
-    return `<a href="${href}"${modeAttr} ${active}>${label}${key === 'review' && summary.needsAction ? `<span class="ws-count">${summary.needsAction}</span>` : ''}</a>`;
-  }).join('');
+  // ── 四模式导航**整块移除**（用户要求）──
+  // 「要求与大纲 / 素材库 / 方案编辑 / 质量检查」这块导航的逻辑需要重新梳理，
+  // 暂时先不梳理，先把导航整块删掉，只保留当前工作区。
+  // 元素保留但清空并隐藏：其它代码会引用 `#workspace-nav`（下面的状态条就挂在
+  // 它所属的 header 之后），直接删 DOM 会连带影响那些引用。
+  nav.innerHTML = '';
+  nav.hidden = true;
+  if (!nav.dataset.navRemoved) {
+    nav.dataset.navRemoved = '1';
+    console.info('[workspace] 四模式导航已按用户要求移除（逻辑待重新设计）');
+  }
   let bar = document.getElementById('workspace-status');
   if (!bar) {
     bar = document.createElement('section'); bar.id = 'workspace-status'; bar.className = 'ws-status';
