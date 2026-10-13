@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v14';
+import { api } from './api.js?v=20261013-v18';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v14';
+       } from './workspace.js?v=20261013-v18';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v14';
+       } from './workspace-model.mjs?v=20261013-v18';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v14';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v18';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -809,6 +809,9 @@ function setStatusActions(key, html, bind) {
 }
 
 function setStatusBar(state, label, pct, totalB, doneB) {
+  // 统一的"退出运行态"收口：状态不再是 extracting 就把左下的提示文案还原
+  // （运行中它显示"正在拆解…点按钮可取消并重新拆解"）。
+  if (state !== 'extracting') restoreExtractHint();
   extractionState = state;
   statusBar.dataset.state = state;
   statusLabel.textContent = label;
@@ -3951,10 +3954,35 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
  * （含范围与类别选择、主题归属），并把旧运行标成作废；再起一个**新 thread**。
  * 保留上传的材料文件（那是输入）与项目级投标范围（用户的显式设定）。
  */
+// 防重入：清理 + 起新 run 是一整条链，期间再次点击（或别的路径同时触发）
+// 会连起两个运行 —— 实测日志里一次点击出现两次 POST /api/workflow/start。
+let restartInFlight = false;
+let lastRestartAt = 0;
+
 async function restartExtraction() {
+  if (restartInFlight) {
+    console.info('[workflow] 上一次"重新拆解"还在进行中，忽略这次点击');
+    return;
+  }
+  // 抑制"手抖连点"：整条链（取消 → 清库 → 起新 run）在几百毫秒内就结束了，
+  // 只靠 in-flight 标志挡不住紧接着的第二次点击 —— 实测连点两次起了两条 run
+  // （多余的那条会立刻被下一次 abort，白跑一次解析）。
+  const now = Date.now();
+  if (now - lastRestartAt < 5000) {
+    console.info('[workflow] 5 秒内重复点击"拆解评分点"，忽略');
+    return;
+  }
+  lastRestartAt = now;
+  restartInFlight = true;
   const btn = document.getElementById('btn-extract');
   if (btn) btn.disabled = true;
   setStatusBar('extracting', '正在清空上次的拆解结果…', 0, 0, 0);
+  // **先取消正在跑的任务**再清库：否则旧任务会边跑边往库里写，
+  // 清完之后又冒出残行（清了等于没清）。
+  if (currentThreadId) {
+    try { await api.workflow.abort(currentThreadId); }
+    catch (e) { console.warn('[workflow] 取消旧任务失败（继续重跑）', e); }
+  }
   try {
     const res = await api.projects.resetAnalysis(projectId);
     const n = res?.deleted?.blocks ?? 0;
@@ -3975,7 +4003,11 @@ async function restartExtraction() {
     console.warn('[workflow] 清空旧拆解结果失败，仍继续重跑', err);
   }
   if (btn) btn.disabled = false;
-  await startExtraction(true);
+  try {
+    await startExtraction(true);
+  } finally {
+    restartInFlight = false;
+  }
 }
 
 async function startExtraction(forceRestart = false) {
@@ -4286,9 +4318,27 @@ function failedBlockCount() {
 // 主按钮有两个入口：左栏底部的「拆解评分点 / 素材匹配」和素材库顶部总览条的
 // 「分析素材归属」。禁用态必须一起变 —— 只灰一个的话另一个看起来能点却没反应。
 function setExtractDisabled(v) {
-  btnExtract.disabled = !!v;
+  // **不再禁用「拆解评分点」**（用户反馈：运行期按钮变灰，只能先去右上角点「取消」，
+  // 再回来点一次按钮 —— 两步操作纯属冗余）。现在它始终可点：
+  // 运行中点它 = 自动取消当前任务 + 从零重跑（见 restartExtraction）。
+  // 运行期用文案/提示表达状态，而不是把唯一的入口禁掉。
+  btnExtract.disabled = false;
+  btnExtract.classList.toggle('is-running', !!v);
+  btnExtract.title = v
+    ? '正在拆解中 —— 点它可以取消当前任务并从零重新拆解'
+    : '按招标文件的评分点拆解应答目录';
+  const hint = document.querySelector('.materials-footer .extract-hint');
+  if (hint && v) {
+    hint.dataset.prev = hint.dataset.prev || hint.textContent;
+    hint.textContent = '正在拆解…点按钮可取消并重新拆解';
+  }
   const alt = document.getElementById('ms-match');
-  if (alt) alt.disabled = !!v;
+  if (alt) alt.disabled = !!v;      // 素材匹配没有"重跑"语义，保持禁用
+}
+
+function restoreExtractHint() {
+  const hint = document.querySelector('.materials-footer .extract-hint');
+  if (hint && hint.dataset.prev) { hint.textContent = hint.dataset.prev; delete hint.dataset.prev; }
 }
 
 function setPartialOutlineBar({ note = '' } = {}) {

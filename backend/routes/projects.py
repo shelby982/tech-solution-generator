@@ -56,14 +56,15 @@ async def reset_analysis(project_id: int):
         deleted = {}
         for table, sql, params in (
             ("blocks", "DELETE FROM blocks WHERE project_id = ?", (project_id,)),
-            ("reviews", "DELETE FROM reviews WHERE project_id = ?", (project_id,)),
+            # reviews 表没有 project_id，只能按 thread_id 关联（实测按 project_id 会报
+            # "no such column: project_id"，被 except 吞掉 → 旧评审静默残留）
+            ("reviews", "DELETE FROM reviews WHERE thread_id IN "
+                        "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
+             (project_id,)),
             ("split_answers", "DELETE FROM split_answers WHERE project_id = ?", (project_id,)),
-            ("review_points", "DELETE FROM review_points WHERE run_thread_id IN "
-                              "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
-             (project_id,)),
-            ("spec_requirements", "DELETE FROM spec_requirements WHERE run_thread_id IN "
-                                  "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
-             (project_id,)),
+            # 这两张表有 project_id：直接按项目删，覆盖该项目所有历史运行
+            ("review_points", "DELETE FROM review_points WHERE project_id = ?", (project_id,)),
+            ("spec_requirements", "DELETE FROM spec_requirements WHERE project_id = ?", (project_id,)),
             ("checkpoints", "DELETE FROM checkpoints WHERE thread_id IN "
                             "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
              (project_id,)),
