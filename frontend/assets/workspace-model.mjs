@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261013-v8';
+} from './material-roles.mjs?v=20261013-v9';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -41,7 +41,10 @@ export function extractBadgeState(block) {
 }
 
 export const stageLabels = {
-  idle: '等待上传要求', parsing: '解析要求中', outline_review: '待确认目录',
+  idle: '等待上传要求', parsing: '解析要求中',
+  // points_review：第①步「只拆评分点」的停留态（评分点已拆出、目录还没生成）
+  points_review: '评分点已拆出',
+  outline_review: '待确认目录',
   // extracting：闸门 1 放行后的逐节提炼（后端运行期 stage，写在 workflow_runs）
   extracting: '提炼要点中',
   matching: '匹配素材中', materials_review: '待确认素材', generating: '撰写 / 修订中',

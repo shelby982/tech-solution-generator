@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v8';
+import { api } from './api.js?v=20261013-v9';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v8';
+       } from './workspace.js?v=20261013-v9';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v8';
+       } from './workspace-model.mjs?v=20261013-v9';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v8';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v9';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -838,6 +838,18 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       `<button class="btn-status-secondary" id="btn-cancel"
         title="取消在**当前章节**跑完后生效（正在进行的这一次模型调用不会被打断）">取消</button>`,
       () => document.getElementById('btn-cancel').addEventListener('click', cancelExtraction));
+  } else if (state === 'points_pending') {
+    // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆解结果」）。
+    // 这里**不能**给「确认目录，开始提炼要点」——那会用上一版目录继续提炼（自相矛盾）。
+    setStatusActions('points_pending', `
+      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆解评分点</button>
+      <button class="btn-status-primary" id="btn-gen-outline">生成所选目录 ▸</button>`, () => {
+      document.getElementById('btn-redraft-outline')?.addEventListener('click', redraftOutline);
+      document.getElementById('btn-gen-outline')?.addEventListener('click', () => {
+        splitPanelAutoOpenedFor = 0;
+        openSplitReport();
+      });
+    });
   } else if (state === 'gate_outline') {
     setStatusActions('gate_outline', `
       <button class="btn-status-secondary" id="btn-cancel">取消</button>
@@ -2625,11 +2637,11 @@ async function openSplitReport({ auto = false } = {}) {
   const matrixRows = data.package_matrix || [];
   const tabs = [
     { id: 'matrix', label: '① 拆解结果', badge: `${matrixRows.length} 个标包` },
-    { id: 'basis', label: '拆分依据', badge: pending.length ? `${pending.length} 待确认` : '已确认' },
-    { id: 'points', label: '② 评分点', badge: pointsConfirmed ? '已确认' : `${rp.count || 0}` },
-    { id: 'units', label: '③ 评分单元', badge: `${su.unit_count || 0}` },
+    { id: 'points', label: '② 评分点明细', badge: `${rp.count || 0}` },
+    { id: 'units', label: '③ 评分单元与子项', badge: `${su.unit_count || 0}` },
     { id: 'tech', label: '技术要求矩阵', badge: `${tm.topic_count || 0}` },
     { id: 'map', label: '映射矩阵', badge: `${(mp.point_to_requirement || []).length}` },
+    { id: 'basis', label: '拆分依据', badge: pending.length ? `${pending.length} 待确认` : '已确认' },
   ];
   // 默认停在「拆解结果」：这是入口 —— 先看清各标包的商务/技术/报价评分点，
   // 再由用户选择生成哪一份目录（用户明确要求的结构）。
@@ -2828,9 +2840,9 @@ async function openSplitReport({ auto = false } = {}) {
     <div class="sr-box">
       <div class="sr-head">
         <b>拆解评分点</b>
-        <span class="sr-step ${stage === 'points' ? 'on' : ''}">① 确认评分点</span>
+        <span class="sr-step ${outlinePending ? 'on' : ''}">① 拆解评分点</span>
         <span class="sr-step-arrow">→</span>
-        <span class="sr-step ${stage === 'structure' ? 'on' : ''}">② 确认目录拆分</span>
+        <span class="sr-step ${outlinePending ? '' : 'on'}">② 生成应答目录</span>
         <span class="sr-dim" id="sr-sub">${escapeHtml(smap.selection?.reason || '')}</span>
         <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button>
       </div>
@@ -2839,15 +2851,13 @@ async function openSplitReport({ auto = false } = {}) {
       <div class="sr-panes">${Object.entries(panes).map(([id, html]) =>
         `<div class="sr-pane ${id === activeTab ? 'active' : ''}" data-pane="${id}">${html}</div>`).join('')}</div>
       <div class="sr-foot">
-        <span class="sr-dim">${stage === 'points'
-          ? `第 ① 步 · 确认评分点：${rp.count || 0} 个、合计 ${rp.score_total != null ? rp.score_total : '—'} 分。`
-            + '确认后进入第 ② 步确认目录拆分。'
-          : '第 ② 步 · 确认目录拆分：确认后收起本面板，以下即最终应答目录。'}</span>
+        <span class="sr-dim">${outlinePending
+          ? `目录还没生成：${rp.count || 0} 个评分点、合计 ${rp.score_total != null ? rp.score_total : '—'} 分。
+             请在上方选一个标包、勾选类别，再点「按所选生成应答目录」。`
+          : `目录已生成${draftRevision ? `（第 ${draftRevision} 版）` : ''}：${su.unit_count || 0} 个评分单元 / ${su.sub_item_count || 0} 个详细评审项。
+             需要换一份（技术 ⇄ 商务）就回「① 拆解结果」改选后重新生成。`}</span>
         <button class="mw-btn" data-act="redraft">重新拆解评分点</button>
-        ${stage === 'points'
-          ? `<button class="mw-btn primary" data-act="confirm-points">确认评分点，继续拆目录</button>`
-          : `<button class="mw-btn primary" data-act="confirm">确认目录拆分，生成应答目录${
-              draftRevision ? `（第 ${draftRevision} 版）` : ''}</button>`}
+        ${outlinePending ? '' : '<button class="mw-btn primary" data-act="collapse">收起，看目录</button>'}
       </div>
     </div>`;
 
@@ -3243,11 +3253,21 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   refreshMaterialUsage();      // 素材列表的「供 N 章 · M 条」按刚加载的依据重算
   renderMatDrawer();           // 抽屉开着的话跟着更新（同一份 lastSrcMaterials）
   refreshChapterEvidenceIndex();
-  // 第①步（只拆评分点）之后：目录尚未生成 → 展开「拆解结果」让用户选标包+类别。
+  // 第①步（只拆评分点）之后：目录尚未生成 →
+  //   1) **隐藏上一版目录**（否则和"只拆评分点"自相矛盾：下面还挂着旧目录）；
+  //   2) 显示占位指引；3) 展开「拆解结果」让用户选标包+类别。
   // 必须放在**树渲染之后**：早于树渲染会被后续的构建/切换盖掉（实测面板不出现）。
+  const pendingEl = document.getElementById('blocks-pending');
   if (outlinePending) {
+    blocksList.hidden = true;
+    blocksList.style.display = 'none';
+    if (pendingEl) pendingEl.hidden = false;
     splitPanelAutoOpenedFor = 0;
     openSplitReport();
+  } else {
+    blocksList.hidden = false;
+    blocksList.style.display = '';
+    if (pendingEl) pendingEl.hidden = true;
   }
   applyPageView();             // 先定视图：下面的总览/筛选/详情都按当前视图渲染
   renderMatchSummary();
