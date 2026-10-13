@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v48';
+import { api } from './api.js?v=20261015-v49';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v48';
+       } from './workspace.js?v=20261015-v49';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v48';
+       } from './workspace-model.mjs?v=20261015-v49';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v48';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v49';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3717,6 +3717,7 @@ async function recoverStreamAfterDrop() {
     // （实测：后端重启把运行清掉后，页面就卡成转圈，而顶部已经在提示"请刷新页面重试"）。
     splitInProgress = false;
     outlineDrafting = false;
+    setSplitChromeHidden(false);
     await resyncFromDb();
     setStatusBar('failed',
       '事件流已断开，且按检查点也接不回来（该任务可能已被清理）。请刷新页面后重试。',
@@ -4052,6 +4053,7 @@ function attachStream(threadId) {
     onDone: (data) => {
       console.debug('[workflow] done', data);
       splitInProgress = false;      // 拆分结束：此后允许渲染面板/目录
+      setSplitChromeHidden(false);  // 恢复顶部阶段条与页面状态栏
       const eeDone = document.getElementById('blocks-empty');
       if (eeDone) { eeDone.hidden = true; eeDone.innerHTML = ''; }
       // 运行结束但没进闸门（例如被后端中止 / 图跑到尽头）时同样要回读库，
@@ -4203,10 +4205,19 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
 let restartInFlight = false;
 let lastRestartAt = 0;
 
+/** 拆分期间隐藏/恢复两块重复的进度 UI（顶部阶段条 + 页面状态栏）。 */
+function setSplitChromeHidden(hidden) {
+  const ws = document.getElementById('workspace-status');
+  if (ws) ws.hidden = !!hidden;
+  const sb = document.getElementById('status-bar');
+  if (sb) sb.hidden = !!hidden;
+}
+
 /** 拆分中断（任务被清理 / 恢复失败）：面板给出明确说明 + 一键重试。
  *  不能继续显示加载态转圈 —— 那会让人以为还在跑。 */
 function showSplitPanelRetry(reason) {
   splitInProgress = false;
+  setSplitChromeHidden(false);
   const el = document.getElementById('split-panel-inline');
   if (!el) return;
   el.hidden = false;
@@ -4225,6 +4236,10 @@ function showSplitPanelRetry(reason) {
  *  位置与正式面板一致（同一个容器），拆完由 openSplitReport 覆盖重绘。 */
 function showSplitPanelLoading(text) {
   splitInProgress = true;
+  // 拆分期间把两块**重复信息**收起来：顶部共享壳的阶段条（第 N 轮 · 阶段 + 正文/已通过/待处理，
+  // 红框1）与页面状态栏（解析进度，红框2）。此时它们和面板里的加载态说的是同一件事，
+  // 用户要求"重新拆分时只展示上面加载的内容"。
+  setSplitChromeHidden(true);
   const el = document.getElementById('split-panel-inline');
   if (!el) return;
   el.hidden = false;
