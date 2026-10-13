@@ -4455,7 +4455,14 @@ if (params.get('autoExtract') === '1') {
   });
 } else {
   loadMaterials();
-  blocksReady = loadExistingBlocks();
+  blocksReady = loadExistingBlocks().then(() => { window.__dshAppReady = true; })
+    .catch((e) => {
+      // 启动失败必须留痕并显示，不能只留骨架：这条曾经把"模块没加载"藏成"一直在加载"
+      console.error('[outline] 首屏加载失败', e);
+      (window.__bootErrors = window.__bootErrors || []).push('首屏加载失败：' + (e?.message || e));
+      const skel = document.getElementById('blocks-loading');
+      if (skel) skel.hidden = true;
+    });
   loadModels();
   // 提炼要求：先按 localStorage 回填，闸门 1 快照到达后再以后端值覆盖空输入框
   restoreOutlineInstruction();

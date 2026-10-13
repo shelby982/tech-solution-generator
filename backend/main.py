@@ -241,6 +241,20 @@ else:
     logger.warning(f"前端目录不存在，跳过静态文件挂载：{frontend_dir}")
 
 
+@app.middleware("http")
+async def _assets_no_cache(request, call_next):
+    """静态资源一律回源校验。
+
+    为什么：本地开发时前端模块带 `?v=` 版本号，但**浏览器可能仍用缓存里的旧模块**
+    （尤其 HTML 也来自缓存时，版本号根本没变），表现为"改完前端没生效/整页卡死"。
+    给显式 no-cache，让浏览器每次带 If-None-Match 回源 —— 未变化仍是 304，开销极小。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 _HTML_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
 
 

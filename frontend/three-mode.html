@@ -465,6 +465,17 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .ot-node > .block-card { display: none; margin-top: 8px; }
 .ot-node.open > .block-card { display: block; }
 
+/* 启动失败诊断（脚本未执行时显示；正常情况下始终 hidden） */
+#boot-error{margin:8px 12px;padding:12px 14px;border:1px solid #fca5a5;border-radius:8px;
+  background:#fef2f2;color:#7f1d1d;font-size:12.5px;line-height:1.6}
+.boot-error-title{font-weight:600;font-size:13px;margin-bottom:4px}
+.boot-error-hint{color:#991b1b}
+.boot-error-detail{margin:6px 0;padding:8px;background:#fff;border:1px solid #fecaca;border-radius:6px;
+  font-size:11.5px;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow:auto}
+.boot-error-actions{display:flex;gap:10px;align-items:center}
+.boot-error-actions button{font:inherit;padding:3px 10px;border:1px solid #fca5a5;border-radius:6px;
+  background:#fff;color:#b91c1c;cursor:pointer}
+
 /* 模块卡片 */
 .block-card {
   background: var(--bg);
@@ -3323,6 +3334,8 @@ body[data-view="matching"] .match-detail { display: block; }
         <div class="blocks-empty" id="blocks-loading">
           <p>正在加载目录…</p>
         </div>
+        <!-- 启动失败诊断：由内联看门狗填充（脚本没跑起来时唯一能说话的东西） -->
+        <div id="boot-error" hidden></div>
         <div class="blocks-empty" id="blocks-empty" hidden>
           <p>上传应标文件后点击「拆解评分点」开始</p>
         </div>
@@ -3811,11 +3824,51 @@ body[data-view="matching"] .match-detail { display: block; }
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
     <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
          抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
+    <!-- 启动自检：脚本没跑起来时必须**报出来**，不能只留一个转不完的圈。
+         背景：mode-outline.js 曾用**静态 import** 加载，而静态 import 失败无法捕获 ——
+         模块链接错误（具名导入不存在/文件 404）会让整页静默不执行，界面只有骨架。 -->
+    <script>
+      window.__bootErrors = [];
+      window.__dshAppReady = false;
+      window.addEventListener('error', (e) => {
+        const t = e?.target;
+        if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+          window.__bootErrors.push(`资源加载失败：${t.src || t.href}`);
+        } else if (e?.message) {
+          window.__bootErrors.push(`脚本错误：${e.message}${e.filename ? ` @ ${e.filename}:${e.lineno}` : ''}`);
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', (e) => {
+        window.__bootErrors.push('未处理的 Promise 失败：' + (e?.reason?.message || e?.reason || ''));
+      });
+      // 看门狗：6 秒后仍未就绪 → 把骨架换成可读的诊断（含具体报错）
+      setTimeout(() => {
+        if (window.__dshAppReady) return;
+        const skel = document.getElementById('blocks-loading');
+        const box = document.getElementById('boot-error');
+        if (!box) return;
+        const errs = (window.__bootErrors || []).filter(Boolean);
+        box.hidden = false;
+        box.innerHTML = `
+          <div class="boot-error-title">页面脚本没有启动</div>
+          <div class="boot-error-hint">这不是"还在加载"，而是脚本执行失败。请把下面的报错发给开发者：</div>
+          <pre class="boot-error-detail">${errs.length ? errs.join('\n') : '（浏览器没有抛出具体错误，可能是模块图未执行）'}</pre>
+          <div class="boot-error-actions">
+            <button onclick="location.reload()">重新加载</button>
+            <a href="/projects">回到项目列表</a>
+          </div>`;
+        if (skel) skel.hidden = true;
+      }, 6000);
+    </script>
     <script type="module" src="./assets/workbench.js?v=20261013-v1"></script>
     <script type="module" src="./assets/mode-dispatch.js?v=20261013-v1"></script>
+    <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      import './assets/mode-outline.js?v=20261013-v1';
-      import './assets/mode-editor.js?v=20261013-v1';
+      for (const mod of ['./assets/mode-outline.js?v=20261013-v1',
+                        './assets/mode-editor.js?v=20261013-v1']) {
+        try { await import(mod); }
+        catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
+      }
     </script>
   <script type="module" src="./assets/workspace.js?v=20261013-v1"></script>
   </body>
