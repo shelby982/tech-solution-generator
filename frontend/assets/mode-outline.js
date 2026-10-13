@@ -2403,13 +2403,63 @@ async function resolvePanelThreadId(tid) {
   try { return await api.workflow.latestRunThreadId(projectId); } catch (e) { return null; }
 }
 
+/**
+ * 投标范围选择器：**一次设定、贯穿全程**。
+ *
+ * "我们投哪个标包"是投标人的属性，不该每次从提炼要求里的文字去猜 ——
+ * 实测多标包文件里推错范围 = 整份技术应答目录错。选项来自评分地图的标包索引。
+ *
+ * ⚠️ 这个函数曾被整段删除过（重写 openSplitReport 时连带删掉），而调用点还在，
+ * 报错又被下面的 try/catch 吞了 —— 界面只表现为"投标范围一直加载中"。
+ * 所以本函数失败时必须**留痕**（console.warn），不能静默。
+ */
+async function bindScopeSelector() {
+  const sel = document.getElementById('ov-scope-select');
+  if (!sel || sel.dataset.bound === '1') return;
+  sel.dataset.bound = '1';
+  try {
+    const tid = await resolvePanelThreadId(null);
+    const [report, scope] = await Promise.all([
+      api.workflow.splitReport(projectId, tid).catch(() => null),
+      api.workflow.getScope(projectId).catch(() => null),
+    ]);
+    const idx = (report && report.scoring_map && report.scoring_map.index) || [];
+    const opts = ['<option value="">未设定（按提炼要求推断）</option>'];
+    idx.forEach(t => (t.packages || []).forEach(p => {
+      opts.push(`<option value="${escapeHtml(`${t.target}|${p.no}`)}">${
+        escapeHtml(`${t.target} / 标包${p.no}｜${p.name}`)}</option>`);
+    }));
+    sel.innerHTML = opts.join('');
+    if (scope && (scope.target || scope.package_no)) {
+      sel.value = `${scope.target}|${scope.package_no}`;
+    }
+    sel.addEventListener('change', async () => {
+      const [target, no] = (sel.value || '').split('|');
+      const pack = (idx.find(t => t.target === target) || {}).packages?.find(p => p.no === no);
+      await api.workflow.setScope(projectId, {
+        target: target || '', package_no: no || '',
+        package_name: (pack && pack.name) || '',
+      });
+      await refreshOutlineCoverage(tid);
+      alert('投标范围已保存。下次「重新拆分目录」按它执行。');
+    });
+  } catch (e) {
+    console.warn('[outline] 投标范围选项加载失败：', e);
+    sel.innerHTML = '<option value="">范围选项加载失败</option>';
+  }
+}
+
 async function refreshOutlineCoverage(tid) {
   tid = await resolvePanelThreadId(tid);
   if (!tid) return;
   try {
     const st = await api.workflow.state(tid);
     renderOutlineCoverage((st && st.spec && st.spec.outline_coverage) || null);
-  } catch (e) { /* 覆盖率面板是增强信息，拿不到就不显示 */ }
+  } catch (e) {
+    // 面板是增强信息，但不许静默 —— 之前正是静默吞掉了 "bindScopeSelector is not defined"，
+    // 让"投标范围一直加载中"这种问题查了很久。
+    console.warn('[outline] 覆盖率面板刷新失败：', e);
+  }
 }
 
 /**
