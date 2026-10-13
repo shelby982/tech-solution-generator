@@ -99,3 +99,34 @@ test('本次事故的那个导出确实存在且可用', () => {
   assert.ok(exportedNames(join(assets, 'workspace.js')).has('SELECTABLE_REQUIREMENT_ROLES'),
     'workspace.js 未再导出 SELECTABLE_REQUIREMENT_ROLES，页面按名字导入会链接失败');
 });
+
+// ── 模块版本号必须**全局统一**（防"一半新一半旧"的缓存错配）────────────
+// 真实事故：修复 workspace.js 的再导出后，用户在浏览器里仍然卡在骨架 ——
+// 因为 `mode-outline.js` 里对 workspace.js 的导入还挂着**很早的** `?v=20261013-noconfirm`，
+// 浏览器命中了缓存里的旧文件（没有那个再导出）→ 具名导入不存在 → 整页脚本不执行。
+// 无头浏览器每次都是全新 profile（无缓存），所以本地测不出来。
+// 结论：所有模块导入/脚本引用共用一个版本号；改代码时只 bump 这一个 token。
+test('模块引用共用同一个版本号（避免缓存里新旧混用）', () => {
+  const frontend = join(here, '..', '..', 'frontend');
+  const files = [
+    ...[ 'three-mode.html', 'projects.html', 'project-init.html', 'workbench.html',
+         'review.html', 'diff-review.html' ].map(f => join(frontend, f)),
+    ...[ 'mode-outline.js', 'mode-editor.js', 'mode-dispatch.js', 'workspace.js',
+         'workbench.js', 'context-panel.js', 'review.js', 'generate-session.js' ]
+        .map(f => join(frontend, 'assets', f)),
+  ];
+  const versions = new Map();
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    const rel = file.slice(frontend.length + 1);
+    const src = readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/\.(?:js|mjs|css)\?v=([A-Za-z0-9._-]+)/g)) {
+      if (!versions.has(m[1])) versions.set(m[1], []);
+      versions.get(m[1]).push(rel);
+    }
+  }
+  assert.ok(versions.size > 0, '没有找到任何版本号，检查正则');
+  assert.equal(versions.size, 1,
+    `模块版本号不统一（共 ${versions.size} 种）：\n` +
+    [...versions.entries()].map(([v, fs]) => `  ?v=${v} ← ${fs.length} 个文件，例如 ${fs[0]}`).join('\n'));
+});

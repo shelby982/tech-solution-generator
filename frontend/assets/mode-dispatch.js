@@ -11,7 +11,7 @@
  * 那个是**编辑器内部**的视图切换，与页面三模式无关。
  */
 import { DEFAULT_MODE, isValidMode } from './workbench-modes.mjs';
-import { renderWorkspaceChrome } from './workspace.js?v=20261013-3mode';
+import { renderWorkspaceChrome } from './workspace.js?v=20261013-v1';
 
 const VIEW_KEY = 'aibidding:workspace-view';
 
