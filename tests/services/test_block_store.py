@@ -182,7 +182,8 @@ async def test_sync_outline_placeholders_kept_zero_when_all_orphans_empty(db):
 
     stats = await sync_outline_placeholders(conn, pid, [_Sec("s2", 2, "新节")])
 
-    assert stats == {"removed": 1, "created": 1, "kept": 0}
+    assert stats == {"removed": 1, "created": 1, "kept": 0,
+                "migrated": 0, "orphaned": 0, "repointed_items": 0}
     blocks = await list_blocks(conn, pid)
     assert [b["block_id"] for b in blocks] == ["s2"]
 
@@ -220,7 +221,8 @@ async def test_sync_only_clears_own_run_orphans(db):
         conn, pid, [_Sec("s1", 2, "新节")], run_thread_id="run-b",
     )
 
-    assert stats == {"removed": 0, "created": 1, "kept": 0}
+    assert stats == {"removed": 0, "created": 1, "kept": 0,
+                "migrated": 0, "orphaned": 0, "repointed_items": 0}
     blocks = {b["block_id"]: b for b in await list_blocks(conn, pid)}
     assert sorted(blocks) == ["old-1", "s1"]
     assert blocks["old-1"]["run_thread_id"] == "run-a"

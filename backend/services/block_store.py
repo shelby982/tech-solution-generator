@@ -5,6 +5,7 @@ Row 对象通过 dict(row) 转为普通字典后返回。
 """
 
 import logging
+import re
 
 import aiosqlite
 
@@ -436,15 +437,142 @@ async def _write_block_chain(db: aiosqlite.Connection, block_pk: int, chain: dic
 
     await db.execute(
         """UPDATE blocks SET review_point_ids = ?, spec_requirement_ids = ?,
-                             score_weight = ?, criterion_text = ?, spec_topic = ?
+                             score_weight = ?, criterion_text = ?, spec_topic = ?,
+                             stable_key = ?
            WHERE id = ?""",
         (_ids(chain.get("review_point_id")),
          _ids(chain.get("spec_requirement_ids")),
          chain.get("score_weight"),
          str(chain.get("criterion_text") or ""),
          str(chain.get("spec_topic") or ""),
+         str(chain.get("stable_key") or ""),
          block_pk),
     )
+
+
+async def carry_over_by_stable_key(
+    db: aiosqlite.Connection,
+    project_id: int,
+    run_thread_id: str | None,
+    sections,
+    stale_rows: list[dict],
+) -> dict:
+    """重出目录后，把旧章节的**正文 / 8 字段 / 素材挂接**迁移到新章节。
+
+    为什么必须做：``block_id`` 是位置派生的（s1 / s1.1），重拆换位置就换 id；
+    而应答条目 id 里嵌着 block_id（``{block_id}#R1``），所以素材挂接也会失效。
+    旧实现只"保护有正文的行不删"—— 结果是正文留在错位的节上、素材指向不存在的
+    条目（脏数据），用户看到的是"我写的内容不见了 / 依据对不上了"。
+
+    现在按 ``stable_key``（内容派生：评分点 id + 标题路径）认亲：
+    匹配上 → 把内容与挂接**搬到新行**，删掉旧行；匹配不上 → 保持原样（仍不删用户内容）。
+
+    返回 ``{"migrated": int, "orphaned": int, "repointed_items": int}``。
+    """
+    if not stale_rows:
+        return {"migrated": 0, "orphaned": 0, "repointed_items": 0}
+
+    new_by_key = {
+        str((getattr(sec, "chain", None) or {}).get("stable_key") or ""): sec.id
+        for sec in sections
+    }
+    new_by_key.pop("", None)
+
+    # 兜底索引：**标题在新目录里唯一**的章节，用归一化标题认亲。
+    # 为什么需要：稳定键含父级路径，章节一"搬家"（比如用户要求把规范书专题
+    # 从技术方案挪到项目管理）路径就变了、精确键必然失配，正文就搬不过去。
+    # 只收唯一标题，避免「工作项1：梳理分析现状」这类同名节点被张冠李戴。
+    title_counts: dict[str, int] = {}
+    for sec in sections:
+        t = re.sub(r"\s+", "", str(getattr(sec, "title", "") or ""))
+        if t:
+            title_counts[t] = title_counts.get(t, 0) + 1
+    new_by_unique_title = {
+        re.sub(r"\s+", "", str(getattr(sec, "title", "") or "")): sec.id
+        for sec in sections
+        if title_counts.get(re.sub(r"\s+", "", str(getattr(sec, "title", "") or "")), 0) == 1
+    }
+
+    migrated = 0
+    orphaned = 0
+    repointed = 0
+
+    for row in stale_rows:
+        key = str(row.get("stable_key") or "")
+        new_id = new_by_key.get(key) if key else None
+        if not new_id:
+            # 精确键失配（章节搬了家）→ 用唯一标题兜底
+            norm_title = re.sub(r"\s+", "", str(row.get("title") or ""))
+            new_id = new_by_unique_title.get(norm_title)
+        if not new_id:
+            orphaned += 1
+            continue
+
+        # 素材挂接里的 item_id 前缀是旧 block_id，搬到新 id 时要一起改
+        source, n = _remap_item_ids(row.get("source"), str(row.get("block_id") or ""), new_id)
+        repointed += n
+
+        await db.execute(
+            """UPDATE blocks SET
+                   content = ?, requirement = ?, key_points = ?, veto_items = ?,
+                   bonus_items = ?, score_items = ?, evidence_required = ?,
+                   constraint_level = ?, indicators = ?, status = ?,
+                   error = ?, error_kind = ?, source = ?,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE project_id = ? AND block_id = ? AND run_thread_id IS ?""",
+            (row.get("content") or "", row.get("requirement") or "", row.get("key_points") or "",
+             row.get("veto_items") or "", row.get("bonus_items") or "", row.get("score_items") or "",
+             row.get("evidence_required") or "", row.get("constraint_level") or "",
+             row.get("indicators") or "", row.get("status") or "", row.get("error") or "",
+             row.get("error_kind") or "", source, project_id, new_id, run_thread_id),
+        )
+        await db.execute("DELETE FROM blocks WHERE id = ?", (row.get("id"),))
+        migrated += 1
+
+    if migrated or orphaned:
+        await db.commit()
+        logger.info(
+            "carry_over_by_stable_key：项目 %s 迁移 %d 个章节的正文/挂接，%d 个无法认亲（保留）",
+            project_id, migrated, orphaned,
+        )
+    return {"migrated": migrated, "orphaned": orphaned, "repointed_items": repointed}
+
+
+def _remap_item_ids(source: str | None, old_id: str, new_id: str) -> tuple[str, int]:
+    """把 ``blocks.source`` 里 item_ids 的旧 block_id 前缀换成新的。
+
+    item_id 形如 ``s3.3#R1``（见 domain/spec/response_items.py）——前缀就是 block_id。
+    """
+    import json as _json
+
+    raw = (source or "").strip()
+    if not raw or raw == "[]" or not old_id or old_id == new_id:
+        return source or "[]", 0
+    try:
+        items = _json.loads(raw)
+    except (ValueError, TypeError):
+        return source or "[]", 0
+    if not isinstance(items, list):
+        return source or "[]", 0
+
+    changed = 0
+    prefix = f"{old_id}#"
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        ids = it.get("item_ids")
+        if not isinstance(ids, list):
+            continue
+        new_ids = []
+        for iid in ids:
+            s_iid = str(iid)
+            if s_iid.startswith(prefix):
+                new_ids.append(f"{new_id}#{s_iid[len(prefix):]}")
+                changed += 1
+            else:
+                new_ids.append(iid)
+        it["item_ids"] = new_ids
+    return _json.dumps(items, ensure_ascii=False), changed
 
 
 async def upsert_outline_block(
@@ -622,6 +750,28 @@ async def sync_outline_placeholders(
             ", ".join(str(b.get("block_id")) for b in kept[:10]),
         )
 
+    # 先把"有正文/有挂接"的旧行收集起来，等新行 upsert 完再按稳定键迁移。
+    #
+    # ⚠️ 候选**不能**只看"block_id 不在新目录里"：位置 id 会跨版本撞车 ——
+    # 旧「方案可行性」在 s1.1，新版本 s1.1 变成了「方案总体架构设计」，
+    # 于是旧行不算孤儿、却会被 upsert 的 UPDATE 分支**直接清空正文**（实测）。
+    # 判据因此改成：**该 id 在新目录里不存在，或该 id 已被另一个章节占用**（稳定键不同）。
+    new_key_by_id = {
+        sec.id: str((getattr(sec, "chain", None) or {}).get("stable_key") or "")
+        for sec in sections
+    }
+    carry_candidates = []
+    for b in existing:
+        has_payload = ((b.get("content") or "").strip()
+                       or (b.get("source") or "").strip() not in ("", "[]"))
+        if not has_payload:
+            continue
+        bid = b.get("block_id")
+        new_key = new_key_by_id.get(bid)
+        old_key = str(b.get("stable_key") or "").strip()
+        if new_key is None or new_key != old_key:
+            carry_candidates.append(b)
+
     for idx, sec in enumerate(sections):
         await upsert_outline_block(
             db,
@@ -635,7 +785,11 @@ async def sync_outline_placeholders(
             chain=getattr(sec, "chain", None),
         )
 
-    return {"removed": len(stale_ids), "created": len(sections), "kept": len(kept)}
+    carry = await carry_over_by_stable_key(db, project_id, run_thread_id, sections,
+                                           carry_candidates)
+    return {"removed": len(stale_ids), "created": len(sections), "kept": len(kept),
+            "migrated": carry["migrated"], "orphaned": carry["orphaned"],
+            "repointed_items": carry["repointed_items"]}
 
 
 # ══════════════════════════════════════════════════

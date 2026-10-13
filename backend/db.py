@@ -216,7 +216,11 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     #   招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
     # 在此之前评分点/规范要求只在本轮派生中内存存活，章节只有 8 段散文，
     # 于是"这章为哪个评分点得分、响应了哪条规范要求"无法反查、覆盖度算不出来。
-    for col in ("review_point_ids", "spec_requirement_ids", "criterion_text", "spec_topic"):
+    for col in ("review_point_ids", "spec_requirement_ids", "criterion_text", "spec_topic",
+                # stable_key：章节的**内容派生稳定键**。block_id 是位置派生的，
+                # 重拆目录换位置就换 id；而应答条目 id 嵌着 block_id，素材挂接也会失效。
+                # 重拆时靠这个键把正文/8字段/素材挂接迁移到新章节。
+                "stable_key"):
         if col not in existing_cols:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     if "score_weight" not in existing_cols:

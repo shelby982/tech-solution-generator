@@ -198,3 +198,83 @@ async def test_blocks_columns_carry_chain(db):
     assert row["score_weight"] == 30.0
     assert row["criterion_text"] == "口径"
     assert row["spec_topic"] == "信创适配研究及验证"
+
+
+# ── P1：重出目录时按稳定键迁移正文与素材挂接 ────────────────────
+# block_id 是位置派生的（s1/s1.1），重拆换位置就换 id；而应答条目 id 里嵌着
+# block_id（`{block_id}#R1`），素材挂接也会一起失效。旧实现只"保护有正文的行不删"，
+# 结果是正文留在错位的节上、素材指向不存在的条目。
+
+def _sec(id_, level, title, chain):
+    sec = type("S", (), {})()
+    sec.id, sec.level, sec.title, sec.chain = id_, level, title, chain
+    return sec
+
+
+@pytest.mark.asyncio
+async def test_content_migrates_to_new_chapter_by_stable_key(db):
+    """章节换了位置（id 从 s1.1 变成 s1.2）→ 正文与 8 字段要跟着到新行。"""
+    from services.block_store import sync_outline_placeholders
+
+    key = "rp-a|技术方案>方案可行性"
+    # 旧版目录：方案可行性在 s1.1
+    await sync_outline_placeholders(db, 7, [_sec("s1", 1, "技术方案", {"review_point_id": "rp-a"}),
+                                           _sec("s1.1", 2, "方案可行性", {"stable_key": key})],
+                                    run_thread_id="tid-1")
+    await db.execute("UPDATE blocks SET content='已写的正文', requirement='应标要求原文', "
+                     "source=? WHERE project_id=7 AND block_id='s1.1'",
+                     ('[{"item_ids":["s1.1#R1"],"filename":"素材.pdf"}]',))
+    await db.commit()
+
+    # 新版目录：前面插了一节，方案可行性变成 s1.3
+    stats = await sync_outline_placeholders(
+        db, 7,
+        [_sec("s1", 1, "技术方案", {"review_point_id": "rp-a"}),
+         _sec("s1.1", 2, "方案总体架构设计", {"review_point_id": "rp-a"}),
+         _sec("s1.2", 2, "方案先进性", {"review_point_id": "rp-a"}),
+         _sec("s1.3", 2, "方案可行性", {"stable_key": key})],
+        run_thread_id="tid-1")
+
+    assert stats["migrated"] == 1
+    cur = await db.execute("SELECT content, requirement, source, block_id FROM blocks "
+                           "WHERE project_id = 7 AND block_id = 's1.3'")
+    row = await cur.fetchone()
+    assert row["content"] == "已写的正文"          # 正文跟着走了
+    assert row["requirement"] == "应标要求原文"     # 8 字段也保留
+    # 素材挂接的 item_id 前缀已从旧 id 改成新 id
+    assert "s1.3#R1" in row["source"] and "s1.1#R1" not in row["source"]
+    assert stats["repointed_items"] == 1
+
+    # 旧行已删（不留错位脏数据）
+    cur = await db.execute("SELECT count(*) c FROM blocks WHERE project_id = 7 AND block_id = 's1.1'")
+    assert (await cur.fetchone())["c"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unmatched_orphan_is_kept_not_deleted(db):
+    """认不出亲的章节（标题/评分点都变了）仍**不删用户内容**，只记为孤儿。"""
+    from services.block_store import sync_outline_placeholders
+
+    await sync_outline_placeholders(db, 7, [_sec("s1", 1, "技术方案", {"stable_key": "rp-a|技术方案"}),
+                                            _sec("s1.1", 2, "旧章节", {"stable_key": "gone|x"})],
+                                    run_thread_id="tid-1")
+    await db.execute("UPDATE blocks SET content='历史正文' WHERE project_id=7 AND block_id='s1.1'")
+    await db.commit()
+
+    stats = await sync_outline_placeholders(db, 7, [_sec("s1", 1, "技术方案", {"stable_key": "rp-a|技术方案"})],
+                                            run_thread_id="tid-1")
+    assert stats["migrated"] == 0 and stats["orphaned"] == 1
+    cur = await db.execute("SELECT content FROM blocks WHERE project_id=7 AND block_id='s1.1'")
+    assert (await cur.fetchone())["content"] == "历史正文"
+
+
+@pytest.mark.asyncio
+async def test_empty_and_matching_chapters_do_not_migrate(db):
+    """空章节、以及位置没变的章节都不该触发迁移（避免无意义搬运）。"""
+    from services.block_store import sync_outline_placeholders
+
+    secs = [_sec("s1", 1, "技术方案", {"stable_key": "rp-a|技术方案"}),
+            _sec("s1.1", 2, "方案可行性", {"stable_key": "rp-a|技术方案>方案可行性"})]
+    await sync_outline_placeholders(db, 7, secs, run_thread_id="tid-1")
+    stats = await sync_outline_placeholders(db, 7, secs, run_thread_id="tid-1")
+    assert stats["migrated"] == 0 and stats["orphaned"] == 0

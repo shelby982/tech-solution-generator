@@ -8,6 +8,7 @@
 子树丢失；扁平数组截断后前缀仍是合法 JSON，可降级为「部分成功」。
 """
 
+import re
 from dataclasses import dataclass, field
 
 from .models import Section
@@ -121,6 +122,23 @@ def normalize_nodes(
     return accepted, warnings
 
 
+def stable_chapter_key(chain: dict, title_path: str) -> str:
+    """章节的**稳定键**：重出目录后靠它把正文与素材挂接迁移到新章节。
+
+    为什么需要：``block_id`` 是**位置派生**的（s1 / s1.1 / s1.1.1），重拆目录换了位置
+    就换 id；而应答条目 id 里嵌着 block_id（``{block_id}#R1``），素材挂接也一起失效。
+    前后端都不解析 id 的格式（层级靠 level 与标题推断），所以不动 id 格式，
+    另给一个内容派生的键做"跨版本认亲"。
+
+    键的取法（越靠前越稳）：
+    1. ``review_point_id + 标题路径`` —— 链条给的锚点，重排也认得出；
+    2. 只有标题路径时用它（同一次派生的标题通常稳定）。
+    """
+    norm = re.sub(r"\s+", "", title_path or "")
+    point = str(chain.get("review_point_id") or "").strip()
+    return f"{point}|{norm}" if point else norm
+
+
 def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
     """给规整后的节点分配 ``s1 / s1.1 / s1.1.1`` 形式的 id，转成 Section。
 
@@ -138,6 +156,7 @@ def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
     child_counters: dict[str, int] = {}
     sections: list[Section] = []
     used_ids: set[str] = set()
+    title_paths: list[str] = []          # 与 sections 对齐，用于算稳定键
 
     for node in nodes:
         parent = node.parent
@@ -166,8 +185,15 @@ def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
             section_id = f"{section_id}-{suffix}"
         used_ids.add(section_id)
 
-        sections.append(Section(id=section_id, level=level, title=node.title,
-                                chain=dict(getattr(node, "extra", {}) or {})))
+        chain = dict(getattr(node, "extra", {}) or {})
+        parent_path = (
+            title_paths[sections.index(parent_section)]
+            if parent_section is not None and parent_section in sections else ""
+        )
+        path = f"{parent_path} > {node.title}" if parent_path else node.title
+        title_paths.append(path)
+        chain["stable_key"] = stable_chapter_key(chain, path)
+        sections.append(Section(id=section_id, level=level, title=node.title, chain=chain))
 
     return sections
 
