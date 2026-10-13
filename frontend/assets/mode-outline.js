@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261014-v25';
+import { api } from './api.js?v=20261014-v26';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261014-v25';
+       } from './workspace.js?v=20261014-v26';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261014-v25';
+       } from './workspace-model.mjs?v=20261014-v26';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v25';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261014-v26';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2701,7 +2701,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   // 以前"评分点/评分单元/技术要求矩阵/映射矩阵"并列，混了三种不同范围的东西
   // （某标包的一次派生结果 / 该标包的规范书要求 / 待办），所以看不懂。
   const tabs = [
-    { id: 'matrix', label: '标包一览', badge: `${matrixRows.length} 个标包` },
     { id: 'points', label: '依据 · 招标文件评分点', badge: `${pkgs.length || rp.count || 0}` },
     { id: 'tech', label: '依据 · 技术规范书要求', badge: `${tm.count || 0}` },
     { id: 'units', label: '产物 · 目录骨架', badge: `${su.unit_count || 0}` },
@@ -2710,7 +2709,8 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   ];
   // 默认停在「拆解结果」：这是入口 —— 先看清各标包的商务/技术/报价评分点，
   // 再由用户选择生成哪一份目录（用户明确要求的结构）。
-  const activeTab = tab || 'matrix';
+  // 默认停在「依据 · 招标文件评分点」：筛选已置顶，"先看筛出来的评分点"才是主路径
+  const activeTab = tab || 'points';
   const tabHtml = tabs.map(t => `
     <button class="sr-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">
       ${t.label}<span class="sr-tab-badge">${escapeHtml(String(t.badge))}</span></button>`).join('');
@@ -2897,57 +2897,15 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
   splitPanelFlashKind = '';
   const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
-  const rowHtml = (row) => {
-    const isCurScope = String(curScope.target || '') === row.target
-      && String(curScope.package_no || '') === String(row.package_no);
-    const isViewScope = String(viewPkg.target || '') === row.target
-      && String(viewPkg.package_no || '') === String(row.package_no);
-    const cells = (row.cells || []).map((c, ci) => {
-      // 勾选状态：当前目录用的标包 → 回显它真实用的类别；
-      // 切到别的标包（还没生成）→ 默认勾第一个类别（通常是分值最高的那类），方便一键生成。
-      const checked = isCurScope
-        ? (data.current_categories || []).includes(c.category)
-        : (isViewScope && ci === 0);
-      return `<label class="pm-cell ${checked ? 'on' : ''}">
-        <span class="pm-cell-label">${escapeHtml(c.label)}</span>
-        <span class="pm-cell-num">${c.count} 个评分点 · ${c.score} 分</span>
-        <span class="pm-cell-target">${escapeHtml(CAT_HINT[c.category] || '')}</span>
-      </label>`;
-    }).join('');
-    return `<div class="pm-row ${isViewScope ? 'cur' : ''}" data-row="${escapeHtml(row.target + '|' + row.package_no)}">
-      <label class="pm-pick">
-        <span class="pm-scope">${escapeHtml(row.target)} / 标包${escapeHtml(row.package_no)}</span>
-        <span class="pm-name" title="${escapeHtml(row.package_name)}">${escapeHtml(row.package_name)}</span>
-        ${isViewScope ? '<span class="sr-chip sel">当前筛选</span>' : ''}
-        ${isCurScope ? '<span class="sr-chip">已生成</span>' : ''}
-      </label>
-      <div class="pm-cells">${cells}</div>
-    </div>`;
-  };
-  const matrixHtml = matrixRows.length
-    ? matrixRows.map(rowHtml).join('')
-    : '<div class="sr-empty">没有解析到评分表。请先上传招标文件与技术规范书，再点左下「拆解评分点」。</div>';
-
   const panes = {
-    matrix: `
-      <h4>标包一览：每个标包的商务 / 技术 / 报价评分点</h4>
-      <div class="sr-note">点任意一行即可把上方筛选切到该标包（下面所有内容随之更新）。</div>
-      ${matrixHtml}
-      <div class="sr-answer" style="margin-top:10px">
-        <button class="mw-btn primary" data-act="generate">按所选生成应答目录</button>
-        <span class="sr-dim">选一个标包 + 勾选要生成的类别（可多选）。生成后可回到本页切换成另一份目录。</span>
-      </div>
-      <div class="sr-dim" data-flash-for="generate"></div>
-      <div class="sr-note">当前目录包含：${
-        (data.current_categories || []).map(c => CAT_HINT[c] || c).join('、') || '—'}
-        ｜投标范围：${escapeHtml((curScope.target || '未设定') + ' / 标包' + (curScope.package_no || '—'))}</div>`,
     basis: `
       ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
       <h4>待确认（${pending.length}）</h4>
       ${pending.length ? pending.map(confItem).join('') : '<div class="sr-empty">没有待确认项，拆分依据已闭合。</div>'}
       <h4>已识别（${settled.length}）</h4>
       ${settled.map(confItem).join('')}
-      <h4>评分地图（全文评分表与选中结果）</h4>
+      <h4>评分地图（全部标包的评分表概览）</h4>
+      <div class="sr-note">每张评分表对应一个标包。要看某个标包的评分点，用面板上方的「筛选 · 标包」。</div>
       <table class="sr-table"><thead><tr><th>表</th><th>标的/标包</th><th>名称</th><th>类别构成</th><th>来源文件</th></tr></thead>
         <tbody>${scopeRows}</tbody></table>
       <div class="sr-note">${escapeHtml(smap.selection?.reason || '')}${
@@ -3010,9 +2968,12 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
               const v = `${r.target}|${r.package_no}`;
               const sel = String(r.target) === String(viewPkg.target)
                 && String(r.package_no) === String(viewPkg.package_no);
+              // 选项里带类别构成：原来这个概览在「标包一览」页，页签删掉后信息不能丢
+              const comp = (r.cells || []).map(c => `${c.label}${c.count}`).join('·');
               return `<option value="${escapeHtml(v)}" ${sel ? 'selected' : ''}>${
                 escapeHtml(r.target)} / 标包${escapeHtml(r.package_no)} · ${
-                escapeHtml((r.package_name || '').slice(0, 20))}</option>`;
+                escapeHtml((r.package_name || '').slice(0, 16))}${
+                comp ? `（${escapeHtml(comp)}）` : ''}</option>`;
             }).join('')}
           </select>
         </label>
@@ -3139,20 +3100,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   .sr-topic-name{flex:0 0 46%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sr-topic-row select{flex:1;font:inherit;font-size:12.5px;padding:2px 6px;
     border:1px solid var(--line);border-radius:6px;background:#fff}
-  .pm-row{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:7px 0;
-    background:var(--surface-2,#faf9f7)}
-  .pm-row.cur{border-color:#bfdbfe;background:#f0f7ff}
-  .pm-pick{display:flex;align-items:center;gap:8px;cursor:pointer}
-  .pm-scope{font-weight:600;font-size:12.5px;white-space:nowrap}
-  .pm-name{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .pm-cells{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
-  .pm-cell{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;
-    padding:5px 9px;background:#fff;cursor:pointer;font-size:12.5px}
-  .pm-cell.on{border-color:#2563eb;background:#eff6ff}
-  .pm-cell-label{font-weight:600}
-  .pm-cell-num{color:var(--muted)}
-  .pm-cell-target{color:#1d4ed8;font-size:11.5px}
-  .pm-cell input{accent-color:#2563eb}
   .sr-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--surface-2,#faf9f7)}
   .sr-foot .mw-btn.primary{margin-left:auto;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -3191,15 +3138,6 @@ async function openSplitReport({ auto = false, tab = '' } = {}) {
   el.querySelectorAll('[data-vcat]').forEach((box) => {
     box.addEventListener('change', () => {
       panelViewCats = [...el.querySelectorAll('[data-vcat]:checked')].map(x => x.dataset.vcat);
-      openSplitReport({ tab: currentTab() });
-    });
-  });
-  // 标包一览里的行可点：等价于切换筛选
-  el.querySelectorAll('.pm-row[data-row]').forEach((row) => {
-    row.addEventListener('click', () => {
-      const [t, n] = String(row.dataset.row || '').split('|');
-      panelViewPkg = { target: t || '', package_no: n || '' };
-      panelViewCats = null;
       openSplitReport({ tab: currentTab() });
     });
   });
