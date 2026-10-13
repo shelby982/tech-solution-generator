@@ -2715,3 +2715,12 @@ body[data-view="matching"] .ot-node[data-level="1"] > .ot-row .ot-title { font-w
   background: var(--bg-2); color: var(--text); font-weight: 700;
 }
 .doc-outline-item.level-1:hover { background: #e6ebf2; }
+
+
+/* hidden 属性 = "不显示"，必须压过作者样式里的 display。
+   为什么：UA 样式表的 [hidden]{display:none} 特异性最低，只要元素自己有一条
+   `display:flex/block/...` 规则就会把它盖掉 —— 于是 `el.hidden = true` 表面生效、
+   元素照样渲染。实测踩坑：`.split-banner{display:flex}` 让 hidden 的横幅渲染成
+   一条 20px 高的空白黄条（用户截图问"这个是什么东西啊"）。
+   以前是逐个元素补（.view-panel[hidden] / .lightbox[hidden] …），漏一个就出一次。 */
+[hidden]{display:none!important}
