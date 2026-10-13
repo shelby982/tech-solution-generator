@@ -38,7 +38,8 @@ def _extract_per_table(tables: list[dict]) -> list[dict]:
     return out
 
 
-def build_scoring_map(sections, instruction: str = "", *, forced_scope: dict | None = None) -> dict:
+def build_scoring_map(sections, instruction: str = "", *, forced_scope: dict | None = None,
+                      keep_points: bool = False) -> dict:
     """产出评分地图 + 选中/未选中结论。
 
     返回::
@@ -236,7 +237,11 @@ def build_scoring_map(sections, instruction: str = "", *, forced_scope: dict | N
 
     return {
         "index": index,
-        "entries": [{k: v for k, v in e.items() if k != "points"} for e in entries],
+        # 默认剥掉 entries 里的 points（每张表的完整评分点行）：这份 map 会进 checkpoint，
+        # 带上会显著变大。只有"拆分清单"接口需要按标包列明细，它传 keep_points=True。
+        "entries": entries if keep_points else [
+            {k: v for k, v in e.items() if k != "points"} for e in entries
+        ],
         "selected_table_no": (selected or {}).get("table_no"),
         "selection": selection,
         "tokens": tokens,

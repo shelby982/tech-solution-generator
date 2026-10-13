@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v18';
+import { api } from './api.js?v=20261013-v20';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v18';
+       } from './workspace.js?v=20261013-v20';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v18';
+       } from './workspace-model.mjs?v=20261013-v20';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v18';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v20';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2654,10 +2654,16 @@ async function openSplitReport({ auto = false } = {}) {
     </div>`).join('');
 
   // ── 标签页：四张清单 + 拆分依据，各自独立滚动（原来全挤在一页里滚不完）──
+  const curScope = data.project_scope || {};
+  // 每个标包各自的评分点（后端 package_points）：用户反馈"我拆解了 3 个标包，
+  // 但后面的评分点又好像对应不上"—— 之前明细页只有当前标包的数据。
+  const pkgs = data.package_points || [];
+  const pkgLabel = (p) => `${p.target || '—'} / 标包${p.package_no || '—'}`;
+  const curPkgLabel = pkgLabel(curScope);
   const matrixRows = data.package_matrix || [];
   const tabs = [
     { id: 'matrix', label: '① 拆解结果', badge: `${matrixRows.length} 个标包` },
-    { id: 'points', label: '② 评分点明细', badge: `${rp.count || 0}` },
+    { id: 'points', label: '② 各标包评分点', badge: `${pkgs.length || rp.count || 0}` },
     { id: 'units', label: '③ 评分单元与子项', badge: `${su.unit_count || 0}` },
     { id: 'tech', label: '技术要求矩阵', badge: `${tm.topic_count || 0}` },
     { id: 'map', label: '映射矩阵', badge: `${(mp.point_to_requirement || []).length}` },
@@ -2740,6 +2746,29 @@ async function openSplitReport({ auto = false } = {}) {
         <td>${escapeHtml(r.package_no || '—')}</td>
         <td class="sr-crit" title="${escapeHtml(r.criterion || '')}">${escapeHtml((r.criterion || '').slice(0, 70))}${(r.criterion || '').length > 70 ? '…' : ''}</td></tr>`).join('');
 
+  const pkgBlocks = pkgs.map((p) => {
+    const isCur = String(p.package_no || '') === String(curScope.package_no || '')
+      && String(p.target || '') === String(curScope.target || '');
+    const totals = (p.groups || []).map(g =>
+      `${g.label} ${g.count} 个 · ${g.score} 分`).join('　／　');
+    const rows = (p.groups || []).flatMap(g => (g.items || []).map(it => `
+      <tr><td>${escapeHtml(it.factor || '')}</td><td>${escapeHtml(it.item || '')}</td>
+          <td class="sr-num">${it.points != null ? it.points : '—'}</td>
+          <td><span class="sr-chip">${escapeHtml(g.label)}</span></td>
+          <td class="sr-crit" title="${escapeHtml(it.criterion || '')}">${
+            escapeHtml((it.criterion || '').slice(0, 70))}${
+            (it.criterion || '').length > 70 ? '…' : ''}</td></tr>`)).join('');
+    return `<details class="pp-pkg" ${isCur ? 'open' : ''}>
+      <summary><b>${escapeHtml(pkgLabel(p))}</b>
+        <span class="pp-name">${escapeHtml(p.package_name || '')}</span>
+        <span class="sr-dim">${escapeHtml(totals)}</span>
+        ${isCur ? '<span class="sr-chip sel">当前目录用的标包</span>' : ''}</summary>
+      <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th>
+        <th class="sr-num">分值</th><th>类别</th><th>评分口径</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="sr-dim">该标包下没有解析到评分点</td></tr>'}</tbody></table>
+    </details>`;
+  }).join('');
+
   const unitRows = (su.items || []).map(u => `
     <tr class="sr-unit"><td><b>${escapeHtml(u.title)}</b></td>
         <td class="sr-num">${u.score_weight != null ? u.score_weight : '—'}</td>
@@ -2776,7 +2805,6 @@ async function openSplitReport({ auto = false } = {}) {
   splitPanelFlash = '';          // 消费一次即清（下次重开不再重复显示旧消息）
   splitPanelFlashKind = '';
   const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
-  const curScope = data.project_scope || {};
   const rowHtml = (row) => {
     const isCurScope = String(curScope.target || '') === row.target
       && String(curScope.package_no || '') === String(row.package_no);
@@ -2827,8 +2855,13 @@ async function openSplitReport({ auto = false } = {}) {
       <div class="sr-note">${escapeHtml(smap.selection?.reason || '')}${
         smap.selection?.by ? `（依据：${escapeHtml(smap.selection.by)}）` : ''}
         未选中的表不属于本次投标范围，因此不参与本次拆分。</div>`,
-    points: `
-      <h4>① 评分点清单（${rp.count || 0} 个，合计 ${rp.score_total != null ? rp.score_total : '—'} 分）</h4>
+    points: pkgs.length ? `
+      <h4>② 各标包评分点明细（共 ${pkgs.length} 个标包）</h4>
+      <div class="sr-note">每个标包各自一套评分点。当前这次生成目录用的是
+        <b>${escapeHtml(curPkgLabel)}</b>（已默认展开）；展开其他标包可以查看它们各自的评分点。
+        要换一个标包生成目录，回「① 拆解结果」改选后重新生成。</div>
+      ${pkgBlocks}` : `
+      <h4>② 评分点明细（${rp.count || 0} 个，合计 ${rp.score_total != null ? rp.score_total : '—'} 分）</h4>
       <table class="sr-table"><thead><tr><th>评分因素</th><th>详细评审项</th><th class="sr-num">分值</th><th>类别</th><th>标包</th><th>评分口径</th></tr></thead>
         <tbody>${rpRows}</tbody></table>`,
     units: `
@@ -2952,6 +2985,12 @@ async function openSplitReport({ auto = false } = {}) {
   #blocks-pending p{margin:0}
   #blocks-pending p+p{margin-top:5px}
   .ov-metric.pending{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
+  .pp-pkg{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:var(--surface-2,#faf9f7)}
+  .pp-pkg>summary{cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pp-pkg>summary::marker{color:var(--muted)}
+  .pp-pkg[open]>summary{border-bottom:1px solid var(--line)}
+  .pp-pkg .pp-name{color:var(--muted);font-size:12px}
+  .pp-pkg .sr-table{margin:0}
   .sr-topic-list{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:8px;
     padding:6px 8px;margin-top:6px;background:var(--surface-2,#faf9f7)}
   .sr-topic-row{display:flex;align-items:center;gap:10px;padding:3px 0}

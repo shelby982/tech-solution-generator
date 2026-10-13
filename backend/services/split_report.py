@@ -246,7 +246,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
                     inferred += parse_target_tokens(str(fname))
                 if inferred:
                     instruction = (instruction + " " + " ".join(inferred)).strip()
-            full = build_scoring_map(source_toc, instruction,
+            full = build_scoring_map(source_toc, instruction, keep_points=True,
                                      forced_scope=answers.get("scope") or None)
             scoring_map = {k: v for k, v in full.items() if k != "_selected_points"}
             scoring_map["_issues"] = full.get("issues") or []
@@ -282,6 +282,39 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "total_score": e.get("total_score"),
             "sources": [x.get("source_file") for x in (e.get("sources") or []) if x.get("source_file")],
         })
+    # **每个标包各自的评分点明细**（不只是当前选中的那个）。
+    # 用户反馈："我拆解了 3 个标包，但后面的评分点又好像对应不上。按道理来讲，
+    # 每一个标包都有对应的评分点" —— 之前矩阵有 3 个标包，明细页却只有当前标包的数据，
+    # 结构上对不上。这里把每个标包的评分点按类别整份给前端，分组展示。
+    package_points: list[dict] = []
+    for e in (scoring_map or {}).get("entries", []):
+        if not e.get("resolved"):
+            continue
+        groups = []
+        for c in sorted(e.get("categories") or [],
+                        key=lambda x: CAT_ORDER.index(x["category"])
+                        if x.get("category") in CAT_ORDER else 99):
+            rows = [p for p in (e.get("points") or []) if (p.category or "") == c["category"]]
+            groups.append({
+                "category": c["category"],
+                "label": CAT_LABEL.get(c["category"], c["category"] or "未分类"),
+                "count": len(rows),
+                "score": c["score"],
+                "items": [{
+                    "factor": p.factor, "item": p.item, "points": p.points,
+                    "clause": p.clause, "seq": p.seq,
+                    "criterion": (p.criterion or "")[:400],
+                } for p in rows],
+            })
+        package_points.append({
+            "target": e.get("target") or "",
+            "package_no": e.get("package_no") or "",
+            "package_name": e.get("package_name") or e.get("scope_label") or "",
+            "total_count": e.get("total_count"),
+            "total_score": e.get("total_score"),
+            "groups": groups,
+        })
+
     # 当前这次运行**实际用了**哪些类别（从落库的评分点反推），供前端回显勾选
     current_categories = sorted({(p.get("category") or "") for p in points if p.get("category")})
 
@@ -314,10 +347,17 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
         "package_matrix": matrix,
+        "package_points": package_points,
+        # 评分地图的 entries 里带着完整评分点对象（keep_points=True 取来的），
+        # 响应体不需要它们 —— package_points 已经按标包/类别整理好了。
+        "scoring_map": (
+            {**scoring_map, "entries": [{k: v for k, v in e.items() if k != "points"}
+                                        for e in (scoring_map or {}).get("entries", [])]}
+            if scoring_map else scoring_map
+        ),
         "current_categories": current_categories,
         "topic_options": topic_options,
         "chapter_options": chapter_options,
-        "scoring_map": scoring_map,
         "answers": answers,
         "project_scope": ctx.get("project_scope") or {},
         "confirmations": _apply_answers(
