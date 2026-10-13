@@ -162,7 +162,7 @@
       <nav class="rail">
         <div class="rail-item on" data-stage="1">
           <span class="dot">1</span>
-          <span><span class="lab">评审点</span><span class="sub">已拆：商务 8 · 技术 8</span></span>
+          <span><span class="lab">评审点</span><span class="sub">拆商务/技术/规范书</span></span>
         </div>
         <div class="rail-item done" data-stage="2">
           <span class="dot">2</span>
@@ -185,7 +185,6 @@
           <div class="acc-head">
             <span class="idx">1</span>
             <span class="title">评审点</span>
-            <span class="summary">商务评分点 8 · 技术评分点 8 · 技术规范书拆解 153 条</span>
             <span class="right"><span class="caret">▾</span></span>
           </div>
           <div class="acc-body">
@@ -293,7 +292,7 @@
       if (!on) {
         // 收起后把结论压成一行摘要，保持可读
         const s = a.querySelector('.summary');
-        if (a.dataset.stage === '1') s.textContent = '已拆：商务评分点 8 · 技术评分点 8 · 技术规范书拆解 153 条';
+        if (a.dataset.stage === '1') s.textContent = '';   // 评审点收起后不再重复数字
         if (a.dataset.stage === '2') s.textContent = '3 项待确认：范围 · 类别 · 主题归属';
         if (a.dataset.stage === '3') s.textContent = '确认后展示：目录 · 技术与评分点映射矩阵（共 16 个评分点）';
       }
