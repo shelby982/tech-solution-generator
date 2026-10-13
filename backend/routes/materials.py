@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from db import get_db
 from services.block_store import (
+    replace_materials_by_role,
     create_material,
     list_materials,
     get_project,
@@ -306,8 +307,15 @@ async def upload_material(
     project_id: int,
     file: UploadFile = File(...),
     material_role: str = Form(default="main_rfp"),
+    replace: bool = Form(default=False),
 ):
-    """上传材料文件（multipart/form-data），写入 materials 表"""
+    """上传材料文件（multipart/form-data），写入 materials 表。
+
+    ``replace=True``：该角色已有文件时**先删旧的**（连同磁盘文件）。
+    用户要求：「重新选择了上传的文件」就该以新文件为准 —— 否则同角色的旧文件会被
+    解析一起读进去（旧招标文件 + 新招标文件同时生效），再点「拆解评分点」就是旧数据污染新结果。
+    只对**要求类主文件**（招标文件 / 技术规范书）生效；「其他」与自有素材允许多份。
+    """
     async with get_db() as db:
         project = await get_project(db, project_id)
         if project is None:
@@ -333,6 +341,19 @@ async def upload_material(
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="文件内容为空")
+
+        # 同角色替换：要求类主文件只保留最新一份（与 DELETE /materials/{id} 同一套语义：真删）
+        if replace and role in ("main_rfp", "spec"):
+            replaced = await replace_materials_by_role(db, project_id, role)
+            for old_path in replaced:
+                if not old_path:
+                    continue
+                try:
+                    _abs_upload_path(old_path).unlink(missing_ok=True)
+                except Exception as e:      # 删盘失败不影响入库：库已不指向它
+                    logger.warning(f"替换材料：删除旧文件失败（{old_path}）：{e}")
+            if replaced:
+                logger.info(f"替换材料：项目 {project_id} 角色 {role} 替换旧文件 {len(replaced)} 份")
 
         # 存盘：只取 basename（防 `../../x.pdf` 写到上传根之外），并加短 uuid 前缀
         # ——同名重复上传此前会覆盖前一份字节，而 materials 表留下两条指向同一路径的

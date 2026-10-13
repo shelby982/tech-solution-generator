@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261013-v9';
+import { api } from './api.js?v=20261013-v10';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261013-v9';
+       } from './workspace.js?v=20261013-v10';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261013-v9';
+       } from './workspace-model.mjs?v=20261013-v10';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -127,7 +127,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v9';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261013-v10';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -844,7 +844,7 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     setStatusActions('points_pending', `
       <button class="btn-status-secondary" id="btn-redraft-outline">重新拆解评分点</button>
       <button class="btn-status-primary" id="btn-gen-outline">生成所选目录 ▸</button>`, () => {
-      document.getElementById('btn-redraft-outline')?.addEventListener('click', redraftOutline);
+      document.getElementById('btn-redraft-outline')?.addEventListener('click', restartExtraction);
       document.getElementById('btn-gen-outline')?.addEventListener('click', () => {
         splitPanelAutoOpenedFor = 0;
         openSplitReport();
@@ -2973,8 +2973,9 @@ async function openSplitReport({ auto = false } = {}) {
 
     // 重新拆分：复用状态栏那个入口（带后端预检，原料变过时引导到「重新提炼」）
     if (e.target.closest?.('[data-act="redraft"]')) {
+      // 「重新拆解评分点」= 从零开始（清空旧结果再跑），与左下主按钮同一语义
       el.remove();
-      await redraftOutline();
+      await restartExtraction();
       return;
     }
 
@@ -3908,6 +3909,43 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
   }
 }
 
+/**
+ * 「拆解评分点」入口：**从零开始**。
+ *
+ * 用户口径（原话）：「重新点击『拆分评分点』，系统应该将之前生成的评分点内容清空，
+ * 然后重新生成，不要保存旧数据，不然会造成很多混乱……不要让旧数据对新上传的数据产生影响。」
+ *
+ * 所以这里先调后端的 reset-analysis：清掉旧评分点/规范要求/章节/评审/全部作答
+ * （含范围与类别选择、主题归属），并把旧运行标成作废；再起一个**新 thread**。
+ * 保留上传的材料文件（那是输入）与项目级投标范围（用户的显式设定）。
+ */
+async function restartExtraction() {
+  const btn = document.getElementById('btn-extract');
+  if (btn) btn.disabled = true;
+  setStatusBar('extracting', '正在清空上次的拆解结果…', 0, 0, 0);
+  try {
+    const res = await api.projects.resetAnalysis(projectId);
+    const n = res?.deleted?.blocks ?? 0;
+    console.info('[workflow] 已清空上次的拆解结果', res?.deleted);
+    // 页面级的旧状态也要清：否则刷新或跳转回来又会按旧 thread/旧确认版本恢复视图
+    try {
+      sessionStorage.removeItem(`workflow:${projectId}`);
+      sessionStorage.removeItem(`furthestStage:${projectId}`);
+      sessionStorage.removeItem(`outlineInstruction:${projectId}`);
+      sessionStorage.removeItem(`confirmedRevision:${projectId}`);
+    } catch {}
+    currentThreadId = null;
+    // 注意：不要再给"确认版本"另设缓存变量 —— 上面已经清掉 sessionStorage 里的键，
+    // 任何新增的模块级变量都要先声明（ES 模块是严格模式，给未声明变量赋值会直接抛错）。
+    splitPanelAutoOpenedFor = 0;
+    if (n) console.info(`[workflow] 清掉旧章节 ${n} 节`);
+  } catch (err) {
+    console.warn('[workflow] 清空旧拆解结果失败，仍继续重跑', err);
+  }
+  if (btn) btn.disabled = false;
+  await startExtraction(true);
+}
+
 async function startExtraction(forceRestart = false) {
   // forceRestart：用户点「重新提炼」，先 abort 旧 thread 再起新
   resetWorkflowUi();
@@ -4655,7 +4693,10 @@ async function uploadFile(file, role, btn) {
   btn.disabled = true;
   renderRoleWarning(file.name, role);
   try {
-    await api.materials.upload(projectId, file, role);
+    // 要求类主文件（招标文件 / 技术规范书）同一角色**只保留最新一份**：
+    // 重新选择文件就是替换，不能旧 + 新一起参与解析（用户口径：重新选了就该以新文件为准）。
+    const replace = role === 'main_rfp' || role === 'spec';
+    await api.materials.upload(projectId, file, role, { replace });
     await loadMaterials();
   } finally {
     btn.disabled = false;
@@ -4704,15 +4745,12 @@ btnExtract.addEventListener('click', async () => {
     startMatching();
     return;
   }
-  // 「拆解评分点」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
-  // interrupt_before 的闸门继续往下 —— 停在闸门 2 的线程会被直接带进生成。
-  // 已有章节 = 之前拆分过，本次点击的语义是「重新拆分」（redraft 跳过 parse，
-  // 只重跑张衡的目录派生）；没有章节才是首次拆分。
-  if (totalBlocks > 0) {
-    redraftOutline();
-  } else {
-    startExtraction();
-  }
+  // 「拆解评分点」= **从零开始**（用户口径）：
+  // 先清空上一次的拆解结果（评分点/规范要求/章节/作答），再新起一个 thread 重跑。
+  // 以前"有章节就 redraft"会复用旧 thread 的 config.outline_instruction 与旧作答
+  // （范围/类别/主题归属），于是重新上传材料后仍是旧数据在起作用（用户实测反馈）。
+  // 也不用 recover 续跑：recover 会越过 interrupt_before 的闸门继续往下。
+  restartExtraction();
 });
 
 // ── 初始化 ──

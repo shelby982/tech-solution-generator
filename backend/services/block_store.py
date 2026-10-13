@@ -151,6 +151,27 @@ async def list_materials_by_ids(
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def replace_materials_by_role(
+    db: aiosqlite.Connection, project_id: int, role: str,
+) -> list[str]:
+    """删除该项目下该角色的全部材料，返回被删文件的路径列表（供路由清磁盘）。
+
+    用于"重新上传同类型文件"：用户重新选了招标文件 / 技术规范书就该以新文件为准，
+    否则同角色的旧文件会被解析一起读进去（旧 + 新同时生效，再拆解就是旧数据污染新结果）。
+    """
+    cursor = await db.execute(
+        "SELECT id, file_path FROM materials WHERE project_id = ? AND role = ?",
+        (project_id, role),
+    )
+    rows = await cursor.fetchall()
+    paths: list[str] = []
+    for row in rows:
+        await db.execute("DELETE FROM materials WHERE id = ?", (row["id"],))
+        paths.append(row["file_path"] or "")
+    await db.commit()
+    return paths
+
+
 async def delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
     """真删材料记录（磁盘文件由路由一并清）。
 

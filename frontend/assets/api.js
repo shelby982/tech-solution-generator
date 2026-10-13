@@ -1,5 +1,5 @@
 // frontend/assets/api.js
-// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261013-v9' 使用
+// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261013-v10' 使用
 
 // workflow 动作的统一调用：非 2xx 时抛出**带 code 的** Error。
 // code 来自后端响应头 X-Error-Code（如 workflow_aborted）—— 前端据此决定
@@ -34,6 +34,9 @@ export const api = {
       }).then(r => r.json()),
     get: (id) =>
       fetch(`/api/projects/${id}`).then(r => r.json()),
+    /** 清空该项目的拆解结果（评分点/规范要求/章节/评审/作答），保留材料与项目本身 */
+    resetAnalysis: (id) =>
+      fetch(`/api/projects/${id}/reset-analysis`, { method: 'POST' }).then(r => r.json()),
     patch: (id, data) =>
       fetch(`/api/projects/${id}`, {
         method: 'PATCH',
@@ -45,10 +48,12 @@ export const api = {
   },
 
   materials: {
-    upload: (projectId, file, role = 'requirement') => {
+    upload: (projectId, file, role = 'requirement', { replace = false } = {}) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('material_role', role);
+      // replace：同角色的旧文件先删掉（重新选择文件 = 替换，不让旧文件继续参与解析）
+      fd.append('replace', replace ? 'true' : 'false');
       return fetch(`/api/projects/${projectId}/materials`, {
         method: 'POST', body: fd,
       }).then(r => r.json());

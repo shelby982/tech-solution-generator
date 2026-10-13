@@ -34,6 +34,60 @@ router = APIRouter(tags=["projects"])
 
 # ── GET /api/projects ─────────────────────────────────────
 
+@router.post("/projects/{project_id}/reset-analysis")
+async def reset_analysis(project_id: int):
+    """**清空该项目的全部拆解结果**（保留上传的材料与项目本身）。
+
+    用户要求：再点一次「拆解评分点」必须**从零开始**，不要让旧数据影响新结果 ——
+    此前旧的评分点/规范要求/章节/作答（含范围与类别选择、主题归属）会跨运行残留，
+    重新上传材料后仍然生效，导致"新的文件 + 旧的结果"混在一起。
+
+    保留：项目、上传的材料文件（那是输入）、项目级投标范围（用户的显式设定）。
+    清空：blocks / review_points / spec_requirements / reviews / split_answers。
+    """
+    async with get_db() as db:
+        project = await get_project(db, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
+
+        threads = [r[0] for r in await (await db.execute(
+            "SELECT thread_id FROM workflow_runs WHERE project_id = ?", (project_id,)
+        )).fetchall()]
+        deleted = {}
+        for table, sql, params in (
+            ("blocks", "DELETE FROM blocks WHERE project_id = ?", (project_id,)),
+            ("reviews", "DELETE FROM reviews WHERE project_id = ?", (project_id,)),
+            ("split_answers", "DELETE FROM split_answers WHERE project_id = ?", (project_id,)),
+            ("review_points", "DELETE FROM review_points WHERE run_thread_id IN "
+                              "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
+             (project_id,)),
+            ("spec_requirements", "DELETE FROM spec_requirements WHERE run_thread_id IN "
+                                  "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
+             (project_id,)),
+            ("checkpoints", "DELETE FROM checkpoints WHERE thread_id IN "
+                            "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
+             (project_id,)),
+            ("writes", "DELETE FROM writes WHERE thread_id IN "
+                       "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
+             (project_id,)),
+        ):
+            try:
+                cur = await db.execute(sql, params)
+                deleted[table] = cur.rowcount or 0
+            except Exception as e:      # 表不存在等：不因清理失败阻断重跑
+                logger.warning(f"reset-analysis：清理 {table} 失败（{e}）")
+                deleted[table] = -1
+        # 运行记录本身保留（历史可追溯），但标成已作废，避免前端把它当"当前运行"
+        if threads:
+            await db.execute(
+                "UPDATE workflow_runs SET stage = 'aborted', updated_at = CURRENT_TIMESTAMP "
+                "WHERE project_id = ?", (project_id,))
+        await db.commit()
+
+    logger.info(f"reset-analysis：项目 {project_id} 已清空拆解结果 {deleted}")
+    return JSONResponse({"project_id": project_id, "deleted": deleted})
+
+
 @router.get("/projects")
 async def get_projects(status: str | None = None):
     async with get_db() as db:
