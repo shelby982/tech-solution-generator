@@ -135,12 +135,12 @@ class BaoZhengAgent:
             try:
                 if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                     raw = await generate_oneshot_openai(
-                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=8000,
                         call_site="review_compliance",
                     )
                 else:
                     raw = await generate_oneshot_claude(
-                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=8000,
                         call_site="review_compliance",
                     )
                 return self._parse_finding(block_id, raw)

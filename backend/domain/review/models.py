@@ -50,6 +50,14 @@ class Finding:
     strengths: list[str] = field(default_factory=list)
     error: str = ""          # 评审失败时的错误描述
 
+    # ── 对齐评分口径的判断（用户确定的核心数据关系里"审查是否真正满足要求"）──
+    # 在此之前 reviews 只回答"写得好不好"（score/issues/strengths），
+    # 不回答"这一章的应答是否命中它该拿的那些分"。
+    criterion_text: str = ""                    # 评审依据的评分口径（来自评分表分项要素）
+    satisfied: str = ""                          # satisfied | partial | unsatisfied | ""
+    covered_points: list[str] = field(default_factory=list)   # 已命中的得分要点
+    missing_points: list[str] = field(default_factory=list)   # 未覆盖的得分要点（缺口）
+
     def to_dict(self) -> dict:
         return {
             "block_id": self.block_id,
@@ -58,6 +66,10 @@ class Finding:
             "issues": [i.to_dict() for i in self.issues],
             "strengths": list(self.strengths),
             "error": self.error,
+            "criterion_text": self.criterion_text,
+            "satisfied": self.satisfied,
+            "covered_points": list(self.covered_points),
+            "missing_points": list(self.missing_points),
         }
 
     @classmethod
@@ -69,6 +81,10 @@ class Finding:
             issues=[Issue.from_dict(i) for i in d.get("issues", [])],
             strengths=[str(s) for s in d.get("strengths", [])],
             error=d.get("error", ""),
+            criterion_text=str(d.get("criterion_text") or ""),
+            satisfied=str(d.get("satisfied") or ""),
+            covered_points=[str(x) for x in d.get("covered_points", [])],
+            missing_points=[str(x) for x in d.get("missing_points", [])],
         )
 
 

@@ -226,6 +226,15 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if "score_weight" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
 
+    # reviews：对齐评分口径的判断（审查是否真正满足要求）。
+    #   criterion_text 评审依据的评分口径；satisfied 满足度；
+    #   covered_points / missing_points 命中的与缺失的得分要点（JSON 数组）
+    cursor = await conn.execute("PRAGMA table_info(reviews)")
+    existing_cols = {row[1] for row in await cursor.fetchall()}
+    for col in ("criterion_text", "satisfied", "covered_points", "missing_points"):
+        if col not in existing_cols:
+            await conn.execute(f"ALTER TABLE reviews ADD COLUMN {col} TEXT")
+
     # material_chunks.page：出处页码（PDF 有；Word 无页码概念，留 0）
     cursor = await conn.execute("PRAGMA table_info(material_chunks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}

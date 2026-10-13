@@ -369,7 +369,7 @@ class _ReviewerStub:
     def __init__(self, agent_name):
         self.agent_name = agent_name
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         results = {}
         for bid in blocks:
             finding = Finding(
@@ -802,7 +802,7 @@ class _RecordingReviewer:
         self.score = score
         self.scopes: list[list[str]] = []
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         from domain.review import Finding
         self.scopes.append(sorted(blocks.keys()))
         return {

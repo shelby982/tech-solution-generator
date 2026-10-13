@@ -135,6 +135,23 @@ def _split_for_scoring_evaluation(parsed) -> list[str]:
     return chunks
 
 
+@router.get("/projects/{project_id}/scoring-risk")
+async def get_scoring_risk(project_id: int, threadId: str | None = None):
+    """**得分风险**：把逐章审查结论按评分点聚合。
+
+    用户确定的核心数据关系里，审查要回答"是否真正满足要求"。
+    对齐评分口径之后（reviews.satisfied / missing_points），这里回答决策问题：
+    「这几个技术评分点里，哪些的应答还是不达标的？分别缺什么？」
+    """
+    from services.block_store import current_run_thread_id
+    from services.scoring_risk import summarize_scoring_risk
+
+    async with get_db() as db:
+        tid = threadId or await current_run_thread_id(db, project_id)
+        data = await summarize_scoring_risk(db, project_id, tid)
+    return JSONResponse(content=data)
+
+
 @router.get("/projects/{project_id}/response-items")
 async def get_response_items(project_id: int, threadId: str | None = None):
     """该项目的「章节 → 应答要求条目」表（由 blocks 的 8 字段展开，零模型调用）。

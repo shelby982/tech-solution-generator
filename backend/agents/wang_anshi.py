@@ -65,9 +65,14 @@ class WangAnshiAgent:
         blocks: dict[str, BlockOutput],
         outline_matrix: dict[str, OutlineMatrixRow],
         emitter: Optional[EventCallback] = None,
+        chain_by_block: Optional[dict[str, dict]] = None,
     ) -> dict[str, Finding]:
         """
         对 blocks 中每个 block 做技术评审，返回 {block_id: Finding}。
+
+        ``chain_by_block``：链条数据 ``{block_id: {"criterion_text": …, "spec_requirements": [...]}}``
+        —— 审查要回答"是否真正满足要求"，判据是**评分口径**与**该章应响应的规范要求**，
+        而不是泛泛的"写得好不好"。
 
         遍历顺序：blocks 的字典插入顺序。
         单 block 全 API 失败：Finding(score=0, issues=[], strengths=[], error="...")。
@@ -93,7 +98,12 @@ class WangAnshiAgent:
             matrix_dict = self._row_to_dict(row)
             # build_tech_review_user 用 block["title"]，title 由 outline_matrix 提供
             block_dict["title"] = matrix_dict.get("title", "")
-            user_prompt = self._build_user_prompt(block_dict, matrix_dict)
+            chain = (chain_by_block or {}).get(block_id) or {}
+            criterion = str(chain.get("criterion_text") or matrix_dict.get("criterion_text") or "")
+            spec_reqs = list(chain.get("spec_requirements") or [])
+            user_prompt = build_tech_review_user(
+                block_dict, matrix_dict, criterion=criterion, spec_requirements=spec_reqs,
+            )
 
             await _emit(emitter, "review_block_start", {
                 "block_id": block_id,
@@ -104,6 +114,8 @@ class WangAnshiAgent:
                 block_id, user_prompt,
                 configs, (rr_start + idx) % len(configs),
             )
+            # 记下评审依据，便于前端展示"这一章是按哪段口径判的"
+            finding.criterion_text = criterion
             results[block_id] = finding
 
             await _emit(emitter, "review_block_done", {
@@ -134,12 +146,12 @@ class WangAnshiAgent:
             try:
                 if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
                     raw = await generate_oneshot_openai(
-                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=8000,
                         call_site="review_tech",
                     )
                 else:
                     raw = await generate_oneshot_claude(
-                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                        config, self.SYSTEM_PROMPT, user_prompt, max_tokens=8000,
                         call_site="review_tech",
                     )
                 return self._parse_finding(block_id, raw)
@@ -201,6 +213,16 @@ class WangAnshiAgent:
         if isinstance(strengths_raw, list):
             strengths = [str(s) for s in strengths_raw]
 
+        # 对齐评分口径的判断（用户确定的核心数据关系里"审查是否真正满足要求"）
+        satisfied = str(obj.get("satisfied") or "").strip().lower()
+        if satisfied not in ("satisfied", "partial", "unsatisfied", ""):
+            satisfied = ""
+        covered, missing = [], []
+        for key, bucket in (("covered_points", covered), ("missing_points", missing)):
+            raw_list = obj.get(key) or []
+            if isinstance(raw_list, list):
+                bucket.extend(str(x).strip() for x in raw_list if str(x).strip())
+
         return Finding(
             block_id=block_id,
             agent=self.AGENT_NAME,
@@ -208,6 +230,9 @@ class WangAnshiAgent:
             issues=issues,
             strengths=strengths,
             error="",
+            satisfied=satisfied,
+            covered_points=covered,
+            missing_points=missing,
         )
 
     # ── 辅助：dataclass → dict ─────────────────

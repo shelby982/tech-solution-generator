@@ -81,7 +81,7 @@ class _StubZhugeLiang:
 class _StubReviewer:
     def __init__(self, name): self.name = name
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         return {bid: Finding(block_id=bid, agent=self.name, score=80)
                 for bid in blocks}
 
@@ -333,7 +333,7 @@ async def test_workspace_review_stops_even_when_scores_fail(runner_env):
     runner, tid = await _ready_workspace(runner_env)
     deps = _deps_factory()
     class LowReviewer:
-        async def review(self, *, blocks, outline_matrix, emitter=None):
+        async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
             return {bid: Finding(block_id=bid, agent="test", score=40) for bid in blocks}
     class NoGeneration:
         async def generate(self, **kwargs):

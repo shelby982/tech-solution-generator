@@ -31,8 +31,9 @@ class ReviewRepository:
         strengths_json = json.dumps(finding.strengths, ensure_ascii=False)
         cursor = await self.db.execute(
             """INSERT INTO reviews
-               (thread_id, block_id, agent, score, issues, strengths, error)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (thread_id, block_id, agent, score, issues, strengths, error,
+                criterion_text, satisfied, covered_points, missing_points)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 thread_id,
                 finding.block_id,
@@ -41,6 +42,10 @@ class ReviewRepository:
                 issues_json,
                 strengths_json,
                 finding.error,
+                finding.criterion_text,
+                finding.satisfied,
+                json.dumps(finding.covered_points, ensure_ascii=False),
+                json.dumps(finding.missing_points, ensure_ascii=False),
             ),
         )
         await self.db.commit()

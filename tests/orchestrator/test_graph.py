@@ -127,7 +127,7 @@ class _DelayingReviewer:
         self.delay = delay
         self.entered_at: float | None = None
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         self.entered_at = time.perf_counter()
         await asyncio.sleep(self.delay)
         return {
@@ -410,7 +410,7 @@ class _ScoreReviewer:
         self.score = score
         self.reviewed: list[list[str]] = []
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         self.reviewed.append(sorted(blocks.keys()))
         return {
             bid: Finding(block_id=bid, agent=self.name, score=self.score)
@@ -506,7 +506,7 @@ class _PerBlockReviewer:
         self.scores = scores
         self.reviewed: list[list[str]] = []
 
-    async def review(self, *, blocks, outline_matrix, emitter=None):
+    async def review(self, *, blocks, outline_matrix, emitter=None, chain_by_block=None):
         self.reviewed.append(sorted(blocks.keys()))
         return {
             bid: Finding(

@@ -650,11 +650,16 @@ TECH_REVIEW_SYSTEM = (
 )
 
 
-def build_tech_review_user(block: dict, matrix_row: dict) -> str:
+def build_tech_review_user(block: dict, matrix_row: dict, *,
+                           criterion: str = "", spec_requirements: list | None = None) -> str:
     """构造王安石技术评审 user prompt。
 
     block: {block_id, title, content, kind}
     matrix_row: 8 字段响应矩阵（requirement, key_points, indicators 等）
+    criterion: 该章的**评分口径**（评分表里对应的「详细评审分项要素」原文）。
+        用户确定的核心数据关系里，审查要回答"是否真正满足要求" ——
+        判据就是这段评分口径，而不是泛泛的"写得好不好"。
+    spec_requirements: 该章应响应的**技术规范要求**原文（来自链条 spec_requirement_ids）。
 
     返回字符串必须包含关键短语 '评审'，以便 mock 路由。
     """
@@ -664,13 +669,25 @@ def build_tech_review_user(block: dict, matrix_row: dict) -> str:
     key_points = matrix_row.get("key_points") or ""
     indicators = matrix_row.get("indicators") or ""
 
-    return (
-        f"以下是投标方案中「{title}」章节的内容：\n\n"
-        f"---\n{content}\n---\n\n"
-        f"对照应标要求：\n"
-        f"【应标要求】\n{requirement}\n\n"
-        f"【应答要点】\n{key_points}\n\n"
-        f"【量化指标】\n{indicators}\n\n"
+    parts = [
+        f"以下是投标方案中「{title}」章节的内容：\n\n---\n{content}\n---\n",
+        f"【应标要求】\n{requirement}",
+        f"【应答要点】\n{key_points}",
+        f"【量化指标】\n{indicators}",
+    ]
+    if criterion:
+        parts.append(
+            "【本章的评分口径 —— 判断是否满足要求的**唯一依据**】\n"
+            f"{criterion[:3000]}\n"
+            "请逐条核对：口径里出现的每一个得分/扣分条件，本章正文是否给了明确、可核查的响应。"
+        )
+    if spec_requirements:
+        joined = "\n".join(f"- {str(t)[:300]}" for t in list(spec_requirements)[:40])
+        parts.append(
+            "【本章对应的技术规范要求 —— 必须逐条响应】\n" + joined
+        )
+
+    instruction = (
         "请站在技术评审的视角进行评审：\n"
         "- score: 0-100 的整数（90+ 优秀，70-90 合格，<70 不合格）\n"
         "- issues: 问题清单 [{severity, point, suggestion, needs_material, material_query}]，"
@@ -680,9 +697,17 @@ def build_tech_review_user(block: dict, matrix_row: dict) -> str:
         "**必须为 false**。\n"
         "  - material_query：当 needs_material=true 时，填入用于检索素材库的查询词"
         "（15 字以内，具体到材料名称，如「配电柜型式试验报告」）；否则留空字符串。\n"
-        "- strengths: 亮点清单（字符串数组）\n\n"
-        '只输出 JSON 对象：{"score":N,"issues":[...],"strengths":[...]}'
+        "- strengths: 亮点清单（字符串数组）\n"
+        "- satisfied: 本章对**评分口径**的满足度，取 satisfied / partial / unsatisfied"
+        "（没有给评分口径时留空字符串）\n"
+        "- covered_points: 评分口径里**已被明确响应**的得分要点（短句数组，逐条对应口径原文）\n"
+        "- missing_points: 评分口径里**没有被响应或响应不充分**的得分要点（短句数组）；"
+        "缺少证明材料也要列出（如「未提供 PMP 证书」）\n\n"
+        '只输出 JSON 对象：{"score":N,"issues":[...],"strengths":[...],'
+        '"satisfied":"","covered_points":[],"missing_points":[]}'
     )
+
+    return "\n\n".join(parts) + "\n\n" + instruction
 
 
 # ─────────────────────────────────────────────

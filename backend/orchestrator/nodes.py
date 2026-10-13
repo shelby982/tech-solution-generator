@@ -972,10 +972,45 @@ async def _run_review(
                 issues=payload.get("issues") or [],
             ))
 
+    # 链条数据：本章的**评分口径**与应响应的**规范要求** —— 审查据此判断
+    # "是否真正满足要求"，而不是泛泛评"写得好不好"。
+    chain_by_block: dict[str, dict] = {}
+    try:
+        from db import get_db
+        from services.block_store import list_blocks as _list_blocks
+        from services.point_store import list_spec_requirements as _list_reqs
+
+        thread_id_for_chain = state.get("thread_id")
+        project_id_for_chain = state.get("project_id")
+        if thread_id_for_chain:
+            async with get_db() as db:
+                rows = {b.get("block_id"): b
+                        for b in await _list_blocks(db, int(project_id_for_chain or 0),
+                                                   thread_id_for_chain)}
+                reqs = {r.get("requirement_id"): r
+                        for r in await _list_reqs(db, run_thread_id=thread_id_for_chain)}
+            for bid in blocks:
+                row = rows.get(bid) or {}
+                import json as _json
+                try:
+                    req_ids = _json.loads(row.get("spec_requirement_ids") or "[]")
+                except (ValueError, TypeError):
+                    req_ids = []
+                chain_by_block[bid] = {
+                    "criterion_text": str(row.get("criterion_text") or ""),
+                    "spec_requirements": [
+                        (reqs.get(rid, {}).get("text") or "") for rid in req_ids
+                        if reqs.get(rid)
+                    ],
+                }
+    except Exception as e:
+        logger.warning(f"_run_review：链条数据读取失败（{e}），按无评分口径评审")
+
     findings = await agent.review(
         blocks=blocks,
         outline_matrix=outline_matrix,
         emitter=_review_bridge,
+        chain_by_block=chain_by_block,
     )
 
     findings_dict: dict[str, dict] = {}
