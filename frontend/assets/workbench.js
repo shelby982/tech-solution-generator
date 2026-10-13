@@ -84,6 +84,11 @@ function editorBadges(b) {
 }
 
 function renderOutline() {
+  // ⚠️ 共享宿主只有一个（#blocks-list 由 mode-dispatch 在模式间搬运）。
+  // 本模块只能在自己是当前模式时渲染，否则会把「要求与大纲 / 素材库」的目录
+  // 覆盖成写作版样式 —— 实测刷新后目录变成 `doc-outline-item / 待撰写 / 无编辑按钮`，
+  // 与点「拆分应答目录」当场生成的样式不一致（用户报的正是这个）。
+  if ((document.body.dataset.view || '') !== 'editor') return;
   window.__extractBlockMap=new Map(workspace.chapters.map(b=>[b.block_id,editableBlock(b)]));
   window.__allBlocks=[...window.__extractBlockMap.values()];
   const q=search.value.toLowerCase().trim();

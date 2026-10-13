@@ -948,6 +948,9 @@ const BADGE_TEXT = { pending: '待提炼', extracting: '提炼中', done: '已�
 
 
 function renderBlockCard(block, status = 'pending') {
+  // 编辑器模式不渲染：共享宿主此刻归 mode-editor 用，这里画会把写作版目录覆盖掉
+  // （反向同理，见 workbench.js:renderOutline）。
+  if (document.body.dataset.view === 'editor') return;
   blocksEmpty.style.display = 'none';
   const blockId = block.block_id || block.id;
   const el = document.createElement('div');
@@ -1727,6 +1730,7 @@ function applyOutlineExpansion(forceAll = false) {
 
 // 按 level 把已渲染的 .ot-node 重新挂成树
 function renderOutlineTree() {
+  if (document.body.dataset.view === 'editor') return;
   const entries = Array.from(blocksList.querySelectorAll('.ot-node'))
     .map(node => ({
       node,
