@@ -3348,7 +3348,17 @@ body[data-view="matching"] .match-detail { display: block; }
         <!-- 素材清单抽屉（匹配视图的素材入口）：面板收起后素材仍要能看/能传/能删 -->
         <div class="mat-drawer" id="mat-drawer" hidden></div>
         <div class="blocks-scroll" id="blocks-scroll">
-        <div class="blocks-empty" id="blocks-empty">
+        <!-- 面板容器**静态占位**：覆盖率面板 / 两阶段提示 / 拆分清单都在这里就地填充，
+             不再"目录渲染完再 append" —— 那样每插一块都把目录往下推，
+             表现为进入页面时抖动 + 闪一下（用户反馈）。 -->
+        <div id="outline-coverage-panel" hidden></div>
+        <div id="split-confirm-banner" hidden></div>
+        <div id="split-panel-inline" hidden></div>
+        <!-- 首帧骨架：避免"先显示空态文案 → 0.4s 后突然整块出现"的闪烁 -->
+        <div class="blocks-empty" id="blocks-loading">
+          <p>正在加载目录…</p>
+        </div>
+        <div class="blocks-empty" id="blocks-empty" hidden>
           <p>上传应标文件后点击「拆解评分点」开始</p>
         </div>
             <div class="blocks-list" id="blocks-list"></div>
@@ -3836,11 +3846,11 @@ body[data-view="matching"] .match-detail { display: block; }
          同页拼接必然互相覆盖，所以必须分开成模块。 -->
     <!-- 编辑器的左栏目录渲染在 workbench.js 里（原页面是独立 script 标签）。
          抽取内联脚本时没带上它 —— 结果编辑器模式的章节目录是空的（实测 0 条目）。 -->
-    <script type="module" src="./assets/workbench.js?v=20261013-simplenew"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261013-simplenew"></script>
+    <script type="module" src="./assets/workbench.js?v=20261013-noshift"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261013-noshift"></script>
     <script type="module">
-      import './assets/mode-outline.js?v=20261013-simplenew';
-      import './assets/mode-editor.js?v=20261013-simplenew';
+      import './assets/mode-outline.js?v=20261013-noshift';
+      import './assets/mode-editor.js?v=20261013-noshift';
     </script>
   <script type="module" src="./assets/workspace.js?v=20261013-noconfirm"></script>
   </body>

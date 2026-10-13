@@ -58,7 +58,7 @@ test('关键面板函数都存在（本会话新增的能力，逐个钉住）',
   const defined = definedNames();
   const critical = [
     'openSplitReport',        // 拆分清单面板
-    'bindScopeSelector',      // 投标范围选择器（事故函数）
+    'fillScopeSelector',      // 投标范围选项（原 bindScopeSelector，已并入一次性渲染）
     'showConfirmedBanner',    // 两阶段提示
     'maybeAutoOpenSplitReport', // 拆分完自动展示
     'markRevisionConfirmed',
