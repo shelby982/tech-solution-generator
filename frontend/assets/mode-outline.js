@@ -3095,6 +3095,11 @@ async function startExtraction(forceRestart = false) {
       setThread(projectId, threadId);
     }
     currentThreadId = threadId;
+    // 新运行开始：立刻按新 thread 重算这两个面板。否则覆盖率/未派生提示会**残留
+    // 上一次运行的结论** —— 页面看起来自相矛盾（实测：树是 367 节原始目录，
+    // 面板却显示上一轮的「评分点 8/8」）。
+    refreshOutlineCoverage(null);
+    warnIfOutlineNotDerived(null);
     // 已有 thread 可能停在上次运行的闸门 / 终态（recover 不改状态）—— 这时没有帧可等
     const settled = (await api.workflow.state(threadId).catch(() => null))?.stage;
     if (SETTLED_STAGES.has(settled)) {

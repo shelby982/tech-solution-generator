@@ -351,12 +351,27 @@ def _iter_table_rows(content: str):
         yield cells, is_header
 
 
+# 子串识别：不同招标文件的表头写法差别很大。实测南网中台那份写的是
+# 「（一）、商务评审（100）分」「（二）、技术评审（100）分」——
+# 精确匹配 _CATEGORY_BY_HINT 一个都命中不了，13 条评分点**类别全空**，
+# 于是按"技术类"过滤时一条都取不到，确定性骨架直接退回模型路径（用户实测反馈）。
+_CATEGORY_SUBSTR = (
+    ("技术评审", CATEGORY_TECH), ("技术评分", CATEGORY_TECH), ("技术部分", CATEGORY_TECH),
+    ("商务评审", CATEGORY_COMMERCE), ("商务评分", CATEGORY_COMMERCE), ("商务部分", CATEGORY_COMMERCE),
+    ("报价评分", CATEGORY_PRICE), ("价格分", CATEGORY_PRICE), ("投标报价", CATEGORY_PRICE),
+    ("其他因素", CATEGORY_OTHER), ("其他评分", CATEGORY_OTHER),
+)
+
+
 def _category_from_cells(cells: list[str]) -> str:
-    """从一行里读评分类别（合并单元格，只在部分行出现）。"""
+    """从一行里读评分类别（合并单元格 / 表内小标题，只在部分行出现）。"""
     for c in cells:
         n = _norm(c)
         if n in _CATEGORY_BY_HINT:
             return _CATEGORY_BY_HINT[n]
+        for word, cat in _CATEGORY_SUBSTR:
+            if word in n:
+                return cat
     return ""
 
 
@@ -365,12 +380,27 @@ _SCOPE_IN_LINE_RE = re.compile(
 )
 
 
+# 「适用标包：<名称>」——只有名称没有编号。实测南网中台那份就是这种写法，
+# 旧实现只认「标包N：」，于是 13 条评分点的 package_no 全空。
+_SCOPE_NAME_RE = re.compile(r"适用标包\s*[：:]\s*([^|｜\n]{2,80})")
+
+
 def _split_off_scope(cells: list[str]) -> Optional[tuple[str, str]]:
-    """若这一行是「下列评审标准适用的标的/标包：标包N：…」→ (标包号, 标包名)。"""
-    m = _SCOPE_IN_LINE_RE.search(_norm("".join(cells)))
-    if not m:
-        return None
-    return m.group(1), m.group(2)
+    """若这一行是作用域声明 → (标包号, 标包名)。
+
+    两种写法都要认：
+    1. 「下列评审标准适用的标的/标包：标包2：高可靠…」→ 有编号；
+    2. 「适用标包：2026年南网…采购项目[应用中台客户档案管理认证系统开发实施服务]」→ 只有名称。
+       只有名称时编号留空，靠**名称匹配**（见 agents.zhang_heng 的范围判定）挂靠。
+    """
+    text = _norm("".join(cells))
+    m = _SCOPE_IN_LINE_RE.search(text)
+    if m:
+        return m.group(1), m.group(2)
+    m2 = _SCOPE_NAME_RE.search("".join(cells))
+    if m2:
+        return "", m2.group(1).strip()
+    return None
 
 
 def extract_review_points(

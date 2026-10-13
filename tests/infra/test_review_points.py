@@ -219,3 +219,54 @@ def test_real_tender_package2_technical_points():
     assert by_seq["8"].objective is True
     assert by_seq["3"].objective is False
     assert by_seq["3"].bands and by_seq["3"].bands[0].hi == 12
+
+
+# ── 不同招标文件的表头写法（实测：南网中台那份 13 条类别全空）──────
+
+def _tbl(*rows):
+    header = "| 序号 | 评分因素 | 详细评审项 | 详细评审分项要素 | 分值 |"
+    sep = "| --- | --- | --- | --- | --- |"
+    # 注意：作用域那行也必须是**表格行** —— 抽取器逐行解析表格单元格，
+    # 写成普通段落行不会被处理（真实文档里它就是表格首行）。
+    return {"id": "s96", "level": 2, "title": "（2）详细评审标准",
+            "raw_content": "\n".join(["| 适用标包：某某采购项目[开发实施服务] |  |  |  |  |",
+                                      header, sep, *rows]),
+            "source_file": "招标文件.pdf"}
+
+
+def test_category_detected_from_in_table_subheading():
+    """表内小标题「（一）、商务评审（100）分 / （二）、技术评审（100）分」要能定类别。
+
+    旧实现只做精确匹配（"技术评分标准"这类），这套写法一个都命中不了 ——
+    实测 13 条评分点类别全空，按"技术类"过滤时一条都取不到。
+    """
+    from infra.parser.review_points import extract_review_points
+
+    sec = _tbl(
+        "| （一）、商务评审（100）分 |  |  |  |  |",
+        "| 1 | 财务状况 | 营业净利率 | 按排名得分 | 10 |",
+        "| （二）、技术评审（100）分 |  |  |  |  |",
+        "| 2 | 项目理解 | 需求理解完整性 | 完整得4分 | 4 |",
+        "| 3 | 技术实现方案 | 工作方案的科学性 | 科学得6分 | 6 |",
+    )
+    table = extract_review_points([sec])
+    by_cat = {}
+    for p in table.points:
+        by_cat.setdefault(p.category, []).append((p.factor, p.item))
+    assert ("财务状况", "营业净利率") in by_cat.get("commerce", [])
+    assert ("项目理解", "需求理解完整性") in by_cat.get("tech", [])
+    assert ("技术实现方案", "工作方案的科学性") in by_cat.get("tech", [])
+
+
+def test_scope_name_without_number_is_captured():
+    """「适用标包：<名称>」没有编号，也要把名称读出来（编号留空）。
+
+    实测这份文件就是这种写法，旧实现只认「下列评审标准适用的…标包N：」。
+    """
+    from infra.parser.review_points import extract_review_points
+
+    sec = _tbl("| 1 | 项目理解 | 需求理解完整性 | 完整得4分 | 4 |")
+    table = extract_review_points([sec])
+    p = table.points[0]
+    assert p.package_no == ""                     # 没有编号
+    assert "某某采购项目" in p.package_label      # 名称读到了

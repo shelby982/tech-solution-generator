@@ -541,6 +541,26 @@ class ZhangHengAgent:
         picked = [p for p in pts
                   if (not category or p.category == category)
                   and (not package_no or str(p.package_no or "") == package_no)]
+        # 范围过滤要**容错**，不能一过滤为空就退回模型自由生成 —— 那是"目录变差"的根源。
+        # 实测：南网中台那份招标文件的标包是「适用标包：<名称>」写法（没有编号），
+        # 于是评分点的 package_no 全空；而要求里写「标的1」→ 过滤后 0 条 →
+        # 退回模型路径 → 只产出 5 节粗目录（用户反馈"为什么拆解目录还是这样"）。
+        scope_note = ""
+        effective_package_no = package_no
+        effective_category = category
+        if not picked and pts:
+            by_cat = [p for p in pts if not category or p.category == category]
+            if by_cat:
+                picked = by_cat
+                effective_package_no = ""      # 放宽后下游不能再按标包过滤
+                scope_note = (f"材料里的标包没有编号（无法对应「{package_no}」），"
+                              f"已按「{category or '全部'}」类的全部评分点拆解")
+            else:
+                picked = list(pts)
+                effective_package_no = ""
+                effective_category = ""
+                scope_note = "材料里没有可识别的评分类别/标包标识，已按全部评分点拆解"
+            logger.info(f"张衡：{scope_note}")
         if not picked:
             return None
 
@@ -608,8 +628,11 @@ class ZhangHengAgent:
 
         from infra.parser.outline_builder import parse_placement_targets
         placement = parse_placement_targets(instruction)
+        # ⚠️ 用**生效后**的过滤条件：容错放宽了 picked（13 条），若这里还传原来的
+        # package_no="1"，build_scoring_skeleton 会**再过滤一遍**清空骨架 ——
+        # 结果只剩 1 个顶级节点、判定结构不完整、退回模型路径（实测踩到）。
         outline = build_outline(picked, spec_sections=spec_sections,
-                                category=category, package_no=package_no,
+                                category=effective_category, package_no=effective_package_no,
                                 subpoints_by_criterion=subpoints or None,
                                 placement_targets=placement,
                                 requirement_ids_by_title=requirement_ids_by_title(requirements))
@@ -640,7 +663,10 @@ class ZhangHengAgent:
                 item["spec_topic"] = "、".join(n.spec_refs)[:200]
             raw_nodes.append(item)
             stack_idx.append(len(raw_nodes) - 1)
-        nodes, warnings = normalize_nodes(raw_nodes)
+        # 上限放宽：DEFAULT_MAX_NODES=120 是给**模型输出**设的保护（防跑飞），
+        # 而确定性骨架的节点数由评分表自身决定（实测标的1 有 13 个评分点、
+        # 展开后 140+ 节），用 120 截断会**静默丢掉后面整个评分点**。
+        nodes, warnings = normalize_nodes(raw_nodes, max_nodes=600)
         sections = build_sections(nodes)
         from infra.parser.outline_builder import compute_coverage
         coverage = compute_coverage(outline, picked, requirements)
@@ -648,6 +674,8 @@ class ZhangHengAgent:
                 "并已并入技术规范书对应专题与工作项")
         if placement:
             note += f"；已按提炼要求把规范书专题放入「{'、'.join(placement[:3])}」"
+        if scope_note:
+            note += f"；{scope_note}"
         # 覆盖率写进闸门可读的一句话：漏没漏一眼可见（分值合计最能暴露漏评分点）
         note += (f"；覆盖：评分点 {coverage['review_points_covered']}/"
                  f"{coverage['review_points_total']}（已拆细 {coverage['review_points_decomposed']}），"
