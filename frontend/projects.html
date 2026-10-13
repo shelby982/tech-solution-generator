@@ -819,7 +819,7 @@
         } catch {}
 
         if (!thread || !thread.thread_id) {
-          location.href = `/project-init?projectId=${projectId}`;
+          location.href = `/three-mode?projectId=${projectId}&view=outline`;
           return;
         }
         const tid = thread.thread_id;
@@ -835,19 +835,25 @@
         } catch {}
 
         const backendQ = stage ? `&backend=${encodeURIComponent(stage)}` : '';
+        // **统一进三模式工作台**（要求与大纲 / 素材库 / 方案编辑）：
+        // 以前按 stage 分流到 /project-init 等旧页，那些页面还留着已废弃的「提炼要求」面板 ——
+        // 用户从项目列表点进来看到的就是旧界面（实测反馈）。质量检查仍是独立页。
+        const threeMode = (view) =>
+          `/three-mode?projectId=${projectId}&threadId=${enc}${backendQ}&view=${view}`;
         switch (stage) {
           case 'idle':
           case 'parsing':
           case 'outline_review':
-          // extracting：闸门 1 放行后的逐节提炼，仍属 project-init 这一步。
-          // 漏了它就会掉到 default 分支，跳转时把 threadId 丢掉（提炼完的进度看不见）。
+          // extracting：闸门 1 放行后的逐节提炼，仍在「要求与大纲」阶段。
           case 'extracting':
+            location.href = threeMode('outline');
+            break;
           case 'matching':
           case 'materials_review':
-            location.href = `/project-init?projectId=${projectId}&threadId=${enc}${backendQ}`;
+            location.href = threeMode('matching');
             break;
           case 'generating':
-            location.href = `/workbench?projectId=${projectId}&threadId=${enc}${backendQ}`;
+            location.href = threeMode('editor');
             break;
           case 'reviewing':
           case 'report_review':
@@ -856,7 +862,7 @@
             break;
           case 'aborted':
           default:
-            location.href = `/project-init?projectId=${projectId}`;
+            location.href = `/three-mode?projectId=${projectId}&view=outline`;
         }
       }
 
