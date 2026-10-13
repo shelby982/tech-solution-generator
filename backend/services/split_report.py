@@ -266,7 +266,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
 
 ANSWERABLE = {"scope": "scope", "category": "categories", "scope_unresolved": "scope",
               "topic_placement": "topic_placement", "structure": "structure",
-              "scope_excluded": "scope"}
+              "review_points": "review_points", "scope_excluded": "scope"}
 
 
 def _apply_answers(items: list[dict], answers: dict) -> list[dict]:
@@ -327,6 +327,16 @@ def _confirmations(points: list[dict], rp_rows: list[dict], rp_total: float,
         "detected": f"{len(rp_rows)} 个评分点，合计 {rp_total:g} 分",
         "detail": "不足或超出 100 说明有评分点没解析出来（或混入了非本标包的评分点）",
         "needs_confirm": abs(rp_total - 100.0) > 0.01,
+    })
+
+    # 评分点确认（两阶段流程的第一步：先确认"要拿哪些分"，再确认"目录怎么拆"）
+    items.append({
+        "key": "review_points",
+        "question": "评分点清单是否正确、是否都已纳入本次拆解？",
+        "detected": f"{len(rp_rows)} 个评分点，合计 {rp_total:g} 分",
+        "detail": ("确认后进入下一步：目录拆分确认。若有多标包/多标的，"
+                   "先在「拆分依据」里选定范围，再确认本项。"),
+        "needs_confirm": True,
     })
 
     # 规范书主题归属

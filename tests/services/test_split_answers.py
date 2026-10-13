@@ -90,3 +90,26 @@ def test_report_marks_answered_items_as_identified():
     assert by_key["topic_placement"]["answered"] is False
     assert by_key["topic_placement"]["answer_key"] == "topic_placement"
     assert by_key["structure"]["answer_key"] == "structure"
+
+
+@pytest.mark.asyncio
+async def test_review_points_confirmation_is_a_valid_answer(db):
+    """两阶段流程第①步：确认评分点（先确认要拿哪些分，再确认目录怎么拆）。"""
+    await set_answer(db, 1, "tid-1", "review_points",
+                     {"confirmed": True, "revision": 3, "count": 13, "score": 100})
+    got = (await get_answers(db, 1, "tid-1"))["review_points"]
+    assert got["confirmed"] is True and got["revision"] == 3
+
+
+def test_report_offers_review_points_confirmation_and_answers_it():
+    """报告里要有「评分点确认」项，且作答后不再是待确认。"""
+    from services.split_report import _apply_answers, _confirmations
+
+    items = _confirmations([], [], 100.0, [], [], [], {})
+    rp = next(i for i in items if i["key"] == "review_points")
+    assert rp["needs_confirm"] is True
+
+    answered = _apply_answers(items, {"review_points": {"confirmed": True, "revision": 3}})
+    rp2 = next(i for i in answered if i["key"] == "review_points")
+    assert rp2["answered"] is True and rp2["needs_confirm"] is False
+    assert rp2["answer"] == {"confirmed": True, "revision": 3}

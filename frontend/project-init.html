@@ -999,7 +999,7 @@ body[data-view="matching"] .match-detail { display: block; }
       </div>
     </div>
     <div class="materials-footer">
-      <button class="btn-extract" id="btn-extract" type="button">✦ 拆分应答目录</button>
+      <button class="btn-extract" id="btn-extract" type="button">✦ 拆解评分点</button>
       <p class="extract-hint">依据应标要求生成章节结构，原始素材用于补充各模块内容</p>
     </div>
   </aside>
@@ -1042,7 +1042,7 @@ body[data-view="matching"] .match-detail { display: block; }
         <div class="mat-drawer" id="mat-drawer" hidden></div>
         <div class="blocks-scroll" id="blocks-scroll">
         <div class="blocks-empty" id="blocks-empty">
-          <p>上传应标文件后点击「拆分应答目录」开始</p>
+          <p>上传应标文件后点击「拆解评分点」开始</p>
         </div>
             <div class="blocks-list" id="blocks-list"></div>
         </div>
@@ -1232,7 +1232,7 @@ let currentStage = (() => {
 const blocksByOrder = []; // 按 outline_extract 顺序累积，给 confirm 用
 const blocksById = new Map();
 
-// ── 视图模式：outline（拆分应答目录） / matching（素材匹配） ──
+// ── 视图模式：outline（拆解评分点） / matching（素材匹配） ──
 // 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
 // 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
 // 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
@@ -1266,7 +1266,7 @@ function applyPageView() {
       btn.innerHTML = '✦ 素材匹配';
       hint.textContent = '为每个章节匹配最相关的原始素材片段';
     } else {
-      btn.innerHTML = '✦ 拆分应答目录';
+      btn.innerHTML = '✦ 拆解评分点';
       hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
     }
   }
@@ -3450,7 +3450,7 @@ async function resyncFromDb() {
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
-  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
+  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆解评分点」开始</p>';
   blocksEmpty.style.display = 'block';
   sidebarToc.innerHTML = '';
   totalBlocks = 0; doneBlocks = 0;
@@ -3765,7 +3765,7 @@ function attachStream(threadId) {
       resetWorkflowUi();
       draftRevision = Number(data?.revision) || draftRevision;
       outlineError = String(data?.error || '');
-      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
+      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆解评分点」开始</p>';
       blocksEmpty.style.display = toc.length ? 'none' : 'block';
       toc.forEach(sec => {
         const block = {
@@ -3920,7 +3920,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     currentThreadId = null;
     currentGate = null;
     resetWorkflowUi();
-    setStatusBar('idle', '该任务已作废，请重新拆分应答目录', 0, 0, 0);
+    setStatusBar('idle', '该任务已作废，请重新拆解评分点', 0, 0, 0);
     return;
   }
   if (['report_review', 'done'].includes(stage)) {
@@ -4295,7 +4295,7 @@ function failedBlockCount() {
   return n;
 }
 
-// 主按钮有两个入口：左栏底部的「拆分应答目录 / 素材匹配」和素材库顶部总览条的
+// 主按钮有两个入口：左栏底部的「拆解评分点 / 素材匹配」和素材库顶部总览条的
 // 「分析素材归属」。禁用态必须一起变 —— 只灰一个的话另一个看起来能点却没反应。
 function setExtractDisabled(v) {
   btnExtract.disabled = !!v;
@@ -4471,7 +4471,7 @@ function updateInstructionDirtyHint() {
   if (!dirty) { hint.textContent = ''; return; }
   hint.textContent = appliedInstruction
     ? '提炼要求已修改：当前目录仍是按上一版要求生成的，点「重新拆分目录」后才会生效。'
-    : '这段提炼要求还没用于生成目录：点「拆分应答目录」（或「重新拆分目录」）后生效。';
+    : '这段提炼要求还没用于生成目录：点「拆解评分点」（或「重新拆分目录」）后生效。';
 }
 
 instructionInput()?.addEventListener('input', () => {
@@ -4786,7 +4786,7 @@ btnExtract.addEventListener('click', async () => {
     startMatching();
     return;
   }
-  // 「拆分应答目录」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
+  // 「拆解评分点」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
   // interrupt_before 的闸门继续往下 —— 停在闸门 2 的线程会被直接带进生成。
   // 已有章节 = 之前拆分过，本次点击的语义是「重新拆分」（redraft 跳过 parse，
   // 只重跑张衡的目录派生）；没有章节才是首次拆分。

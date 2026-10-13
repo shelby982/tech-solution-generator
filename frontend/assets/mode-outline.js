@@ -170,7 +170,7 @@ let currentStage = (() => {
 const blocksByOrder = []; // 按 outline_extract 顺序累积，给 confirm 用
 const blocksById = new Map();
 
-// ── 视图模式：outline（拆分应答目录） / matching（素材匹配） ──
+// ── 视图模式：outline（拆解评分点） / matching（素材匹配） ──
 // 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
 // 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
 // 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
@@ -209,7 +209,7 @@ function applyPageView() {
       btn.innerHTML = '✦ 素材匹配';
       hint.textContent = '为每个章节匹配最相关的原始素材片段';
     } else {
-      btn.innerHTML = '✦ 拆分应答目录';
+      btn.innerHTML = '✦ 拆解评分点';
       hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
     }
   }
@@ -2524,6 +2524,15 @@ async function openSplitReport({ auto = false } = {}) {
   const pending = conf.filter(c => c.needs_confirm);
   const settled = conf.filter(c => !c.needs_confirm);
 
+  // ── 两阶段流程（用户要求）：先确认**评分点**，再确认**目录拆分** ──
+  // 点「拆解评分点」→ 解析 → 评分点面板（本面板的「评分点」页）→ 确认评分点
+  // → 再确认目录结构 → 收起、展示最终应答目录。
+  const answers = data.answers || {};
+  const rpAnswer = answers.review_points || {};
+  const pointsConfirmed = !!rpAnswer.confirmed
+    && Number(rpAnswer.revision || 0) === Number(draftRevision || 0);
+  const stage = pointsConfirmed ? 'structure' : 'points';
+
   // 指标条：一眼看清"这份目录是什么规模、依据确认到什么程度"
   const metrics = [
     { label: '评分点', value: `${rp.count || 0} 个`, sub: `合计 ${rp.score_total != null ? rp.score_total : '—'} 分`,
@@ -2548,13 +2557,15 @@ async function openSplitReport({ auto = false } = {}) {
   // ── 标签页：四张清单 + 拆分依据，各自独立滚动（原来全挤在一页里滚不完）──
   const tabs = [
     { id: 'basis', label: '拆分依据', badge: pending.length ? `${pending.length} 待确认` : '已确认' },
-    { id: 'points', label: '评分点', badge: `${rp.count || 0}` },
-    { id: 'units', label: '评分单元', badge: `${su.unit_count || 0}` },
+    { id: 'points', label: '① 评分点', badge: pointsConfirmed ? '已确认' : `${rp.count || 0}` },
+    { id: 'units', label: '② 评分单元', badge: `${su.unit_count || 0}` },
     { id: 'tech', label: '技术要求矩阵', badge: `${tm.topic_count || 0}` },
     { id: 'map', label: '映射矩阵', badge: `${(mp.point_to_requirement || []).length}` },
   ];
-  const tabHtml = tabs.map((t, i) => `
-    <button class="sr-tab ${i === 0 ? 'active' : ''}" data-tab="${t.id}">
+  // 第一阶段停在「评分点」（用户要先确认评分点）；第二阶段停在「评分单元」（要确认目录结构）
+  const activeTab = stage === 'points' ? 'points' : 'units';
+  const tabHtml = tabs.map(t => `
+    <button class="sr-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">
       ${t.label}<span class="sr-tab-badge">${escapeHtml(String(t.badge))}</span></button>`).join('');
 
   const confItem = (c) => {
@@ -2664,21 +2675,27 @@ async function openSplitReport({ auto = false } = {}) {
   el.innerHTML = `
     <div class="sr-box">
       <div class="sr-head">
-        <b>拆分清单</b>
+        <b>拆解评分点</b>
+        <span class="sr-step ${stage === 'points' ? 'on' : ''}">① 确认评分点</span>
+        <span class="sr-step-arrow">→</span>
+        <span class="sr-step ${stage === 'structure' ? 'on' : ''}">② 确认目录拆分</span>
         <span class="sr-dim" id="sr-sub">${escapeHtml(smap.selection?.reason || '')}</span>
         <button class="mw-btn" data-act="collapse" style="margin-left:auto;">收起，看目录</button>
       </div>
       <div class="sr-metrics">${metricHtml}</div>
       <div class="sr-tabs">${tabHtml}</div>
       <div class="sr-panes">${Object.entries(panes).map(([id, html]) =>
-        `<div class="sr-pane ${id === 'basis' ? 'active' : ''}" data-pane="${id}">${html}</div>`).join('')}</div>
+        `<div class="sr-pane ${id === activeTab ? 'active' : ''}" data-pane="${id}">${html}</div>`).join('')}</div>
       <div class="sr-foot">
-        <span class="sr-dim">${pending.length
-          ? `还有 ${pending.length} 项待确认；也可以直接确认，未确认项按当前识别结果执行。`
-          : '拆分依据已闭合，可以确认输出最终应答目录。'}</span>
-        <button class="mw-btn" data-act="redraft">重新拆分目录</button>
-        <button class="mw-btn primary" data-act="confirm">
-          确认无误，生成应答目录${draftRevision ? `（第 ${draftRevision} 版）` : ''}</button>
+        <span class="sr-dim">${stage === 'points'
+          ? `第 ① 步 · 确认评分点：${rp.count || 0} 个、合计 ${rp.score_total != null ? rp.score_total : '—'} 分。`
+            + '确认后进入第 ② 步确认目录拆分。'
+          : '第 ② 步 · 确认目录拆分：确认后收起本面板，以下即最终应答目录。'}</span>
+        <button class="mw-btn" data-act="redraft">重新拆解评分点</button>
+        ${stage === 'points'
+          ? `<button class="mw-btn primary" data-act="confirm-points">确认评分点，继续拆目录</button>`
+          : `<button class="mw-btn primary" data-act="confirm">确认目录拆分，生成应答目录${
+              draftRevision ? `（第 ${draftRevision} 版）` : ''}</button>`}
       </div>
     </div>`;
 
@@ -2692,6 +2709,9 @@ async function openSplitReport({ auto = false } = {}) {
     display:flex;flex-direction:column;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}
   .sr-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}
   .sr-head b{font-size:14px}
+  .sr-step{font-size:11.5px;color:var(--muted);padding:1px 8px;border-radius:999px;border:1px solid var(--line)}
+  .sr-step.on{background:#e0edff;border-color:#bfdbfe;color:#1d4ed8;font-weight:600}
+  .sr-step-arrow{color:var(--muted);font-size:11.5px}
   .sr-metrics{display:flex;gap:10px;padding:12px 18px 0;flex-wrap:wrap}
   .sr-metric{flex:1 1 130px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--surface-2,#faf9f7)}
   .sr-metric.ok{border-color:#a7f3d0;background:#f0fdf4}
@@ -2776,7 +2796,28 @@ async function openSplitReport({ auto = false } = {}) {
       return;
     }
 
-    // 确认：落库"结构已确认" + 记住这一版已确认 → 关闭面板，输出最终应答目录
+    // 第 ① 步：确认评分点 → 落库 review_points，重开面板进入第 ② 步
+    if (e.target.closest?.('[data-act="confirm-points"]')) {
+      const btnP = e.target.closest('[data-act="confirm-points"]');
+      btnP.disabled = true;
+      try {
+        const tidP = await resolvePanelThreadId(null);
+        await api.workflow.answerSplit(projectId, {
+          key: 'review_points',
+          value: { confirmed: true, revision: Number(draftRevision || 0),
+                   count: Number(rp.count || 0), score: rp.score_total },
+          threadId: tidP,
+        });
+      } catch (err) {
+        btnP.disabled = false;
+        alert('保存失败：' + String(err).slice(0, 120));
+        return;
+      }
+      await openSplitReport();          // 重开：此时阶段已是"确认目录拆分"
+      return;
+    }
+
+    // 第 ② 步：确认目录拆分 → 记住这一版已确认 → 收起面板，输出最终应答目录
     if (e.target.closest?.('[data-act="confirm"]')) {
       const confirmBtn = e.target.closest('[data-act="confirm"]');
       confirmBtn.disabled = true;
@@ -2988,7 +3029,7 @@ async function resyncFromDb() {
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
-  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
+  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆解评分点」开始</p>';
   blocksEmpty.style.display = 'block';
   sidebarToc.innerHTML = '';
   totalBlocks = 0; doneBlocks = 0;
@@ -3303,7 +3344,7 @@ function attachStream(threadId) {
       resetWorkflowUi();
       draftRevision = Number(data?.revision) || draftRevision;
       outlineError = String(data?.error || '');
-      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分应答目录」开始</p>';
+      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆解评分点」开始</p>';
       blocksEmpty.style.display = toc.length ? 'none' : 'block';
       toc.forEach(sec => {
         const block = {
@@ -3463,7 +3504,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     currentThreadId = null;
     currentGate = null;
     resetWorkflowUi();
-    setStatusBar('idle', '该任务已作废，请重新拆分应答目录', 0, 0, 0);
+    setStatusBar('idle', '该任务已作废，请重新拆解评分点', 0, 0, 0);
     return;
   }
   if (['report_review', 'done'].includes(stage)) {
@@ -3843,7 +3884,7 @@ function failedBlockCount() {
   return n;
 }
 
-// 主按钮有两个入口：左栏底部的「拆分应答目录 / 素材匹配」和素材库顶部总览条的
+// 主按钮有两个入口：左栏底部的「拆解评分点 / 素材匹配」和素材库顶部总览条的
 // 「分析素材归属」。禁用态必须一起变 —— 只灰一个的话另一个看起来能点却没反应。
 function setExtractDisabled(v) {
   btnExtract.disabled = !!v;
@@ -4019,7 +4060,7 @@ function updateInstructionDirtyHint() {
   if (!dirty) { hint.textContent = ''; return; }
   hint.textContent = appliedInstruction
     ? '提炼要求已修改：当前目录仍是按上一版要求生成的，点「重新拆分目录」后才会生效。'
-    : '这段提炼要求还没用于生成目录：点「拆分应答目录」（或「重新拆分目录」）后生效。';
+    : '这段提炼要求还没用于生成目录：点「拆解评分点」（或「重新拆分目录」）后生效。';
 }
 
 instructionInput()?.addEventListener('input', () => {
@@ -4334,7 +4375,7 @@ btnExtract.addEventListener('click', async () => {
     startMatching();
     return;
   }
-  // 「拆分应答目录」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
+  // 「拆解评分点」按是否已有章节分派，绝不用 recover 续跑：recover 会越过
   // interrupt_before 的闸门继续往下 —— 停在闸门 2 的线程会被直接带进生成。
   // 已有章节 = 之前拆分过，本次点击的语义是「重新拆分」（redraft 跳过 parse，
   // 只重跑张衡的目录派生）；没有章节才是首次拆分。
