@@ -13,7 +13,10 @@ export async function request(url, options) {
   return data;
 }
 const params = new URLSearchParams(location.search);
-export const workspace = { projectId: params.get('projectId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
+// projectId 只取数字部分（与 mode-outline / mode-editor 一致）：链接里混进说明文字时
+// 不再把整串当 id，避免每个接口 422 而页面毫无提示。
+const _pid = (params.get('projectId') || '').match(/\d+/)?.[0] || '';
+export const workspace = { projectId: _pid, threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
   // runStage：workflow_runs 里的阶段（运行期会被 runner 更新，见 orchestrator/runner.py
   // 的 _mark_next_phase）。stageLabel：**页面自己**给出的阶段文案（project-init 最清楚
   // "提炼到哪了"，它一设这里就盖过 stageLabels 的默认词）。

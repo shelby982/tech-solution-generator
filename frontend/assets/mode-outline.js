@@ -26,7 +26,16 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
        } from './workspace-model.mjs?v=20261013-noconfirm';
 
 const params = new URLSearchParams(location.search);
-const projectId = params.get('projectId');
+// projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
+// 时，原实现会把整串当 id，导致每个接口都 422、页面一片空白而无任何解释。
+// 归一化 + 控制台告警，既容错又不掩盖真实的参数错误。
+const _rawProjectId = params.get('projectId') || '';
+const _pidMatch = _rawProjectId.match(/\d+/);
+const projectId = _pidMatch ? _pidMatch[0] : '';
+if (_rawProjectId && String(_rawProjectId) !== String(projectId)) {
+  console.warn('[outline] projectId 参数含非数字内容，已取数字部分：',
+    JSON.stringify(_rawProjectId), '→', projectId);
+}
 if (!projectId) { location.href = '/projects'; }
 // URL 显式指定的视图模式（顶部进度条点击会带上）；空 / 非法值视为不覆盖
 const _viewParam = params.get('view');

@@ -36,7 +36,9 @@ initContextPanel();
 })();
 
 const params = new URLSearchParams(location.search);
-const projectId = params.get('projectId');
+// projectId 只取数字部分：链接里混进说明文字（如 `?projectId=19**(Cmd+Shift+R)`）时
+// 原实现把整串当 id，导致每个接口 422、页面空白且没有任何解释。
+const projectId = (params.get('projectId') || '').match(/\d+/)?.[0] || '';
 let threadId = params.get('threadId');
 // URL ?backend=... 兜底：跨页面跳转时显式带，让进度条第一次绘制就用真实 backend stage
 const _backendParam = params.get('backend');
