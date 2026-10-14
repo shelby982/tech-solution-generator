@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>原型：待确认（目录确认 → 调整 → 技术规范书确认）</title>
+<style>
+  :root{
+    --bg:#f2f4f7; --panel:#fff; --panel-soft:#f8fafc; --line:#e5e7eb; --line2:#eef1f5;
+    --text:#16202c; --muted:#6b7280; --muted2:#8a97a8;
+    --accent:#2563eb; --accent-soft:#eff6ff; --accent-strong:#1d4ed8;
+    --success:#047857; --success-soft:#ecfdf5; --warn:#92400e; --warn-soft:#fffbeb;
+    --danger:#b91c1c; --danger-soft:#fef2f2;
+    --r1:6px; --r2:10px; --r3:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1360px;margin:0 auto;padding:12px}
+
+  /* 顶栏 + 材料条（压缩示意） */
+  .topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--r2) var(--r2) 0 0;padding:9px 14px}
+  .topbar .name{font-weight:600}
+  .topbar .tools{margin-left:auto;color:var(--muted);font-size:12px;display:flex;gap:12px}
+  .mat{background:var(--panel);border:1px solid var(--line);border-top:1px solid var(--line2);
+    padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    border-radius:0 0 0 0}
+  .mat .k{font-weight:600;font-size:12.5px;color:var(--muted)}
+  .chip{border:1px solid var(--line);border-radius:8px;background:#fbfcfd;padding:3px 9px;font-size:12.5px}
+  .chip .tag{font-size:11px;border-radius:999px;padding:0 6px;background:var(--accent-soft);
+    color:var(--accent);border:1px solid #bfdbfe;margin-right:6px}
+  .chip .sz{color:var(--muted);font-size:11.5px;margin-left:6px}
+  .mat .add{border:1px dashed var(--line);border-radius:8px;padding:3px 10px;color:var(--muted);font-size:12.5px}
+  .mat .hint{margin-left:auto;color:var(--muted);font-size:11.5px}
+
+  /* 面板 */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:0 0 var(--r2) var(--r2);
+    border-top:none;overflow:hidden;box-shadow:0 2px 10px rgba(16,24,40,.05)}
+  .filter{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--panel-soft);
+    border-bottom:1px solid var(--line);font-size:12.5px;flex-wrap:wrap}
+  .filter .k{font-weight:600;color:var(--muted)}
+  .filter select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+    border-radius:7px;background:#fff;max-width:320px}
+  .btn{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer;
+    background:#fff;border:1px solid var(--line);color:var(--text)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn-sm{font-size:11.5px;padding:2px 8px;border-radius:6px}
+  .pill{display:inline-block;font-size:11px;border-radius:999px;padding:0 8px;border:1px solid var(--line);
+    color:var(--muted);background:#fff;white-space:nowrap}
+  .pill.ok{color:var(--success);background:var(--success-soft);border-color:var(--success-soft)}
+  .pill.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-soft)}
+  .dim{color:var(--muted);font-size:11.5px}
+
+  /* 顶层五阶段 + 右侧内容 */
+  .body{display:flex;align-items:stretch;min-height:520px}
+  .rail{flex:0 0 152px;border-right:1px solid var(--line);background:#fafbfc;padding:10px 0}
+  .rail-item{position:relative;display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer}
+  .rail-item .dot{flex:0 0 18px;height:18px;border-radius:50%;border:1.5px solid var(--line);
+    background:#fff;color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
+  .rail-item .lab{font-size:12.5px}
+  .rail-item.on{background:var(--accent-soft)}
+  .rail-item.on .dot{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rail-item.on .lab{font-weight:600;color:var(--accent)}
+  .rail-item.done .dot{background:var(--success-soft);border-color:#a7f3d0;color:var(--success)}
+
+  .stack{flex:1;min-width:0;background:#fcfcfd}
+  .stage-head{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line2);background:#fff}
+  .stage-head .t{font-weight:600;font-size:13.5px}
+  .stage-head .hint{color:var(--muted);font-size:11.5px}
+
+  /* ② 待确认：嵌套三步 */
+  .nested{display:flex;align-items:stretch}
+  .subrail{flex:0 0 176px;border-right:1px solid var(--line);background:#fafbfc;padding:10px 0}
+  .sub-item{position:relative;display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer}
+  .sub-item .n{flex:0 0 18px;height:18px;border-radius:50%;border:1.5px solid var(--line);background:#fff;
+    color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
+  .sub-item:not(:last-child)::after{content:"";position:absolute;left:22px;top:28px;bottom:-10px;width:1.5px;background:var(--line)}
+  .sub-item.on{background:var(--accent-soft)}
+  .sub-item.on .n{background:var(--accent);border-color:var(--accent);color:#fff}
+  .sub-item.on .lab{font-weight:600;color:var(--accent)}
+  .sub-item .sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+  .sub-item.done .n{background:var(--success-soft);border-color:#a7f3d0;color:var(--success)}
+
+  .subpane{flex:1;min-width:0;display:none}
+  .subpane.on{display:block}
+  .pane-head{display:flex;align-items:center;gap:10px;padding:9px 15px;border-bottom:1px solid var(--line2);background:#fff}
+  .pane-head .t{font-weight:600;font-size:13px}
+  .pane-head .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .pane-body{padding:12px 15px 16px}
+
+  .checks{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px}
+  .check{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;border-radius:999px;
+    padding:2px 10px;border:1px solid var(--line);background:#fff}
+  .check.ok{color:var(--success);background:var(--success-soft);border-color:var(--success-soft)}
+  .check.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-soft)}
+  .echo{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12.5px;padding:4px 0 8px;
+    border-bottom:1px solid var(--line2);margin-bottom:10px}
+  .echo b{color:var(--text);font-weight:600;margin-right:4px}
+
+  .sec{font-size:12.5px;font-weight:600;margin:12px 0 6px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  th{color:var(--muted);font-weight:600;background:var(--panel-soft)}
+
+  /* 目录结构（只读） */
+  .struct{border:1px solid var(--line);border-radius:8px;background:#fff;max-height:300px;overflow:auto;padding:4px 0}
+  .srow{display:flex;align-items:center;gap:8px;padding:3px 10px;font-size:12.5px}
+  .srow:hover{background:var(--panel-soft)}
+  .srow.l2{padding-left:24px}
+  .srow.l3{padding-left:38px;color:var(--muted)}
+  .srow .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srow .meta{font-size:11px;color:var(--muted);white-space:nowrap}
+  .srow .score{font-size:11.5px;color:var(--success);white-space:nowrap}
+
+  /* 目录调整（可编辑） */
+  .erow{display:flex;align-items:center;gap:8px;padding:4px 10px;font-size:12.5px;border-radius:6px;cursor:pointer}
+  .erow:hover{background:var(--panel-soft)}
+  .erow.on{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+  .erow.l2{padding-left:26px}
+  .erow.l3{padding-left:42px}
+  .erow .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acts{display:none;gap:4px;flex:none}
+  .erow.on .acts{display:flex}
+  .actbar{display:flex;gap:6px;align-items:center;padding:8px 0 0;flex-wrap:wrap}
+
+  .topicrow{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line2)}
+  .topicrow .tname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topicrow select{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;max-width:260px}
+  .footer{display:flex;align-items:center;gap:10px;padding:10px 15px;border-top:1px solid var(--line2);background:#fff}
+  .footer .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <span class="name">新建项目</span>
+    <span class="tools"><span>处理待办</span><span>版本记录</span><span>运行详情</span><span>● 模型 ▾</span></span>
+  </div>
+
+  <div class="mat">
+    <span class="k">材料 2</span>
+    <span class="chip"><span class="tag">技术规范书</span>4_高可靠技术专题研究与验证.docx<span class="sz">235 KB ✕</span></span>
+    <span class="chip"><span class="tag">招标文件</span>1_广东电网…技术招标文件.docx<span class="sz">5.7 MB ✕</span></span>
+    <span class="add">＋ 添加文件</span>
+    <span class="hint">明细 ▾ ｜ 多选 · 类型按文件名建议</span>
+  </div>
+
+  <div class="panel">
+    <div class="filter">
+      <span class="k">筛选</span><span>标包</span>
+      <select><option>标的1 / 标包2 · 高可靠技术专题研究与验证标包（技术8·商务8）</option></select>
+      <button class="btn btn-primary btn-sm">确认标包</button>
+      <span class="dim">已确认：标的1 / 标包2</span>
+      <span class="dim" style="margin-left:auto">已准备 33/121 章节（未跑完）</span>
+    </div>
+
+    <div class="body">
+      <!-- 顶层五阶段 -->
+      <nav class="rail">
+        <div class="rail-item done"><span class="dot">1</span><span class="lab">评分点</span></div>
+        <div class="rail-item on"><span class="dot">2</span><span class="lab">待确认</span></div>
+        <div class="rail-item"><span class="dot">3</span><span class="lab">产物</span></div>
+        <div class="rail-item"><span class="dot">4</span><span class="lab">编写</span></div>
+        <div class="rail-item"><span class="dot">5</span><span class="lab">评审</span></div>
+      </nav>
+
+      <section class="stack">
+        <div class="stage-head"><span class="t">待确认</span>
+          <span class="hint">目录确认 → 调整 → 技术规范书确认；最后一步确认生成产物</span></div>
+
+        <!-- ② 待确认：左侧三步 + 右侧内容 -->
+        <div class="nested">
+          <nav class="subrail" id="subrail">
+            <div class="sub-item on done" data-sub="1"><span class="n">1</span>
+              <span><span class="lab">目录确认</span><span class="sub">结构是否完整</span></span></div>
+            <div class="sub-item" data-sub="2"><span class="n">2</span>
+              <span><span class="lab">调整</span><span class="sub">改名 / 增删 / 移动</span></span></div>
+            <div class="sub-item" data-sub="3"><span class="n">3</span>
+              <span><span class="lab">技术规范书确认</span><span class="sub">要求挂到哪一章</span></span></div>
+          </nav>
+
+          <div class="subpane on" data-sub="1">
+            <div class="pane-head"><span class="t">目录确认</span>
+              <span class="dim">先看目录结构是否完整；要改就下一步</span>
+              <span class="right"><button class="btn" data-goto="2">去调整 →</button></span></div>
+            <div class="pane-body">
+              <div class="checks">
+                <span class="check ok">✅ 分值合计 100 / 100</span>
+                <span class="check ok">✅ 结构完整（8 评分单元 / 37 详细项 / 76 子检查项）</span>
+                <span class="check ok">✅ 标星项已入目录 0 个</span>
+                <span class="check warn">⚠ 6 个评分点名下没有挂到要求</span>
+              </div>
+              <div class="echo">
+                <span><b>范围</b>标的1 / 标包2</span>
+                <span><b>类别</b>技术</span>
+                <span><b>评分表</b>1 张（另 2 张未选中）</span>
+                <span><b>评分点</b>8 个，合计 100 分</span>
+              </div>
+
+              <div class="sec">目录结构（121 章）</div>
+              <div class="struct">
+                <div class="srow"><span class="ti">技术条款差异性</span><span class="meta">评分点：技术条款差异性</span></div>
+                <div class="srow l2"><span class="ti">投标响应度</span><span class="score">10 分</span></div>
+                <div class="srow l2"><span class="ti">招标技术要求满足情况</span><span class="score">10 分</span></div>
+                <div class="srow l2"><span class="ti">高可靠技术专题验证工具研发</span><span class="meta">规范书 1 条</span></div>
+                <div class="srow"><span class="ti">对项目的理解</span><span class="meta">评分点：对项目的理解正确、深入、全面</span></div>
+                <div class="srow l2"><span class="ti">对项目的理解正确、深入、全面</span><span class="score">10 分</span></div>
+                <div class="srow l3"><span class="ti">项目背景现状目标</span></div>
+                <div class="srow l3"><span class="ti">建设范围</span></div>
+                <div class="srow"><span class="ti">技术方案可行性</span><span class="meta">评分点：技术方案可行性</span></div>
+                <div class="srow l2"><span class="ti">技术方案完整性</span><span class="score">12 分</span><span class="meta">规范书 3 条</span></div>
+              </div>
+              <div class="dim" style="margin-top:8px">结构完整 = 每个评分点都有承载章节；缺的会在上面以 ⚠ 提示。</div>
+            </div>
+          </div>
+
+          <div class="subpane" data-sub="2">
+            <div class="pane-head"><span class="t">调整目录</span>
+              <span class="dim">点一行选中，右侧出现该行操作；改动即时保存</span>
+              <span class="right"><button class="btn" data-goto="1">← 上一步</button>
+                <button class="btn btn-primary" data-goto="3">去确认规范书 →</button></span></div>
+            <div class="pane-body">
+              <div class="struct">
+                <div class="erow" data-row><span class="ti">技术条款差异性</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow on l2" data-row><span class="ti">投标响应度</span><span class="score">10 分</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l2" data-row><span class="ti">招标技术要求满足情况</span><span class="score">10 分</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l2" data-row><span class="ti">高可靠技术专题验证工具研发</span><span class="meta">规范书 1 条</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow" data-row><span class="ti">对项目的理解</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+              </div>
+              <div class="actbar">
+                <button class="btn">＋ 新增同级章节</button>
+                <button class="btn">＋ 新增子章节</button>
+                <span class="dim">改动即时保存；失败会回到服务端的结构</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="subpane" data-sub="3">
+            <div class="pane-head"><span class="t">技术规范书确认</span>
+              <span class="dim">19 个主题 / 153 条要求；指定挂到哪一章，不指定就进「技术规范书要求应答」</span>
+              <span class="right"><button class="btn" data-goto="2">← 上一步</button></span></div>
+            <div class="pane-body">
+              <table>
+                <thead><tr><th>技术规范书主题</th><th style="width:70px">条数</th>
+                  <th style="width:300px">归属章节</th><th style="width:80px">状态</th></tr></thead>
+                <tbody>
+                  <tr><td>1.4.1组织保证</td><td>6</td>
+                    <td><select><option>技术方案可行性</option><option>默认：技术规范书要求应答</option></select></td>
+                    <td><span class="pill ok">已指定</span></td></tr>
+                  <tr><td>安全与保障体系研究及验证（含数据安全）</td><td>31</td>
+                    <td><select><option>技术方案可行性</option><option>默认：技术规范书要求应答</option></select></td>
+                    <td><span class="pill ok">已指定</span></td></tr>
+                  <tr><td>信创性能与兼容性评估工具</td><td>1</td>
+                    <td><select><option>默认：技术规范书要求应答</option><option>技术方案可行性</option></select></td>
+                    <td><span class="pill">默认</span></td></tr>
+                  <tr><td>信息安全要求</td><td>6</td>
+                    <td><select><option>默认：技术规范书要求应答</option><option>技术方案可行性</option></select></td>
+                    <td><span class="pill">默认</span></td></tr>
+                  <tr><td>技术服务能力要求</td><td>4</td>
+                    <td><select><option>默认：技术规范书要求应答</option><option>技术方案可行性</option></select></td>
+                    <td><span class="pill">默认</span></td></tr>
+                </tbody>
+              </table>
+              <div class="actbar"><button class="btn">全部保持默认</button>
+                <span class="dim">改完点右下角「确认目录，生成产物」</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <span class="dim">两步都已确认？最后一步会把目录与技术规范书归属<b>一起</b>生成产物。</span>
+          <span class="right">
+            <button class="btn" id="btn-prev">← 上一步</button>
+            <button class="btn btn-primary" id="btn-next">下一步 →</button>
+            <button class="btn btn-primary" id="btn-final">确认目录，生成产物</button>
+          </span>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+  const subs = [...document.querySelectorAll('.sub-item')];
+  const panes = [...document.querySelectorAll('.subpane')];
+  const prev = document.getElementById('btn-prev');
+  const next = document.getElementById('btn-next');
+  const final = document.getElementById('btn-final');
+  let cur = 1;
+
+  function show(n) {
+    cur = Math.max(1, Math.min(3, Number(n)));
+    panes.forEach(p => p.classList.toggle('on', p.dataset.sub === String(cur)));
+    subs.forEach(s => s.classList.toggle('on', s.dataset.sub === String(cur)));
+    prev.disabled = cur === 1;
+    next.style.display = cur === 3 ? 'none' : '';
+    final.style.display = cur === 3 ? '' : 'none';
+    // 完成态：走过的步骤标 done
+    subs.forEach(s => s.classList.toggle('done', Number(s.dataset.sub) < cur));
+  }
+  subs.forEach(s => s.addEventListener('click', () => show(s.dataset.sub)));
+  document.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => show(b.dataset.goto)));
+  prev.addEventListener('click', () => show(cur - 1));
+  next.addEventListener('click', () => show(cur + 1));
+
+  // 调整页：点行选中并显示该行操作
+  document.querySelectorAll('.erow[data-row]').forEach(r => r.addEventListener('click', (e) => {
+    if (e.target.tagName === 'BUTTON') return;
+    document.querySelectorAll('.erow[data-row]').forEach(x => x.classList.remove('on'));
+    r.classList.add('on');
+  }));
+  show(1);
+</script>
+</body>
+</html>
