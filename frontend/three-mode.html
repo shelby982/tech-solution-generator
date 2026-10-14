@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v58" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v59" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -14,6 +14,25 @@
 }
 
 /* 左侧面板 */
+/* 「本章回应」章头 */
+.chap-points { border: 1px solid var(--line); border-left: 3px solid var(--blue, #2563eb);
+  border-radius: 8px; background: #f8fafc; padding: 7px 10px; margin: 0 0 8px; }
+.chap-points .cp-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chap-points .cp-k { font-size: 11.5px; color: var(--muted); flex: 0 0 auto; }
+.chap-points .cp-points { display: flex; gap: 6px; flex-wrap: wrap; }
+.chap-points .cp-point { font-size: 12.5px; font-weight: 600; }
+.chap-points .cp-point em { font-style: normal; font-weight: 600; color: #047857; margin-left: 5px; }
+.chap-points .cp-point .cp-cat { font-weight: 400; color: var(--muted); font-size: 11.5px; margin-left: 5px; }
+.chap-points .cp-ev { font-size: 12px; color: #92400e; background: #fffbeb;
+  border: 1px solid #fcd34d; border-radius: 999px; padding: 1px 8px; }
+.chap-points .cp-ev.none { color: var(--muted); background: #fff; border-color: var(--line); }
+.chap-points .cp-cite { margin-left: auto; font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--blue, #2563eb); background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 8px; padding: 3px 10px; cursor: pointer; }
+.chap-points .cp-criterion { margin-top: 5px; font-size: 12px; color: var(--ink-2, #475569);
+  line-height: 1.6; }
+.chap-points .cp-criterion b { color: var(--muted); font-weight: 600; margin-right: 5px; }
+
 /* 顶部共享壳状态条按原型隐藏：阶段/计数/工具都并入了 #status-bar，避免两行重复 */
 #workspace-status { display: none !important; }
 
@@ -3224,7 +3243,7 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v58" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v59" />
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3448,6 +3467,19 @@ body[data-view="matching"] .match-detail { display: block; }
               </div>
               <span class="et-saved" id="ced-save-time">—</span>
             </header>
+
+            <!-- 本章回应（写作时最该常驻的信息）：这个评分点多少分、得分口径是什么、
+                 需要什么举证。数据来自块上的 review_point_ids / criterion_text /
+                 score_weight / evidence_required（拆分与提炼时已写好）。 -->
+            <section class="chap-points" id="chap-points" hidden>
+              <div class="cp-row">
+                <span class="cp-k">本章回应</span>
+                <span class="cp-points" id="cp-points"></span>
+                <span class="cp-ev" id="cp-ev"></span>
+                <button type="button" class="cp-cite" id="cp-cite" hidden>引用素材 →</button>
+              </div>
+              <div class="cp-criterion" id="cp-criterion" hidden></div>
+            </section>
 
             <!-- 生成进度（运行期才出现）：留在编辑区顶部，不再占右栏 -->
             <div class="gen-status-card" id="gen-status-card" hidden>
@@ -3897,16 +3929,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v58"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v58"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v59"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v59"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v58',
-                        './assets/mode-editor.js?v=20261016-v58']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v59',
+                        './assets/mode-editor.js?v=20261016-v59']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v58"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v59"></script>
   </body>
 </html>

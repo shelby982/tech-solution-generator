@@ -2,12 +2,12 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v58';
+import { GenerateSession } from './generate-session.js?v=20261016-v59';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v58';
-import { initContextPanel } from './context-panel.js?v=20261016-v58';
-import { api } from './api.js?v=20261016-v58';
-import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261016-v58';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v59';
+import { initContextPanel } from './context-panel.js?v=20261016-v59';
+import { api } from './api.js?v=20261016-v59';
+import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261016-v59';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -20,7 +20,7 @@ let responseItemsByBlock = {};
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v58';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v59';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -915,6 +915,7 @@ function showEditorWorkspace(b) {
   // 渲染折叠卡 + 本章要求 bar（条目编号与「素材库」同一份 response_items）
   renderRefCards(b);
   renderReqBar(b);
+  renderChapterPoints(b);
 
   // 编辑器内容：优先使用缓存（批量生成后已更新），其次用 block.content
   const editable = document.getElementById('ced-editable');
@@ -968,6 +969,73 @@ async function loadResponseItems() {
 }
 
 const ITEM_CODE = (id) => String(id || '').split('#').pop();
+// ── 本章回应：回应哪个评分点 / 多少分 / 得分口径 / 需什么举证 ──
+// 写作时最该常驻的信息。评分点的名称与分值来自评分点结论接口（按 point_id 索引，缓存一次）；
+// 得分口径与举证要求直接读块上的 criterion_text / evidence_required（拆分与提炼时已写好）。
+let pointMetaCache = null;
+async function loadPointMeta() {
+  if (pointMetaCache) return pointMetaCache;
+  pointMetaCache = {};
+  try {
+    const q = threadId ? `?threadId=${encodeURIComponent(threadId)}` : '';
+    const data = await fetch(`/api/projects/${projectId}/scoring-verdict${q}`).then(r => r.json());
+    for (const p of data.points || []) {
+      pointMetaCache[String(p.point_id)] = {
+        item: p.item || p.factor || p.point_id,
+        factor: p.factor || '',
+        points: p.points,
+      };
+    }
+  } catch (e) {
+    console.warn('[editor] 评分点元信息取不到，本章回应只显示口径与举证', e);
+  }
+  return pointMetaCache;
+}
+
+async function renderChapterPoints(b) {
+  const box = document.getElementById('chap-points');
+  if (!box || !b) return;
+  let ids = [];
+  try {
+    const raw = b.review_point_ids;
+    ids = Array.isArray(raw) ? raw.map(String) : (JSON.parse(raw || '[]') || []).map(String);
+  } catch { ids = []; }
+  const criterion = String(b.criterion_text || '').trim();
+  const evidence = String(b.evidence_required || '').trim();
+  if (!ids.length && !criterion && !evidence) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const meta = await loadPointMeta();
+  const pointsEl = document.getElementById('cp-points');
+  pointsEl.innerHTML = ids.length
+    ? ids.map((id) => {
+        const m = meta[id] || {};
+        return `<span class="cp-point">${escHtml(m.item || id)}${
+          m.points != null ? `<em>${m.points} 分</em>` : ''}${
+          m.factor && m.factor !== m.item ? `<span class="cp-cat">${escHtml(m.factor)}</span>` : ''}</span>`;
+      }).join('<span class="cp-cat">·</span>')
+    : '<span class="cp-cat">本章未挂到具体评分点（骨架章节）</span>';
+
+  const ev = document.getElementById('cp-ev');
+  ev.textContent = evidence ? `需举证：${evidence}` : '本章无需强制举证';
+  ev.className = evidence ? 'cp-ev' : 'cp-ev none';
+
+  const crit = document.getElementById('cp-criterion');
+  crit.hidden = !criterion;
+  if (criterion) crit.innerHTML = `<b>得分口径</b>${escHtml(criterion)}`;
+
+  // 有举证要求 → 给"引用素材"入口（点开按需素材抽屉，而不是预先全量挂载）
+  const cite = document.getElementById('cp-cite');
+  cite.hidden = !evidence;
+  if (evidence && !cite.dataset.bound) {
+    cite.dataset.bound = '1';
+    cite.addEventListener('click', () => window.__toggleMaterialDrawer?.(true));
+  }
+}
+
+// 调试/验证入口：可用合成块直接驱动"本章回应"渲染（不依赖库里数据）
+window.__ovEditor = { renderChapterPoints, renderReqBar };
+
 function renderReqBar(b) {
   const bar = document.getElementById('req-bar');
   if (!bar) return;
