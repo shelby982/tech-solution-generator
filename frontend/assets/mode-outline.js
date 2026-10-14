@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v131';
+import { api } from './api.js?v=20261016-v133';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v131';
+       } from './workspace.js?v=20261016-v133';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -28,7 +28,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v131';
+       } from './workspace-model.mjs?v=20261016-v133';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -114,7 +114,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v131';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v133';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2527,6 +2527,7 @@ let selectedStructId = null;
 let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 const batchIds = new Set();   // 批量操作选中的章节（跨渲染保留，方便连着挪几格）
+const removedByUser = new Set();   // 用户**明确删掉**的章节 id（区别于"本地列表少了"）
 // 「已确认」的确认项默认展示**结果**；点「修改」才展开控件（否则确认完信息就消失了 ——
 // 用户反馈："确认进入对应目录后需要能够查到确认的结果情况"）
 let confirmEditOpen = {};
@@ -2678,6 +2679,21 @@ async function saveStructureFromPanel(next, { afterSave = null, label = '' } = {
   if (!Array.isArray(next) || !next.length) {
     console.error('[panel-structure] 期望节点数组，实际收到：', next);
     structSaveNote = '保存失败：内部数据结构不对（已跳过，详见控制台）';
+    await openSplitReport({ stage: '2' });
+    return;
+  }
+
+  // ⚠️ 关键安全校验：**本地列表比模型少、而且少的不是用户删的** → 本地模型不可信。
+  // 这种保存会把"没列出来的章节"当删除，静默削掉目录（实测发生过两次：少 8 行 / 少 33 行，
+  // 服务端日志只有一条 200）。宁可拒绝并重载，也不要拿不可信的列表去覆盖服务器。
+  const nextIds = new Set(next.map((n) => String(n.id)));
+  const lost = [...blocksById.keys()]
+    .map(String)
+    .filter((id) => !nextIds.has(id) && !removedByUser.has(id));
+  if (lost.length) {
+    console.error('[panel-structure] 本地目录比服务器少且非用户删除，已拒绝保存：', lost.slice(0, 10));
+    structSaveNote = `本地目录与服务器不一致（少 ${lost.length} 节），已重新加载，请重试`;
+    await loadExistingBlocks({ silent: true });
     await openSplitReport({ stage: '2' });
     return;
   }
@@ -2856,6 +2872,7 @@ async function handleBatchStruct(action) {
     if (!ok) return;
     const { nodes: next, removed } = removeManyOutlineSubtrees(nodes, ids);
     if (!removed) return;
+    nodes.filter((n) => !next.some((m) => m.id === n.id)).forEach((n) => removedByUser.add(String(n.id)));
     batchIds.clear();
     selectedStructId = null;
     await saveStructureFromPanel(next, { label: `批量删除 ${removed} 节` });
@@ -2904,6 +2921,7 @@ async function handleStructAct(blockId, op) {
     // 界面上就是"点了确认但什么都没发生"（实测踩到）。
     const { nodes: next, removed } = removeOutlineSubtree(nodes, blockId);
     if (!removed) return;
+    nodes.filter((n) => !next.some((m) => m.id === n.id)).forEach((n) => removedByUser.add(String(n.id)));
     selectedStructId = null;
     await saveStructureFromPanel(next, { label: `删除 ${removed} 节` });
     return;

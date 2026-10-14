@@ -423,3 +423,31 @@ test('批量删除：空选择什么都不删', () => {
   assert.deepEqual(ids(r.nodes), ['s1', 's2']);
   assert.equal(r.removed, 0);
 });
+
+// 用户实测反馈：勾选多行"原地往右拖一级"不动 → 必须刷新才生效。
+// 根因：位置没变时 moveOutlineNodesTo 返回 null，被当成"非法拖动"丢弃，于是不发保存。
+test('Notion 式拖动：**位置不变、只降一级**也要生效（原地缩进）', () => {
+  const nodes = [
+    { id: 'a', level: 1, title: 'A' },
+    { id: 'b', level: 2, title: 'B' },
+    { id: 'c', level: 2, title: 'C' },
+    { id: 'd', level: 2, title: 'D' },
+  ];
+  const r = moveOutlineNodesToLevel(nodes, ['c', 'd'], 3, 3);   // 插到原位置，但降一级
+  assert.ok(r, '不能返回 null —— 否则界面"拖了没反应"');
+  assert.deepEqual(ids(r), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(levels(r), [1, 2, 3, 3]);
+});
+
+test('Notion 式拖动（单个）：位置不变、只降一级也要生效', () => {
+  const nodes = [N('a', 1), N('b', 2), N('c', 2)];
+  const r = moveOutlineNodeToLevel(nodes, 'c', 2, 3);
+  assert.ok(r);
+  assert.equal(r.find((n) => n.id === 'c').level, 3);
+  assert.deepEqual(ids(r), ['a', 'b', 'c']);
+});
+
+test('Notion 式拖动：位置与层级都没变 → null（不写库）', () => {
+  const nodes = [N('a', 1), N('b', 2)];
+  assert.equal(moveOutlineNodeToLevel(nodes, 'b', 1, 2), null);
+});

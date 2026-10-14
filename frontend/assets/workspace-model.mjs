@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v131';
+} from './material-roles.mjs?v=20261016-v133';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -302,65 +302,11 @@ export function moveOutlineNodeTo(nodes, id, targetIndex) {
  *   · natural = 插入点后一个节点的层级（不做水平移动时的手感：成为它的同级）
  * 界面据此把水平位移换算成层级，并显示「成为子级 / 同级 / 上级」。
  */
-export function levelRangeAt(nodes, targetIndex) {
-  const before = targetIndex > 0 ? nodes[targetIndex - 1] : null;
-  const max = before ? Math.min(MAX_LEVEL, (Number(before.level) || 1) + 1) : 1;
-  const after = nodes[targetIndex] || null;
-  const natural = after ? (Number(after.level) || 1) : (before ? (Number(before.level) || 1) : 1);
-  return { min: 1, max, natural: Math.max(1, Math.min(max, natural)) };
-}
-
-/** 拖动到指定位置**并指定层级**（Notion 式：水平位置决定成为子级/同级/上级）。
- *  同样连带整棵子树；层级最终由服务端 clamp_levels 归一，这里先夹到 [1,4]。 */
-export function moveOutlineNodeToLevel(nodes, id, targetIndex, level) {
-  const [start, end] = outlineSubtreeRange(nodes, id);
-  if (start < 0) return null;
-  if (targetIndex > start && targetIndex < end) return null;
-  const subtree = nodes.slice(start, end);
-  const rest = [...nodes.slice(0, start), ...nodes.slice(end)];
-  const at = Math.max(0, Math.min(
-    rest.length,
-    targetIndex > start ? targetIndex - (end - start) : targetIndex,
-  ));
-  const lvl = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1));
-  const delta = lvl - (Number(nodes[start].level) || 1);
-  const moved = delta === 0 ? subtree : _shiftLevels(subtree, 0, subtree.length, delta);
-  const result = [...rest.slice(0, at), ...moved, ...rest.slice(at)];
-  const same = result.length === nodes.length
-    && result.every((n, i) => n.id === nodes[i].id && Number(n.level) === Number(nodes[i].level));
-  return same ? null : result;
-}
-
-/** 同上，但整组（与 moveOutlineNodesTo 一致的摘出/插回，只是层级由参数给定）。 */
-export function moveOutlineNodesToLevel(nodes, ids, targetIndex, level) {
-  const moved = moveOutlineNodesTo(nodes, ids, targetIndex);
-  if (!moved) return null;
-  // 块内第一个选中节点的原层级 → 目标层级
-  const sel = new Set((ids || []).map(String));
-  const anchorNode = nodes.find((n) => sel.has(String(n.id)));
-  if (!anchorNode) return null;
-  const delta = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1)) - (Number(anchorNode.level) || 1);
-  if (delta === 0) return moved;
-  const baseIds = new Set((ids || []).map(String));
-  // 只对"块内的顶层节点"（不在其他选中项子树里的）位移
-  const roots = [];
-  for (const n of nodes) {
-    if (!baseIds.has(String(n.id))) continue;
-    const r = outlineSubtreeRange(nodes, n.id);
-    if (roots.some(([rs, re]) => r[0] >= rs && r[1] <= re)) continue;
-    roots.push(r);
-  }
-  const shift = new Set();
-  for (const [rs, re] of roots) for (let i = rs; i < re; i++) shift.add(nodes[i].id);
-  return moved.map((n) => (shift.has(n.id)
-    ? { ...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta)) }
-    : n));
-}
-
 /** 拖动排序（整组）：把一组选中节点（各自连带子树）作为一块移到 targetIndex 之前。
  *
  * 组内保持原有相对顺序；整块用同一个层级（落点后一个节点的层级，插到末尾跟最后一个同级）。
  * 先把各范围摘出来再插回，所以"选中项互为父子"也不会算错。
+ * 位置没变时返回 null（调用方 moveOutlineNodesToLevel 会把它当作"原地"继续处理层级）。
  */
 export function moveOutlineNodesTo(nodes, ids, targetIndex) {
   const sel = new Set((ids || []).map(String));
@@ -394,10 +340,62 @@ export function moveOutlineNodesTo(nodes, ids, targetIndex) {
     ...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta)),
   }));
   const result = [...keep.slice(0, at), ...moved, ...keep.slice(at)];
-  // 位置与层级都没变 → 当作没动（不写库）
   const same = result.length === nodes.length
     && result.every((n, i) => n.id === nodes[i].id && Number(n.level) === Number(nodes[i].level));
   return same ? null : result;
+}
+
+export function levelRangeAt(nodes, targetIndex) {
+  const before = targetIndex > 0 ? nodes[targetIndex - 1] : null;
+  const max = before ? Math.min(MAX_LEVEL, (Number(before.level) || 1) + 1) : 1;
+  const after = nodes[targetIndex] || null;
+  const natural = after ? (Number(after.level) || 1) : (before ? (Number(before.level) || 1) : 1);
+  return { min: 1, max, natural: Math.max(1, Math.min(max, natural)) };
+}
+
+/** 拖动到指定位置**并指定层级**（Notion 式：水平位置决定成为子级/同级/上级）。
+ *
+ * ⚠️ 位置"原地不动、只改层级"是**最常见的用法**（往右拖一点 = 原地降一级）。
+ * 所以位置部分为 null（没换位置）时不能当成"非法拖动"返回 null ——
+ * 那样就不发保存请求，用户看到"拖了没反应，刷新才生效"（实测反馈）。
+ */
+export function moveOutlineNodeToLevel(nodes, id, targetIndex, level) {
+  const [start, end] = outlineSubtreeRange(nodes, id);
+  if (start < 0) return null;
+  if (targetIndex > start && targetIndex < end) return null;   // 拖进自己的子树 → 拒绝
+  const reordered = moveOutlineNodeTo(nodes, id, targetIndex) || nodes;   // null = 位置没变（允许）
+  const [s2] = outlineSubtreeRange(reordered, id);
+  const lvl = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1));
+  const delta = lvl - (Number(reordered[s2].level) || 1);
+  if (delta === 0 && reordered === nodes) return null;         // 位置与层级都没变
+  if (delta === 0) return reordered;
+  const [s3, e3] = outlineSubtreeRange(reordered, id);
+  return _shiftLevels(reordered, s3, e3, delta);
+}
+
+/** 同上，但整组（位置可原地，只改层级也要保存）。 */
+export function moveOutlineNodesToLevel(nodes, ids, targetIndex, level) {
+  const reordered = moveOutlineNodesTo(nodes, ids, targetIndex) || nodes;   // null = 位置没变（允许）
+  const sel = new Set((ids || []).map(String));
+  const anchorNode = nodes.find((n) => sel.has(String(n.id)));
+  if (!anchorNode) return null;
+  const delta = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1)) - (Number(anchorNode.level) || 1);
+  if (delta === 0 && reordered === nodes) return null;
+
+  // 只对"块内的顶层节点"（不在其他选中项子树里的）位移
+  const roots = [];
+  for (const n of nodes) {
+    if (!sel.has(String(n.id))) continue;
+    const r = outlineSubtreeRange(nodes, n.id);
+    if (roots.some(([rs, re]) => r[0] >= rs && r[1] <= re)) continue;
+    roots.push(r);
+  }
+  const shift = new Set();
+  for (const [rs, re] of roots) for (let i = rs; i < re; i++) shift.add(nodes[i].id);
+  if (delta === 0) return reordered;
+  return reordered.map((n) => (shift.has(n.id)
+    ? { ...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta)) }
+    : n));
 }
 
 /** 批量缩进 / 减少缩进：**以这一批的"头"决定，整批一起升降**。
