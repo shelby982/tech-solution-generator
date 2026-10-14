@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v81';
+import { api } from './api.js?v=20261016-v82';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v81';
+       } from './workspace.js?v=20261016-v82';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v81';
+       } from './workspace-model.mjs?v=20261016-v82';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v81';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v82';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2506,6 +2506,25 @@ let lastCoverageScope = null;
 // 用户口径：技术要求也按标包归属，不存在共享；切换后若该标包还没生成目录，
 // 相关页签必须显示空态 + 一键生成，绝不能继续显示上一个标包的目录。
 let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当前目录）
+// 用户口径「**每个标包是单独的内容**」：先选标包、点「确认标包」，五阶段才针对该标包展开。
+// 未确认时面板不出阶段内容（避免把上一个标包/默认范围的内容误当成这个标包的）。
+let confirmedPkg = null;      // {target, package_no} | null
+const pkgKeyOf = (x) => (x ? `${x.target || ''}|${x.package_no || ''}` : '');
+function readConfirmedPkg() {
+  let raw = params.get('pkg') || '';
+  if (!raw) { try { raw = localStorage.getItem(`ge:pkg:${projectId}`) || ''; } catch { /* 隐私模式 */ } }
+  if (!raw) return null;
+  const [target, package_no] = String(raw).split('|');
+  return (target || package_no) ? { target: target || '', package_no: package_no || '' } : null;
+}
+function rememberConfirmedPkg(x) {
+  confirmedPkg = x;
+  const raw = pkgKeyOf(x);
+  try { localStorage.setItem(`ge:pkg:${projectId}`, raw); } catch { /* 忽略 */ }
+  const url = new URL(location.href);
+  if (raw) url.searchParams.set('pkg', raw); else url.searchParams.delete('pkg');
+  history.replaceState(null, '', url.toString());
+}
 let panelViewCats = null;     // 筛选的类别（null = 跟随当前目录）
 // 面板当前所在阶段（'1' 评分点 / '2' 待确认 / '3' 产物）与其内的子页签
 let panelStage = '1';
@@ -2898,6 +2917,7 @@ function hideLaneTreeWhenPanelShows() {
 
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
+  if (!confirmedPkg) confirmedPkg = readConfirmedPkg();   // 刷新后仍记得确认过哪个标包
   // 面板头那行运行进度：只在真在跑 / 有进度时显示（原来在状态栏，已随该模块去掉）
   setTimeout(refreshPanelRunState, 0);
   // 拆分进行中：报告此时是空的（旧数据已被清），画出来只会得到空标包下拉 +
@@ -3446,11 +3466,16 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
             }).join('')}
           </select>
         </label>
-        <span class="sr-dim">选好标包后，到「待确认」确认类别再生成</span>
+        <button class="sr-btn-primary" id="sr-confirm-pkg" type="button">确认标包</button>
+        <span class="sr-dim" id="sr-pkg-state">${
+          confirmedPkg
+            ? `已确认：${escapeHtml(confirmedPkg.target || '—')} / 标包${escapeHtml(confirmedPkg.package_no || '—')}`
+            : '选好标包后点「确认标包」，五个步骤会针对该标包展开'
+        }</span>
         <span class="sr-run" id="sr-run-state"></span>
       </div>
       ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
-      <div class="sr-body">
+      ${confirmedPkg ? `<div class="sr-body">
         <nav class="sr-rail">
           ${STAGES.map(x => `
             <div class="sr-rail-item ${stageState(x.id)}" data-stage="${x.id}"
@@ -3502,7 +3527,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
             </div>
           </div>
         </section>
-      </div>
+      </div>` : `<div class="sr-gate">
+        <b>先确认标包</b>
+        <div class="sr-dim">在上方选好标包并点「确认标包」，五个步骤（评分点 → 待确认 → 产物 → 编写 → 评审）
+          会针对该标包展开；每个标包的目录、正文与评审各自独立。</div>
+      </div>`}
     </div>`;
 
   if (!document.getElementById('sr-style')) {
@@ -3677,6 +3706,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-subtab .n{color:var(--muted);font-weight:400;margin-left:4px}
   .sr-subpane{display:none}
   .sr-subpane.on{display:block}
+  .sr-gate{padding:28px 20px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .sr-gate b{font-size:13.5px}
   .sr-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:11px 18px;border-bottom:1px solid var(--line);background:#f8fafc}
   .sr-filter-k{font-weight:600;font-size:12.5px;color:var(--muted)}
@@ -3736,6 +3767,57 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     stage.querySelectorAll('.sr-subtab').forEach(t =>
       t.classList.toggle('on', t.dataset.sub === panelSub));
   };
+  // 「确认标包」：写范围 + 把当前运行归属到该标包 → 五阶段针对它展开。
+  // 该标包还没有运行 → 新建一条（带 target/package_no），后端只清**同标包**的旧数据。
+  el.querySelector('#sr-confirm-pkg')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const sel = document.getElementById('sr-view-pkg');
+    const [target, package_no] = String(sel?.value || '').split('|');
+    if (!target && !package_no) return;
+    const stat = document.getElementById('sr-pkg-state');
+    btn.disabled = true;
+    if (stat) stat.textContent = '正在确认…';
+    try {
+      const row = pkgs.find((x) => String(x.package_no || '') === String(package_no)
+        && String(x.target || '') === String(target)) || {};
+      const tidNow = currentThreadId || params.get('threadId') || getThread(projectId);
+      // ① 写投标范围（同时把当前运行归属到该标包）
+      await api.workflow.setScope(projectId, {
+        target, package_no, package_name: row.package_name || '', threadId: tidNow || '',
+      });
+      // ② 该标包已有运行？有就切过去；没有就为它新建一条（此处带 points_only：先拆评分点）
+      const runs = await api.workflow.workflowRuns(projectId);
+      const same = (runs || []).find((r) => String(r.target || '') === String(target)
+        && String(r.package_no || '') === String(package_no));
+      let tid = same?.thread_id || '';
+      if (!tid) {
+        const resp = await api.workflow.start(projectId, {
+          target, package_no, points_only: true,
+          model: selectedModel, outline_instruction: readOutlineInstruction(),
+        });
+        tid = resp?.thread_id || '';
+        splitPanelFlash = `已为「${row.package_name || `标包${package_no}`}」新建一条作业，正在拆评分点…`;
+      } else {
+        splitPanelFlash = `已切换到「${row.package_name || `标包${package_no}`}」的作业（该标包的内容相互独立）。`;
+      }
+      if (tid) {
+        currentThreadId = tid;
+        setThread(projectId, tid);
+        const url = new URL(location.href);
+        url.searchParams.set('threadId', tid);
+        history.replaceState(null, '', url.toString());
+        if (typeof attachStream === 'function') { try { attachStream(tid); } catch { /* 流可选 */ } }
+      }
+      rememberConfirmedPkg({ target, package_no });
+      panelViewPkg = { target, package_no };
+      splitPanelAutoOpenedFor = 0;
+      await openSplitReport({ stage: '1' });
+    } catch (err) {
+      if (stat) stat.textContent = `确认失败：${String(err?.message || err).slice(0, 80)}`;
+      btn.disabled = false;
+    }
+  });
+
   el.querySelectorAll('.sr-rail-item').forEach(r => r.addEventListener('click', () => {
     panelStage = r.dataset.stage;
     panelSub = '';                 // 换阶段时子页签回到该阶段的第一个

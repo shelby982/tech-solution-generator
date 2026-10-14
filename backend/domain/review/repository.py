@@ -148,13 +148,14 @@ class WorkflowRunRepository:
 
     async def create(
         self, thread_id: str, project_id: int, stage: str = "idle",
+        *, target: str = "", package_no: str = "",
     ) -> dict:
         if stage not in _VALID_STAGES:
             raise ValueError(f"非法 stage：{stage}")
         await self.db.execute(
-            """INSERT INTO workflow_runs (thread_id, project_id, stage)
-               VALUES (?, ?, ?)""",
-            (thread_id, project_id, stage),
+            """INSERT INTO workflow_runs (thread_id, project_id, stage, target, package_no)
+               VALUES (?, ?, ?, ?, ?)""",
+            (thread_id, project_id, stage, target or "", package_no or ""),
         )
         await self.db.commit()
         row = await self.get(thread_id)
@@ -187,6 +188,30 @@ class WorkflowRunRepository:
             )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def set_scope(self, thread_id: str, *, target: str, package_no: str) -> None:
+        """把这一条运行归属到某个标包（用户确认标包时写）。
+
+        用户口径「每个标包是单独的内容」：运行必须能按标包归属与检索，
+        否则跑标包 1 会清掉标包 2 的目录，前端也无法"按标包找运行"。
+        """
+        await self.db.execute(
+            "UPDATE workflow_runs SET target = ?, package_no = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE thread_id = ?",
+            (target or "", package_no or "", thread_id),
+        )
+        await self.db.commit()
+
+    async def latest_for_scope(self, project_id: int, target: str, package_no: str) -> dict | None:
+        """找该项目该标包的**最新**运行；没有返回 None（前端据此新建运行）。"""
+        cur = await self.db.execute(
+            """SELECT * FROM workflow_runs
+               WHERE project_id = ? AND COALESCE(target, '') = ? AND COALESCE(package_no, '') = ?
+               ORDER BY created_at DESC, rowid DESC LIMIT 1""",
+            (project_id, target or "", package_no or ""),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
 
     async def update_stage(
         self, thread_id: str, stage: str,

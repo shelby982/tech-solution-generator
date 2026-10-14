@@ -162,6 +162,10 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     thread_id   TEXT PRIMARY KEY,
     project_id  INTEGER NOT NULL REFERENCES projects(id),
     stage       TEXT NOT NULL DEFAULT 'idle',
+    -- 这一条运行属于哪个标包（标的 + 标包号）。用户口径：**每个标包是单独的内容**
+    -- ——评分点/目录/编写/评审都各自独立，所以运行必须能按标包归属与检索。
+    target      TEXT NOT NULL DEFAULT '',
+    package_no  TEXT NOT NULL DEFAULT '',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME
@@ -249,6 +253,16 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         "PRAGMA table_info(spec_requirements)")).fetchall()}
     if _sr_cols and "package_no" not in _sr_cols:
         await conn.execute("ALTER TABLE spec_requirements ADD COLUMN package_no TEXT")
+
+    # workflow_runs.target / package_no（用户口径：**每个标包是单独的内容**）：
+    # 一条运行归属一个标包，前端按标包找/建运行，五阶段都只看该标包的内容。
+    _wr_cols = {row[1] for row in await (await conn.execute(
+        "PRAGMA table_info(workflow_runs)")).fetchall()}
+    if _wr_cols:
+        for _col in ("target", "package_no"):
+            if _col not in _wr_cols:
+                await conn.execute(
+                    f"ALTER TABLE workflow_runs ADD COLUMN {_col} TEXT NOT NULL DEFAULT ''")
 
     # reviews：对齐评分口径的判断（审查是否真正满足要求）。
     #   criterion_text 评审依据的评分口径；satisfied 满足度；

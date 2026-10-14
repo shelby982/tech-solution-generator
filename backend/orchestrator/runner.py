@@ -196,15 +196,24 @@ class WorkflowRunner:
         前端，是为了不依赖某个按钮是否被点到 —— 只要开了新 run，项目里就只剩一套。
         """
         thread_id = str(uuid.uuid4())
+        # 标包归属：用户口径「每个标包是单独的内容」→ 运行要记住自己属于哪个标包，
+        # 前端才能按标包找/建运行；清理旧数据也必须收敛到同一个标包。
+        scope_target = str((config or {}).get("target") or "")
+        scope_pkg = str((config or {}).get("package_no") or "")
         async with get_db() as db:
             repo = WorkflowRunRepository(db)
-            await repo.create(thread_id, project_id, stage="idle")
-            from services.block_store import purge_blocks_except_run
+            await repo.create(thread_id, project_id, stage="idle",
+                              target=scope_target, package_no=scope_pkg)
+            from services.block_store import purge_scope_blocks
 
-            dropped = await purge_blocks_except_run(db, project_id, keep_thread_id=None)
+            dropped = await purge_scope_blocks(
+                db, project_id, target=scope_target, package_no=scope_pkg,
+                keep_thread_id=None,
+            )
             if dropped:
                 logger.info(
-                    f"runner: 项目 {project_id} 新建 run，清理旧 run 的 {dropped} 条 blocks"
+                    "runner: 项目 %s 标包(%s/%s) 新建 run，清理该标包旧 run 的 %s 条 blocks",
+                    project_id, scope_target or '-', scope_pkg or '-', dropped,
                 )
 
         run = _Run(thread_id, EventEmitter())

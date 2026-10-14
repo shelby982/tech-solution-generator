@@ -146,15 +146,35 @@ async def get_project_scope(project_id: int):
 
 @router.put("/projects/{project_id}/scope")
 async def put_project_scope(project_id: int, payload: dict):
-    """设定投标范围。一次设定、贯穿拆分与报告 —— 不再每次靠提炼要求里的文字去猜。"""
+    """设定投标范围。一次设定、贯穿拆分与报告 —— 不再每次靠提炼要求里的文字去猜。
+
+    用户口径「**每个标包是单独的内容**」：确认标包时还会把**当前运行归属到该标包**
+    （payload 带 threadId 就用它，否则用该项目最新一条运行），这样前端能按标包找/建运行，
+    五阶段都只读该标包的内容。
+    """
     from services.split_answers import set_project_scope as _set
+    target = str(payload.get("target") or "")
+    package_no = str(payload.get("package_no") or "")
     async with get_db() as db:
-        return JSONResponse(content=await _set(
+        out = await _set(
             db, project_id,
-            target=str(payload.get("target") or ""),
-            package_no=str(payload.get("package_no") or ""),
+            target=target,
+            package_no=package_no,
             package_name=str(payload.get("package_name") or ""),
-        ))
+        )
+        tid = str(payload.get("threadId") or "")
+        from domain.review.repository import WorkflowRunRepository
+        repo = WorkflowRunRepository(db)
+        if not tid:
+            cur = await db.execute(
+                "SELECT thread_id FROM workflow_runs WHERE project_id = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1", (project_id,))
+            row = await cur.fetchone()
+            tid = (row[0] if row else "") or ""
+        if tid:
+            await repo.set_scope(tid, target=target, package_no=package_no)
+            out = {**(out or {}), "thread_id": tid}
+    return JSONResponse(content=out)
 
 
 @router.get("/projects/{project_id}/split-answers")

@@ -318,6 +318,36 @@ async def list_blocks(
     return [dict(row) for row in rows]
 
 
+async def purge_scope_blocks(
+    db: aiosqlite.Connection,
+    project_id: int,
+    *,
+    target: str = "",
+    package_no: str = "",
+    keep_thread_id: str | None = None,
+) -> int:
+    """清掉**同一标包**下、不属于 keep 的旧 blocks，返回删除条数。
+
+    为什么不能再用 `purge_blocks_except_run`（清全项目）：用户口径是
+    **每个标包是单独的内容** —— 跑标包 1 不能把标包 2 已经拆好的目录清掉。
+    所以清理范围必须收敛到"同一个 (target, package_no)"。
+    """
+    cursor = await db.execute(
+        """DELETE FROM blocks
+            WHERE project_id = ?
+              AND (run_thread_id IS NULL OR run_thread_id != COALESCE(?, ''))
+              AND COALESCE(run_thread_id, '') IN (
+                  SELECT COALESCE(thread_id, '') FROM workflow_runs
+                   WHERE project_id = ?
+                     AND COALESCE(target, '') = ?
+                     AND COALESCE(package_no, '') = ?
+              )""",
+        (project_id, keep_thread_id, project_id, target or "", package_no or ""),
+    )
+    await db.commit()
+    return cursor.rowcount or 0
+
+
 async def purge_blocks_except_run(
     db: aiosqlite.Connection,
     project_id: int,

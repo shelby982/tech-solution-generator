@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from orchestrator.runner import next_phase_stage
 
 
@@ -68,3 +70,56 @@ def test_resume_auto_only_acts_on_preparation_stages():
     # 四个可续跑阶段各有一条分支
     for stage in ("extracting", "matching", "generating", "reviewing"):
         assert f'"{stage}"' in src, stage
+
+
+@pytest.fixture
+async def runs_db(tmp_path):
+    """独立小库 + 用完必关。
+
+    ⚠️ 必须用 fixture（yield + close）：断言失败时后面的 `await conn.close()` 不会执行，
+    aiosqlite 的后台线程会吊住解释器 —— 实测表现为"整个测试套件卡住不退出"。
+    """
+    import aiosqlite
+    from db import init_db
+
+    conn = await aiosqlite.connect(str(tmp_path / "runs.db"))
+    conn.row_factory = aiosqlite.Row
+    await init_db(conn)
+    await conn.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+    await conn.commit()
+    yield conn
+    await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_runs_are_attributed_to_a_package(runs_db):
+    """**每个标包是单独的内容**：运行要能按 (target, package_no) 归属与检索。
+
+    否则前端无法"按标包找运行"，跑标包 1 时也会把标包 2 的目录清掉。
+    """
+    from domain.review.repository import WorkflowRunRepository
+
+    conn = runs_db
+    repo = WorkflowRunRepository(conn)
+    await repo.create("t-pkg1", 1, stage="idle", target="标的1", package_no="1")
+    await repo.create("t-pkg2", 1, stage="idle", target="标的1", package_no="2")
+    await repo.create("t-pkg2b", 1, stage="idle", target="标的1", package_no="2")
+    # created_at 同秒会踩平时间序（真机同一秒建多条很常见）→ 显式写成不同时刻
+    for tid, ts in (("t-pkg1", "2026-01-01 00:00:01"),
+                    ("t-pkg2", "2026-01-01 00:00:02"),
+                    ("t-pkg2b", "2026-01-01 00:00:03")):
+        await conn.execute("UPDATE workflow_runs SET created_at = ? WHERE thread_id = ?", (ts, tid))
+    await conn.commit()
+
+    assert (await repo.latest_for_scope(1, "标的1", "1"))["thread_id"] == "t-pkg1"
+    # 同一标包取**最新**那条
+    assert (await repo.latest_for_scope(1, "标的1", "2"))["thread_id"] == "t-pkg2b"
+    # 没跑过的标包 → None（前端据此新建运行）
+    assert await repo.latest_for_scope(1, "标的1", "3") is None
+
+    # 确认标包时把运行归属写进去：改归属后应在**新**标包下被检索到
+    await repo.set_scope("t-pkg1", target="标的2", package_no="2")
+    assert (await repo.latest_for_scope(1, "标的2", "2"))["thread_id"] == "t-pkg1"
+    # 原标包只剩原来那两条，最新仍是 t-pkg2b（归属没串）
+    assert (await repo.latest_for_scope(1, "标的1", "2"))["thread_id"] == "t-pkg2b"
+    assert await repo.latest_for_scope(1, "标的1", "1") is None
