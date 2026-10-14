@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261015-v51';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v57';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261015-v51';
+} from './material-roles.mjs?v=20261016-v57';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -89,13 +89,16 @@ function renderChrome() {
     nav.dataset.navRemoved = '1';
     console.info('[workspace] 四模式导航已按用户要求移除（逻辑待重新设计）');
   }
-  let bar = document.getElementById('workspace-status');
-  if (!bar) {
-    bar = document.createElement('section'); bar.id = 'workspace-status'; bar.className = 'ws-status';
-    nav.closest('header').after(bar);
-    bar.innerHTML = '<div class="ws-state-copy" role="status"><strong id="ws-run-label"></strong><span id="ws-run-detail"></span></div><div class="ws-status-actions"><a id="ws-todo-link">处理待办</a><button type="button" id="ws-history">版本记录</button><button type="button" id="ws-run">运行详情</button></div>';
-    bar.querySelector('#ws-history').onclick = () => showHistory();
-    bar.querySelector('#ws-run').onclick = showRun;
+  // 共享壳状态条已按原型移除（信息并入页面状态行 #status-bar，避免两行重复）。
+  // 那三个工具（处理待办 / 版本记录 / 运行详情）现在在状态行里是**静态节点**，
+  // 这里按 id 绑定一次即可（原来绑在共享壳自己的副本上，且 id 重复）。
+  const bar = null;
+  if (!workspace._toolsBound) {
+    workspace._toolsBound = true;
+    const todo = document.getElementById('ws-todo-link');
+    if (todo) todo.setAttribute('href', workspaceUrl('review'));
+    document.getElementById('ws-history')?.addEventListener('click', () => showHistory());
+    document.getElementById('ws-run')?.addEventListener('click', () => showRun());
   }
   const state = workspace.state;
   // 运行期阶段（extracting/matching）以 workflow_runs 为准：这期间 checkpoint 还停在
@@ -110,7 +113,8 @@ function renderChrome() {
   const round = Number(state.iteration || 0) + 1;
   // 优先级：页面自己给的（最实时，带 x/y 计数）→ 按 blocks 推出的提炼进度 → 默认词
   const label = workspace.stageLabel || outlinePhaseLabel(stage) || stageLabels[stage] || stage;
-  bar.querySelector('#ws-run-label').textContent = workspace.threadId
+  const runLabel = null;   // 共享壳已移除；阶段文案由页面状态行显示
+  if (runLabel) runLabel.textContent = workspace.threadId
     ? `第 ${round} 轮 · ${label}${workspace.orphaned ? '（已中断）' : ''}`
     : '开始准备方案';
   // 大纲阶段别显示"正文 x/y"（那时还没有正文），换成提炼进度更有意义
@@ -120,12 +124,13 @@ function renderChrome() {
     : (summary.total
       ? `正文 ${summary.written}/${summary.total} · 已通过 ${summary.counts.passed || 0} · 待处理 ${summary.needsAction}`
       : '');
-  bar.querySelector('#ws-run-detail').textContent = workspace.orphaned
+  const runDetail = null;
+  if (runDetail) runDetail.textContent = workspace.orphaned
     ? `后端重启导致该任务中断，进度来自上次运行${stats ? ` · ${stats}` : ''}。可在「要求与大纲」页点「继续提炼」接着跑`
     : (stats || '上传要求后确认大纲，可随时切换工作区');
-  bar.querySelector('#ws-todo-link').href = workspaceUrl('review');
-  bar.dataset.busy = String(workspace.busy);
-  bar.dataset.orphaned = String(workspace.orphaned);
+  // busy/orphaned 现在挂在 body 上，供样式与状态行使用（原来挂在共享壳上）
+  document.body.dataset.busy = String(workspace.busy);
+  document.body.dataset.orphaned = String(workspace.orphaned);
 }
 export async function refreshWorkspace() {
   if (loading) return;

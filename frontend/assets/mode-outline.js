@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261015-v51';
+import { api } from './api.js?v=20261016-v57';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261015-v51';
+       } from './workspace.js?v=20261016-v57';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261015-v51';
+       } from './workspace-model.mjs?v=20261016-v57';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261015-v51';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v57';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -603,6 +603,19 @@ apiSave.addEventListener('click', async () => {
   await loadModels();
 });
 
+// 材料条：展开全部 / 管理材料（管理 = 直接展开成多行，逐条可改类型与删除）
+document.getElementById('mat-more')?.addEventListener('click', () => {
+  const rows = document.getElementById('mat-rows');
+  if (!rows) return;
+  rows.classList.toggle('expanded');
+  refreshMaterialSummary();
+});
+document.getElementById('mat-manage')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  document.getElementById('mat-rows')?.classList.add('expanded');
+  refreshMaterialSummary();
+});
+
 apiClose.addEventListener('click', closeApiModal);
 apiCancel.addEventListener('click', async () => {
   const cid = apiSave.dataset.configId;
@@ -632,6 +645,36 @@ function fmtSize(bytes) {
 // 角色标签来自共享模块 assets/material-roles.mjs（与 node --test 同一份口径），
 // 不再在此处另写一套 —— 两套文案必然漂移，而角色决定文件进哪条链路。
 const ROLE_LABEL = { ...ROLE_LABEL_SHARED };
+/** 材料条的摘要（数量 + 分组构成）与"展开全部"控制。
+ *  文件多时第一行先给构成，第二行只显示前两行内的 chip，其余折叠。 */
+function refreshMaterialSummary() {
+  const chips = [...document.querySelectorAll('#req-stack .mat-row, #src-stack .mat-row')];
+  const total = chips.length;
+  const t = document.getElementById('mat-total');
+  if (t) t.textContent = String(total);
+  const gsum = document.getElementById('mat-gsum');
+  if (gsum) {
+    const groups = {};
+    chips.forEach((c) => {
+      const sel = c.querySelector('.mat-role-select');
+      const role = sel ? sel.value : 'source';
+      const label = ROLE_LABEL_SHARED[role] || role;
+      groups[label] = (groups[label] || 0) + 1;
+    });
+    const colors = { '招标文件': '#2563eb', '技术规范书': '#0891b2', '其他': '#7c3aed', '我方素材': '#7c3aed' };
+    gsum.innerHTML = Object.entries(groups)
+      .map(([k, v]) => `<span><i style="background:${colors[k] || '#94a3b8'}"></i>${k} ${v}</span>`).join('');
+  }
+  // 第二行超过可视高度 → 显示「展开全部」
+  const rows = document.getElementById('mat-rows');
+  const more = document.getElementById('mat-more');
+  if (rows && more) {
+    const expanded = rows.classList.contains('expanded');
+    more.hidden = expanded ? false : rows.scrollHeight <= rows.clientHeight + 4;
+    more.textContent = expanded ? '收起 ▴' : '展开全部 ▾';
+  }
+}
+
 async function loadMaterials() {
   const list = await api.materials.list(projectId);
   const reqRoles = ['spec', 'main_rfp', 'requirement', 'scoring', 'evaluation'];
@@ -641,9 +684,13 @@ async function loadMaterials() {
   sourceMaterialCount = srcs.length;   // 匹配详情的空状态：一份素材都没有时说清"先上传"
   renderMatchTreeHead();               // 栏头上的「素材 N 份」跟着变
   renderMats(reqStack, reqs, true);
+  refreshMaterialSummary();          // 数量 + 分组构成 + 是否要"展开全部"
   renderMats(srcStack, srcs, false);
-  reqCount.textContent = `${reqs.length} 项`;
-  srcCount.textContent = `${srcs.length} 项`;
+  refreshMaterialSummary();
+  // 左栏已按原型移除：计数改由材料条的摘要（#mat-total / #mat-gsum）承担。
+  // 这里对旧节点做空值保护，避免整页脚本因一个 null 崩掉（实测踩过）。
+  if (reqCount) reqCount.textContent = `${reqs.length} 项`;
+  if (srcCount) srcCount.textContent = `${srcs.length} 项`;
   // 若有材料正在解析，2.5s 后再拉一次直到全部 done/failed
   const hasPending = list.some(m => m.parse_status === 'pending' || m.parse_status === 'parsing');
   if (hasPending) {
@@ -753,7 +800,13 @@ function headerStageLabel(state) {
   const done = Number(doneBlocks) || 0;
   const failed = failedBlockCount();
   if (state === 'failed') return '本次运行失败';
-  if (state === 'extracting') {
+  if (state === 'idle') {
+    // 主动作从"左栏底部按钮"搬到状态行（左栏已按原型移除）
+    setStatusActions('idle', `
+      <button class="btn-status-primary" id="btn-start-split">拆分评审点</button>`, () => {
+      document.getElementById('btn-start-split')?.addEventListener('click', restartExtraction);
+    });
+  } else if (state === 'extracting') {
     // 拆分期间（解析 + 梳理目录）不能显示「提炼要点中（0/530）」——那时还没开始逐节提炼，
     // 而且 totalBlocks 还是上一版的数字（用户反馈：解析时显示"提炼要点中"很奇怪）。
     if (splitInProgress) return '拆分中（解析材料）';
@@ -2983,6 +3036,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     { id: '1', label: '评审点', sub: '拆商务/技术/规范书' },
     { id: '2', label: '待确认', sub: '确认后进入产物' },
     { id: '3', label: '产物点', sub: '目录 · 映射矩阵' },
+    // ④⑤ 不在本面板内：按原型它们是同一条主线的后续阶段，点击跳到对应视图
+    { id: '4', label: '编写', sub: '按章 · 按需举证',
+      href: () => `/three-mode?projectId=${projectId}&view=editor${
+        currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}` },
+    { id: '5', label: '评审', sub: '按评分点把关',
+      href: () => `/review?projectId=${projectId}${
+        currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}` },
   ];
   const stageState = (st) => (st === '3'
     ? (categoriesConfirmed
@@ -3035,7 +3095,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-body">
         <nav class="sr-rail">
           ${STAGES.map(x => `
-            <div class="sr-rail-item ${stageState(x.id)}" data-stage="${x.id}">
+            <div class="sr-rail-item ${stageState(x.id)}" data-stage="${x.id}"
+              ${x.href ? 'data-nav="1" title="切到该视图"' : ''}>
               <span class="sr-dot">${x.id}</span>
               <span><span class="sr-lab">${x.label}</span><span class="sr-sub">${x.sub}</span></span>
             </div>`).join('')}
@@ -3230,6 +3291,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       t.classList.toggle('on', t.dataset.sub === panelSub));
   };
   el.querySelectorAll('.sr-rail-item').forEach(r => r.addEventListener('click', () => {
+    const meta = STAGES.find(x => x.id === r.dataset.stage);
+    if (meta?.href) { location.href = meta.href(); return; }   // ④编写 / ⑤评审：切视图
     panelStage = r.dataset.stage;
     panelSub = '';                 // 换阶段时子页签回到该阶段的第一个
     applyStage(); applySub();
