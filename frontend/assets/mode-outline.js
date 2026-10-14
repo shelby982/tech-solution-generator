@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v75';
+import { api } from './api.js?v=20261016-v78';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v75';
+       } from './workspace.js?v=20261016-v78';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v75';
+       } from './workspace-model.mjs?v=20261016-v78';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v75';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v78';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -902,10 +902,10 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   } else if (state === 'points_pending') {
     // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆分结果」）。
     // 这里**不能**给「确认目录，开始提炼要点」——那会用上一版目录继续提炼（自相矛盾）。
+    // 回退类动作（重新拆分评分点 / 重新拆分目录 / 重新提炼）统一收在面板头的「重做 ▾」里，
+    // 这里只留**前进**动作，避免同一动作两处出现（用户反馈"逻辑重复"）。
     setStatusActions('points_pending', `
-      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分评分点</button>
       <button class="btn-status-primary" id="btn-gen-outline">生成所选目录 ▸</button>`, () => {
-      document.getElementById('btn-redraft-outline')?.addEventListener('click', restartExtraction);
       document.getElementById('btn-gen-outline')?.addEventListener('click', () => {
         splitPanelAutoOpenedFor = 0;
         openSplitReport();
@@ -916,19 +916,14 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     if (autoConfirmOutlineAt && Date.now() - autoConfirmOutlineAt < 15 * 60 * 1000) {
       autoConfirmOutlineAt = 0;
       setStatusActions('gate_outline', `
-        <span class="status-pill is-ok">目录已按你的确认生成</span>
-        <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>`, () => {
-        document.getElementById('btn-redraft-outline')?.addEventListener('click', redraftOutline);
-      });
+        <span class="status-pill is-ok">目录已按你的确认生成</span>`, () => {});
       setTimeout(() => confirmOutlineGate(), 60);   // 下一拍再放行，先让状态行落到目标态
       return;
     }
     // 闸门 1 不再给「取消」：运行已停住、不消耗资源，点它只会把 run 标成作废；
     // 要重来用「重新拆分目录」。
     setStatusActions('gate_outline', `
-      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
       <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`, () => {
-      document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
       document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
     });
     // 闸门 1 只审**目录结构**（增删改/上下移/缩进走每行的「编辑」按钮）；8 字段此刻
@@ -957,9 +952,7 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       freezeOutlineEdit();
     } else {
       setStatusActions('done_outline', `
-        <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
         <button class="btn-status-primary" id="btn-to-matching">确认内容大纲及要求</button>`, () => {
-        document.getElementById('btn-reextract').addEventListener('click', () => confirmReextract());
         document.getElementById('btn-to-matching').addEventListener('click', confirmOutlineContent);
       });
       // 确认前允许修改：这份提炼结果正是用户要审的内容，只读就没法改
@@ -968,13 +961,12 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   } else if (state === 'failed') {
     // 硬失败（如目录派生失败）：不是「等一会就好」，给明确的重试入口。
     // 线程保留 —— 要求文件已经解析好，重出目录复用的是同一个 thread 的 checkpoint。
+    // 失败态只留一个**上下文重试**（最常见的那条：重出目录）；
+    // 其它范围（重新拆分评分点 / 重新提炼）在面板头的「重做 ▾」里。
+    // 失败原因不再铺在界面上 → 由面板头的运行状态提示指向「运行详情」。
     setStatusActions('failed', `
-      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>
-      <button class="btn-status-primary" id="btn-restart-run">从头重新提炼</button>`, () => {
-      // 这里以前绑的是 btn-reextract —— 该分支根本没有这个 id，getElementById 返回 null，
-      // 于是「从头重新提炼」点了**必然没反应**（用户报的"点了没反应"之一）。
-      document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
-      document.getElementById('btn-restart-run').addEventListener('click', () => startExtraction(true));
+      <button class="btn-status-primary" id="btn-retry-outline">重试</button>`, () => {
+      document.getElementById('btn-retry-outline')?.addEventListener('click', redraftOutline);
     });
     freezeOutlineEdit();
   } else if (state === 'paused') {
@@ -2605,12 +2597,6 @@ async function loadVerdict() {
 
 /** 把状态动作区（#status-actions）挂到面板头里 —— 让"动作"只有一处，
  *  不再单独占一条状态栏。面板不存在时留在原处兜底（例如纯解析期）。 */
-function mountStatusActions() {
-  const slot = document.querySelector('#split-panel-inline .sr-head-actions');
-  const strip = document.getElementById('status-actions');
-  if (slot && strip && strip.parentElement !== slot) slot.prepend(strip);
-}
-
 function refreshPanelRunState() {
   const el = document.getElementById('sr-run-state');
   if (!el) return;
@@ -2618,7 +2604,8 @@ function refreshPanelRunState() {
   const total = Number(totalBlocks) || 0;
   const done = Number(doneBlocks) || 0;
   let text = '';
-  if (splitInProgress || st === 'parsing') text = '正在解析要求文件…';
+  if (st === 'failed') text = '上次运行失败 · 原因见「运行详情」';
+  else if (splitInProgress || st === 'parsing') text = '正在解析要求文件…';
   else if (outlineDrafting) text = '正在梳理应答目录…';
   else if (st === 'extracting' && total) text = `已提炼 ${done}/${total} 章节`;
   else if (st === 'matching') text = '正在匹配素材…';
@@ -3403,21 +3390,33 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     if (st === '2') return analyzedAll ? (categoriesConfirmed ? 'done' : '') : 'gated';
     return 'done';
   };
-  const stageHint = (st) => (st === '4'
-    ? (totalBlocks ? `已写 ${writeStats.written} / ${writeStats.total} 章 · 章头常驻评分点与举证` : '等目录生成后再撰写')
-    : (st === '5'
-        ? (reviewSummary.points_total
-            ? `得分预估 ${reviewSummary.score_estimated ?? 0} / ${reviewSummary.score_max ?? 0} · 缺口 ${reviewSummary.gaps ?? 0} 项`
-            : '等生成正文后按评分点评审')
-        : stageHintLegacy(st)));
-  const stageHintLegacy = (st) => (st === '2'
-    ? (analyzedAll ? `共 ${pending.length} 项；确认完才会输出产物` : '等三块拆分完成')
-    : (st === '3'
-        ? (categoriesConfirmed
-            ? (generated ? `已生成：目录 ${su.unit_count || 0} · 映射 ${(mp.point_to_requirement || []).length}`
-                         : '确认完成，生成中 / 未生成')
-            : '还没确认，确认后展示')
-        : '拆商务 / 技术评分点 + 技术规范书'));
+  // 阶段内容头 = **该阶段的实时状态**；左竖条 = 阶段定位（名字 + 一句概述）。
+  // 两者刻意不重复：以前内容头把竖条那两行原样抄一遍，读起来像同一句话说两次。
+  const stageHint = (st) => {
+    if (st === '1') {
+      // 用与子页签同一份口径（commerceStat/techStat/specCount），不另算一遍
+      const parts = [];
+      if (commerceStat?.count) parts.push(`商务评分点 ${commerceStat.count}`);
+      if (techStat?.count) parts.push(`技术评分点 ${techStat.count}`);
+      if (specCount) parts.push(`技术规范书要求 ${specCount}`);
+      return parts.length ? parts.join(' · ') : '还没有拆分结果';
+    }
+    if (st === '2') {
+      return analyzedAll ? `待确认 ${pending.length} 项；确认完才会输出产物` : '等三块拆分完成';
+    }
+    if (st === '3') {
+      if (!categoriesConfirmed) return '还没确认，确认后展示';
+      return generated
+        ? `目录 ${su.unit_count || 0} 章 · 映射 ${(mp.point_to_requirement || []).length} 条`
+        : '确认完成，生成中 / 未生成';
+    }
+    if (st === '4') {
+      return totalBlocks ? `已写 ${writeStats.written} / ${writeStats.total} 章` : '等目录生成后再撰写';
+    }
+    return reviewSummary.points_total
+      ? `得分预估 ${reviewSummary.score_estimated ?? 0} / ${reviewSummary.score_max ?? 0} · 缺口 ${reviewSummary.gaps ?? 0} 项`
+      : '等生成正文后按评分点评审';
+  };
 
   const el = document.getElementById('split-panel-inline') || (() => {
     const d = document.createElement('div');
@@ -3430,14 +3429,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   el.innerHTML = `
     <div class="sr-box">
       <div class="sr-head">
-        <b>拆分评分点</b>
         <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
         <span class="sr-run" id="sr-run-state"></span>
-        <!-- 运行态动作（取消 / 确认目录 / 继续提炼 / 重新提炼…）由 #status-actions 挂进来，
-             见 mountStatusActions()：一是条件多（跟运行状态走），二是避免两个写者各画一套 -->
-        <span class="sr-head-actions">
-          <button class="mw-btn" data-act="redraft-points">重新拆分评分点</button>
-        </span>
+        <!-- 右侧按钮已按用户要求整组删除。
+             ⚠️ 注意：这组按钮曾承载「继续提炼（resume-extract）」——那是**唯一**能接着跑完
+             被暂停的提炼的入口（编辑器里的「继续生成」是生成阶段的事，不是提炼）。
+             要恢复的话，把它作为**唯一**的上下文主按钮放回这里即可（只在真有暂停/闸门时出现）。 -->
+        <span class="sr-head-actions"></span>
       </div>
       <div class="sr-filter">
         <span class="sr-filter-k">筛选</span>
@@ -3626,6 +3624,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-vpill.bad{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-soft)}
   .sr-vpill.none{color:var(--muted)}
   .sr-head-actions{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .sr-redo{position:relative}
+  .sr-redo>summary{list-style:none;cursor:pointer}
+  .sr-redo>summary::-webkit-details-marker{display:none}
+  .sr-redo-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;display:flex;
+    flex-direction:column;gap:4px;padding:6px;background:var(--panel,#fff);
+    border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:230px}
+  .sr-redo-menu .mw-btn{justify-content:flex-start;text-align:left;white-space:nowrap}
   .sr-head-actions .mw-btn{font-size:12px}
   .sr-run{font-size:11.5px;color:var(--muted)}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
@@ -3749,7 +3754,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   }));
   applyStage(); applySub();
   refreshPanelRunState();
-  mountStatusActions();
   hydrateStage(panelStage);
 
   el.addEventListener('click', async (e) => {
@@ -4749,7 +4753,6 @@ function setSplitChromeHidden(hidden) {
 /** 拆分中断（任务被清理 / 恢复失败）：面板给出明确说明 + 一键重试。
  *  不能继续显示加载态转圈 —— 那会让人以为还在跑。 */
 function showSplitPanelRetry(reason) {
-  mountStatusActions();
   splitInProgress = false;
   setSplitChromeHidden(false);
   const el = document.getElementById('split-panel-inline');
@@ -4770,7 +4773,6 @@ function showSplitPanelRetry(reason) {
 /** 面板的**加载态**：重新拆分 / 首次拆分期间显示，避免旧内容残留在右侧。
  *  位置与正式面板一致（同一个容器），拆完由 openSplitReport 覆盖重绘。 */
 function showSplitPanelLoading(text) {
-  mountStatusActions();
   splitInProgress = true;
   // 拆分期间把两块**重复信息**收起来：顶部共享壳的阶段条（第 N 轮 · 阶段 + 正文/已通过/待处理，
   // 红框1）与页面状态栏（解析进度，红框2）。此时它们和面板里的加载态说的是同一件事，
