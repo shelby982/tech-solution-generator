@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v97';
+import { api } from './api.js?v=20261016-v98';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v97';
+       } from './workspace.js?v=20261016-v98';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v97';
+       } from './workspace-model.mjs?v=20261016-v98';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v97';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v98';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2803,15 +2803,29 @@ async function genWriteBlock() {
   if (!stat) return;
   if (!currentThreadId) { stat.textContent = '还没有运行记录，请先在①拆分评分点'; return; }
   stat.textContent = '已提交生成请求…';
+  // 两条通道（实测出来的差别）：
+  //   ① 运行**正在跑**（extracting/matching/generating/reviewing）→ /regen：把目标写进
+  //      state，由图接着跑；
+  //   ② 运行**已停住**（paused/done/materials_review/report_review…）→ /regen 从检查点继续
+  //      会走回原来的节点，**静默不生成**（实测：什么都不发生）。这种时候要用
+  //      workspace-action(action=revise)：它从确定的入口（GATE_MATERIALS / NODE_GENERATE）
+  //      重入，只针对选中的章节生成。
   try {
-    const r = await fetch(`/api/workflow/${currentThreadId}/regen`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ block_ids: [writeActiveId] }),
-    });
-    // 如实说明：regen 要运行中的 run 才真正执行；停在闸门时需要先继续运行
+    const st = (await api.workflow.state(currentThreadId).catch(() => null))?.stage || '';
+    const RUNNING = ['parsing', 'extracting', 'matching', 'generating', 'reviewing'];
+    const settled = !RUNNING.includes(st);
+    const r = settled
+      ? await fetch(`/api/workflow/${currentThreadId}/workspace-action`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'revise', block_ids: [writeActiveId] }),
+        })
+      : await fetch(`/api/workflow/${currentThreadId}/regen`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ block_ids: [writeActiveId] }),
+        });
     stat.textContent = r.ok
-      ? '已提交生成；完成后重新点该章节即可看到正文（若运行停在闸门，请先在状态行继续）'
-      : `提交失败（HTTP ${r.status}）：若运行已停在闸门，请先在状态行继续运行`;
+      ? '已提交生成；完成后重新点该章节即可看到正文'
+      : `提交失败（HTTP ${r.status}）${settled ? '' : '：若运行已停在闸门，请先在面板上方继续运行'}`;
   } catch (e) {
     stat.textContent = `提交失败：${e.message}`;
   }
