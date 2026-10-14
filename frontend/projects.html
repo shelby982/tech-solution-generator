@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 项目列表</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v91" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v93" />
     <style>
       /* ── 页头 ── */
       .app-header {
@@ -613,7 +613,7 @@
       .btn-api-save:disabled { opacity: 0.45; cursor: default; }
       .btn-api-save:not(:disabled):hover { opacity: 0.88; }
     </style>
-    <link rel="stylesheet" href="./assets/ui.css?v=20261016-v91" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+    <link rel="stylesheet" href="./assets/ui.css?v=20261016-v93" />   <!-- 组件最小集：最后加载以统一历史类名 -->
 </head>
   <body>
     <!-- 页头 -->
@@ -745,7 +745,7 @@
     </div>
 
     <script type="module">
-      import { api } from './assets/api.js?v=20261016-v91';
+      import { api } from './assets/api.js?v=20261016-v93';
 
       // ── 状态 ──
       const reqFiles = []; // {file, name, size, ext}
@@ -859,7 +859,10 @@
           case 'reviewing':
           case 'report_review':
           case 'done':
-            location.href = `/review?threadId=${enc}${backendQ}`;
+            // **不要再直接跳质量检查页**（用户反馈：从项目列表点进来看到的是评审页，
+            // 没走到五步流程）。评审就是第⑤步，统一进三模式面板；面板自己会按运行阶段
+            // 定位到⑤评审（syncPanelStageFromRunOnce）。质量检查页仍可从「处理待办」进。
+            location.href = threeMode('outline');
             break;
           case 'aborted':
           default:

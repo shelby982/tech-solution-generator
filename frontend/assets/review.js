@@ -1,6 +1,21 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v91';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v91';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v93';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v93';
 const $ = id => document.getElementById(id);
+
+// 「← 作业面板」带上当前项目/线程/标包 —— 回面板仍是同一条作业、同一个标包
+(function wireBackToPanel() {
+  const a = document.getElementById('back-to-panel');
+  if (!a) return;
+  const q = new URLSearchParams(location.search);
+  const out = new URLSearchParams();
+  for (const k of ['projectId', 'threadId', 'pkg']) {
+    const v = q.get(k);
+    if (v) out.set(k, v);
+  }
+  const pid = out.get('projectId');
+  if (!pid) { try { const s = JSON.parse(sessionStorage.getItem('ge:last') || '{}'); if (s.projectId) out.set('projectId', s.projectId); } catch { /* 忽略 */ } }
+  a.href = '/three-mode' + (out.toString() ? `?${out.toString()}` : '');
+})();
 let activeId = new URLSearchParams(location.search).get('blockId');
 let mode = 'current', visibleLimit = 100;
 const selected = new Set();

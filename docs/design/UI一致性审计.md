@@ -638,3 +638,32 @@ __bootErrors=[] ｜ 后端 765 passed / 前端 102 passed
 来自 `workspace.js` 的 `refreshWorkspace()` 抓取失败（我验证时反复重启后端会触发），
 **会自动重试**（busy 4s / 空闲 10s），不是数据问题。它插在页头下方、样式显眼（`.ws-error`），
 若觉得打扰可以：连续失败 N 次才显示，或降级成小角标（未做，等你定）。
+
+---
+
+## 二十一、真正的入口在项目列表页（上一处修复没覆盖到）
+
+### 核实（第二次）
+上一轮我修的是**面板内部**的三处 `/review` 跳转。用户反馈"从项目列表点进来还是评审页" ——
+真正的原因在 **`projects.html` 自己的按阶段分流**：
+```js
+case 'reviewing': case 'report_review': case 'done':
+  location.href = `/review?threadId=${enc}${backendQ}`;   // ← 直接跳质量检查页，且没带 projectId
+```
+（这个 switch 上方的注释还写着"统一进三模式工作台"，但评审那几个 case 是旧逻辑遗留。）
+
+### 改法
+1. **`projects.html`**：`reviewing / report_review / done` 也走 `threeMode('outline')`；
+   面板自己按运行阶段定位到⑤评审。在线资产里 `/review?` 跳转 **0 处**。
+2. **标包兜底顺序**（避免从列表进来先撞「先确认标包」门控）：
+   ① 老运行没有标包归属时，用**项目级范围** `projects.scope_*`（这个项目一直在做的标包）；
+   ② 只有一个标包时用它；③ 多标包且项目范围为空 → 仍要用户确认（正确）。
+3. **`/review` 页加「← 作业面板」**（带 projectId/threadId/pkg）—— 已经在评审页的人一键回路；
+   否则停在 `/review` 上刷新永远是那一页（用户反馈的"刷新还是旧的"）。
+
+### 实测（复现用户路径：项目列表 → 点项目）
+```
+project list 生成的地址 = /three-mode?projectId=26&threadId=…&backend=done&view=outline
+落点：url=/three-mode ✅  rail 在 ✅  stage=⑤评审 ✅  无门控 ✅
+      「已确认：标的1 / 标包2」✅  KPI 5 / 100 ✅  __bootErrors=[] ✅
+```

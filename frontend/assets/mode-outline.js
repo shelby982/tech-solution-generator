@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v91';
+import { api } from './api.js?v=20261016-v93';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v91';
+       } from './workspace.js?v=20261016-v93';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v91';
+       } from './workspace-model.mjs?v=20261016-v93';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v91';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v93';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3024,12 +3024,20 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const catLabelOf = (c) => CAT_HINT[c] || c;
 
   const pkgs = data.package_points || [];
-  // 老运行（加标包字段之前建的）没有归属 → 若本文件**只有一个标包**，直接采用它：
-  // 没有歧义，不该让用户先撞一次「先确认标包」的门控（多标包时仍然要确认）。
-  if (!confirmedPkg && pkgs.length === 1
-      && (pkgs[0].package_no || pkgs[0].target)) {
-    rememberConfirmedPkg({ target: pkgs[0].target || '', package_no: pkgs[0].package_no || '' });
-    panelViewPkg = { target: pkgs[0].target || '', package_no: pkgs[0].package_no || '' };
+  // 没记住标包时按"无歧义"顺序兜底，避免从项目列表进来先撞一次「先确认标包」：
+  //   ① 老运行（加标包字段之前建的）没有归属，但**项目级范围**（projects.scope_*）知道
+  //      这个项目一直在做哪个标包 → 直接采用它；
+  //   ② 本文件只有一个标包 → 采用它；
+  //   ③ 都不满足（多标包且项目范围为空）→ 仍然要用户确认（这是正确的）。
+  if (!confirmedPkg) {
+    const ps = curScope || {};
+    if (ps.target || ps.package_no) {
+      rememberConfirmedPkg({ target: ps.target || '', package_no: ps.package_no || '' });
+      panelViewPkg = { target: ps.target || '', package_no: ps.package_no || '' };
+    } else if (pkgs.length === 1 && (pkgs[0].package_no || pkgs[0].target)) {
+      rememberConfirmedPkg({ target: pkgs[0].target || '', package_no: pkgs[0].package_no || '' });
+      panelViewPkg = { target: pkgs[0].target || '', package_no: pkgs[0].package_no || '' };
+    }
   }
   const pkgLabel = (p) => `${p.target || '—'} / 标包${p.package_no || '—'}`;
   const curPkgLabel = pkgLabel(curScope);
