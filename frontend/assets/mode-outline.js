@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v65';
+import { api } from './api.js?v=20261016-v66';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v65';
+       } from './workspace.js?v=20261016-v66';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v65';
+       } from './workspace-model.mjs?v=20261016-v66';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v65';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v66';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -912,6 +912,17 @@ function setStatusBar(state, label, pct, totalB, doneB) {
       });
     });
   } else if (state === 'gate_outline') {
+    // 面板里刚点过「确认并生成目录」→ 那是同一次决策，这里自动放行，不再要第二次确认。
+    if (autoConfirmOutlineAt && Date.now() - autoConfirmOutlineAt < 15 * 60 * 1000) {
+      autoConfirmOutlineAt = 0;
+      setStatusActions('gate_outline', `
+        <span class="status-pill is-ok">目录已按你的确认生成</span>
+        <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分目录</button>`, () => {
+        document.getElementById('btn-redraft-outline')?.addEventListener('click', redraftOutline);
+      });
+      setTimeout(() => confirmOutlineGate(), 60);   // 下一拍再放行，先让状态行落到目标态
+      return;
+    }
     // 闸门 1 不再给「取消」：运行已停住、不消耗资源，点它只会把 run 标成作废；
     // 要重来用「重新拆分目录」。
     setStatusActions('gate_outline', `
@@ -2515,6 +2526,11 @@ let writeHydratedKey = '';
 let reviewHydratedKey = '';
 let reviewSummary = {};
 let verdictCache = { key: '', data: null };
+// 「确认即放行」：在面板里点过「确认并生成目录」后，闸门 1 不再要求用户第二次确认
+// ——范围/类别的确认与目录结构的确认是**同一次决策**（审计 P2-2：
+// 两套确认语义曾让界面自相矛盾：产物还没确认、而目录已经派生完并在提炼）。
+// 带时间戳，避免用户中途改主意后这个标记一直挂在那儿。
+let autoConfirmOutlineAt = 0;
 // 是否正在「梳理应答目录」这一**短任务**阶段（派生目录：秒级~1 分钟）。
 // 该阶段不显示「取消」：取消它既保不住什么，也只会让用户以为必须点它才能重跑
 // （用户反馈：右上角的"取消"在这个阶段还有什么意义）。
@@ -3704,6 +3720,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         });
         const labels = cats.map(c => ({ tech: '技术', commerce: '商务', price: '报价' }[c] || c)).join('、');
         splitPanelFlash = `已确认：${viewLabel} · ${labels}。正在生成目录与映射矩阵…`;
+        // 这次点击已代表用户批准目录 → 派生完成后自动放行闸门，不再弹第二次确认
+        autoConfirmOutlineAt = Date.now();
         await openSplitReport({ tab: 'directory' });   // 产物页签此时已出现
         await redraftOutline();
       } catch (err) {
@@ -4694,6 +4712,7 @@ function showSplitPanelLoading(text) {
 }
 
 async function restartExtraction() {
+  autoConfirmOutlineAt = 0;   // 主动重来 → 不再自动放行闸门
   if (restartInFlight) {
     console.info('[workflow] 上一次"重新拆分"还在进行中，忽略这次点击');
     return;
@@ -5275,6 +5294,7 @@ function redraftAllowedByStage() {
 }
 
 async function redraftOutline() {
+  autoConfirmOutlineAt = 0;   // 主动重来 → 不再自动放行闸门
   // ① 先问后端：能不能重拆。原料变过（删旧文件/传新文件）或已过闸门时，
   //    「重新拆分目录」用的是 checkpoint 里的**旧解析结果**，点下去会返回 200
   //    但页面毫无变化 —— 实测用户连点 8 次。这里直接改走「重新提炼」。
@@ -5793,6 +5813,13 @@ window.__reloadOutlineTree = () => {
 // 调试入口：面板类函数做成窗口钩子，便于在控制台直接验证/排查
 // （与 project-init 的 window.dsv 同一做法）。
 window.__ovPanels = {
+  // 验证用钩子（无副作用）：模拟"面板刚确认过"与"到达闸门"，用来核对
+  // 「确认即放行」这条逻辑，不需要真跑一次模型。
+  setAutoConfirm: (on) => { autoConfirmOutlineAt = on ? Date.now() : 0; },
+  getAutoConfirm: () => autoConfirmOutlineAt,
+  statusBar: (state, label, pct, total, done) => setStatusBar(state, label, pct, total, done),
+  confirmOutlineGate,
+
   refreshCoverage: (tid) => refreshOutlineCoverage(tid || currentThreadId || getThread(projectId)),
   risk: () => toggleScoringRisk(),
   report: (opts) => openSplitReport(opts || {}),
