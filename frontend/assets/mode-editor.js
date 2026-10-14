@@ -2,12 +2,12 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v59';
+import { GenerateSession } from './generate-session.js?v=20261016-v60';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v59';
-import { initContextPanel } from './context-panel.js?v=20261016-v59';
-import { api } from './api.js?v=20261016-v59';
-import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261016-v59';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v60';
+import { initContextPanel } from './context-panel.js?v=20261016-v60';
+import { api } from './api.js?v=20261016-v60';
+import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261016-v60';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -20,7 +20,7 @@ let responseItemsByBlock = {};
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v59';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v60';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -41,6 +41,12 @@ initContextPanel();
   });
   window.__toggleMaterialDrawer = toggle;
 })();
+
+// 评分点元信息缓存（point_id → {item, factor, points}）。
+// ⚠️ 必须在模块顶部声明：renderReqBar/renderChapterPoints 会在**模块初始化早期**
+// 就被调用（第 917 行的首屏渲染），若声明写在函数区（更靠后的行）会踩 TDZ，
+// 表现为"未处理的 Promise 失败：Cannot access 'pointMetaCache' before initialization"。
+let pointMetaCache = null;
 
 const params = new URLSearchParams(location.search);
 // projectId 只取数字部分：链接里混进说明文字（如 `?projectId=19**(Cmd+Shift+R)`）时
@@ -972,7 +978,6 @@ const ITEM_CODE = (id) => String(id || '').split('#').pop();
 // ── 本章回应：回应哪个评分点 / 多少分 / 得分口径 / 需什么举证 ──
 // 写作时最该常驻的信息。评分点的名称与分值来自评分点结论接口（按 point_id 索引，缓存一次）；
 // 得分口径与举证要求直接读块上的 criterion_text / evidence_required（拆分与提炼时已写好）。
-let pointMetaCache = null;
 async function loadPointMeta() {
   if (pointMetaCache) return pointMetaCache;
   pointMetaCache = {};
