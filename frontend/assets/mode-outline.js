@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v119';
+import { api } from './api.js?v=20261016-v121';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,11 +10,12 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v119';
+       } from './workspace.js?v=20261016-v121';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
          moveOutlineNodeTo, moveOutlineNodesTo,
+         moveOutlineNodeToLevel, moveOutlineNodesToLevel, levelRangeAt,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
          CONSTRAINT_LEVELS, constraintLevelLabel,
          isExtractDone as isDoneBlock, extractBadgeState as badgeStatusOf,
@@ -26,7 +27,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v119';
+       } from './workspace-model.mjs?v=20261016-v121';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -112,7 +113,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v119';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v121';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2746,10 +2747,15 @@ function startRowDrag(ev) {
   const line = document.createElement('div');
   line.className = 'sr-drop-line';
   list.appendChild(line);
+  const tagEl = document.createElement('span');
+  tagEl.className = 'sr-drop-tag';
+  list.appendChild(tagEl);
   rows.forEach((r) => { if (selected.has(r.dataset.struct)) r.classList.add('is-drag-src'); });
   list.classList.add('is-dragging');
 
+  const INDENT = 18;          // 每级缩进（与 .sr-erow.l2/l3 的 padding 对齐）
   let at = null;
+  let level = null;           // 当前投影层级（Notion 式：由水平位置决定）
   const computeAt = (clientY) => {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i].getBoundingClientRect();
@@ -2757,18 +2763,39 @@ function startRowDrag(ev) {
     }
     return rows.length;
   };
-  const showLine = (i) => {
+  // 水平位置 → 层级：以后一个节点的层级为基准，每右移一格深一级；
+  // 最深只能到"前一个节点的层级 + 1"（否则会跨级），插到最顶只能是 1 级。
+  const computeLevel = (clientX, idx) => {
+    const nodes = structureNodesFromModel();
+    const { max, natural } = levelRangeAt(nodes, Math.min(idx, nodes.length));
+    const baseX = list.getBoundingClientRect().left + 10;
+    const want = natural + Math.round((clientX - baseX - (natural - 1) * INDENT) / INDENT);
+    return { level: Math.max(1, Math.min(max, want)), natural };
+  };
+  const showLine = (i, lvl, natural, clientX) => {
     const r = rows[i] || rows[rows.length - 1];
     if (!r) return;
-    line.style.top = `${i < rows.length ? r.offsetTop : r.offsetTop + r.offsetHeight}px`;
+    const top = i < rows.length ? r.offsetTop : r.offsetTop + r.offsetHeight;
+    line.style.top = `${top}px`;
+    line.style.marginLeft = `${(lvl - 1) * INDENT}px`;        // 指示线按层级缩进
+    const rel = lvl - (natural || lvl);
+    tagEl.textContent = rel > 0 ? `成为子级（第 ${lvl} 级）`
+      : rel < 0 ? `上级（第 ${lvl} 级）` : `同级（第 ${lvl} 级）`;
+    // 提示跟随指针（放在指示线右侧太靠右会被容器裁掉 —— 实测看不到）
+    const listLeft = list.getBoundingClientRect().left;
+    tagEl.style.top = `${top - 22}px`;
+    tagEl.style.left = `${Math.max(4, (clientX || listLeft + 40) - listLeft + 10)}px`;
   };
   const onMove = (e) => {
     at = computeAt(e.clientY);
-    showLine(at);
+    const lv = computeLevel(e.clientX, at);
+    level = lv.level;
+    showLine(at, lv.level, lv.natural, e.clientX);
     e.preventDefault();
   };
   const cleanup = () => {
     line.remove();
+    tagEl.remove();
     rows.forEach((r) => r.classList.remove('is-drag-src'));
     list.classList.remove('is-dragging');
     window.removeEventListener('pointermove', onMove);
@@ -2781,11 +2808,14 @@ function startRowDrag(ev) {
     cleanup();
     if (target == null) return;
     const nodes = structureNodesFromModel();
+    const lvl = level == null ? null : level;
     const next = ids.length > 1
-      ? moveOutlineNodesTo(nodes, ids, target)
-      : moveOutlineNodeTo(nodes, ids[0], target);
+      ? (lvl == null ? moveOutlineNodesTo(nodes, ids, target)
+                     : moveOutlineNodesToLevel(nodes, ids, target, lvl))
+      : (lvl == null ? moveOutlineNodeTo(nodes, ids[0], target)
+                     : moveOutlineNodeToLevel(nodes, ids[0], target, lvl));
     if (!next) return;                       // 原位 / 拖进自己的子树 → 不写库
-    await saveStructureFromPanel(next, { label: `拖动 ${ids.length} 项` });
+    await saveStructureFromPanel(next, { label: `拖动 ${ids.length} 项（第 ${lvl || '?'} 级）` });
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
@@ -4132,8 +4162,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     user-select:none;touch-action:none}
   .sr-grip:active{cursor:grabbing}
   .sr-erow.is-drag-src{opacity:.45}
-  .sr-drop-line{position:absolute;left:6px;right:6px;height:2px;background:var(--accent);
+  .sr-drop-line{position:absolute;left:10px;right:6px;height:2px;background:var(--accent);
     border-radius:2px;pointer-events:none}
+  /* Notion 式：拖动时提示「会成为子级/同级/上级」，跟随指针显示 */
+  .sr-drop-tag{position:absolute;z-index:3;font-size:10.5px;line-height:16px;color:#fff;
+    background:var(--accent);padding:0 6px;border-radius:999px;white-space:nowrap;
+    pointer-events:none}
   .sr-struct-edit.is-dragging{user-select:none}
   .sr-batch{display:flex;align-items:center;gap:6px;padding:5px 8px;margin:6px 0;
     border:1px solid var(--line);border-radius:8px;background:var(--panel-soft,#f8fafc)}

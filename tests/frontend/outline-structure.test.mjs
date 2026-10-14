@@ -15,6 +15,9 @@ import {
   insertSiblingAfter,
   insertChildOf,
   moveOutlineNodeTo,
+  moveOutlineNodeToLevel,
+  moveOutlineNodesToLevel,
+  levelRangeAt,
   moveOutlineNodesTo,
   moveManyOutlineNodes,
   indentManyOutlineNodes,
@@ -294,4 +297,58 @@ test('拖动（整组）：组内含父子也不重复搬（各子树只搬一�
   ];
   const r = moveOutlineNodesTo(nodes, ['s2', 's2.1'], 0);   // 父子都选中
   assert.deepEqual(ids(r), ['s2', 's2.1', 's1', 's3']);
+});
+
+// ── Notion 式拖动：水平位置决定层级 ──
+test('落点层级范围：插到最顶只能是 1 级', () => {
+  const nodes = flat(['s1', 's2']);
+  assert.deepEqual(levelRangeAt(nodes, 0), { min: 1, max: 1, natural: 1 });
+});
+
+test('落点层级范围：最深是"前一个节点的层级 + 1"', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's2', level: 1, title: 'B' },
+  ];
+  // 插到 s2 之前：前一个是 s1.1(2 级) → 最深 3 级；后一个是 s2(1 级) → 默认 1 级
+  assert.deepEqual(levelRangeAt(nodes, 2), { min: 1, max: 3, natural: 1 });
+});
+
+test('Notion 式拖动：往右拖一格 → 成为子级', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's2', level: 1, title: 'B' },
+    { id: 's3', level: 1, title: 'C' },
+  ];
+  const r = moveOutlineNodeToLevel(nodes, 's3', 1, 2);   // 拖到 s2 之前 + 右移一格
+  assert.deepEqual(ids(r), ['s1', 's3', 's2']);
+  assert.equal(r[1].level, 2);                            // s3 成为 s1 的子级
+});
+
+test('Notion 式拖动：往左拖 → 变成上级（与目标同级）', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's1.2', level: 2, title: 'A-2' },
+  ];
+  const r = moveOutlineNodeToLevel(nodes, 's1.2', 1, 1);  // 往左拖到 1 级
+  assert.equal(r[1].level, 1);
+  assert.deepEqual(ids(r), ['s1', 's1.2', 's1.1']);
+});
+
+test('Notion 式拖动：连带子树一起改层级', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's2', level: 1, title: 'B' },
+    { id: 's2.1', level: 2, title: 'B-1' },
+  ];
+  const r = moveOutlineNodeToLevel(nodes, 's2', 0, 2);    // 拖到最顶 + 降一级
+  assert.deepEqual(ids(r), ['s2', 's2.1', 's1']);
+  assert.deepEqual(r.map(n => n.level), [2, 3, 1]);       // 子树跟着降
+});
+
+test('Notion 式拖动：原位 + 同层级 → null（不写库）', () => {
+  const nodes = flat(['s1', 's2']);
+  assert.equal(moveOutlineNodeToLevel(nodes, 's1', 0, 1), null);
 });
