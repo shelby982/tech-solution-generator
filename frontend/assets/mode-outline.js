@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v137';
+import { api } from './api.js?v=20261016-v138';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v137';
+       } from './workspace.js?v=20261016-v138';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -29,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v137';
+       } from './workspace-model.mjs?v=20261016-v138';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -115,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v137';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v138';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2918,6 +2918,68 @@ async function handleBatchStruct(action) {
   });
 }
 
+/** 归属章节选择器：点开 = **完整目录列表**（按层级缩进 + 层级徽标）+ 搜索，点一章即选中。
+ *
+ * 为什么不用 <select>：用户要求"展示所有的目录列表，然后再去选择对应的哪一级目录"。
+ * 下拉里 121 章很难看出层级；铺开的列表能一眼看出谁在哪一级。
+ * 值仍写进同行的隐藏 input[data-topic]，既有的「保存归属」逻辑不变。
+ */
+function openTopicPicker(topic, btn) {
+  // 只允许开一个
+  document.querySelectorAll('.sr-pick-pop').forEach((p) => p.remove());
+  const row = btn.closest('[data-topic-row]');
+  if (!row) return;
+  const input = row.querySelector('input[data-topic]');
+  const nodes = structureNodesFromModel();
+  const cur = input?.value || '';
+
+  const pop = document.createElement('div');
+  pop.className = 'sr-pick-pop';
+  pop.innerHTML = `
+    <input class="sr-pick-search" type="search" placeholder="搜索章节…（共 ${nodes.length} 章）" />
+    <div class="sr-pick-list"></div>`;
+  row.querySelector('.sr-mount-cell')?.appendChild(pop);
+  const list = pop.querySelector('.sr-pick-list');
+  const search = pop.querySelector('.sr-pick-search');
+
+  const render = (kw = '') => {
+    const k = kw.trim().toLowerCase();
+    const items = nodes.filter((n) => !k || String(n.title).toLowerCase().includes(k));
+    list.innerHTML = (k ? '' : `<button type="button" class="sr-pick-item${cur ? '' : ' on'}"
+        data-pick=""><span class="sr-pick-t">默认：技术规范书要求应答</span></button>`)
+      + (items.length ? items.map((n) => `
+        <button type="button" class="sr-pick-item${String(n.title) === cur ? ' on' : ''}"
+          data-pick="${escapeHtml(String(n.title))}">
+          <span class="sr-pick-lv">L${n.level}</span>
+          <span class="sr-pick-t" style="padding-left:${(n.level - 1) * 14}px">${escapeHtml(String(n.title))}</span>
+        </button>`).join('')
+        : '<div class="sr-dim" style="padding:6px 10px">没有匹配的章节</div>');
+  };
+  render();
+  pop.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+    const v = b.dataset.pick || '';
+    if (input) input.value = v;
+    if (btn) btn.textContent = v || '默认：技术规范书要求应答';
+    const pill = row.querySelector('.ui-pill');
+    if (pill) { pill.textContent = v ? '已指定' : '默认'; pill.className = `ui-pill ${v ? 'is-ok' : 'is-none'}`; }
+    pop.remove();
+    splitPanelFlash = v ? `「${topic}」→ ${v}（记得点「保存归属」）` : `「${topic}」保持默认（记得点「保存归属」）`;
+    inlineFlash(row.querySelector('.sr-mount-cell') || row, splitPanelFlash, 'ok');
+  }));
+  search?.addEventListener('input', () => render(search.value));
+  search?.focus();
+  // 点别处关闭
+  window.setTimeout(() => {
+    const off = (e) => {
+      if (!pop.contains(e.target) && e.target !== btn) {
+        pop.remove();
+        document.removeEventListener('click', off, true);
+      }
+    };
+    document.addEventListener('click', off, true);
+  }, 0);
+}
+
 /** 撤销上一步目录操作：把"操作之前的完整结构"再存一次。
  *
  * 只保留"操作前快照"，不自己维护重做栈 —— 用户要的是"能退回去"，
@@ -3859,12 +3921,17 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         // 这里把当前值补成一个选项，界面与实际保存值始终一致。
         const extra = cur && !chapters.some((ch) => ch.title === cur)
           ? [{ title: cur, level: 99 }] : [];
-        const opts = [...extra, ...chapters].map((ch) => `<option value="${escapeHtml(ch.title)}"${
-          cur === ch.title ? ' selected' : ''}>${escapeHtml(ch.title)}${
-          ch.level === 99 ? '（已不在当前目录）' : ''}</option>`).join('');
-        return `<tr><td>${escapeHtml(t.topic)}</td><td class="sr-num">${t.count}</td>
-          <td><select data-topic="${escapeHtml(t.topic)}">
-            <option value=""${cur ? '' : ' selected'}>默认：技术规范书要求应答</option>${opts}</select></td>
+        // 归属章节：**不用下拉**（用户要求"展示所有目录列表再选哪一级"）。
+        // 按钮点开 = 完整目录（按层级缩进 + 层级徽标）+ 搜索；值放在隐藏 input 里，
+        // 这样既有的「保存归属」逻辑（读 [data-topic].value）不用改。
+        const label = cur ? `${cur}${extra.length ? '（已不在当前目录）' : ''}` : '默认：技术规范书要求应答';
+        return `<tr data-topic-row="${escapeHtml(t.topic)}">
+          <td>${escapeHtml(t.topic)}</td><td class="sr-num">${t.count}</td>
+          <td class="sr-mount-cell">
+            <button type="button" class="sr-mount" data-topic-open="${escapeHtml(t.topic)}"
+              title="点开完整目录，选择挂到哪一章">${escapeHtml(label)}</button>
+            <input type="hidden" data-topic="${escapeHtml(t.topic)}" value="${escapeHtml(cur)}" />
+          </td>
           <td><span class="ui-pill ${cur ? 'is-ok' : 'is-none'}">${
             cur ? (extra.length ? '已指定（不在目录）' : '已指定') : '默认'}</span></td></tr>`;
       }).join('')}</tbody></table>
@@ -4225,6 +4292,24 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
   /* ② 两步：左两步 + 右内容 */
+  /* 归属章节：点开的完整目录选择器（带层级徽标 + 搜索） */
+  .sr-mount-cell{position:relative}
+  .sr-mount{font:inherit;font-size:12.5px;text-align:left;padding:4px 9px;border:1px solid var(--line);
+    border-radius:7px;background:#fff;color:var(--text);cursor:pointer;max-width:280px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-mount:hover{border-color:var(--accent);color:var(--accent)}
+  .sr-pick-pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:340px;background:#fff;
+    border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:6px}
+  .sr-pick-search{width:100%;font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+    border-radius:6px;margin-bottom:6px}
+  .sr-pick-list{max-height:240px;overflow:auto}
+  .sr-pick-item{display:flex;align-items:center;gap:6px;width:100%;font:inherit;font-size:12.5px;
+    padding:3px 8px;border:0;background:none;color:var(--text);cursor:pointer;border-radius:6px;text-align:left}
+  .sr-pick-item:hover{background:var(--panel-soft,#f8fafc)}
+  .sr-pick-item.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .sr-pick-lv{flex:none;font-size:10.5px;color:var(--muted);border:1px solid var(--line);
+    border-radius:4px;padding:0 4px}
+  .sr-pick-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sr-two{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;
     overflow:hidden;background:#fff;margin-top:8px}
   .sr-sub2{flex:0 0 168px;border-right:1px solid var(--line);background:#fafbfc;padding:6px 0}
@@ -4552,6 +4637,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     handleBatchStruct(btn.dataset.batch);
   }));
   el.querySelectorAll('.sr-grip').forEach((g) => g.addEventListener('pointerdown', startRowDrag));
+  el.querySelectorAll('[data-topic-open]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openTopicPicker(b.dataset.topicOpen, b);
+  }));
   el.querySelector('[data-act="undo-structure"]')?.addEventListener('click', () => {
     handleUndoStructure();
   });
