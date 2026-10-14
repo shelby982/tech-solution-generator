@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v126';
+} from './material-roles.mjs?v=20261016-v127';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -240,6 +240,27 @@ export function moveManyOutlineNodes(nodes, ids, dir) {
     if (next) { list = next; moved++; } else skipped++;
   }
   return { nodes: list, moved, skipped };
+}
+
+/** 批量删除：把一组选中节点（各自**连带子树**）一起删掉。
+ *
+ * 返回 {nodes, removed}：removed = 实际删掉的**节数**（含子树），界面要如实报出来。
+ * 选中项互为父子时只算一次（取并集，不重复删）。
+ */
+export function removeManyOutlineSubtrees(nodes, ids) {
+  const sel = new Set((ids || []).map(String));
+  const ranges = [];
+  for (const n of nodes) {
+    if (!sel.has(String(n.id))) continue;
+    const r = outlineSubtreeRange(nodes, n.id);
+    if (r[0] < 0) continue;
+    if (ranges.some(([rs, re]) => r[0] >= rs && r[1] <= re)) continue;   // 已被包含
+    ranges.push(r);
+  }
+  if (!ranges.length) return { nodes, removed: 0 };
+  const drop = new Set();
+  for (const [rs, re] of ranges) for (let i = rs; i < re; i++) drop.add(i);
+  return { nodes: nodes.filter((_, i) => !drop.has(i)), removed: drop.size };
 }
 
 /** 拖动排序：把 id（**连带整棵子树**）移动到「第 targetIndex 个节点之前」。

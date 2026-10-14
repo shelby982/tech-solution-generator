@@ -22,6 +22,7 @@ import {
   moveManyOutlineNodes,
   indentManyOutlineNodes,
   outdentManyOutlineNodes,
+  removeManyOutlineSubtrees,
 } from '../../frontend/assets/workspace-model.mjs';
 
 const N = (id, level, title = id) => ({id, level, title});
@@ -370,4 +371,35 @@ test('返回 {nodes, …} 的函数：形状固定（调用方必须解构 .node
   assert.ok(Array.isArray(ind.nodes));
   const out = outdentManyOutlineNodes(flat(['s1', 's2']), ['s1']);
   assert.ok(Array.isArray(out.nodes));
+});
+
+// ── 批量删除 ──
+test('批量删除：多选一次删掉（各自连带子树）', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's2', level: 1, title: 'B' },
+    { id: 's3', level: 1, title: 'C' },
+  ];
+  const r = removeManyOutlineSubtrees(nodes, ['s1', 's3']);
+  assert.deepEqual(ids(r.nodes), ['s2']);
+  assert.equal(r.removed, 3);      // s1 + s1.1 + s3
+});
+
+test('批量删除：父子都选中不重复删', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's2', level: 1, title: 'B' },
+  ];
+  const r = removeManyOutlineSubtrees(nodes, ['s1', 's1.1']);
+  assert.deepEqual(ids(r.nodes), ['s2']);
+  assert.equal(r.removed, 2);
+});
+
+test('批量删除：空选择什么都不删', () => {
+  const nodes = flat(['s1', 's2']);
+  const r = removeManyOutlineSubtrees(nodes, []);
+  assert.deepEqual(ids(r.nodes), ['s1', 's2']);
+  assert.equal(r.removed, 0);
 });
