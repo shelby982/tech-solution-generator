@@ -14,12 +14,17 @@ import {
   removeOutlineSubtree,
   insertSiblingAfter,
   insertChildOf,
+  moveManyOutlineNodes,
+  indentManyOutlineNodes,
+  outdentManyOutlineNodes,
 } from '../../frontend/assets/workspace-model.mjs';
 
 const N = (id, level, title = id) => ({id, level, title});
 // a / a1 / a1x / b / b1  —— a 有两层子级，b 有一个子级
 const tree = () => [N('a', 1), N('a1', 2), N('a1x', 3), N('b', 1), N('b1', 2)];
 const ids = (nodes) => nodes.map(n => n.id);
+// 同级平铺的小树（批量用例用）：flat(['s1','s2']) → 三个 1 级节点
+const flat = (list) => list.map((id) => ({ id, level: 1, title: id }));
 const levels = (nodes) => nodes.map(n => n.level);
 
 // ── id 生成 ──
@@ -154,4 +159,76 @@ test('新增子级到已有子级之后（不会插到别的章节里）', () =>
   const out = insertChildOf(nodes, 'a1', N('new', 1));
   assert.deepEqual(ids(out), ['a', 'a1', 'a1x', 'new', 'a2', 'b']);
   assert.equal(out.find(n => n.id === 'new').level, 3);
+});
+
+// ── 批量操作（目录调整：批量上移/下移/批量缩进/减少缩进）──
+// 语义与单节点一致（逐个复用单节点函数），这里守三件事：
+//   ① 一批同级节点整体挪一格（不互相插队）；② 子树跟着走；③ 动不了的项如实计入 skipped。
+test('批量上移：一批同级节点整体上移一格', () => {
+  const nodes = flat(['s1', 's2', 's3', 's4']);
+  const r = moveManyOutlineNodes(nodes, ['s2', 's3'], -1);
+  // s2/s3 整体挪到 s1 前面
+  assert.deepEqual(ids(r.nodes), ['s2', 's3', 's1', 's4']);
+  assert.equal(r.moved, 2);
+  assert.equal(r.skipped, 0);
+});
+
+test('批量下移：一批同级节点整体下移一格', () => {
+  const nodes = flat(['s1', 's2', 's3', 's4']);
+  const r = moveManyOutlineNodes(nodes, ['s2', 's3'], +1);
+  assert.deepEqual(ids(r.nodes), ['s1', 's4', 's2', 's3']);
+  assert.equal(r.moved, 2);
+});
+
+test('批量上移：已是第一个同级的项计入 skipped（如实说明，不假装成功）', () => {
+  const nodes = flat(['s1', 's2', 's3']);
+  const r = moveManyOutlineNodes(nodes, ['s1', 's3'], -1);
+  assert.equal(r.moved, 1);      // 只有 s3 能动
+  assert.equal(r.skipped, 1);    // s1 已是第一个同级
+  assert.deepEqual(ids(r.nodes), ['s1', 's3', 's2']);
+});
+
+test('批量移动：子树跟着父节点一起走', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's2', level: 1, title: 'B' },
+    { id: 's2.1', level: 2, title: 'B-1' },
+    { id: 's3', level: 1, title: 'C' },
+  ];
+  const r = moveManyOutlineNodes(nodes, ['s2'], -1);
+  assert.deepEqual(ids(r.nodes), ['s2', 's2.1', 's1', 's3']);
+});
+
+test('批量缩进：一批同级节点**整批**降一级（关键：不能只降第一个）', () => {
+  const nodes = flat(['s1', 's2', 's3', 's4']);
+  const r = indentManyOutlineNodes(nodes, ['s2', 's3', 's4']);
+  assert.deepEqual(levels(r.nodes), [1, 2, 2, 2]);   // 三个都成 s1 的子级
+  assert.equal(r.moved, 3);
+  assert.equal(r.skipped, 0);
+});
+
+test('批量缩进：这批的头没有同级前驱 → 整批都降不了（如实计 skipped）', () => {
+  const nodes = flat(['s1', 's2', 's3']);
+  const r = indentManyOutlineNodes(nodes, ['s1', 's2', 's3']);
+  assert.equal(r.moved, 0);
+  assert.equal(r.skipped, 3);
+  assert.deepEqual(levels(r.nodes), [1, 1, 1]);
+});
+
+test('批量减少缩进：一起升一级', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's2', level: 2, title: 'B' },
+    { id: 's3', level: 2, title: 'C' },
+  ];
+  const r = outdentManyOutlineNodes(nodes, ['s2', 's3']);
+  assert.deepEqual(levels(r.nodes), [1, 1, 1]);
+  assert.equal(r.moved, 2);
+});
+
+test('批量操作：空选择不改变任何东西', () => {
+  const nodes = flat(['s1', 's2']);
+  const r = moveManyOutlineNodes(nodes, [], -1);
+  assert.deepEqual(ids(r.nodes), ['s1', 's2']);
+  assert.equal(r.moved, 0);
 });

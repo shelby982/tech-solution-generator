@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v116';
+} from './material-roles.mjs?v=20261016-v118';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -211,6 +211,84 @@ export function moveOutlineNode(nodes, id, dir) {
   if (k >= nodes.length || (Number(nodes[k].level) || 1) !== level) return null;  // 已是最后一个同级
   const [ns, ne] = outlineSubtreeRange(nodes, nodes[k].id);
   return [...nodes.slice(0, start), ...nodes.slice(ns, ne), ...subtree, ...nodes.slice(ne)];
+}
+
+/** 批量操作（目录调整）：把一组选中节点当作一批处理。
+ *
+ * 实现上是**逐个复用单节点函数**，而不是另写一套批量算法 —— 单节点那套已经有
+ * node --test 覆盖（含子树连带、层级约束），批量再写一遍必然分叉出不一致的语义。
+ *
+ * 顺序很关键（否则同批节点互相插队）：
+ *   · 上移：从**最上面**的开始（每个与同级前驱交换）
+ *   · 下移：从**最下面**的开始
+ *   · 缩进/减少缩进：从上到下
+ * 返回 {nodes, moved, skipped}：skipped 是"这一项动不了"（已是第一个同级 / 无前驱同级 /
+ * 已在 4 级），界面要如实说出跳过了几项，不能假装都成功了。
+ */
+function _pickedInOrder(nodes, sel, dir = 1) {
+  const picked = nodes.filter((n) => sel.has(String(n.id)));
+  return dir < 0 ? picked : picked.slice().reverse();
+}
+
+export function moveManyOutlineNodes(nodes, ids, dir) {
+  const sel = new Set((ids || []).map(String));
+  let list = nodes;
+  let moved = 0;
+  let skipped = 0;
+  for (const n of _pickedInOrder(nodes, sel, dir)) {
+    const next = moveOutlineNode(list, n.id, dir);
+    if (next) { list = next; moved++; } else skipped++;
+  }
+  return { nodes: list, moved, skipped };
+}
+
+/** 批量缩进 / 减少缩进：**以这一批的"头"决定，整批一起升降**。
+ *
+ * 为什么不能"逐个调用单节点函数"（我第一版就是这样，语义是错的）：
+ *   [s1,s2,s3] 全选缩进 → s2 降成 s1 的子级后，s3 的同级前驱变成 level 2，
+ *   单节点函数要求"前一个节点是同级"→ s3 就跳不过去了，用户看到只降了一个。
+ * 正确语义：这一批是**一组**，整组相对"头"的前驱同级降一级。
+ * 头没有前驱同级（或已到 4 级）→ 整批都降不了，skipped = 选中数（如实说明）。
+ */
+function _batchShiftLevel(nodes, ids, delta) {
+  const sel = new Set((ids || []).map(String));
+  const picked = nodes.filter((n) => sel.has(String(n.id)));
+  if (!picked.length) return { nodes, moved: 0, skipped: 0 };
+
+  const head = picked[0];
+  const [start, end] = outlineSubtreeRange(nodes, head.id);
+  if (start < 0) return { nodes, moved: 0, skipped: picked.length };
+  const level = Number(nodes[start].level) || 1;
+  const prev = start - 1 >= 0 ? nodes[start - 1] : null;
+  const canShift = delta > 0
+    ? (level < 4 && prev && (Number(prev.level) || 1) === level)   // 降级：要有同级前驱
+    : (level > 1);                                                // 升级：不能到顶层之外
+  if (!canShift) return { nodes, moved: 0, skipped: picked.length };
+
+  // 从下往上改（保证前面的下标不失效）；已被包含的选中项不重复位移（父子都选时只加一次）
+  let list = nodes;
+  let moved = 0;
+  const ranges = [];
+  for (const n of picked) {
+    const r = outlineSubtreeRange(list, n.id);
+    if (r[0] < 0) continue;
+    if (ranges.some(([rs, re]) => r[0] >= rs && r[1] <= re)) continue;   // 落在已处理范围内
+    ranges.push(r);
+  }
+  ranges.sort((a, b) => b[0] - a[0]);
+  for (const [rs, re] of ranges) {
+    list = _shiftLevels(list, rs, re, delta);
+    moved++;
+  }
+  return { nodes: list, moved, skipped: picked.length - moved };
+}
+
+export function indentManyOutlineNodes(nodes, ids) {
+  return _batchShiftLevel(nodes, ids, +1);
+}
+
+export function outdentManyOutlineNodes(nodes, ids) {
+  return _batchShiftLevel(nodes, ids, -1);
 }
 
 /** 降一级：成为「上一个同级章节」的子级（连带整棵子树一起降）。无前驱同级或已到 4 级 → null。 */

@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v116';
+import { api } from './api.js?v=20261016-v118';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,9 +10,10 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v116';
+       } from './workspace.js?v=20261016-v118';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
+         moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
          CONSTRAINT_LEVELS, constraintLevelLabel,
          isExtractDone as isDoneBlock, extractBadgeState as badgeStatusOf,
@@ -24,7 +25,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v116';
+       } from './workspace-model.mjs?v=20261016-v118';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +111,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v116';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v118';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2522,6 +2523,7 @@ let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当�
 let selectedStructId = null;
 let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
+const batchIds = new Set();   // 批量操作选中的章节（跨渲染保留，方便连着挪几格）
 // 「已确认」的确认项默认展示**结果**；点「修改」才展开控件（否则确认完信息就消失了 ——
 // 用户反馈："确认进入对应目录后需要能够查到确认的结果情况"）
 let confirmEditOpen = {};
@@ -2661,7 +2663,7 @@ function applyStructureToModel(nodes) {
 }
 
 /** 面板内的结构保存：乐观更新模型 → 串行保存（与目录树同一条队列）→ 采纳服务端归一化 → 重绘面板 */
-async function saveStructureFromPanel(next, { afterSave = null } = {}) {
+async function saveStructureFromPanel(next, { afterSave = null, label = '' } = {}) {
   if (!Array.isArray(next) || !next.length) return;
   applyStructureToModel(next);
   let res = null;
@@ -2680,7 +2682,8 @@ async function saveStructureFromPanel(next, { afterSave = null } = {}) {
     if (res.updated) bits.push(`改名/调整 ${res.updated}`);
     if (res.created) bits.push(`新增 ${res.created}`);
     if (res.removed) bits.push(`删除 ${res.removed}`);
-    structSaveNote = bits.length ? `已保存：${bits.join(' · ')}` : '已保存';
+    structSaveNote = (label ? `${label} · ` : '')
+      + (bits.length ? `已保存：${bits.join(' · ')}` : '已保存');
   }
   if (Array.isArray(res?.nodes) && res.nodes.length) {
     applyStructureToModel(res.nodes.map((n, i) => ({
@@ -2722,6 +2725,41 @@ function renameStructInPanel(blockId) {
   input.addEventListener('blur', () => finish(true));
 }
 
+/** 批量操作（目录调整）：整批上移/下移/缩进/减少缩进。
+ *
+ * 语义在模型层（workspace-model.mjs，有 node --test）：整批按"头"决定一起升降，
+ * 动不了的项计入 skipped —— 界面必须如实说出跳过了几项。
+ */
+async function handleBatchStruct(action) {
+  if (action === 'clear') {
+    batchIds.clear();
+    await openSplitReport({ stage: '2' });
+    return;
+  }
+  if (!batchIds.size) return;
+  const nodes = structureNodesFromModel();
+  const ids = [...batchIds].filter((id) => nodes.some((n) => n.id === id));   // 去掉已不存在的
+  if (!ids.length) { batchIds.clear(); await openSplitReport({ stage: '2' }); return; }
+
+  let r = null;
+  let label = '';
+  if (action === 'up') { r = moveManyOutlineNodes(nodes, ids, -1); label = `批量上移 ${ids.length} 项`; }
+  else if (action === 'down') { r = moveManyOutlineNodes(nodes, ids, +1); label = `批量下移 ${ids.length} 项`; }
+  else if (action === 'indent') { r = indentManyOutlineNodes(nodes, ids); label = `批量缩进 ${ids.length} 项`; }
+  else if (action === 'outdent') { r = outdentManyOutlineNodes(nodes, ids); label = `减少缩进 ${ids.length} 项`; }
+  if (!r) return;
+
+  if (!r.moved) {
+    // 一项都没动：如实说原因，别让用户以为"点了没反应"
+    structSaveNote = `${label}：都动不了（已在边界 / 这批的头没有同级前驱）`;
+    await openSplitReport({ stage: '2' });
+    return;
+  }
+  await saveStructureFromPanel(r.nodes, {
+    label: r.skipped ? `${label}（${r.skipped} 项动不了）` : label,
+  });
+}
+
 /** 面板内的结构操作（改名 / 上下移 / 缩进 / 删除 / 新增） */
 async function handleStructAct(blockId, op) {
   const nodes = structureNodesFromModel();
@@ -2743,7 +2781,8 @@ async function handleStructAct(blockId, op) {
   else if (op === 'indent') next = indentOutlineNode(nodes, blockId);
   else if (op === 'outdent') next = outdentOutlineNode(nodes, blockId);
   if (!next) return;
-  await saveStructureFromPanel(next);
+  const NAME = { up: '上移', down: '下移', indent: '缩进', outdent: '减少缩进' };
+  await saveStructureFromPanel(next, { label: NAME[op] || '' });
 }
 
 /** 新增章节（同级 / 子级）：保存后直接进入改名，接着就能写标题 */
@@ -3593,6 +3632,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     const reqs = parseIds(b.spec_requirement_ids).length;
     return `<div class="sr-erow l${Math.min(Number(b.level) || 1, 3)}${
         selectedStructId === String(b.block_id || b.id) ? ' on' : ''}" data-struct="${escapeHtml(String(b.block_id || b.id))}" data-i="${i}">
+      <input type="checkbox" class="sr-pick" data-pick="${escapeHtml(String(b.block_id || b.id))}"
+        ${batchIds.has(String(b.block_id || b.id)) ? 'checked' : ''}
+        title="选中后可批量操作" />
       <span class="sr-erow-title">${escapeHtml(b.title || '')}</span>
       ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 20))}</span>` : ''}
       ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
@@ -3618,12 +3660,19 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <th class="sr-num">条数</th><th>归属章节</th><th>状态</th></tr></thead><tbody>${
       topics.map((t) => {
         const cur = picked[t.topic] || '';
-        const opts = chapters.map((ch) => `<option value="${escapeHtml(ch.title)}"${
-          cur === ch.title ? ' selected' : ''}>${escapeHtml(ch.title)}</option>`).join('');
+        // 保存的章节可能**不在当前候选列表**里（章节被改名/删除/换了一版目录）——
+        // 那样 <select> 会回落到第一项，于是"状态列写已指定、下拉却是默认"自相矛盾（实测）。
+        // 这里把当前值补成一个选项，界面与实际保存值始终一致。
+        const extra = cur && !chapters.some((ch) => ch.title === cur)
+          ? [{ title: cur, level: 99 }] : [];
+        const opts = [...extra, ...chapters].map((ch) => `<option value="${escapeHtml(ch.title)}"${
+          cur === ch.title ? ' selected' : ''}>${escapeHtml(ch.title)}${
+          ch.level === 99 ? '（已不在当前目录）' : ''}</option>`).join('');
         return `<tr><td>${escapeHtml(t.topic)}</td><td class="sr-num">${t.count}</td>
           <td><select data-topic="${escapeHtml(t.topic)}">
-            <option value="">默认：技术规范书要求应答</option>${opts}</select></td>
-          <td><span class="ui-pill ${cur ? 'is-ok' : 'is-none'}">${cur ? '已指定' : '默认'}</span></td></tr>`;
+            <option value=""${cur ? '' : ' selected'}>默认：技术规范书要求应答</option>${opts}</select></td>
+          <td><span class="ui-pill ${cur ? 'is-ok' : 'is-none'}">${
+            cur ? (extra.length ? '已指定（不在目录）' : '已指定') : '默认'}</span></td></tr>`;
       }).join('')}</tbody></table>
       <div class="sr-answer">
         <button class="mw-btn primary" data-save="topic_placement">保存归属</button>
@@ -3636,6 +3685,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       ${checkLine}
       ${echoLine}
       <h5 class="sr-sec">目录结构（${structBlocks.length} 章）· 点一行即可改</h5>
+      <div class="sr-batch${batchIds.size ? '' : ' is-empty'}" id="sr-batch">
+        <span class="sr-dim">已选 <b id="sr-batch-n">${batchIds.size}</b> 项</span>
+        <button class="sr-mini" data-batch="up">批量上移</button>
+        <button class="sr-mini" data-batch="down">批量下移</button>
+        <button class="sr-mini" data-batch="indent">批量缩进</button>
+        <button class="sr-mini" data-batch="outdent">减少缩进</button>
+        <button class="sr-mini" data-batch="clear">清空选择</button>
+      </div>
       <div class="sr-struct sr-struct-edit">${structRows
         || '<div class="sr-dim">还没有派生目录 —— 确认后会按评分点结构生成。</div>'}</div>
       <div class="sr-answer">
@@ -4000,6 +4057,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-erow.l2{padding-left:26px}
   .sr-erow.l3{padding-left:42px;color:var(--muted)}
   .sr-erow-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-batch{display:flex;align-items:center;gap:6px;padding:5px 8px;margin:6px 0;
+    border:1px solid var(--line);border-radius:8px;background:var(--panel-soft,#f8fafc)}
+  .sr-batch.is-empty{display:none}
+  .sr-pick{flex:none;margin:0 2px 0 0;cursor:pointer}
   .sr-erow-input{flex:1;min-width:0;font:inherit;font-size:12.5px;padding:1px 6px;
     border:1px solid var(--accent);border-radius:5px}
   .sr-erow-acts{display:none;gap:4px;flex:none}
@@ -4267,6 +4328,20 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   }));
   el.querySelectorAll('[data-act="struct-new"]').forEach((b) => b.addEventListener('click', () => {
     handleStructNew(b.dataset.op);
+  }));
+  // 批量操作：复选框多选 → 整批上移/下移/缩进/减少缩进（模型层是纯函数，有 node --test）
+  el.querySelectorAll('.sr-pick').forEach((cb) => {
+    cb.addEventListener('click', (ev) => ev.stopPropagation());   // 勾选不算"选行"
+    cb.addEventListener('change', () => {
+      if (cb.checked) batchIds.add(cb.dataset.pick); else batchIds.delete(cb.dataset.pick);
+      const bar = document.getElementById('sr-batch');
+      const n = document.getElementById('sr-batch-n');
+      if (n) n.textContent = String(batchIds.size);
+      bar?.classList.toggle('is-empty', batchIds.size === 0);
+    });
+  });
+  el.querySelectorAll('[data-batch]').forEach((btn) => btn.addEventListener('click', () => {
+    handleBatchStruct(btn.dataset.batch);
   }));
   applyStage(); applySub();
   refreshPanelRunState();
