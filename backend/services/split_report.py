@@ -93,6 +93,90 @@ def _build_units(chapters: list[dict]) -> list[dict]:
     return units
 
 
+def collect_all_parsed_points(spec: dict, answers: dict | None = None) -> list:
+    """收集**所有**评分表里的评分点（解析事实），并给缺标包编号的点补上所属表的标包。
+
+    与 :func:`collect_parsed_points` 的区别：那个只返回"被选中的那一张表"，
+    用于"本次按哪张表拆"；这里返回**全部**，用于"对齐/核对"——
+    因为用户要在报告里看到"解析到了哪些、落库了哪些"，只看一张表会漏。
+
+    补标包编号是**补事实的归属**，不是编造：点本身没编号时，它属于哪张表是原文给出的。
+    """
+    _sel, smap = collect_parsed_points(spec, answers)
+    out: list = []
+    for e in (smap or {}).get("entries", []):
+        pkg = str(e.get("package_no") or "")
+        for p in (e.get("points") or []):
+            if pkg and not str(getattr(p, "package_no", "") or ""):
+                try:
+                    setattr(p, "package_no", pkg)
+                except Exception:
+                    continue
+            out.append(p)
+    return out
+
+
+def _alignment_block(persisted_rows: list, parsed_points: list, answers: dict, spec: dict) -> dict:
+    """算出对齐状态。标包取 state 里的 scope（没有就按空 = 不过滤）。"""
+    try:
+        from services.point_sync import plan_point_sync
+        scope = (answers or {}).get("scope") or {}
+        package_no = ""
+        if isinstance(scope, dict):
+            package_no = str(scope.get("package_no") or "")
+        if not package_no:
+            cfg = (spec or {}).get("config") or {}
+            package_no = str((cfg or {}).get("package_no") or "")
+        cats = ((answers or {}).get("categories") or {}).get("categories") or []
+        plan = plan_point_sync(parsed_points, persisted_rows,
+                               package_no=package_no, categories=cats)
+        plan["package_no"] = package_no
+        plan["categories"] = list(cats)
+        return plan
+    except Exception as e:      # 对齐是增强信息，失败不影响报告
+        logger.warning(f"split_report：对齐计算失败（{e}）")
+        return {}
+
+
+def collect_parsed_points(spec: dict, answers: dict | None = None) -> tuple[list, dict]:
+    """从 state 重建**解析出来的评分点**（事实），并给出评分地图。
+
+    为什么要有这个函数：报告与"一键对齐"必须用**同一套口径**重建解析事实，
+    否则两边算出来的"应有评分点"又会分叉（本项目已经吃过一次"两处真相"的亏）。
+
+    返回 ``(selected_points, scoring_map)``：
+      · ``selected_points`` = 选中那张评分表里的评分点（解析事实，未做类别/标包过滤）
+      · ``scoring_map`` = 评分地图（含各标的/标包、未选中的表及原因），失败时为空 dict
+    """
+    from services.scoring_map import build_scoring_map
+
+    spec = spec or {}
+    answers = answers or {}
+    source_toc = spec.get("source_toc") or []
+    if not source_toc:
+        return [], {}
+    instruction = ""
+    cfg = spec.get("config") or {}
+    if isinstance(cfg, dict):
+        instruction = str(cfg.get("outline_instruction") or "")
+    instruction = instruction or str(spec.get("outline_instruction") or "")
+    # 与派生时同一套范围推断：要求里没写范围词就从材料文件名推（文件名常写着「标的1」）
+    from infra.parser.scope_index import parse_target_tokens
+    if not parse_target_tokens(instruction):
+        inferred: list[str] = []
+        for sec in source_toc:
+            fname = (sec.get("source_file") if isinstance(sec, dict)
+                     else getattr(sec, "source_file", "")) or ""
+            inferred += parse_target_tokens(str(fname))
+        if inferred:
+            instruction = (instruction + " " + " ".join(inferred)).strip()
+    full = build_scoring_map(source_toc, instruction, keep_points=True,
+                             forced_scope=answers.get("scope") or None)
+    scoring_map = {k: v for k, v in full.items() if k != "_selected_points"}
+    scoring_map["_issues"] = full.get("issues") or []
+    return list(full.get("_selected_points") or []), scoring_map
+
+
 async def build_split_report(db, project_id: int, thread_id: str | None,
                              spec: dict | None = None) -> dict:
     from services.block_store import list_blocks
@@ -234,33 +318,12 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
     # ── ⑤ 评分地图：全文有几张评分表、选中了哪张、其余为什么没选中 ──
     # 用户提出的困难：多个标的/标包 + 商务/技术混排。地图把"干扰"变成"有归属但未选中"。
     scoring_map = None
-    source_toc = (spec or {}).get("source_toc") or []
-    if source_toc:
-        try:
-            from services.scoring_map import build_scoring_map
-            instruction = ""
-            cfg = (spec or {}).get("config") or {}
-            if isinstance(cfg, dict):
-                instruction = str(cfg.get("outline_instruction") or "")
-            instruction = instruction or str((spec or {}).get("outline_instruction") or "")
-            # 与派生时**同一套**范围推断：要求里没写范围词就从材料文件名推
-            # （文件名常写着「标的1」）。否则报告会显示"未选中"、而目录其实已按
-            # 标的1 选中 —— 两处口径不一致，用户看到的就是自相矛盾的页面。
-            from infra.parser.scope_index import parse_target_tokens
-            if not parse_target_tokens(instruction):
-                inferred: list[str] = []
-                for sec in source_toc:
-                    fname = (sec.get("source_file") if isinstance(sec, dict)
-                             else getattr(sec, "source_file", "")) or ""
-                    inferred += parse_target_tokens(str(fname))
-                if inferred:
-                    instruction = (instruction + " " + " ".join(inferred)).strip()
-            full = build_scoring_map(source_toc, instruction, keep_points=True,
-                                     forced_scope=answers.get("scope") or None)
-            scoring_map = {k: v for k, v in full.items() if k != "_selected_points"}
-            scoring_map["_issues"] = full.get("issues") or []
-        except Exception as e:      # 地图是增强信息，失败不影响其余四张清单
-            logger.warning(f"split_report：评分地图构建失败（{e}）")
+    parsed_selected: list = []
+    try:
+        parsed_selected, _smap = collect_parsed_points(spec, answers)
+        scoring_map = _smap or None
+    except Exception as e:      # 地图是增强信息，失败不影响其余四张清单
+        logger.warning(f"split_report：评分地图构建失败（{e}）")
 
     # ── 拆解结果矩阵：**标包 × 类别**（商务/技术/报价）──
     # 用户要的结构：进来先看清"每个标包各自的商务/技术/报价评分点各是什么"，
@@ -359,6 +422,11 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "requirements_without_point": [r["requirement_id"] for r in req_rows if not r["point_ids"]],
         },
         "package_matrix": matrix,
+        # ── 评分点对齐状态：**解析事实 vs 落库结果** ──
+        # 事故背景：界面显示解析事实（商务8+技术8），库里只有 24 条 tech →
+        # "拆分完对不上"。这里把差异显式报出来，界面才能提示"重新拆分/一键对齐"。
+        "points_alignment": _alignment_block(points, collect_all_parsed_points(spec, answers),
+                                             answers, spec),
         "package_points": package_points,
         # 评分地图的 entries 里带着完整评分点对象（keep_points=True 取来的），
         # 响应体不需要它们 —— package_points 已经按标包/类别整理好了。

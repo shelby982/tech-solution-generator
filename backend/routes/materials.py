@@ -625,3 +625,59 @@ async def get_package_analysis(project_id: int, refresh: int = 0):
         "chunks": chunk_n,
         "note": note,
     })
+
+
+@router.post("/projects/{project_id}/sync-points")
+async def sync_points(project_id: int, payload: dict | None = None):
+    """**一键对齐**：把"解析出来的评分点"按已确认的范围/类别落库（**不调用模型**）。
+
+    用途：界面第①步显示的是解析事实，管线用的是 `review_points`。两者不一致时
+    （例如当次运行的类别选择与现在不同），用户在这里一次对齐，不必重跑拆分。
+    """
+    from routes.workflow import get_runner
+    from services.point_sync import sync_points_from_parse
+    from services.split_report import collect_parsed_points
+
+    body = payload or {}
+    thread_id = str(body.get("threadId") or body.get("thread_id") or "")
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="缺少 threadId")
+
+    runner = get_runner()
+    state = await runner.state(thread_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    spec = state.get("spec") or {}
+    # 用**全部**评分表的评分点（不是"选中的那一张"）——对齐要覆盖解析到的全部事实
+    from services.split_report import collect_all_parsed_points
+    parsed = collect_all_parsed_points(spec, body or {})
+    if not parsed:
+        return JSONResponse({"synced": 0, "note": "解析事实里没有评分点，无从对齐。"})
+
+    async with get_db() as db:
+        # 范围与类别：优先用请求里给的，其次用 state 里的 answers
+        answers = await (await db.execute(
+            """SELECT key, value FROM split_answers WHERE project_id = ? AND thread_id = ?""",
+            (project_id, thread_id))).fetchall()
+        ans = {}
+        for k, v in answers:
+            try:
+                ans[k] = _json.loads(v) if v else {}
+            except Exception:
+                ans[k] = {"raw": v}
+        scope = (body.get("scope") or ans.get("scope") or {}) or {}
+        cats = (body.get("categories") or (ans.get("categories") or {}).get("categories") or [])
+        package_no = str((scope or {}).get("package_no") or (body.get("packageNo") or ""))
+        if not package_no:
+            # 兜底：**运行的归属**才是权威（本会话新加的 workflow_runs.target/package_no）。
+            # 老运行没保存过 scope 答案，若只读 answers 会退化成"不过滤"→ 把别的标包的
+            # 评分点也写进这条运行（实测发生过：一次写了 37 条，含标包 1/3）。
+            row = await (await db.execute(
+                "SELECT package_no FROM workflow_runs WHERE thread_id = ?", (thread_id,))).fetchone()
+            if row and row[0]:
+                package_no = str(row[0])
+        result = await sync_points_from_parse(
+            db, project_id, thread_id, parsed,
+            package_no=package_no, categories=cats,
+        )
+    return JSONResponse(result)
