@@ -77,6 +77,12 @@ const srcCount   = document.getElementById('src-count');
 const btnAddReq  = document.getElementById('btn-add-req');
 const btnAddSrc  = document.getElementById('btn-add-src');
 const btnExtract = document.getElementById('btn-extract');
+const btnParsePkg = document.getElementById('btn-parse-pkg');
+const matHintEl = document.getElementById('mat-hint');
+/** 材料条右侧提示：上传/解析/标包结果都写这里（此前这个节点在 JS 里从没被用过）。 */
+function setMatHint(text) {
+  if (matHintEl) matHintEl.textContent = text;
+}
 const modelBtn      = document.getElementById('model-selector-btn');
 const modelLabel    = document.getElementById('model-selector-label');
 const modelDropdown = document.getElementById('model-dropdown');
@@ -690,6 +696,13 @@ function refreshMaterialSummary() {
 async function loadMaterials() {
   await loadMaterialIntegrity();
   const list = await api.materials.list(projectId);
+  // 「解析标包」按**全部材料**判断（只看 req-stack 会在"只传了素材"时误禁用）
+  if (btnParsePkg) {
+    btnParsePkg.disabled = list.length === 0;
+    btnParsePkg.title = list.length
+      ? '读取已上传文件的正文，检索「标的 / 标包 / 标段」；只按原文事实列出，不猜测'
+      : '先上传文件，再解析标包';
+  }
   const reqRoles = ['spec', 'main_rfp', 'requirement', 'scoring', 'evaluation'];
   const reqs = list.filter(m => reqRoles.includes(m.role));
   const srcs = list.filter(m => m.role === 'source');
@@ -6944,6 +6957,35 @@ fileInputSrc.addEventListener('change', () => {
   const f = fileInputSrc.files[0];
   if (f) uploadFile(f, 'source', btnAddSrc);
 });
+// 「解析标包」：**上传之后的确认动作** —— 读已上传文件的正文，检索标的/标包/标段。
+// 只按原文事实列出（含出处）；找不到就说找不到，不猜。
+btnParsePkg?.addEventListener('click', async () => {
+  if (btnParsePkg.disabled) return;
+  const prev = btnParsePkg.textContent;
+  btnParsePkg.disabled = true;
+  btnParsePkg.classList.add('is-running');
+  btnParsePkg.textContent = '解析中…';
+  try {
+    pkgAnalysis = null;
+    pkgMergeNote = '';
+    const d = await loadPackageAnalysis({ refresh: true });
+    const n = (d.packages || []).length;
+    if (n) {
+      setMatHint(`已识别 ${n} 个标包（按招标文件原文）；到「第①步 · 标包」确认要怎么拆`);
+      await openSplitReport({ stage: '1' });
+    } else if ((d.chunks || 0) === 0) {
+      // 最诚实的一种：文件在、但还没有正文可检索
+      setMatHint(`文件还没有解析出正文，无法检索标包 —— 先让系统读一遍文件（点「拆分评分点」）`);
+    } else {
+      setMatHint(d.note || '已检索全部正文，没有找到「标的 / 标包 / 标段」的表述');
+    }
+  } finally {
+    btnParsePkg.disabled = false;
+    btnParsePkg.classList.remove('is-running');
+    btnParsePkg.textContent = prev || '解析标包';
+  }
+});
+
 btnExtract.addEventListener('click', async () => {
   // 视图为 matching 时按钮承担「素材匹配」职责
   if (document.body.dataset.view === 'matching') {

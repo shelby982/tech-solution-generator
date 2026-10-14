@@ -294,6 +294,18 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   background: #eff6ff;
   border-radius: 0 0 0 0;
 }
+/* 「解析标包」是上传后的确认动作：实线按钮、**不参与 flex 伸缩**、文字不换行。
+   之前它复用了 .btn-add-mat（flex:1 + 虚线），把「＋ 添加文件」挤成了两行。 */
+.btn-parse-pkg {
+  flex: none; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; font-size: 13px; color: var(--accent, #2563eb); cursor: pointer;
+  min-height: 38px; white-space: nowrap;
+}
+.btn-parse-pkg:hover:not(:disabled) { border-color: var(--accent, #2563eb); }
+.btn-parse-pkg:disabled { opacity: .5; cursor: not-allowed; }
+.btn-parse-pkg.is-running { opacity: .6; cursor: progress; }
+/* 两个动作按钮都不换行 */
+.btn-add-mat { white-space: nowrap; }
 .btn-extract {
   width: 100%;
   padding: 13px;
@@ -3340,6 +3352,8 @@ body[data-view="matching"] .match-detail { display: block; }
       <span class="mat-actions">
         <button class="btn-add-mat" id="btn-add-req" type="button"
           title="支持一次选多个；类型按文件名自动识别，可在明细里逐个修改">＋ 添加文件</button>
+        <button class="btn-parse-pkg" id="btn-parse-pkg" type="button"
+          title="读取已上传文件的正文，检索「标的 / 标包 / 标段」；只按原文事实列出，不猜测">解析标包</button>
         <button class="mat-more-btn" id="mat-manage" type="button" aria-expanded="false">明细 ▾</button>
       </span>
       <span class="hint" id="mat-hint">多选 · 类型按文件名建议，可在「明细」里改</span>
