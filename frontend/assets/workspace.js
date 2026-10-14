@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v66';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v67';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v66';
+} from './material-roles.mjs?v=20261016-v67';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -35,15 +35,17 @@ export function workspaceUrl(view, blockId) {
   if (workspace.threadId) q.set('threadId', workspace.threadId);
   const bid = blockId ?? workspace.selectedBlockId ?? params.get('blockId');
   if (bid) q.set('blockId', bid);
-  let path = '/project-init';
+  // 旧的 /project-init、/workbench 已合并进 /three-mode（P2-3 下线）：
+  // 这里统一生成新地址，旧页只保留一个重定向，避免书签/外链失效。
+  let path = '/three-mode';
   if (view === 'outline' || view === 'matching') q.set('view', view);
-  if (view === 'editor') path = '/workbench';
+  if (view === 'editor') q.set('view', 'editor');
   if (view === 'review') path = '/review';
   return path + '?' + q;
 }
 function currentView() {
   if (location.pathname.includes('review')) return 'review';
-  if (location.pathname.includes('workbench')) return 'editor';
+  if (location.pathname.includes('workbench')) return 'editor';   // 旧地址直接访问时仍识别
   return document.body.dataset.view || params.get('view') || 'outline';
 }
 export function renderWorkspaceChrome() { renderChrome(); }

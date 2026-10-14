@@ -290,3 +290,26 @@ setAutoConfirm(true) → statusBar('gate_outline', …)
 ### 顺带一条纪律
 `node --check xxx.js` **没有**抓出我这次插入造成的 ESM 语法错误（参数列表里多了语句）。
 改用 `node --check /tmp/x.mjs`（ESM 解析）才拦住 —— 后续前端语法校验都用这个方式。
+
+---
+
+## 十一、整改进展（P2-3：旧页下线）
+
+### 问题
+`/project-init`（要求与大纲、素材库）与 `/workbench`（方案编辑）已被 three-mode 合并，
+但仍有 **6 处入口**指向它们（URL 生成器 + 视图跳转 + 提示横幅）—— 同一个活有三个入口，
+用户会在两套 UI 之间被来回搬运。
+
+### 改法
+1. **统一 URL 生成**：`workspaceUrl()` 与三处 `VIEW_URLS` 改为 `/three-mode?…&view=…`；
+   两处 `location.href = /workbench…` 改指 `/three-mode?…&view=editor`。
+2. **旧页保留重定向**（不删文件）：`project-init.html` / `workbench.html` 顶部加跳转脚本，
+   按 `view` 参数落到对应视图；**`?legacy=1` 可绕过**（仅供排查历史问题）。
+3. `diff-review.html` 的「材料撰写」标签改指 `/three-mode?view=editor`。
+
+### 实测
+```
+/project-init?projectId=26&threadId=…  →  /three-mode?…&view=outline   ✅
+/workbench?projectId=26&threadId=…     →  /three-mode?…&view=editor    ✅（编辑器布局正常渲染）
+在线资产里指向旧页的链接：0 处
+```

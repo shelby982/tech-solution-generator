@@ -2,13 +2,13 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v66';
+import { GenerateSession } from './generate-session.js?v=20261016-v67';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v66';
-import { initContextPanel } from './context-panel.js?v=20261016-v66';
-import { api } from './api.js?v=20261016-v66';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v67';
+import { initContextPanel } from './context-panel.js?v=20261016-v67';
+import { api } from './api.js?v=20261016-v67';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction ,
-         uiAlert, uiConfirm} from './workspace.js?v=20261016-v66';
+         uiAlert, uiConfirm} from './workspace.js?v=20261016-v67';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -21,7 +21,7 @@ let responseItemsByBlock = {};
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v66';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v67';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -223,9 +223,9 @@ document.getElementById('stage-progress')?.addEventListener('click', (e) => {
   const enc = encodeURIComponent(tid);
   const backendQuery = backendForUrl ? `&backend=${encodeURIComponent(backendForUrl)}` : '';
   const routes = {
-    parsing: `/project-init?projectId=${projectId}&threadId=${enc}&view=outline${backendQuery}`,
-    matching: `/project-init?projectId=${projectId}&threadId=${enc}&view=matching${backendQuery}`,
-    generating: `/workbench?projectId=${projectId}&threadId=${enc}${backendQuery}`,
+    parsing: `/three-mode?projectId=${projectId}&threadId=${enc}&view=outline${backendQuery}`,
+    matching: `/three-mode?projectId=${projectId}&threadId=${enc}&view=matching${backendQuery}`,
+    generating: `/three-mode?projectId=${projectId}&threadId=${enc}&view=editor${backendQuery}`,
     reviewing: `/review?threadId=${enc}${backendQuery}`,
     report_review: `/review?threadId=${enc}${backendQuery}`,
   };
@@ -369,7 +369,7 @@ _refreshGoReviewBtn();
       try {
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
-        banner.innerHTML = `项目尚未到达「方案撰写」阶段，请先完成 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}" style="color:#1d4ed8;text-decoration:underline;">前置步骤</a>。`;
+        banner.innerHTML = `项目尚未到达「方案撰写」阶段，请先完成 <a href="/three-mode?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&view=outline" style="color:#1d4ed8;text-decoration:underline;">前置步骤</a>。`;
         // 合并页里三个模式都在同一页，"回前置步骤"的引导没有意义，且这条横幅
         // 会把头部整体下推（实测刷新后布局变样的元凶）。改为不插入。
         if (!isMergedPage()) insertNotice(banner);
@@ -388,7 +388,7 @@ _refreshGoReviewBtn();
         setStage('generating');
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:12px 20px;background:#fff7ed;color:#9a3412;border-bottom:1px solid #fdba74;font-size:13px;text-align:center;';
-        banner.innerHTML = `素材匹配尚未确认，请先回 <a href="/project-init?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&view=matching" style="color:#1d4ed8;text-decoration:underline;">素材匹配页面</a> 点击「确认素材，进入撰写」。`;
+        banner.innerHTML = `素材匹配尚未确认，请先回 <a href="/three-mode?projectId=${projectId}&threadId=${encodeURIComponent(tid)}&view=matching" style="color:#1d4ed8;text-decoration:underline;">素材匹配页面</a> 点击「确认素材，进入撰写」。`;
         if (!isMergedPage()) insertNotice(banner);
       } catch {}
       return;
