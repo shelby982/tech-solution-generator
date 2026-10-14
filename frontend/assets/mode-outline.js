@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v98';
+import { api } from './api.js?v=20261016-v99';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v98';
+       } from './workspace.js?v=20261016-v99';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v98';
+       } from './workspace-model.mjs?v=20261016-v99';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v98';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v99';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2512,6 +2512,9 @@ let lastCoverageScope = null;
 // 用户口径：技术要求也按标包归属，不存在共享；切换后若该标包还没生成目录，
 // 相关页签必须显示空态 + 一键生成，绝不能继续显示上一个标包的目录。
 let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当前目录）
+// 「已确认」的确认项默认展示**结果**；点「修改」才展开控件（否则确认完信息就消失了 ——
+// 用户反馈："确认进入对应目录后需要能够查到确认的结果情况"）
+let confirmEditOpen = {};
 // 用户口径「**每个标包是单独的内容**」：先选标包、点「确认标包」，五阶段才针对该标包展开。
 // 未确认时面板不出阶段内容（避免把上一个标包/默认范围的内容误当成这个标包的）。
 let confirmedPkg = null;      // {target, package_no} | null
@@ -2986,6 +2989,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     (c.key === 'review_points' && !rpCurrent)
       ? { ...c, answered: false, needs_confirm: true }
       : c);
+  const allConfs = conf;                       // 全部确认项（含已确认的，面板要展示结果）
   const pending = conf.filter(c => c.needs_confirm);
   const settled = conf.filter(c => !c.needs_confirm);
 
@@ -3104,13 +3108,16 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       } else {
         const opts = chapters.map(ch =>
           `<option value="${escapeHtml(ch.title)}">${'　'.repeat(Math.max(0, ch.level - 2))}${escapeHtml(ch.title)}</option>`).join('');
+        const picked = (data.answers || {}).topic_placement || {};
         const rows = topics.map(t => `
           <div class="sr-topic-row">
             <span class="sr-topic-name" title="${escapeHtml(t.topic)}">${escapeHtml(t.topic)}
               <span class="sr-dim">（${t.count} 条）</span></span>
             <select data-topic="${escapeHtml(t.topic)}">
               <option value="">默认：进「技术规范书要求应答」</option>
-              ${opts}
+              ${chapters.map(ch => `<option value="${escapeHtml(ch.title)}"${
+                picked[t.topic] === ch.title ? ' selected' : ''}>${
+                '　'.repeat(Math.max(0, ch.level - 2))}${escapeHtml(ch.title)}</option>`).join('')}
             </select>
           </div>`).join('');
         ctrl = `<div class="sr-topic-list">${rows}</div>
@@ -3124,14 +3131,39 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     } else if (c.answer_key === 'structure') {
       ctrl = `<div class="sr-answer"><button class="mw-btn" data-save="structure">结构没问题，确认</button></div>`;
     }
-    const badge = c.answered ? '已作答' : (c.needs_confirm ? '待确认' : '已识别');
+    const badge = c.answered ? '已确认' : (c.needs_confirm ? '待确认' : '已识别');
     const cls = c.answered ? 'done' : (c.needs_confirm ? 'warn' : 'ok');
+    const editKey = c.answer_key || c.key;
+    const editing = !!confirmEditOpen[editKey];
+    // 已确认的项：显示**确认结果**，控件折叠在「修改」后面（确认完还查得到 —— 用户要求）
+    const answerText = (() => {
+      if (!c.answered) return '';
+      if (c.answer_key === 'topic_placement') {
+        const map = (data.answers || {}).topic_placement || {};
+        const rows = Object.entries(map);
+        if (!rows.length) return '全部主题保持默认归属（进「技术规范书要求应答」章节）';
+        return `<table class="sr-table sr-conf-result"><thead><tr>
+            <th>技术规范书主题</th><th>归属章节</th></tr></thead><tbody>${
+          rows.map(([t, ch]) => `<tr><td>${escapeHtml(t)}</td>
+            <td>${escapeHtml(ch || '默认：技术规范书要求应答')}</td></tr>`).join('')}</tbody></table>`;
+      }
+      const a = c.answer;
+      if (a && typeof a === 'object') {
+        return escapeHtml(Object.entries(a).map(([k, v]) => `${k}：${v}`).join('；'));
+      }
+      return escapeHtml(String(a || c.detected || '已确认'));
+    })();
+    const body = c.answered && !editing
+      ? `<div class="sr-conf-a">${escapeHtml(c.detected)}</div>
+         ${answerText ? `<div class="sr-conf-result-wrap">${answerText}</div>` : ''}
+         <div class="sr-answer"><button class="mw-btn" data-act="edit-confirm" data-key="${escapeHtml(editKey)}">修改</button></div>`
+      : `<div class="sr-conf-a">${escapeHtml(c.detected)}</div>
+         <div class="sr-conf-d">${escapeHtml(c.detail || '')}</div>
+         ${ctrl}`;
     return `<div class="sr-conf ${cls}">
       <div class="sr-conf-head"><span class="sr-conf-badge">${badge}</span>
         <span class="sr-conf-q">${escapeHtml(c.question)}</span></div>
-      <div class="sr-conf-a">${escapeHtml(c.detected)}</div>
-      <div class="sr-conf-d">${escapeHtml(c.detail || '')}</div>
-      ${ctrl}</div>`;
+      ${body}</div>`;
   };
 
   const statusCell = (r) => {
@@ -3382,12 +3414,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>
 
       <h5 class="sr-sec">③ 技术规范书主题归属（可选）</h5>
-      ${(pending.filter(c => c.answer_key === 'topic_placement').map(confItem).join('')
-        || '<div class="sr-dim">没有未归属的主题。</div>')}
+      ${(allConfs.filter(c => c.answer_key === 'topic_placement').map(confItem).join('')
+        || '<div class="sr-dim">这份材料里没有需要归属的技术规范书主题。</div>')}
 
-      <h5 class="sr-sec">④ 其他待确认项</h5>
-      ${(pending.filter(c => c.answer_key !== 'topic_placement').map(confItem).join('')
-        || '<div class="sr-dim">没有其他待确认项。</div>')}
+      <h5 class="sr-sec">④ 其他确认项</h5>
+      ${(allConfs.filter(c => c.answer_key !== 'topic_placement').map(confItem).join('')
+        || '<div class="sr-dim">没有其他确认项。</div>')}
 
       <div class="sr-answer" style="margin-top:12px">
         <button class="mw-btn primary" data-act="confirm-generate">确认，生成目录与映射矩阵</button>
@@ -3683,6 +3715,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  .sr-conf-result-wrap{margin:6px 0}
+  .sr-conf-result{margin:0}
+  .sr-conf-result th,.sr-conf-result td{padding:4px 8px}
   .sr-req-table .sr-group td{background:var(--panel-soft,#f8fafc);border-top:1px solid var(--line);
     font-size:12.5px;padding:6px 10px}
   .sr-req-table .sr-group .sr-dim{margin-left:6px}
@@ -3904,6 +3939,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
 
   el.addEventListener('click', async (e) => {
     // 收起：拆下面板，露出目录（确认与否都能收起，收起不等于确认）
+
+    // 「修改」：把已确认项重新展开成控件（确认结果默认展示，避免"确认完就查不到"）
+    const editBtn = e.target.closest?.('[data-act="edit-confirm"]');
+    if (editBtn) {
+      confirmEditOpen[editBtn.dataset.key] = true;
+      await openSplitReport({ stage: '2' });
+      return;
+    }
 
     // 「重新拆分评分点」= 从零开始（清空旧结果再跑）
     if (e.target.closest?.('[data-act="redraft-points"]')) {
