@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v141';
+import { api } from './api.js?v=20261016-v142';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v141';
+       } from './workspace.js?v=20261016-v142';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -29,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v141';
+       } from './workspace-model.mjs?v=20261016-v142';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -115,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v141';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v142';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3959,10 +3959,23 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>`;
   })();
 
+  // 「要生成哪些类别」：**确认生成时必填**（生成处理器读 [data-confirm-cat]:checked）。
+  // 改版时这块被我删掉了 —— 结果用户点确认只看到「请至少勾选一个类别。」却无处可勾（实测 bug）。
+  // 归属放在「目录确认与调整」这一步：类别决定这份应答目录由哪几块合成。
+  const catPick = (pointTabs || []).length ? `
+      <h5 class="sr-sec">① 要生成哪些类别</h5>
+      <div class="sr-answer">
+        ${(pointTabs || []).map((t) => `<label class="sr-cat"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
+          ${((confirmedCats.length ? confirmedCats : (pointTabs || []).map((x) => x.id)).includes(t.id)) ? 'checked' : ''}>
+          ${escapeHtml(String(t.label).replace('评分点', ''))}</label>`).join('')}
+        <span class="sr-dim">勾选的类别会合成这一份应答目录</span>
+      </div>` : '';
+
   const pane1 = `
       ${checkLine}
       ${echoLine}
-      <h5 class="sr-sec">目录结构（${structBlocks.length} 章）· 点一行即可改</h5>
+      ${catPick}
+      <h5 class="sr-sec">② 目录结构（${structBlocks.length} 章）· 点一行即可改</h5>
       <div class="sr-batch${batchIds.size ? '' : ' is-empty'}" id="sr-batch">
         <span class="sr-dim">已选 <b id="sr-batch-n">${batchIds.size}</b> 项</span>
         <button class="sr-mini" data-batch="up">批量上移</button>
