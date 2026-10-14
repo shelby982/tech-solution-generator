@@ -154,3 +154,36 @@ async def test_run_analysis_empty_when_no_chunks(tmp_path):
         assert await run_analysis(conn, 1) == []
     finally:
         await conn.close()
+
+
+async def test_set_material_packages_is_many_to_many(tmp_path):
+    """一份文件可以属于多个标包；也可以一个都不选（未指定，不是错误）。"""
+    import aiosqlite
+    from db import init_db
+    from services.package_analysis import load_material_packages, set_material_packages
+
+    conn = await aiosqlite.connect(str(tmp_path / "mp.db"))
+    conn.row_factory = aiosqlite.Row
+    await init_db(conn)
+    await conn.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+    await conn.execute("INSERT INTO materials (id, project_id, filename) VALUES (10, 1, 'f.pdf')")
+    await conn.commit()
+    try:
+        n = await set_material_packages(conn, 1, 10, [
+            {"target": "1", "package_no": "2"},
+            {"target": "1", "package_no": "3"},
+        ])
+        assert n == 2
+        got = await load_material_packages(conn, 1)
+        assert {(x["target"], x["package_no"]) for x in got["10"]} == {("1", "2"), ("1", "3")}
+
+        # 覆盖式：改成只留一个
+        await set_material_packages(conn, 1, 10, [{"target": "1", "package_no": "3"}])
+        got2 = await load_material_packages(conn, 1)
+        assert {(x["target"], x["package_no"]) for x in got2["10"]} == {("1", "3")}
+
+        # 清空 = 未指定标包（合法状态）
+        await set_material_packages(conn, 1, 10, [])
+        assert await load_material_packages(conn, 1) == {}
+    finally:
+        await conn.close()

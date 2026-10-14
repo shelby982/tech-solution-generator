@@ -769,9 +769,13 @@ function renderMats(container, mats, showRole) {
            ${opts.map(([v, l]) => `<option value="${v}" ${m.role === v ? 'selected' : ''}>${l}</option>`).join('')}
          </select>`
       : '';
+    const mine = materialPackagesOf(m.id);
     return `<div class="mat-row">
       ${extBadge(m.filename)}
       <span class="mat-name" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename)}</span>
+      <button type="button" class="mat-pkg${mine.length ? '' : ' is-none'}" data-pkg-open="${m.id}"
+        title="这份文件属于哪些标包（可多选；一份文件可以属于多个标包）">${
+        mine.length ? escapeHtml(mine.map(pkgLabelOf).join('、')) : '未指定标包'}</button>
       ${roleCell}
       ${parseStatusBadge(m.parse_status)}
       ${showRole ? '' : materialUsageHtml(m)}
@@ -779,6 +783,10 @@ function renderMats(container, mats, showRole) {
       <button class="mat-del" data-id="${m.id}" title="删除">×</button>
     </div>`;
   }).join('');
+  container.querySelectorAll('[data-pkg-open]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openMaterialPackagesPicker(b.dataset.pkgOpen, b);
+  }));
   container.querySelectorAll('.mat-del').forEach(btn => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
@@ -2528,6 +2536,15 @@ let selectedStructId = null;
 let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 let topicSaveNote = '';    // 归属保存结果 —— 保存后\*\*面板会重绘\*\*，所以用模块变量而不是就地写 DOM
+// 文件↔标包（多对多）：一个人工可改的归属
+function materialPackagesOf(materialId) {
+  const map = (pkgAnalysis && pkgAnalysis.material_packages) || {};
+  return map[String(materialId)] || [];
+}
+function pkgLabelOf(x) {
+  const t = x && x.target ? `标的${x.target} ` : '';
+  return `${t}标包${(x && x.package_no) || '—'}`;
+}
 let pkgAnalysis = null;    // 标包分析结果（GET package-analysis；null = 还没取）
 // 类别短名：**模块级** —— 模块级渲染函数看不到 openSplitReport 内部的 CAT_HINT（实测 ReferenceError）
 const CAT_NAME = { commerce: '商务', tech: '技术', price: '报价', other: '其他' };
@@ -2620,6 +2637,59 @@ async function maybeAutoOpenSplitReport() {
   if (splitPanelAutoOpenedFor === rev) return;      // 同一版只自动展示一次
   splitPanelAutoOpenedFor = rev;
   await openSplitReport({ auto: true });
+}
+
+/** 文件的标包归属：**多选**弹层（一份文件可属多个标包，也可不指定）。 */
+async function openMaterialPackagesPicker(materialId, btn) {
+  document.querySelectorAll('.sr-pkg-pop').forEach((x) => x.remove());
+  await loadPackageAnalysis().catch(() => {});
+  const all = (pkgAnalysis && pkgAnalysis.packages) || [];
+  const mine = materialPackagesOf(materialId);
+  const key = (x) => `${x.target || ''}|${x.package_no || ''}`;
+  const chosen = new Set(mine.map(key));
+
+  const pop = document.createElement('div');
+  pop.className = 'sr-pkg-pop';
+  // 分析结果为空时也要能操作：把当前已选的列出来（否则用户没法取消）
+  const options = all.length ? all : mine;
+  pop.innerHTML = options.length ? options.map((p) => `
+      <label class="sr-pkg-opt"><input type="checkbox" data-pkg-opt="${escapeHtml(key(p))}"
+        ${chosen.has(key(p)) ? 'checked' : ''} /> ${escapeHtml(pkgLabelOf(p))}
+        ${p.package_name ? `<span class="sr-dim">${escapeHtml(p.package_name)}</span>` : ''}</label>`).join('')
+    : '<div class="sr-dim" style="padding:4px 6px">还没有识别到标包 —— 先上传并等待解析，或先在第①步做标包分析。</div>';
+  btn.parentElement.appendChild(pop);
+
+  const save = async () => {
+    const picked = [...pop.querySelectorAll('[data-pkg-opt]:checked')].map((cb) => {
+      const [target, package_no] = cb.dataset.pkgOpt.split('|');
+      return { target, package_no };
+    });
+    try {
+      await api.projects.setMaterialPackages(projectId, materialId, picked);
+      // 更新本地缓存，界面立即反映（不必重新拉分析）
+      pkgAnalysis = pkgAnalysis || {};
+      pkgAnalysis.material_packages = pkgAnalysis.material_packages || {};
+      pkgAnalysis.material_packages[String(materialId)] = picked;
+      btn.textContent = picked.length ? picked.map((x) => pkgLabelOf(x)).join('、') : '未指定标包';
+      btn.classList.toggle('is-none', !picked.length);
+      splitPanelFlash = picked.length
+        ? `已把该文件归到 ${picked.map((x) => pkgLabelOf(x)).join('、')}`
+        : '该文件已设为"未指定标包"';
+    } catch (e) {
+      console.error('[materials] 标包归属保存失败', e);
+      splitPanelFlash = '标包归属保存失败（详见控制台）';
+    }
+  };
+  pop.querySelectorAll('[data-pkg-opt]').forEach((cb) => cb.addEventListener('change', save));
+  window.setTimeout(() => {
+    const off = (e) => {
+      if (!pop.contains(e.target) && e.target !== btn) {
+        pop.remove();
+        document.removeEventListener('click', off, true);
+      }
+    };
+    document.addEventListener('click', off, true);
+  }, 0);
 }
 
 /** 取标包分析结果（来自招标文件正文的事实 + 出处）。失败不阻断面板，只标记。 */
@@ -4403,6 +4473,16 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  /* 材料行里的标包归属（多选） */
+  .mat-pkg{font:inherit;font-size:11px;padding:1px 7px;border:1px solid var(--line);border-radius:999px;
+    background:#fff;color:var(--accent);cursor:pointer;white-space:nowrap;max-width:190px;
+    overflow:hidden;text-overflow:ellipsis}
+  .mat-pkg.is-none{color:var(--muted)}
+  .sr-pkg-pop{position:absolute;z-index:30;margin-top:4px;background:#fff;border:1px solid var(--line);
+    border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:6px;min-width:200px}
+  .sr-pkg-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 6px;border-radius:6px;
+    cursor:pointer}
+  .sr-pkg-opt:hover{background:var(--panel-soft,#f8fafc)}
   /* 标包卡片（第①步顶部）：事实 + 出处 */
   .sr-pkg-cards{display:flex;flex-direction:column;gap:6px;margin:6px 0}
   .sr-pkg-card{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff}

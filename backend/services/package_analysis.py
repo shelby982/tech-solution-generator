@@ -258,3 +258,28 @@ async def load_material_packages(db, project_id: int) -> dict:
     for mid, target, package_no in rows:
         out.setdefault(str(mid), []).append({"target": target, "package_no": package_no})
     return out
+
+
+async def set_material_packages(db, project_id: int, material_id: int,
+                                packages: list[dict]) -> int:
+    """设置**某一份文件**归属的标包（覆盖式；人工修正走这里）。
+
+    用户口径：一个文件可以属于多个标包，没有严格对应关系 —— 所以这里是集合，
+    而且允许为空（= 未指定标包，不是错误）。
+    """
+    await db.execute(
+        "DELETE FROM material_packages WHERE project_id = ? AND material_id = ?",
+        (project_id, material_id))
+    n = 0
+    for p in packages or []:
+        target = str((p or {}).get("target") or "")
+        package_no = str((p or {}).get("package_no") or "")
+        if not target and not package_no:
+            continue
+        await db.execute(
+            """INSERT OR IGNORE INTO material_packages (material_id, project_id, target, package_no)
+               VALUES (?,?,?,?)""",
+            (material_id, project_id, target, package_no))
+        n += 1
+    await db.commit()
+    return n

@@ -681,3 +681,25 @@ async def sync_points(project_id: int, payload: dict | None = None):
             package_no=package_no, categories=cats,
         )
     return JSONResponse(result)
+
+
+@router.put("/projects/{project_id}/materials/{material_id}/packages")
+async def set_material_packages_route(project_id: int, material_id: int, payload: dict | None = None):
+    """设置某份文件归属的标包（**多对多**：可以一个都不选，也可以选多个）。
+
+    用户口径：「一个文件可能会属于多个标包，这块没有严格的对应关系」。
+    """
+    from services.package_analysis import set_material_packages
+
+    body = payload or {}
+    packages = body.get("packages") or []
+    if not isinstance(packages, list):
+        raise HTTPException(status_code=400, detail="packages 必须是数组")
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT id FROM materials WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
+            (material_id, project_id))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        n = await set_material_packages(db, project_id, material_id, packages)
+    return JSONResponse({"material_id": material_id, "packages": n})

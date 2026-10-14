@@ -27,6 +27,12 @@ export const api = {
     // 标包分析：从招标文件正文抽出的标包事实（含原文出处）
     packageAnalysis: (projectId, q = '') =>
       fetch(`/api/projects/${projectId}/package-analysis${q}`).then(r => r.json()),
+    // 某份文件的标包归属（多对多；可空 = 未指定）
+    setMaterialPackages: (projectId, materialId, packages) =>
+      fetch(`/api/projects/${projectId}/materials/${materialId}/packages`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages: packages || [] }),
+      }).then(r => r.json()),
     // 一键对齐：把解析出来的评分点按已确认范围/类别落库（不调用模型）
     syncPoints: (projectId, payload) =>
       fetch(`/api/projects/${projectId}/sync-points`, {
