@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v71" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v75" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -83,7 +83,14 @@
   align-self: center; font-size: 12px; color: var(--blue); cursor: pointer; white-space: nowrap;
   border: 1px solid #bfdbfe; background: var(--blue-soft, #eff6ff); border-radius: 999px; padding: 1px 9px;
 }
-/* 状态行右侧的工具链接 */
+/* 顶栏工具（原状态栏右侧那三个） */
+.header-tools { display: flex; align-items: center; gap: 10px; margin-right: 8px; font-size: 12px; }
+.header-tools a, .header-tools button {
+  color: var(--muted); background: none; border: none; font: inherit; cursor: pointer; padding: 0;
+}
+.header-tools a:hover, .header-tools button:hover { color: var(--text); }
+
+/* 状态行右侧的工具链接（已挪走，保留选择器以防残留引用） */
 .status-bar-tools { display: flex; align-items: center; gap: 10px; padding-left: 10px;
   border-left: 1px solid var(--line); font-size: 12px; }
 .status-bar-tools a, .status-bar-tools button {
@@ -408,7 +415,13 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   flex: 0 0 auto;
   min-height: 48px;
 }
-.extract-status-bar[data-state="idle"] { display: flex; }   /* idle 也要显示：它承载主动作 */
+/* 状态栏模块已按用户要求"去掉"：它显示的是运行阶段/进度，与五阶段面板的逻辑重复。
+   保留其中的**动作区**（取消 / 确认目录 / 继续提炼 / 重新提炼…是流程必需，没有替代入口），
+   其余（阶段文案、进度条、进度环）全部隐藏；进度改由面板头显示。 */
+.extract-status-bar[data-state="idle"] { display: flex; }
+#status-label, #status-bar .status-bar-center, #status-bar .sidebar-ring-wrap { display: none !important; }
+/* 动作区已被 JS 挂进面板头（mountStatusActions），这里彻底不占位 */
+#status-bar { display: none !important; }
 .status-bar-left {
   font-size: 12.5px; color: var(--muted); white-space: nowrap;
   /* 可收缩 + 省略号：文案变长时截断自己，而不是把右侧按钮挤出可视区
@@ -3243,8 +3256,8 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v71" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v71" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v75" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v75" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3253,6 +3266,11 @@ body[data-view="matching"] .match-detail { display: block; }
           <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
           <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
+            <div class="header-tools">
+              <a id="ws-todo-link" href="/review">处理待办</a>
+              <button type="button" id="ws-history">版本记录</button>
+              <button type="button" id="ws-run">运行详情</button>
+            </div>
             <!-- 编辑器模式的「进入评审」：由 mode-editor.js 控制 disabled。
                  合并前它在 workbench 的 header 里，这里并入同一处 actions。 -->
             <button type="button" id="btn-go-review-top" class="btn-go-review-top" disabled>进入评审 →</button>
@@ -3352,11 +3370,7 @@ body[data-view="matching"] .match-detail { display: block; }
         <span class="status-pct" id="status-pct"></span>
       </div>
       <div class="status-bar-right" id="status-actions"></div>
-      <div class="status-bar-tools">
-        <a id="ws-todo-link" href="/review">处理待办</a>
-        <button type="button" id="ws-history">版本记录</button>
-        <button type="button" id="ws-run">运行详情</button>
-      </div>
+
       <!-- 进度环（状态栏最右侧，点击展开目录） -->
       <div class="sidebar-ring-wrap" id="sidebar-ring-wrap" style="position:relative;display:flex;align-items:center;gap:6px;cursor:pointer;padding:0 4px;" title="展开/收起目录">
         <svg class="ring-svg" viewBox="0 0 36 36" width="32" height="32">
@@ -3930,16 +3944,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v71"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v71"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v75"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v75"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v71',
-                        './assets/mode-editor.js?v=20261016-v71']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v75',
+                        './assets/mode-editor.js?v=20261016-v75']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v71"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v75"></script>
   </body>
 </html>
