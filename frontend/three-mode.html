@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v60" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v63" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -258,7 +258,7 @@ body[data-view="matching"] .init-materials-panel { display: none; }
 .mat-drawer-head .mw-btn { margin-left: auto; }
 /* 总览条的主按钮：素材库视图里左栏已收起，匹配的入口放在这一屏的顶部 */
 .ms-primary {
-  border: 1px solid var(--text); background: var(--text); color: #fff;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
   border-radius: 999px; padding: 4px 14px; font: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer; white-space: nowrap;
 }
@@ -282,7 +282,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .btn-extract {
   width: 100%;
   padding: 13px;
-  background: var(--text);
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -387,7 +387,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .test-status.fail { color: #dc2626; }
 .api-footer-right { display: flex; gap: 8px; }
 .btn-api-cancel { padding: 9px 16px; border-radius: 9px; border: 1.5px solid var(--line); background: var(--panel); font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
-.btn-api-save { padding: 9px 16px; border-radius: 9px; border: none; background: var(--text); font: inherit; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; }
+.btn-api-save { padding: 9px 16px; border-radius: 9px; border: none; background: var(--accent); font: inherit; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; }
 .btn-api-save:disabled { opacity: 0.45; cursor: default; }
 
 /* 中间主区 */
@@ -437,7 +437,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .btn-status-primary {
   padding: 6px 14px; border-radius: 6px; white-space: nowrap;
   border: none;
-  background: var(--text); color: #fff;
+  background: var(--accent); color: #fff;
   font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
 .blocks-scroll { flex: 1; overflow-y: auto; padding: 20px; }
@@ -1558,9 +1558,9 @@ body[data-view="matching"] .match-detail { display: block; }
         align-items: center;
         gap: 6px;
         padding: 6px 14px;
-        border: 1px solid var(--ink);
+        border: 1px solid var(--accent);
         border-radius: 8px;
-        background: var(--ink);
+        background: var(--accent);
         color: #fff;
         font: inherit;
         font-size: 12.5px;
@@ -2196,7 +2196,7 @@ body[data-view="matching"] .match-detail { display: block; }
         all: unset;
         cursor: pointer;
         padding: 5px 13px; border-radius: 7px;
-        background: var(--ink); color: #fff;
+        background: var(--accent); color: #fff;
         font-size: 12px; font-weight: 600;
       }
 
@@ -2376,7 +2376,7 @@ body[data-view="matching"] .match-detail { display: block; }
       .suggestion-btn:hover { background: var(--bg-2); }
 
       .suggestion-btn.accept {
-        background: var(--ink);
+        background: var(--accent);
         color: #fff;
         border-color: var(--ink);
       }
@@ -3243,7 +3243,7 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v60" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v63" />
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3335,7 +3335,7 @@ body[data-view="matching"] .match-detail { display: block; }
 
   <!-- 兼容节点：主动作已移到状态行（左栏按原型移除），这里保留隐藏按钮，
        既有代码（setExtractDisabled / 点击绑定 / 视图文案）仍引用 #btn-extract。 -->
-  <button class="btn-extract" id="btn-extract" type="button" hidden>✦ 拆分评审点</button>
+  <button class="btn-extract" id="btn-extract" type="button" hidden>✦ 拆分评分点</button>
   <p class="extract-hint" hidden></p>
 
   <section class="init-layout">
@@ -3393,7 +3393,7 @@ body[data-view="matching"] .match-detail { display: block; }
         <!-- 启动失败诊断：由内联看门狗填充（脚本没跑起来时唯一能说话的东西） -->
         <div id="boot-error" hidden></div>
         <div class="blocks-empty" id="blocks-empty" hidden>
-          <p>上传应标文件后点击「拆分评审点」开始</p>
+          <p>上传应标文件后点击「拆分评分点」开始</p>
         </div>
             <div class="blocks-list" id="blocks-list"></div>
         </div>
@@ -3929,16 +3929,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v60"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v60"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v63"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v63"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v60',
-                        './assets/mode-editor.js?v=20261016-v60']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v63',
+                        './assets/mode-editor.js?v=20261016-v63']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v60"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v63"></script>
   </body>
 </html>

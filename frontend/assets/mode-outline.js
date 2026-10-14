@@ -2,14 +2,14 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v60';
+import { api } from './api.js?v=20261016-v63';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261016-v60';
+       } from './workspace.js?v=20261016-v63';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +23,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v60';
+       } from './workspace-model.mjs?v=20261016-v63';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +109,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v60';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v63';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -152,7 +152,7 @@ let currentStage = (() => {
 const blocksByOrder = []; // 按 outline_extract 顺序累积，给 confirm 用
 const blocksById = new Map();
 
-// ── 视图模式：outline（拆分评审点） / matching（素材匹配） ──
+// ── 视图模式：outline（拆分评分点） / matching（素材匹配） ──
 // 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
 // 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
 // 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
@@ -191,7 +191,7 @@ function applyPageView() {
       btn.innerHTML = '✦ 素材匹配';
       hint.textContent = '为每个章节匹配最相关的原始素材片段';
     } else {
-      btn.innerHTML = '✦ 拆分评审点';
+      btn.innerHTML = '✦ 拆分评分点';
       hint.textContent = '依据应标要求生成章节结构，原始素材用于补充各模块内容';
     }
   }
@@ -803,7 +803,7 @@ function headerStageLabel(state) {
   if (state === 'idle') {
     // 主动作从"左栏底部按钮"搬到状态行（左栏已按原型移除）
     setStatusActions('idle', `
-      <button class="btn-status-primary" id="btn-start-split">拆分评审点</button>`, () => {
+      <button class="btn-status-primary" id="btn-start-split">拆分评分点</button>`, () => {
       document.getElementById('btn-start-split')?.addEventListener('click', restartExtraction);
     });
   } else if (state === 'extracting') {
@@ -853,7 +853,7 @@ function setStatusActions(key, html, bind) {
 
 function setStatusBar(state, label, pct, totalB, doneB) {
   // 统一的"退出运行态"收口：状态不再是 extracting 就把左下的提示文案还原
-  // （运行中它显示"正在拆解…点按钮可取消并重新拆解"）。
+  // （运行中它显示"正在拆分…点按钮可取消并重新拆分"）。
   if (state !== 'extracting') restoreExtractHint();
   extractionState = state;
   statusBar.dataset.state = state;
@@ -899,10 +899,10 @@ function setStatusBar(state, label, pct, totalB, doneB) {
         () => document.getElementById('btn-cancel').addEventListener('click', cancelExtraction));
     }
   } else if (state === 'points_pending') {
-    // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆解结果」）。
+    // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆分结果」）。
     // 这里**不能**给「确认目录，开始提炼要点」——那会用上一版目录继续提炼（自相矛盾）。
     setStatusActions('points_pending', `
-      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分评审点</button>
+      <button class="btn-status-secondary" id="btn-redraft-outline">重新拆分评分点</button>
       <button class="btn-status-primary" id="btn-gen-outline">生成所选目录 ▸</button>`, () => {
       document.getElementById('btn-redraft-outline')?.addEventListener('click', restartExtraction);
       document.getElementById('btn-gen-outline')?.addEventListener('click', () => {
@@ -1399,7 +1399,7 @@ function renderMatchDetail() {
 
   const emptyPool = sourceMaterialCount === 0
     ? `<div class="mw-empty" style="padding:20px 8px;text-align:left;">
-         还没有可匹配的原始素材。<br>
+         暂无可匹配的素材。<br>
          <span style="font-size:12px;">点左上角「＋ 上传」加方案 / 产品资料，再点右上角「分析素材归属」。</span>
        </div>`
     : '';
@@ -1587,7 +1587,7 @@ function renderMatDrawer() {
   const list = el.querySelector('#mat-drawer-list');
   if (!lastSrcMaterials.length) {
     list.innerHTML = `<p class="ms-dim" style="font-size:12px;padding:8px;">
-      还没有原始素材。上传方案 / 产品资料后点「分析素材归属」，系统会把它们挂到对应章节。</p>`;
+      暂无素材。上传方案 / 产品资料后点「分析素材归属」，系统会把它们挂到对应章节。</p>`;
     return;
   }
   renderMats(list, lastSrcMaterials, false);
@@ -1731,7 +1731,7 @@ async function toggleScoringRisk() {
     <div class="mw-body">
       ${rows ? `<table class="ov-risk-table">
         <thead><tr><th>风险</th><th>评分点</th><th>分值</th><th>已审章节</th><th>缺口（未响应的得分要点）</th></tr></thead>
-        <tbody>${rows}</tbody></table>` : '<div class="mw-empty">还没有审查结论。先在「方案编辑」生成正文，再跑审查。</div>'}
+        <tbody>${rows}</tbody></table>` : '<div class="mw-empty">暂无审查结论。先在「方案编辑」生成正文，再跑审查。</div>'}
     </div>`;
   el.querySelector('[data-act="close-risk"]')?.addEventListener('click', () => {
     el.dataset.risk = ''; renderMatchDetail();
@@ -2493,7 +2493,7 @@ let splitPanelExpanded = true;   // 面板默认展开（用户要求：不要"�
 let splitPanelFlash = '';
 let splitPanelFlashKind = '';      // '' | 'err'
 // 目录是否"待生成"（第①步只拆评分点之后的中间态）。由 refreshOutlineCoverage 写入，
-// loadExistingBlocks 据此自动展开「拆解结果」—— 启动时 thread 还没解析出来，
+// loadExistingBlocks 据此自动展开「拆分结果」—— 启动时 thread 还没解析出来，
 // 光靠 restoreSettledThread 那条路会漏掉这个提示（实测面板不出现）。
 let outlinePending = false;
 // 覆盖率渲染用的上下文（当前目录对应的标包 + 类别），由 refreshOutlineCoverage 写入
@@ -2503,14 +2503,23 @@ let lastCoverageScope = null;
 // 相关页签必须显示空态 + 一键生成，绝不能继续显示上一个标包的目录。
 let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当前目录）
 let panelViewCats = null;     // 筛选的类别（null = 跟随当前目录）
-// 面板当前所在阶段（'1' 评审点 / '2' 待确认 / '3' 产物点）与其内的子页签
+// 面板当前所在阶段（'1' 评分点 / '2' 待确认 / '3' 产物）与其内的子页签
 let panelStage = '1';
+// ④编写 / ⑤评审 面板的数据（**必须声明在模块顶部**：面板可能在初始化早期就渲染，
+// 声明放函数区会踩 TDZ —— 本会话已经因此踩过一次坑）。
+let writeBlocks = [];
+let writeActiveId = '';
+let writeStats = { written: 0, total: 0 };
+let writeHydratedKey = '';
+let reviewHydratedKey = '';
+let reviewSummary = {};
+let verdictCache = { key: '', data: null };
 // 是否正在「梳理应答目录」这一**短任务**阶段（派生目录：秒级~1 分钟）。
 // 该阶段不显示「取消」：取消它既保不住什么，也只会让用户以为必须点它才能重跑
 // （用户反馈：右上角的"取消"在这个阶段还有什么意义）。
 let outlineDrafting = false;
-// 是否正在"拆分评审点"（解析 + 派生，整段过程）。此期间右侧**只显示加载态**：
-// 不渲染面板内容（否则会出现空标包下拉、"技术规范书拆解 0"、"先点左下按钮"这类
+// 是否正在"拆分评分点"（解析 + 派生，整段过程）。此期间右侧**只显示加载态**：
+// 不渲染面板内容（否则会出现空标包下拉、"技术规范书要求 0"、"先点左下按钮"这类
 // 在解析中毫无意义甚至自相矛盾的文案），也不显示上一版的目录树。
 let splitInProgress = false;
 let panelSub = '';
@@ -2558,10 +2567,281 @@ async function maybeAutoOpenSplitReport() {
 // 注意：参数**不能叫 stage** —— 函数体内已有 `const stage = pointsConfirmed ? …`，
 // 同名参数会直接 SyntaxError（"Identifier 'stage' has already been declared"），
 // 整页脚本不执行（由启动自检面板捕获）。
+
+// ── ④编写 / ⑤评审：与①②③ 同一套「左导航 + 右内容」的布局约定 ──
+async function loadVerdict() {
+  const key = `${projectId}|${currentThreadId || ''}`;
+  if (verdictCache.key === key && verdictCache.data) return verdictCache.data;
+  try {
+    const q = currentThreadId ? `?threadId=${encodeURIComponent(currentThreadId)}` : '';
+    const r = await fetch(`/api/projects/${projectId}/scoring-verdict${q}`);
+    verdictCache = { key, data: r.ok ? await r.json() : null };
+  } catch (e) {
+    console.warn('[panel] 评分点结论取不到', e);
+    verdictCache = { key, data: null };
+  }
+  return verdictCache.data;
+}
+
+function hydrateStage(st) {
+  if (st === '4') renderWritePane().then(refreshStageHint);
+  else if (st === '5') renderReviewPane().then(refreshStageHint);
+}
+
+/** 阶段头提示依赖异步数据（写了多少章 / 得分预估），拉到数据后要回填 */
+function refreshStageHint() {
+  const map = { '4': stageHintText('4'), '5': stageHintText('5') };
+  document.querySelectorAll('#split-panel-inline .sr-stage').forEach((st) => {
+    const txt = map[st.dataset.stage];
+    if (txt == null) return;
+    const el = st.querySelector('.sr-stage-head .hint');
+    if (el) el.textContent = txt;
+  });
+}
+
+function stageHintText(st) {
+  if (st === '4') {
+    return writeStats.total
+      ? `已写 ${writeStats.written} / ${writeStats.total} 章 · 章头常驻评分点与举证`
+      : '等目录生成后再撰写';
+  }
+  if (st === '5') {
+    return reviewSummary.points_total
+      ? `得分预估 ${reviewSummary.score_estimated ?? 0} / ${reviewSummary.score_max ?? 0} · 缺口 ${reviewSummary.gaps ?? 0} 项`
+      : '等生成正文后按评分点评审';
+  }
+  return '';
+}
+
+function paintWriteList(keyword = '') {
+  const list = document.getElementById('sr-wlist');
+  if (!list) return;
+  const kw = keyword.trim().toLowerCase();
+  list.innerHTML = writeBlocks
+    .filter((b) => !kw || String(b.title || '').toLowerCase().includes(kw))
+    .slice(0, 400)
+    .map((b) => `<div class="sr-wnode l${Math.min(Number(b.level) || 1, 3)}${String(b.block_id) === writeActiveId ? ' on' : ''}" data-bid="${escapeHtml(String(b.block_id))}">
+        <span class="sr-wname">${escapeHtml(b.title || '')}</span>
+        <span class="sr-wtag">${(b.content || '').trim() ? '已写' : '待写'}</span></div>`).join('')
+    || '<div class="sr-note">没有匹配的章节。</div>';
+}
+
+async function renderWritePane() {
+  const body = document.getElementById('sr-write-body');
+  if (!body) return;
+  const key = `${projectId}|${currentThreadId || ''}`;
+  if (writeHydratedKey === key && writeBlocks.length) return;
+  body.innerHTML = '<div class="sr-note">正在加载章节…</div>';
+  let blocks = [];
+  try {
+    blocks = await api.blocks.list(projectId, currentThreadId) || [];
+  } catch (e) {
+    body.innerHTML = `<div class="sr-flash err">章节加载失败：${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  // 只要"应答章节"（规范书要求行不进写作列表）
+  writeBlocks = blocks.filter((b) => b && b.title && b.kind !== 'spec');
+  writeStats = { total: writeBlocks.length,
+                 written: writeBlocks.filter((b) => (b.content || '').trim()).length };
+  writeHydratedKey = key;
+  if (!writeBlocks.length) {
+    body.innerHTML = '<div class="sr-note">暂无章节。请先完成 ①拆分评分点 → ②待确认 → ③产物。</div>';
+    return;
+  }
+  body.innerHTML = `
+    <div class="sr-write">
+      <div class="sr-wtree">
+        <input class="sr-wsearch" id="sr-wsearch" type="search" placeholder="搜索章节" aria-label="搜索章节" />
+        <div class="sr-wlist" id="sr-wlist"></div>
+      </div>
+      <div class="sr-wmain">
+        <div class="sr-whead" id="sr-whead"></div>
+        <div class="sr-wedit" id="sr-wedit" contenteditable="true" role="textbox" aria-multiline="true"
+             data-placeholder="在此撰写本节正文，或点下方「生成本章」…"></div>
+        <div class="sr-wfoot">
+          <button class="sr-btn-primary" id="sr-wsave" type="button">保存</button>
+          <button class="sr-btn" id="sr-wgen" type="button">生成本章</button>
+          <span class="sr-wstate" id="sr-wstat"></span>
+          <span class="sr-wright"><button class="sr-btn" id="sr-wmat" type="button">按需素材 ▾</button></span>
+        </div>
+        <div class="sr-wmatlist" id="sr-wmatlist" hidden></div>
+      </div>
+    </div>`;
+  paintWriteList();
+  document.getElementById('sr-wsearch')?.addEventListener('input', (e) => paintWriteList(e.target.value));
+  document.getElementById('sr-wlist')?.addEventListener('click', (e) => {
+    const node = e.target.closest('.sr-wnode');
+    if (node) selectWriteBlock(node.dataset.bid);
+  });
+  document.getElementById('sr-wsave')?.addEventListener('click', saveWriteBlock);
+  document.getElementById('sr-wgen')?.addEventListener('click', genWriteBlock);
+  document.getElementById('sr-wmat')?.addEventListener('click', toggleWriteMaterials);
+  // 默认落在第一个"待写"章节（打开就能干活）
+  const first = writeBlocks.find((b) => !(b.content || '').trim()) || writeBlocks[0];
+  selectWriteBlock(String(first.block_id));
+}
+
+async function selectWriteBlock(bid) {
+  const b = writeBlocks.find((x) => String(x.block_id) === String(bid));
+  if (!b) return;
+  writeActiveId = String(bid);
+  document.querySelectorAll('.sr-wnode').forEach((n) =>
+    n.classList.toggle('on', n.dataset.bid === String(bid)));
+  const head = document.getElementById('sr-whead');
+  const verdict = await loadVerdict();
+  const meta = new Map(((verdict && verdict.points) || []).map((p) => [String(p.point_id), p]));
+  let ids = [];
+  try {
+    ids = (Array.isArray(b.review_point_ids) ? b.review_point_ids
+                                            : JSON.parse(b.review_point_ids || '[]') || []).map(String);
+  } catch { ids = []; }
+  const criterion = String(b.criterion_text || '').trim();
+  const evidence = String(b.evidence_required || '').trim();
+  if (head) {
+    head.innerHTML = `
+      <div class="sr-wrow">
+        <span class="sr-dim">本章回应</span>
+        ${ids.length
+          ? ids.map((id) => { const m = meta.get(id) || {};
+              return `<span class="sr-wpoint">${escapeHtml(m.item || m.factor || id)}${
+                m.points != null ? `<em>${m.points} 分</em>` : ''}</span>`; }).join('')
+          : '<span class="sr-dim">骨架章节（未挂评分点）</span>'}
+        <span class="sr-wev${evidence ? '' : ' none'}">${
+          evidence ? '需举证：' + escapeHtml(evidence) : '本章无需强制举证'}</span>
+      </div>
+      ${criterion ? `<div class="sr-wcrit"><b>得分口径</b>${escapeHtml(criterion)}</div>` : ''}`;
+  }
+  const edit = document.getElementById('sr-wedit');
+  if (edit) edit.textContent = b.content || '';
+  const stat = document.getElementById('sr-wstat');
+  if (stat) stat.textContent = '';
+  const mat = document.getElementById('sr-wmatlist');
+  if (mat) mat.hidden = true;
+}
+
+async function saveWriteBlock() {
+  const b = writeBlocks.find((x) => String(x.block_id) === writeActiveId);
+  const stat = document.getElementById('sr-wstat');
+  if (!b || !stat) return;
+  const content = document.getElementById('sr-wedit')?.innerText ?? '';
+  stat.textContent = '保存中…';
+  try {
+    await api.blocks.update(b.id ?? b.block_id, content);
+    b.content = content;
+    writeStats = { total: writeBlocks.length,
+                   written: writeBlocks.filter((x) => (x.content || '').trim()).length };
+    paintWriteList(document.getElementById('sr-wsearch')?.value || '');
+    refreshStageHint();
+    stat.textContent = '已保存';
+  } catch (e) {
+    stat.textContent = `保存失败：${e.message}`;
+  }
+}
+
+async function genWriteBlock() {
+  const stat = document.getElementById('sr-wstat');
+  if (!stat) return;
+  if (!currentThreadId) { stat.textContent = '还没有运行记录，请先在①拆分评分点'; return; }
+  stat.textContent = '已提交生成请求…';
+  try {
+    const r = await fetch(`/api/workflow/${currentThreadId}/regen`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ block_ids: [writeActiveId] }),
+    });
+    // 如实说明：regen 要运行中的 run 才真正执行；停在闸门时需要先继续运行
+    stat.textContent = r.ok
+      ? '已提交生成；完成后重新点该章节即可看到正文（若运行停在闸门，请先在状态行继续）'
+      : `提交失败（HTTP ${r.status}）：若运行已停在闸门，请先在状态行继续运行`;
+  } catch (e) {
+    stat.textContent = `提交失败：${e.message}`;
+  }
+}
+
+async function toggleWriteMaterials() {
+  const box = document.getElementById('sr-wmatlist');
+  const b = writeBlocks.find((x) => String(x.block_id) === writeActiveId);
+  if (!box || !b) return;
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = '<div class="sr-note">正在检索本章相关素材…</div>';
+  try {
+    const r = await fetch(`/api/blocks/${b.id}/matched-sources`);
+    const data = r.ok ? await r.json() : null;
+    const list = Array.isArray(data) ? data : (data?.sources || []);
+    box.innerHTML = list.length
+      ? list.slice(0, 8).map((x) => `
+          <div class="sr-wmat">
+            <div class="sr-wmatsrc">${escapeHtml(x.filename || x.source_file || '素材')}${
+              x.page ? ` · 第 ${x.page} 页` : ''}</div>
+            <div class="sr-wmattxt">${escapeHtml(String(x.content || x.snippet || '').slice(0, 180))}</div>
+          </div>`).join('')
+        + '<div class="sr-note">这里只做按需查看；引用动作在「方案编辑」页的素材抽屉里完成。</div>'
+      : '<div class="sr-note">暂无匹配素材。先在素材库上传并匹配。</div>';
+  } catch (e) {
+    box.innerHTML = `<div class="sr-flash err">素材加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function renderReviewPane() {
+  const body = document.getElementById('sr-review-body');
+  if (!body) return;
+  const key = `${projectId}|${currentThreadId || ''}`;
+  if (reviewHydratedKey === key && body.dataset.ready) return;
+  body.innerHTML = '<div class="sr-note">正在加载评审结论…</div>';
+  const data = await loadVerdict();
+  if (!data) {
+    body.innerHTML = '<div class="sr-flash err">评审结论暂时取不到（接口未返回）。</div>';
+    return;
+  }
+  const s = data.summary || {};
+  reviewSummary = s;
+  reviewHydratedKey = key;
+  body.dataset.ready = '1';
+  const VERDICT = { ok: ['满足', 'ok'], medium: ['部分满足', 'part'],
+                    high: ['不满足', 'bad'], unreviewed: ['未评审', 'none'] };
+  const pct = s.score_max ? Math.round((s.score_estimated || 0) / s.score_max * 100) : 0;
+  body.innerHTML = `
+    <div class="sr-kpis">
+      <div class="sr-kpi ok"><span>得分预估</span><strong>${s.score_estimated ?? 0} / ${s.score_max ?? 0}</strong>
+        <em>${pct}% 满分${s.score_pending ? ` · 另有 ${s.score_pending} 分待评` : ''}</em></div>
+      <div class="sr-kpi warn"><span>缺口</span><strong>${s.gaps ?? 0} 项</strong>
+        <em>未满足的得分要点</em></div>
+      <div class="sr-kpi"><span>不满足 / 部分满足</span><strong>${s.high ?? 0} / ${s.medium ?? 0}</strong>
+        <em>满足 ${s.ok ?? 0} · 未评审 ${s.unreviewed ?? 0}</em></div>
+      <div class="sr-kpi"><span>需举证章节</span><strong>${s.evidence_chapters ?? 0} 章</strong>
+        <em>有举证要求的章节</em></div>
+      <div class="sr-kpi"><span>成本</span><strong>${Math.round((s.cost_tokens || 0) / 10000)} 万 token</strong>
+        <em>本标包累计</em></div>
+    </div>
+    <div class="sr-vlist">${(data.points || []).map((p) => {
+      const [lab, cls] = VERDICT[p.verdict] || ['—', 'none'];
+      return `<details class="sr-vrow"><summary>
+        <span class="sr-vpoint">${escapeHtml(p.item || p.factor || p.point_id)}<em>${escapeHtml(p.factor || '')}</em></span>
+        <span class="sr-vnum">${p.points} 分</span>
+        <span class="sr-vnum">${p.chapters_total} 章</span>
+        <span class="sr-vpill ${cls}">${lab}</span>
+        <span class="sr-vmiss">${(p.missing_points || []).slice(0, 2).map(escapeHtml).join('；') || '—'}</span>
+        <span class="sr-vpill ${p.evidence_chapters ? 'part' : 'none'}">${
+          p.evidence_chapters ? `需举证 ${p.evidence_chapters} 章` : '无需举证'}</span>
+        <span class="sr-vest">${p.estimated_score == null ? '待评' : `${p.estimated_score} 分`}</span>
+      </summary>
+      <table class="sr-table"><thead><tr><th>章节</th><th>评审</th><th>缺失的得分要点</th></tr></thead>
+        <tbody>${(p.chapters || []).map((c) => {
+          const [l2, c2] = VERDICT[c.risk] || ['—', 'none'];
+          return `<tr><td>${escapeHtml(c.title)}</td><td><span class="sr-vpill ${c2}">${l2}</span></td>
+            <td>${(c.missing_points || []).map(escapeHtml).join('；') || '—'}</td></tr>`; }).join('')
+          || '<tr><td colspan="3" class="sr-dim">该评分点暂无承载章节</td></tr>'}</tbody></table>
+      </details>`; }).join('') || '<div class="sr-note">暂无评分点。</div>'}</div>
+    <div class="sr-note" style="padding:8px 15px">
+      这里是按评分点把关；章节级的正文与评审意见仍在
+      <a href="/review?projectId=${projectId}${currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}"
+         style="color:var(--accent)">质量检查页</a>。</div>`;
+}
+
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   // 拆分进行中：报告此时是空的（旧数据已被清），画出来只会得到空标包下拉 +
-  // "还没拆解出来"这类矛盾文案。保持加载态，等 onDone 再画。
-  if (splitInProgress) { showSplitPanelLoading('正在拆分评审点…'); return; }
+  // "暂未拆分"这类矛盾文案。保持加载态，等 onDone 再画。
+  if (splitInProgress) { showSplitPanelLoading('正在拆分评分点…'); return; }
   let wantStage = stageIn;
   // 兼容旧的 tab 写法（'commerce'/'confirm'/'directory'…）→ 映射到阶段 + 子页签
   if (tab && !wantStage) {
@@ -2581,9 +2861,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     const host = document.getElementById('split-panel-inline');
     if (host) {
       host.hidden = false;
-      host.innerHTML = `<div class="sr-box"><div class="sr-head"><b>拆分评审点</b>
-        <span class="sr-dim" style="margin-left:auto;">拆解结果</span></div>
-        <div style="padding:14px 18px" class="sr-flash err">拆分清单暂时取不到（接口未返回）。请稍后重试，或点「重新拆分评审点」。</div></div>`;
+      host.innerHTML = `<div class="sr-box"><div class="sr-head"><b>拆分评分点</b>
+        <span class="sr-dim" style="margin-left:auto;">拆分结果</span></div>
+        <div style="padding:14px 18px" class="sr-flash err">拆分清单暂时取不到（接口未返回）。请稍后重试，或点「重新拆分评分点」。</div></div>`;
       splitPanelExpanded = true;
     }
     return;
@@ -2592,7 +2872,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const rp = data.review_points || {}, su = data.scoring_units || {};
   const tm = data.tech_matrix || {}, mp = data.mapping || {};
   const smap = data.scoring_map || {};
-  // 「评分点确认」必须按**当前版本**判定：重新拆解产生新版本后，
+  // 「评分点确认」必须按**当前版本**判定：重新拆分产生新版本后，
   // 旧版本的作答不算数 —— 否则该项一直显示"已作答"、确认按钮再也不出现，
   // 用户只剩页脚那个按钮可点（实测反馈"这个我要怎么确认？"）。
   const rpAns = (data.answers || {}).review_points || {};
@@ -2606,14 +2886,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const settled = conf.filter(c => !c.needs_confirm);
 
   // ── 两阶段流程（用户要求）：先确认**评分点**，再确认**目录拆分** ──
-  // 点「拆分评审点」→ 解析 → ① 评审点 → ② 待确认 → ③ 产物点
+  // 点「拆分评分点」→ 解析 → ① 评分点 → ② 待确认 → ③ 产物
   // → 再确认目录结构 → 收起、展示最终应答目录。
   const answers = data.answers || {};
   const pointsConfirmed = rpCurrent;      // 同一判定，避免两处口径不一致
   const stage = pointsConfirmed ? 'structure' : 'points';
 
   const curScope = data.project_scope || {};
-  // 每个标包各自的评分点（后端 package_points）：用户反馈"我拆解了 3 个标包，
+  // 每个标包各自的评分点（后端 package_points）：用户反馈"我拆分了 3 个标包，
   // 但后面的评分点又好像对应不上"—— 之前明细页只有当前标包的数据。
   // ── 查看范围：标包下拉决定"下面所有内容看哪个标包" ──
   const viewPkg = panelViewPkg || {
@@ -2652,7 +2932,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const hasProducts = isRunScope;
   const matrixRows = data.package_matrix || [];
   // ── 三段式门控（用户口径）──
-  //   ① 拆解：商务评分点 / 技术评分点 / 技术规范书拆解（三个并列块，都是"依据"）
+  //   ① 拆分：商务评分点 / 技术评分点 / 技术规范书要求（三个并列块，都是"依据"）
   //   ② 待确认：三块都拆完才出现（内容是本步真正要用户决定的）
   //   ③ 产物：**确认完成后**才出现 —— 目录 + 技术与评分点映射矩阵
   // 用户原话：「目前"两个产物"和"待确认"的内容在这一步是没有意义的。必须等商务和技术的
@@ -2663,13 +2943,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const techStat = catStat('tech');
   const priceStat = catStat('price');
   const specCount = Number(tm.count || 0);
-  // 该标包**实际有的**类别 → 决定显示哪些拆解页签（没有的不显示空页签）
+  // 该标包**实际有的**类别 → 决定显示哪些拆分页签（没有的不显示空页签）
   const pointTabs = [
     commerceStat ? { id: 'commerce', label: '商务评分点', badge: `${commerceStat.count}` } : null,
     techStat ? { id: 'tech', label: '技术评分点', badge: `${techStat.count}` } : null,
     priceStat ? { id: 'price', label: '报价评分点', badge: `${priceStat.count}` } : null,
   ].filter(Boolean);
-  // "三块都拆完" = 该标包的各类评分点都在 + 技术规范书拆解有内容
+  // "三块都拆完" = 该标包的各类评分点都在 + 技术规范书要求有内容
   const analyzedAll = pointTabs.length > 0 && specCount > 0;
   // "已确认" = 运行级作答里已经有 categories（要生成哪些类别）
   const confirmedCats = ((data.answers || {}).categories || {}).categories || [];
@@ -2700,7 +2980,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       if (!topics.length) {
         ctrl = `<div class="sr-answer"><span class="sr-dim">没有未归属的主题，无需处理。</span></div>`;
       } else if (!chapters.length) {
-        ctrl = `<div class="sr-answer"><span class="sr-dim">目录里还没有可选章节，先拆出目录再指定归属。</span>
+        ctrl = `<div class="sr-answer"><span class="sr-dim">目录里暂无可选章节，先拆分出目录再指定归属。</span>
           <button class="mw-btn" data-save="skip" data-key="topic_placement">跳过</button></div>`;
       } else {
         const opts = chapters.map(ch =>
@@ -2764,11 +3044,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     { label: '技术评分点', value: techStat ? `${techStat.count} 个` : '—',
       sub: techStat ? `合计 ${techStat.score} 分` : '该标包无技术评分点',
       cls: techStat ? 'ok' : 'pending' },
-    { label: '技术规范书拆解', value: specCount ? `${specCount} 条` : '—',
+    { label: '技术规范书要求', value: specCount ? `${specCount} 条` : '—',
       sub: specCount ? `${tm.topic_count || 0} 个主题` : '还没拆出要求',
       cls: specCount ? 'ok' : 'pending' },
     { label: '待确认', value: analyzedAll ? `${pending.length} 项` : '未就绪',
-      sub: analyzedAll ? (pending.length ? '需要你确认' : '已确认') : '等三块拆解完成',
+      sub: analyzedAll ? (pending.length ? '需要你确认' : '已确认') : '等三块拆分完成',
       cls: analyzedAll ? (pending.length ? 'warn' : 'ok') : 'pending' },
     { label: '产物 · 目录', value: generated ? `${su.unit_count || 0} 个` : '—',
       sub: generated ? `${su.sub_item_count || 0} 详细项`
@@ -2813,7 +3093,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   // 绝不能继续显示上一个标包的内容（这正是"评分点对应不上标包"的来源）。
   const notGenerated = (what) => `
     <div class="sr-empty">
-      <b>${escapeHtml(viewLabel)}</b> 还没有生成目录${what ? `，因此${what}暂时没有内容` : ''}。
+      <b>${escapeHtml(viewLabel)}</b> 暂无目录${what ? `，因此${what}暂时没有内容` : ''}。
       <div class="sr-dim" style="margin-top:5px">
         它的评分点可以在「依据 · 招标文件评分点」看到；
         要按这个标包出目录，点上方的「按此范围生成目录」。
@@ -2860,7 +3140,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   splitPanelFlashKind = '';
   const CAT_HINT = { tech: '技术应答目录', commerce: '商务应答目录', price: '报价应答目录', other: '其他应答目录' };
   // ── 内容区：按三段式组织 ──
-  // 拆解层三个块（商务评分点 / 技术评分点 / 技术规范书拆解）+ 待确认 + 产物两个
+  // 拆分层三个块（商务评分点 / 技术评分点 / 技术规范书要求）+ 待确认 + 产物两个
   /**
    * 把评分口径解析成**结构化的得分条件**。
    *
@@ -2929,18 +3209,18 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   };
 
   const notAnalyzedHint = (what) => `
-    <div class="sr-empty">${escapeHtml(viewLabel)} 的${what}还没拆解出来。
-      <div class="sr-dim" style="margin-top:5px">先点左下「拆分评审点」按该标包重新拆解。</div>
+    <div class="sr-empty">${escapeHtml(viewLabel)} 的${what}暂未拆分。
+      <div class="sr-dim" style="margin-top:5px">请点上方「拆分评分点」按该标包重新拆分。</div>
     </div>`;
 
   // ② 待确认：唯一需要用户决定的界面；确认后才会出现产物
   const confirmPane = !analyzedAll ? `
       <div class="sr-empty">
-        <b>待确认还差一步</b>：三块拆解（${pointTabs.map(t => t.label).join(' / ')} / 技术规范书拆解）
+        <b>待确认还差一步</b>：三块拆分（${pointTabs.map(t => t.label).join(' / ')} / 技术规范书要求）
         都完成后，这里才会出现需要你确认的内容。
         <div class="sr-dim" style="margin-top:5px">
           ${pointTabs.length ? `评分点已拆出 ${pointTabs.map(t => `${t.label} ${t.badge} 个`).join('、')}；` : ''}
-          技术规范书拆解 ${specCount ? `已拆出 ${specCount} 条` : '还没拆出'}。
+          技术规范书要求 ${specCount ? `已拆出 ${specCount} 条` : '还没拆出'}。
         </div>
       </div>` : `
       <h4>待确认：确认后生成产物</h4>
@@ -2983,16 +3263,16 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-empty">正在生成 / 还没生成目录。
         <div class="sr-dim" style="margin-top:5px">
           已确认：${escapeHtml(viewLabel)} · ${(confirmedCats || []).join('、')}。
-          可在「待确认」里重新确认，或点左下「拆分评审点」重跑。</div>
+          可在「待确认」里重新确认，或点左下「拆分评分点」重跑。</div>
       </div>` : '');
 
   // ── 阶段内的子页签内容 ──
-  // 评审点 = 商务 / 技术 /（报价）/ 技术规范书拆解；产物点 = 目录 / 映射矩阵
+  // 评分点 = 商务 / 技术 /（报价）/ 技术规范书要求；产物 = 目录 / 映射矩阵
   const reviewSubs = [
     commerceStat ? { id: 'commerce', label: '商务评分点', n: commerceStat.count } : null,
     techStat ? { id: 'tech', label: '技术评分点', n: techStat.count } : null,
     priceStat ? { id: 'price', label: '报价评分点', n: priceStat.count } : null,
-    { id: 'spec', label: '技术规范书拆解', n: specCount },
+    { id: 'spec', label: '技术规范书要求', n: specCount },
   ].filter(Boolean);
   const specHtml = (specCount || tm.topics?.length) ? `
       <div class="sr-note">来自<b>技术规范书</b>，按标包/标的归属：
@@ -3001,7 +3281,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           ? `　来源：${(tm.source_files || []).map(escapeHtml).join('、')}` : ''}。</div>
       <table class="sr-table"><thead><tr><th>主题</th><th class="sr-num">条数</th>
         <th>要求</th><th>来源文件</th></tr></thead>
-        <tbody>${techRows}</tbody></table>` : notAnalyzedHint('技术规范书拆解');
+        <tbody>${techRows}</tbody></table>` : notAnalyzedHint('技术规范书要求');
   const reviewPanes = {
     commerce: catTable(commerceStat, '商务'),
     tech: catTable(techStat, '技术'),
@@ -3031,26 +3311,33 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-note">未落点要求 ${(mp.unmapped_requirements || []).length} 条；
         未关联评分点的要求 ${(mp.requirements_without_point || []).length} 条。</div>`,
   };
-  // 阶段状态（默认 ① 评审点）：点左侧竖条切换，子页签在阶段内切换
+  // 阶段状态（默认 ① 评分点）：点左侧竖条切换，子页签在阶段内切换
   const STAGES = [
-    { id: '1', label: '评审点', sub: '拆商务/技术/规范书' },
+    { id: '1', label: '评分点', sub: '拆商务/技术/规范书' },
     { id: '2', label: '待确认', sub: '确认后进入产物' },
-    { id: '3', label: '产物点', sub: '目录 · 映射矩阵' },
-    // ④⑤ 不在本面板内：按原型它们是同一条主线的后续阶段，点击跳到对应视图
-    { id: '4', label: '编写', sub: '按章 · 按需举证',
-      href: () => `/three-mode?projectId=${projectId}&view=editor${
-        currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}` },
-    { id: '5', label: '评审', sub: '按评分点把关',
-      href: () => `/review?projectId=${projectId}${
-        currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}` },
+    { id: '3', label: '产物', sub: '目录 · 映射矩阵' },
+    // ④⑤ **也在这个面板里**（用户强调的布局约定：左侧五步，点每一步在右侧展示对应内容，
+    // 不做整页跳转）。编写面板＝章节列表 + 章头(本章回应) + 正文 + 按需素材；
+    // 评审面板＝评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻。
+    { id: '4', label: '编写', sub: '按章 · 按需举证' },
+    { id: '5', label: '评审', sub: '按评分点把关' },
   ];
-  const stageState = (st) => (st === '3'
-    ? (categoriesConfirmed
-        ? (generated ? 'done' : '')
-        : 'gated')
-    : (st === '2' ? (analyzedAll ? (categoriesConfirmed ? 'done' : '') : 'gated') : 'done'));
-  const stageHint = (st) => (st === '2'
-    ? (analyzedAll ? `共 ${pending.length} 项；确认完才会输出产物` : '等三块拆解完成')
+  const stageState = (st) => {
+    if (st === '4') return writeStats.written ? 'done' : (totalBlocks ? '' : 'gated');
+    if (st === '5') return reviewSummary.points_total && !reviewSummary.unreviewed ? 'done' : '';
+    if (st === '3') return categoriesConfirmed ? (generated ? 'done' : '') : 'gated';
+    if (st === '2') return analyzedAll ? (categoriesConfirmed ? 'done' : '') : 'gated';
+    return 'done';
+  };
+  const stageHint = (st) => (st === '4'
+    ? (totalBlocks ? `已写 ${writeStats.written} / ${writeStats.total} 章 · 章头常驻评分点与举证` : '等目录生成后再撰写')
+    : (st === '5'
+        ? (reviewSummary.points_total
+            ? `得分预估 ${reviewSummary.score_estimated ?? 0} / ${reviewSummary.score_max ?? 0} · 缺口 ${reviewSummary.gaps ?? 0} 项`
+            : '等生成正文后按评分点评审')
+        : stageHintLegacy(st)));
+  const stageHintLegacy = (st) => (st === '2'
+    ? (analyzedAll ? `共 ${pending.length} 项；确认完才会输出产物` : '等三块拆分完成')
     : (st === '3'
         ? (categoriesConfirmed
             ? (generated ? `已生成：目录 ${su.unit_count || 0} · 映射 ${(mp.point_to_requirement || []).length}`
@@ -3069,9 +3356,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   el.innerHTML = `
     <div class="sr-box">
       <div class="sr-head">
-        <b>拆分评审点</b>
-        <span class="sr-step-arrow">左侧选阶段：评审点 → 待确认 → 产物点</span>
-        <button class="mw-btn" data-act="redraft" style="margin-left:auto;">重新拆分评审点</button>
+        <b>拆分评分点</b>
+        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
+        <button class="mw-btn" data-act="redraft" style="margin-left:auto;">重新拆分评分点</button>
       </div>
       <div class="sr-filter">
         <span class="sr-filter-k">筛选</span>
@@ -3103,7 +3390,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         </nav>
         <section class="sr-stack">
           <div class="sr-stage" data-stage="1">
-            <div class="sr-stage-head"><span class="t">评审点</span>
+            <div class="sr-stage-head"><span class="t">评分点</span>
               <span class="hint">${stageHint('1')}</span></div>
             <div class="sr-stage-body">
               <div class="sr-subtabs">${reviewSubs.map(x => `
@@ -3118,13 +3405,29 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
             <div class="sr-stage-body">${confirmPane}</div>
           </div>
           <div class="sr-stage" data-stage="3">
-            <div class="sr-stage-head"><span class="t">产物点</span>
+            <div class="sr-stage-head"><span class="t">产物</span>
               <span class="hint">${stageHint('3')}</span></div>
             <div class="sr-stage-body">
               <div class="sr-subtabs">${prodSubs.map(x => `
                 <span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
               ${prodSubs.map(x => `
                 <div class="sr-subpane" data-sub="${x.id}">${prodPanes[x.id] || ''}</div>`).join('')}
+            </div>
+          </div>
+          <!-- ④ 编写：章节列表 + 章头（本章回应）+ 正文 + 按需素材 -->
+          <div class="sr-stage" data-stage="4">
+            <div class="sr-stage-head"><span class="t">编写</span>
+              <span class="hint">${stageHint('4')}</span></div>
+            <div class="sr-stage-body" id="sr-write-body">
+              <div class="sr-note">正在加载章节…</div>
+            </div>
+          </div>
+          <!-- ⑤ 评审：评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻 -->
+          <div class="sr-stage" data-stage="5">
+            <div class="sr-stage-head"><span class="t">评审</span>
+              <span class="hint">${stageHint('5')}</span></div>
+            <div class="sr-stage-body" id="sr-review-body">
+              <div class="sr-note">正在加载评审结论…</div>
             </div>
           </div>
         </section>
@@ -3181,6 +3484,68 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-empty{color:var(--muted);font-size:12.5px;padding:6px 0}
   .sr-flash{margin:8px 15px;padding:7px 11px;border-radius:7px;font-size:12.5px;
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
+  /* ── ④编写 / ⑤评审：沿用同一套面板容器与 token ── */
+  .sr-write{display:flex; align-items:stretch; min-height:420px}
+  .sr-wtree{flex:0 0 216px;border-right:1px solid var(--line);background:var(--panel-soft,#fafbfc);
+    display:flex;flex-direction:column;min-width:0}
+  .sr-wsearch{margin:8px 10px;padding:5px 8px;font:inherit;font-size:12.5px;
+    border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff)}
+  .sr-wlist{flex:1;overflow:auto;padding-bottom:8px}
+  .sr-wnode{display:flex;align-items:center;gap:6px;padding:5px 10px;font-size:12.5px;cursor:pointer;
+    border-left:2px solid transparent}
+  .sr-wnode:hover{background:var(--panel,#fff)}
+  .sr-wnode.on{background:var(--panel,#fff);border-left-color:var(--accent);color:var(--accent);font-weight:600}
+  .sr-wnode.l2{padding-left:20px}
+  .sr-wnode.l3{padding-left:30px;color:var(--muted)}
+  .sr-wnode .sr-wname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-wnode .sr-wtag{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .sr-wmain{flex:1;min-width:0;display:flex;flex-direction:column}
+  .sr-whead{padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel,#fff)}
+  .sr-wrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sr-wrow .sr-dim{font-size:11.5px}
+  .sr-wpoint{font-size:12.5px;font-weight:600}
+  .sr-wpoint em{font-style:normal;color:var(--success);margin-left:5px}
+  .sr-wev{font-size:12px;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);
+    border-radius:999px;padding:1px 8px}
+  .sr-wev.none{color:var(--muted);background:var(--panel,#fff);border-color:var(--line)}
+  .sr-wcrit{margin-top:5px;font-size:12px;color:var(--ink-2);line-height:1.6}
+  .sr-wcrit b{color:var(--muted);margin-right:5px}
+  .sr-wedit{flex:1;min-height:240px;padding:12px 14px;font-size:13px;line-height:1.75;background:var(--panel,#fff);
+    outline:none;overflow:auto;white-space:pre-wrap}
+  .sr-wedit:empty::before{content:attr(data-placeholder);color:var(--muted-2,#8a97a8)}
+  .sr-wfoot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--line);
+    background:var(--panel,#fff)}
+  .sr-wfoot .sr-wstate{font-size:11.5px;color:var(--muted)}
+  .sr-wfoot .sr-wright{margin-left:auto}
+  .sr-wmatlist{border-top:1px solid var(--line);background:var(--panel-soft,#fafbfc);padding:8px 14px;max-height:230px;overflow:auto}
+  .sr-wmat{border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff);padding:7px 9px;margin:6px 0}
+  .sr-wmatsrc{font-size:11px;color:var(--accent)}
+  .sr-wmattxt{font-size:12px;color:var(--muted);margin-top:2px}
+  .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
+  .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
+  .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  .sr-kpis{display:flex;gap:8px;flex-wrap:wrap;padding:10px 15px 4px}
+  .sr-kpi{flex:1 1 140px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;background:var(--panel,#fff);
+    display:flex;flex-direction:column;gap:1px}
+  .sr-kpi span{font-size:11.5px;color:var(--muted)}
+  .sr-kpi strong{font-size:16px}
+  .sr-kpi em{font-size:11px;color:var(--muted);font-style:normal}
+  .sr-kpi.ok{border-color:var(--success-soft);background:var(--success-soft)}
+  .sr-kpi.warn{border-color:var(--warn-soft);background:var(--warn-soft)}
+  .sr-vlist{padding:6px 15px 12px}
+  .sr-vrow{border:1px solid var(--line);border-radius:9px;background:var(--panel,#fff);margin-bottom:6px}
+  .sr-vrow>summary{display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;font-size:12.5px}
+  .sr-vrow>summary:hover{background:var(--panel-soft,#fafbfc)}
+  .sr-vpoint{flex:1;font-weight:600;min-width:0}
+  .sr-vpoint em{font-style:normal;color:var(--muted);font-weight:400;font-size:11.5px;margin-left:6px}
+  .sr-vnum{flex:0 0 52px;color:var(--muted)}
+  .sr-vmiss{flex:1.4;color:var(--danger);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-vest{flex:0 0 58px;text-align:right;font-weight:600}
+  .sr-vpill{flex:0 0 auto;font-size:11.5px;border-radius:999px;padding:0 7px;border:1px solid var(--line);white-space:nowrap}
+  .sr-vpill.ok{color:var(--success);background:var(--success-soft);border-color:var(--success-soft)}
+  .sr-vpill.part{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-soft)}
+  .sr-vpill.bad{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-soft)}
+  .sr-vpill.none{color:var(--muted)}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-inline-err{color:#b91c1c}
   /* 目录区顶部工具条：只放入口与投标范围（覆盖率模块已按用户要求删除） */
@@ -3198,7 +3563,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-spinner{width:14px;height:14px;border-radius:50%;border:2px solid #bfdbfe;
     border-top-color:#2563eb;animation:sr-spin .8s linear infinite;display:inline-block}
   @keyframes sr-spin{to{transform:rotate(360deg)}}
-  /* 不再固定 520px 高：产物点未生成时内容只有两行，固定高度会留一大片空白（用户反馈） */
+  /* 不再固定 520px 高：产物未生成时内容只有两行，固定高度会留一大片空白（用户反馈） */
   .sr-body{display:flex;align-items:stretch;min-height:0}
   .sr-rail{flex:0 0 172px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0;
     align-self:stretch}
@@ -3291,24 +3656,24 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       t.classList.toggle('on', t.dataset.sub === panelSub));
   };
   el.querySelectorAll('.sr-rail-item').forEach(r => r.addEventListener('click', () => {
-    const meta = STAGES.find(x => x.id === r.dataset.stage);
-    if (meta?.href) { location.href = meta.href(); return; }   // ④编写 / ⑤评审：切视图
     panelStage = r.dataset.stage;
     panelSub = '';                 // 换阶段时子页签回到该阶段的第一个
     applyStage(); applySub();
+    hydrateStage(panelStage);      // ④⑤ 按需拉数据（已拉过不重复）
   }));
   el.querySelectorAll('.sr-subtab').forEach(t => t.addEventListener('click', () => {
     panelSub = t.dataset.sub;
     applySub();
   }));
   applyStage(); applySub();
+  hydrateStage(panelStage);
 
   el.addEventListener('click', async (e) => {
     // 收起：拆下面板，露出目录（确认与否都能收起，收起不等于确认）
 
     // 重新拆分：复用状态栏那个入口（带后端预检，原料变过时引导到「重新提炼」）
     if (e.target.closest?.('[data-act="redraft"]')) {
-      // 「重新拆分评审点」= 从零开始（清空旧结果再跑），与左下主按钮同一语义
+      // 「重新拆分评分点」= 从零开始（清空旧结果再跑），与左下主按钮同一语义
       el.remove();
       await restartExtraction();
       return;
@@ -3434,13 +3799,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       });
       const n = Object.keys(map).length;
       if (!n) {
-        splitPanelFlash = '还没有选择任何归属。想指定就在主题右侧选一章；不想指定就点「全部保持默认」。';
+        splitPanelFlash = '暂无归属选择。想指定就在主题右侧选一章；不想指定就点「全部保持默认」。';
         splitPanelFlashKind = 'err';
         inlineFlash(host, splitPanelFlash, splitPanelFlashKind);
         return;
       }
       value = map;
-      splitPanelFlash = `已保存 ${n} 个主题的归属；其余保持默认。下次「拆分评审点」按它挂载。`;
+      splitPanelFlash = `已保存 ${n} 个主题的归属；其余保持默认。下次「拆分评分点」按它挂载。`;
     } else if (kind === 'structure') {
       value = { confirmed: true };
       splitPanelFlash = '结构已确认。';
@@ -3474,7 +3839,7 @@ async function warnIfOutlineNotDerived(tid) {
   box.id = 'raw-toc-warn';
   box.className = 'raw-toc-warn';
   box.innerHTML = `
-    <strong>当前显示的是招标文件原始目录（${chk.source_sections} 节），应答目录还没有派生。</strong>
+    <strong>当前显示的是招标文件原始目录（${chk.source_sections} 节），应答目录未派生。</strong>
     <span>那次运行在解析阶段就中断了。请点上方「重新拆分目录」按已解析的内容派生应答目录；
           确认目录前不要直接开始提炼。</span>`;
   blocksList.parentElement?.insertBefore(box, blocksList);
@@ -3483,9 +3848,9 @@ async function warnIfOutlineNotDerived(tid) {
 
 async function loadExistingBlocks({ silent = false, keepSelection = false } = {}) {
   // ── 拆分进行中：**什么都不渲染** ──
-  // 只保留面板里的加载态（"⟳ 正在拆分评审点…"）。以前这个拦截放在函数末尾，
+  // 只保留面板里的加载态（"⟳ 正在拆分评分点…"）。以前这个拦截放在函数末尾，
   // 而"库里没有章节"的分支在它之前就执行了 → 拆分期间底部又会冒出
-  // 「上传应标文件后点击「拆分评审点」开始」，与"正在拆分"自相矛盾（用户反馈）。
+  // 「上传应标文件后点击「拆分评分点」开始」，与"正在拆分"自相矛盾（用户反馈）。
   if (splitInProgress) {
     if (blocksList) { blocksList.hidden = true; blocksList.style.display = 'none'; }
     const ee0 = document.getElementById('blocks-empty');
@@ -3574,7 +3939,7 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   refreshChapterEvidenceIndex();
   // 第①步（只拆评分点）之后：目录尚未生成 →
   //   1) **隐藏上一版目录**（否则和"只拆评分点"自相矛盾：下面还挂着旧目录）；
-  //   2) 显示占位指引；3) 展开「拆解评分点」面板（默认展示全部内容，无需再点"展开"）。
+  //   2) 显示占位指引；3) 展开「拆分评分点」面板（默认展示全部内容，无需再点"展开"）。
   // 必须放在**树渲染之后**：早于树渲染会被后续的构建/切换盖掉（实测面板不出现）。
   // 说明：原来这里还有一个「评分点已拆出，目录还没生成…」的占位块（#blocks-pending），
   // 它与面板里的说明**完全重复**（用户反馈），已删除；需要引导时由面板自身承担。
@@ -3658,7 +4023,7 @@ async function resyncFromDb() {
 // ── 提炼流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
-  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分评审点」开始</p>';
+  blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分评分点」开始</p>';
   blocksEmpty.style.display = 'block';
   sidebarToc.innerHTML = '';
   totalBlocks = 0; doneBlocks = 0;
@@ -3781,7 +4146,7 @@ async function recoverStreamAfterDrop() {
   }
   // 图确实停在中途、进程也不认得它（alive=false）：才值得试一次 recover 把 _Run 建回来
   if (!RECOVERABLE_STAGES.has(currentStage) || streamRecoverCount >= MAX_STREAM_RECOVER) {
-    // 任务已不存在：**必须解除加载态**，否则面板会永远停在「正在拆分评审点…」
+    // 任务已不存在：**必须解除加载态**，否则面板会永远停在「正在拆分评分点…」
     // （实测：后端重启把运行清掉后，页面就卡成转圈，而顶部已经在提示"请刷新页面重试"）。
     splitInProgress = false;
     outlineDrafting = false;
@@ -3982,7 +4347,7 @@ function attachStream(threadId) {
       resetWorkflowUi();
       draftRevision = Number(data?.revision) || draftRevision;
       outlineError = String(data?.error || '');
-      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分评审点」开始</p>';
+      blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分评分点」开始</p>';
       blocksEmpty.style.display = toc.length ? 'none' : 'block';
       toc.forEach(sec => {
         const block = {
@@ -4130,7 +4495,7 @@ function attachStream(threadId) {
       resyncFromDb().then(async () => {
         const st = data?.stage || '';
         // 第①步「只拆评分点」结束时：不生成目录、图直接收尾 —— 这时要主动把
-        // 「拆解结果」展开给用户（否则页面停在没有任何提示的状态）。
+        // 「拆分结果」展开给用户（否则页面停在没有任何提示的状态）。
         let pending = false;
         try {
           const tid = currentThreadId || getThread(projectId);
@@ -4157,7 +4522,7 @@ const SETTLED_STAGES = new Set(['points_review', 'outline_review', 'materials_re
 
 // 需要「按 state 恢复视图」的停留态（闸门）。failed/done 除外：它们是终态。
 // points_review：第①步（只拆评分点）结束的停留态 —— 没有目录可确认，
-// 要把「拆解结果」打开让用户选类别，所以和闸门一样按 state 恢复视图。
+// 要把「拆分结果」打开让用户选类别，所以和闸门一样按 state 恢复视图。
 const GATE_STAGES = new Set(['points_review', 'outline_review', 'materials_review']);
 
 async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
@@ -4168,7 +4533,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     currentThreadId = null;
     currentGate = null;
     resetWorkflowUi();
-    setStatusBar('idle', '该任务已作废，请重新拆分评审点', 0, 0, 0);
+    setStatusBar('idle', '该任务已作废，请重新拆分评分点', 0, 0, 0);
     return;
   }
   if (['report_review', 'done'].includes(stage)) {
@@ -4203,10 +4568,10 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
   }
   if (stage === 'points_review') {
     // 第①步（只拆评分点）的停留态：评分点已拆出、目录还没生成。
-    // 直接展开「拆解结果」，让用户选标包 + 类别后生成目录。
+    // 直接展开「拆分结果」，让用户选标包 + 类别后生成目录。
     currentGate = null;
     setStatusBar('gate_outline',
-      `评分点已拆出，请在「拆解结果」里选择要生成的目录类别（技术 / 商务 / 报价）${note ? `；${note}` : ''}`,
+      `评分点已拆出，请在「拆分结果」里选择要生成的目录类别（技术 / 商务 / 报价）${note ? `；${note}` : ''}`,
       pct, totalBlocks, doneBlocks);
     await refreshOutlineCoverage(threadId);
     splitPanelAutoOpenedFor = 0;
@@ -4259,7 +4624,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
 }
 
 /**
- * 「拆解评分点」入口：**从零开始**。
+ * 「拆分评分点」入口：**从零开始**。
  *
  * 用户口径（原话）：「重新点击『拆分评分点』，系统应该将之前生成的评分点内容清空，
  * 然后重新生成，不要保存旧数据，不然会造成很多混乱……不要让旧数据对新上传的数据产生影响。」
@@ -4291,11 +4656,11 @@ function showSplitPanelRetry(reason) {
   el.hidden = false;
   el.innerHTML = `
     <div class="sr-box">
-      <div class="sr-head"><b>拆分评审点</b>
-        <span class="sr-step-arrow">左侧选阶段：评审点 → 待确认 → 产物点</span>
-        <button class="mw-btn" data-act="redraft" style="margin-left:auto;">重新拆分评审点</button></div>
+      <div class="sr-head"><b>拆分评分点</b>
+        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
+        <button class="mw-btn" data-act="redraft" style="margin-left:auto;">重新拆分评分点</button></div>
       <div class="sr-flash err" style="margin:12px 15px;">
-        ${escapeHtml(reason)}。可以点右上「重新拆分评审点」重跑，或刷新页面后重试。</div>
+        ${escapeHtml(reason)}。可以点右上「重新拆分评分点」重跑，或刷新页面后重试。</div>
     </div>`;
   el.querySelector('[data-act="redraft"]')?.addEventListener('click', () => restartExtraction());
 }
@@ -4313,8 +4678,8 @@ function showSplitPanelLoading(text) {
   el.hidden = false;
   el.innerHTML = `
     <div class="sr-box">
-      <div class="sr-head"><b>拆分评审点</b>
-        <span class="sr-step-arrow">左侧选阶段：评审点 → 待确认 → 产物点</span></div>
+      <div class="sr-head"><b>拆分评分点</b>
+        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span></div>
       <div class="sr-loading">
         <span class="sr-spinner"></span>
         <span>${escapeHtml(text)}</span>
@@ -4329,7 +4694,7 @@ function showSplitPanelLoading(text) {
 
 async function restartExtraction() {
   if (restartInFlight) {
-    console.info('[workflow] 上一次"重新拆解"还在进行中，忽略这次点击');
+    console.info('[workflow] 上一次"重新拆分"还在进行中，忽略这次点击');
     return;
   }
   // 抑制"手抖连点"：整条链（取消 → 清库 → 起新 run）在几百毫秒内就结束了，
@@ -4337,7 +4702,7 @@ async function restartExtraction() {
   // （多余的那条会立刻被下一次 abort，白跑一次解析）。
   const now = Date.now();
   if (now - lastRestartAt < 5000) {
-    console.info('[workflow] 5 秒内重复点击"拆解评分点"，忽略');
+    console.info('[workflow] 5 秒内重复点击"拆分评分点"，忽略');
     return;
   }
   lastRestartAt = now;
@@ -4348,7 +4713,7 @@ async function restartExtraction() {
   // **立刻把旧内容换掉**：重新拆分时右侧还挂着上一次的评分点/规范书要求，
   // 与"正在重新拆分"矛盾、也让人误以为已经拆好了（用户反馈）。这里换成加载态，
   // 新的结果由 loadExistingBlocks → openSplitReport 在同一位置重绘。
-  showSplitPanelLoading('正在重新拆分评审点…');
+  showSplitPanelLoading('正在重新拆分评分点…');
   // **先取消正在跑的任务**再清库：否则旧任务会边跑边往库里写，
   // 清完之后又冒出残行（清了等于没清）。
   if (currentThreadId) {
@@ -4358,7 +4723,7 @@ async function restartExtraction() {
   try {
     const res = await api.projects.resetAnalysis(projectId);
     const n = res?.deleted?.blocks ?? 0;
-    console.info('[workflow] 已清空上次的拆解结果', res?.deleted);
+    console.info('[workflow] 已清空上次的拆分结果', res?.deleted);
     // 页面级的旧状态也要清：否则刷新或跳转回来又会按旧 thread/旧确认版本恢复视图
     try {
       sessionStorage.removeItem(`workflow:${projectId}`);
@@ -4372,7 +4737,7 @@ async function restartExtraction() {
     splitPanelAutoOpenedFor = 0;
     if (n) console.info(`[workflow] 清掉旧章节 ${n} 节`);
   } catch (err) {
-    console.warn('[workflow] 清空旧拆解结果失败，仍继续重跑', err);
+    console.warn('[workflow] 清空旧拆分结果失败，仍继续重跑', err);
   }
   if (btn) btn.disabled = false;
   try {
@@ -4401,7 +4766,7 @@ async function startExtraction(forceRestart = false) {
   setStatusBar('extracting', '准备拆分…', 0, 0, 0);
   setExtractDisabled(true);
   // 首次拆分同样先给加载态：避免上一次残留内容与新任务并存
-  showSplitPanelLoading('正在拆分评审点…');
+  showSplitPanelLoading('正在拆分评分点…');
 
   try {
     if (forceRestart && currentThreadId) {
@@ -4428,8 +4793,8 @@ async function startExtraction(forceRestart = false) {
       const resp = await api.workflow.start(projectId, {
         model: selectedModel,
         outline_instruction: readOutlineInstruction(),
-        // 第①步「拆解评分点」：只把评分点拆出来（落库 + 出矩阵），**不生成目录**。
-        // 目录留到第②步由用户在「拆解结果」里选类别后再生成（用户明确要求的两步）。
+        // 第①步「拆分评分点」：只把评分点拆出来（落库 + 出矩阵），**不生成目录**。
+        // 目录留到第②步由用户在「拆分结果」里选类别后再生成（用户明确要求的两步）。
         points_only: true,
       });
       threadId = resp?.thread_id;
@@ -4689,22 +5054,22 @@ function failedBlockCount() {
   return n;
 }
 
-// 主按钮有两个入口：左栏底部的「拆解评分点 / 素材匹配」和素材库顶部总览条的
+// 主按钮有两个入口：左栏底部的「拆分评分点 / 素材匹配」和素材库顶部总览条的
 // 「分析素材归属」。禁用态必须一起变 —— 只灰一个的话另一个看起来能点却没反应。
 function setExtractDisabled(v) {
-  // **不再禁用「拆解评分点」**（用户反馈：运行期按钮变灰，只能先去右上角点「取消」，
+  // **不再禁用「拆分评分点」**（用户反馈：运行期按钮变灰，只能先去右上角点「取消」，
   // 再回来点一次按钮 —— 两步操作纯属冗余）。现在它始终可点：
   // 运行中点它 = 自动取消当前任务 + 从零重跑（见 restartExtraction）。
   // 运行期用文案/提示表达状态，而不是把唯一的入口禁掉。
   btnExtract.disabled = false;
   btnExtract.classList.toggle('is-running', !!v);
   btnExtract.title = v
-    ? '正在拆解中 —— 点它可以取消当前任务并从零重新拆解'
-    : '按招标文件的评分点拆解应答目录';
+    ? '正在拆分中 —— 点它可以取消当前任务并从零重新拆分'
+    : '按招标文件的评分点拆分应答目录';
   const hint = document.querySelector('.materials-footer .extract-hint');
   if (hint && v) {
     hint.dataset.prev = hint.dataset.prev || hint.textContent;
-    hint.textContent = '正在拆解…点按钮可取消并重新拆解';
+    hint.textContent = '正在拆分…点按钮可取消并重新拆分';
   }
   const alt = document.getElementById('ms-match');
   if (alt) alt.disabled = !!v;      // 素材匹配没有"重跑"语义，保持禁用
@@ -4883,7 +5248,7 @@ function updateInstructionDirtyHint() {
   if (!dirty) { hint.textContent = ''; return; }
   hint.textContent = appliedInstruction
     ? '提炼要求已修改：当前目录仍是按上一版要求生成的，点「重新拆分目录」后才会生效。'
-    : '这段提炼要求还没用于生成目录：点「拆分评审点」（或「重新拆分目录」）后生效。';
+    : '这段提炼要求还没用于生成目录：点「拆分评分点」（或「重新拆分目录」）后生效。';
 }
 
 instructionInput()?.addEventListener('input', () => {
@@ -5202,8 +5567,8 @@ btnExtract.addEventListener('click', async () => {
     startMatching();
     return;
   }
-  // 「拆解评分点」= **从零开始**（用户口径）：
-  // 先清空上一次的拆解结果（评分点/规范要求/章节/作答），再新起一个 thread 重跑。
+  // 「拆分评分点」= **从零开始**（用户口径）：
+  // 先清空上一次的拆分结果（评分点/规范要求/章节/作答），再新起一个 thread 重跑。
   // 以前"有章节就 redraft"会复用旧 thread 的 config.outline_instruction 与旧作答
   // （范围/类别/主题归属），于是重新上传材料后仍是旧数据在起作用（用户实测反馈）。
   // 也不用 recover 续跑：recover 会越过 interrupt_before 的闸门继续往下。

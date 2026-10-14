@@ -10,6 +10,7 @@
   --muted-2: #8a97a8;
   --accent: #2563eb;
   --accent-soft: #e7f0ff;
+  --accent-strong: #1d4ed8;   /* 主色的加压态（hover/选中文字）：workspace.css 里原本硬编码 */
   --success: #0f9f6e;
   --success-soft: #eafbf4;
   --warn: #d97706;

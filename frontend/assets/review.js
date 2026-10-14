@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v60';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v60';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v63';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v63';
 const $ = id => document.getElementById(id);
 let activeId = new URLSearchParams(location.search).get('blockId');
 let mode = 'current', visibleLimit = 100;
@@ -92,7 +92,7 @@ async function renderVerdict() {
     ['warn',      '缺口',     `${s.gaps ?? 0} 项`, '未满足的得分要点'],
     ['',          '不满足 / 部分满足', `${s.high ?? 0} / ${s.medium ?? 0}`, `满足 ${s.ok ?? 0} · 未评审 ${s.unreviewed ?? 0}`],
     ['',          '需举证章节', `${s.evidence_chapters ?? 0} 章`, '有 evidence_required 的章节'],
-    ['',          '成本',     `${Math.round((s.cost_tokens||0)/10000)} 万 token`, '本标段累计'],
+    ['',          '成本',     `${Math.round((s.cost_tokens||0)/10000)} 万 token`, '本标包累计'],
   ].map(([cls,label,value,sub]) => `<div class="verdict-kpi ${cls}">
       <span>${label}</span><strong>${value}</strong><em>${sub}</em></div>`).join('');
 
@@ -107,7 +107,7 @@ async function renderVerdict() {
         <span class="v-pill ${RISK_CLASS[p.verdict] || 'none'}">${esc(RISK_LABEL[p.verdict] || p.verdict)}</span>
         <span class="v-miss">${(p.missing_points||[]).slice(0,2).map(esc).join('；') || '—'}</span>
         <span class="v-pill ${p.evidence_chapters ? 'part' : 'none'}"
-          title="有举证要求的章节数（是否真的引用了素材尚未落库）">
+          title="有举证要求的章节数（是否真的引用了素材未落库）">
           ${p.evidence_chapters ? `需举证 ${p.evidence_chapters} 章` : '无需举证'}</span>
         <span class="v-est">${p.estimated_score == null ? '待评' : `${p.estimated_score} 分`}</span>
       </summary>
@@ -118,9 +118,9 @@ async function renderVerdict() {
             <td><span class="v-pill ${RISK_CLASS[c.risk] || 'none'}">${esc(RISK_LABEL[c.risk] || c.risk)}</span></td>
             <td>${(c.missing_points||[]).map(esc).join('；') || '—'}</td>
             <td>${c.score_weight != null ? c.score_weight : '—'}</td></tr>`).join('')
-          || '<tr><td colspan="4" class="ws-muted">该评分点还没有承载章节</td></tr>'}</tbody>
+          || '<tr><td colspan="4" class="ws-muted">该评分点暂无承载章节</td></tr>'}</tbody>
       </table>
-    </details>`).join('') : '<p class="ws-muted">还没有拆解出评分点。先在「要求与大纲」完成拆分。</p>';
+    </details>`).join('') : '<p class="ws-muted">暂未拆分出评分点。先在「要求与大纲」完成拆分。</p>';
 }
 
 subscribe(() => {
@@ -155,7 +155,7 @@ $('model-selector-btn').onclick = async () => {
   const dialog = openDialog('模型配置','<p>加载中…</p>');
   try {
     const data = await request('/api/configs');
-    dialog.querySelector('.ws-dialog-body').innerHTML = `<p>工作流使用服务器配置的模型池。</p>${(data.configs || []).map(c=>`<p>${esc(c.name || c.model)}</p>`).join('') || '<p>尚未配置模型。</p>'}<p><a href="${esc(workspaceUrl('editor'))}">在方案编辑页管理 API 配置</a></p>`;
+    dialog.querySelector('.ws-dialog-body').innerHTML = `<p>工作流使用服务器配置的模型池。</p>${(data.configs || []).map(c=>`<p>${esc(c.name || c.model)}</p>`).join('') || '<p>未配置模型。</p>'}<p><a href="${esc(workspaceUrl('editor'))}">在方案编辑页管理 API 配置</a></p>`;
   } catch(e) {dialog.querySelector('.ws-dialog-body').textContent=e.message;}
 };
 
