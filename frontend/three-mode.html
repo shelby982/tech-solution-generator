@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v82" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v84" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -55,6 +55,14 @@
   display: flex; align-items: flex-start; gap: 10px; margin-top: 7px;
   max-height: 68px; overflow: hidden; position: relative;
 }
+/* 默认折叠：材料条平时只有一行摘要 + 两个动作，明细按需展开 */
+.init-materials-panel .mrow2.collapsed { display: none; }
+.init-materials-panel .mat-actions { display: inline-flex; align-items: center; gap: 6px; }
+.init-materials-panel .mat-more-btn {
+  font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+}
+.init-materials-panel .mat-more-btn[aria-expanded="true"] { background: var(--bg-2); }
 .init-materials-panel .mrow2.expanded { max-height: none; flex-wrap: wrap; }
 .init-materials-panel .mat-section { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .init-materials-panel .mat-list { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; margin: 0; }
@@ -3256,8 +3264,8 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v82" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v82" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v84" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v84" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3327,18 +3335,21 @@ body[data-view="matching"] .match-detail { display: block; }
     <div class="mrow1">
       <span class="mat-k">材料 <b id="mat-total">0</b></span>
       <span class="gsum" id="mat-gsum"></span>
-      <span class="mat-add-inline">
-        <select id="req-role-select" class="role-select">
-          <option value="main_rfp">招标文件</option>
-          <option value="spec">技术规范书</option>
-          <option value="requirement">其他</option>
-        </select>
-        <button class="btn-add-mat" id="btn-add-req" type="button">＋ 添加文件</button>
+      <span class="mat-actions">
+        <button class="btn-add-mat" id="btn-add-req" type="button"
+          title="支持一次选多个；类型按文件名自动识别，可在明细里逐个修改">＋ 添加文件</button>
+        <button class="mat-more-btn" id="mat-manage" type="button" aria-expanded="false">明细 ▾</button>
       </span>
-      <span class="hint">可一次选多个；上传即识别类型，同类型自动替换旧文件
-        <a href="#" id="mat-manage" style="color:var(--blue);margin-left:6px">管理材料</a></span>
+      <span class="hint" id="mat-hint">多选 · 类型按文件名建议，可在「明细」里改</span>
+      <!-- 兼容节点：上传类型改为按文件名推断（inferRoleFromFilename），
+           这个下拉不再出现在界面，但既有代码仍引用它，保留在 DOM 里。 -->
+      <select id="req-role-select" class="role-select" hidden>
+        <option value="main_rfp">招标文件</option>
+        <option value="spec">技术规范书</option>
+        <option value="requirement">其他</option>
+      </select>
     </div>
-    <div class="mrow2" id="mat-rows">
+    <div class="mrow2 collapsed" id="mat-rows">
       <div class="mat-section" id="mat-section-req">
         <div class="mat-list" id="req-stack"></div>
         <div id="req-role-warn"></div>
@@ -3806,7 +3817,7 @@ body[data-view="matching"] .match-detail { display: block; }
       </main>
     </div>
 
-    <input type="file" id="file-input-req" accept=".pdf,.docx,.doc" style="display:none">
+    <input type="file" id="file-input-req" accept=".pdf,.docx,.doc" multiple style="display:none">
     <input type="file" id="file-input-src" accept=".pdf,.docx,.doc,.ppt,.pptx" style="display:none">
 
     <!-- 素材列表弹窗 -->
@@ -3944,16 +3955,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v82"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v82"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v84"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v84"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v82',
-                        './assets/mode-editor.js?v=20261016-v82']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v84',
+                        './assets/mode-editor.js?v=20261016-v84']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v82"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v84"></script>
   </body>
 </html>

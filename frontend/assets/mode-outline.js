@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v82';
+import { api } from './api.js?v=20261016-v84';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v82';
+       } from './workspace.js?v=20261016-v84';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v82';
+       } from './workspace-model.mjs?v=20261016-v84';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v82';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v84';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -613,7 +613,13 @@ document.getElementById('mat-more')?.addEventListener('click', () => {
 });
 document.getElementById('mat-manage')?.addEventListener('click', (ev) => {
   ev.preventDefault();
-  document.getElementById('mat-rows')?.classList.add('expanded');
+  const rows = document.getElementById('mat-rows');
+  const btn = ev.currentTarget;
+  if (!rows) return;
+  const collapsed = rows.classList.toggle('collapsed');
+  rows.classList.toggle('expanded', !collapsed);   // 展开时也放开高度限制（文件多）
+  btn.textContent = collapsed ? '明细 ▾' : '收起 ▴';
+  btn.setAttribute('aria-expanded', String(!collapsed));
   refreshMaterialSummary();
 });
 
@@ -5758,12 +5764,24 @@ window.dsv = {
 // ── 事件绑定 ──
 btnAddReq.addEventListener('click', () => fileInputReq.click());
 btnAddSrc.addEventListener('click', () => fileInputSrc.click());
-fileInputReq.addEventListener('change', () => {
-  const f = fileInputReq.files[0];
-  if (f) {
-    const role = document.getElementById('req-role-select').value || 'main_rfp';
-    uploadFile(f, role, btnAddReq);
+fileInputReq.addEventListener('change', async () => {
+  // 以前这里只取 files[0] 且完全没用角色推断 —— 材料条的提示却写着"可一次选多个 /
+  // 上传即识别类型"（**提示是假的**，实测核对过）。现在按提示做到：
+  //   ① 多选逐个上传；② 类型用 inferRoleFromFilename 按文件名识别，识别不出再用兜底值。
+  const files = [...(fileInputReq.files || [])];
+  if (!files.length) return;
+  const fallback = document.getElementById('req-role-select')?.value || 'main_rfp';
+  for (const f of files) {
+    // ⚠️ inferRoleFromFilename 返回的是 {role, reason}（不是字符串）—— 直接当 role 传
+    // 会把对象写进角色字段（实测核对过返回值形状）。
+    let role = fallback;
+    try {
+      const inferred = inferRoleFromFilename(f.name);
+      if (inferred?.role) role = inferred.role;
+    } catch { /* 推断失败用兜底 */ }
+    await uploadFile(f, role, btnAddReq);
   }
+  fileInputReq.value = '';   // 同一个文件可以再传一次
 });
 fileInputSrc.addEventListener('change', () => {
   const f = fileInputSrc.files[0];
