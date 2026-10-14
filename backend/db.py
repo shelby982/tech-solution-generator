@@ -56,7 +56,34 @@ CREATE TABLE IF NOT EXISTS materials (
     role        TEXT,
     file_size   INTEGER,
     parsed_at   DATETIME,
-    parse_status TEXT DEFAULT 'pending'
+    parse_status TEXT DEFAULT 'pending',
+    deleted_at  DATETIME          -- 逻辑删除（材料条"✕"用它；新库也要有，不能只靠 ALTER）
+);
+
+-- 标包分析的结果（**唯一产物**）：从招标文件正文里抽出来的"标的/标包/标段"事实。
+-- 只存事实 + 出处（evidence），名字允许为空（留给用户确认，不编造）。
+-- 可重复生成（重新分析就覆盖），所以它是缓存 + 事实快照，不是用户输入。
+CREATE TABLE IF NOT EXISTS project_packages (
+    project_id          INTEGER NOT NULL REFERENCES projects(id),
+    target              TEXT NOT NULL DEFAULT '',
+    package_no          TEXT NOT NULL DEFAULT '',
+    package_name        TEXT NOT NULL DEFAULT '',
+    confidence          TEXT NOT NULL DEFAULT 'low',
+    mentions            INTEGER NOT NULL DEFAULT 0,
+    source_material_ids TEXT NOT NULL DEFAULT '[]',
+    evidence            TEXT NOT NULL DEFAULT '[]',
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, target, package_no)
+);
+
+-- 文件 ↔ 标包：**多对多**（用户口径：「一个文件可能会属于多个标包，这块没有严格的对应关系」）。
+-- 所以不能用 materials.package_no 单列。来源是分析命中的事实，也可由用户手改。
+CREATE TABLE IF NOT EXISTS material_packages (
+    material_id INTEGER NOT NULL REFERENCES materials(id),
+    project_id  INTEGER NOT NULL REFERENCES projects(id),
+    target      TEXT NOT NULL DEFAULT '',
+    package_no  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (material_id, target, package_no)
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -290,6 +317,10 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE materials ADD COLUMN file_size INTEGER")
     if "parse_status" not in existing_cols:
         await conn.execute("ALTER TABLE materials ADD COLUMN parse_status TEXT DEFAULT 'pending'")
+    # 逻辑删除列：老库补列（新库已在上面的 CREATE TABLE 里）
+    _mat_cols = {r[1] for r in await (await conn.execute("PRAGMA table_info(materials)")).fetchall()}
+    if "deleted_at" not in _mat_cols:
+        await conn.execute("ALTER TABLE materials ADD COLUMN deleted_at DATETIME")
     cursor = await conn.execute("PRAGMA table_info(projects)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
     if "target_pages" not in existing_cols:

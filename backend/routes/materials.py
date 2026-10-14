@@ -587,3 +587,41 @@ async def map_sources(project_id: int):
         await db.commit()
 
     return JSONResponse(content={"mapped": mapped})
+
+
+# ── 标包分析 ──────────────────────────────────────────────────────────────────
+# 用户口径：「从招标文件里面去找到标的对应的标包或标段……以招标文件的事实为准，
+# 模型不能去做额外的衍生或者提炼」+「一个文件可能会属于多个标包」。
+@router.get("/projects/{project_id}/package-analysis")
+async def get_package_analysis(project_id: int, refresh: int = 0):
+    """标包清单（含**原文出处**）+ 文件↔标包的多对多关联。
+
+    - 默认返回已落库结果；库里为空、或 ``refresh=1`` → 重新分析并覆盖
+    - **没有解析出正文（chunks 为空）时返回空清单 + 一句原因**，不猜、不编造
+    - ``package_name`` 允许为空：名字要用户确认，本接口不生成
+    """
+    from services.package_analysis import (
+        load_analysis, load_material_packages, run_analysis,
+    )
+
+    async with get_db() as db:
+        packages = await load_analysis(db, project_id)
+        if refresh or not packages:
+            packages = await run_analysis(db, project_id)
+        links = await load_material_packages(db, project_id)
+        chunk_n = (await (await db.execute(
+            """SELECT COUNT(*) FROM material_chunks c JOIN materials m ON m.id = c.material_id
+                WHERE m.project_id = ? AND m.deleted_at IS NULL""", (project_id,))).fetchone())[0]
+
+    note = ""
+    if not chunk_n:
+        note = "还没有解析出的正文，无法从招标文件里检索标包；请先上传并等待解析完成。"
+    elif not packages:
+        note = ("已检索全部正文，但**没有找到**「标的 / 标包 / 标段」的表述 —— "
+                "按事实为准，这里不会猜测标包。")
+    return JSONResponse({
+        "packages": packages,
+        "material_packages": links,     # {material_id: [{target, package_no}]}
+        "chunks": chunk_n,
+        "note": note,
+    })
