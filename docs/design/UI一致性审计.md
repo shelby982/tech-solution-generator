@@ -601,3 +601,40 @@ __bootErrors=[] ｜ 后端 765 passed / 前端 102 passed
 ### 自己引入又当场修掉的一个 bug
 `inferRoleFromFilename` 返回的是 `{role, reason}` **对象**（不是字符串）—— 我第一版直接
 `role = inferRoleFromFilename(name) || fallback`，会把对象写进角色字段。已改为取 `inferred.role`。
+
+---
+
+## 二十、修复：从项目列表进来直接落到评审页（没走五步流程）
+
+### 核实
+`restoreSettledThread()` 里有三处**整页跳转**：`report_review` / `done` → `location.href = /review`；
+生成阶段暂停 → `/review`；素材匹配入口的"返回质量检查" → `/review`。
+所以从项目列表点进来（`/three-mode?projectId=X`）时，一旦运行已到评审/完成，
+页面就被搬到**独立的评审页** —— 那正是用户看到的"没走到五个步骤页面上"。
+
+### 改法
+1. **三处整页跳转全部去掉**（在线资产里 `location.href = /review` 已 0 处）：
+   - `report_review` / `done` → 留在面板，`panelStage='5'`（评审就是第⑤步，同一套壳）
+   - 生成阶段暂停 → 留在面板，`panelStage='4'`（继续撰写）
+   - 素材匹配返回 → 直接落面板⑤
+2. **按运行阶段对齐面板**（新增 `syncPanelStageFromRunOnce()`，进去后一次性）：
+   读后端权威阶段 → 映射到第几步 → 对齐。解决"boot 的几条路径各自把面板停在①"的问题。
+   ```
+   points_review/outline_review → ① ｜ extracting/matching/materials_review/paused → ③
+   generating → ④ ｜ reviewing/report_review/done → ⑤
+   ```
+3. 首访没有记住标包时：沿用**最新运行所属的标包**；只有一个标包时自动采用（多标包仍需确认）。
+
+### 实测
+```
+/three-mode?projectId=26&pkg=标的1|2 →
+  url 仍是 /three-mode（不再跳 /review）✅
+  stage = ⑤评审、rail 在、无门控、KPI = 5 / 100
+  verdict：技术条款差异性 10 分 7 章 部分满足 5 分；技术方案 30 分 13 章 未评审 待评 ✅
+__bootErrors=[] ｜ 后端 765 passed / 前端 102 passed
+```
+
+### 顺带说明「状态同步失败：Failed to fetch」
+来自 `workspace.js` 的 `refreshWorkspace()` 抓取失败（我验证时反复重启后端会触发），
+**会自动重试**（busy 4s / 空闲 10s），不是数据问题。它插在页头下方、样式显眼（`.ws-error`），
+若觉得打扰可以：连续失败 N 次才显示，或降级成小角标（未做，等你定）。
