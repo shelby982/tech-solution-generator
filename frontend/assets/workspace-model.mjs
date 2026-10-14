@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v135';
+} from './material-roles.mjs?v=20261016-v136';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -20,6 +20,20 @@ export const CONSTRAINT_LEVELS = [
   { value: 'recommended', label: '应当响应' },
   { value: 'optional', label: '可选响应' },
 ];
+/* ══════════════════════════════════════════════════════════════════════════
+ * **返回值约定（务必遵守；本会话因没核实返回值而出过 5 次事故）**
+ *
+ * 目录结构类函数有两类返回：
+ *   · 返回**数组**      = 改之后的完整结构，调用方直接保存。
+ *   · 返回 **null**      = 这次操作是空操作或非法，**调用方必须不写库、不报错**。
+ *     null 的具体含义见每个函数上方注释；tests/frontend/outline-structure.test.mjs
+ *     里有一张表逐个钉住（"null 语义契约"）。
+ *
+ * 另有返回 `{nodes, …}` **对象**的函数（removeOutlineSubtree / removeManyOutlineSubtrees /
+ * moveManyOutlineNodes / indentManyOutlineNodes / outdentManyOutlineNodes）：
+ * **必须解构 `.nodes`**，不能当数组用 —— 当数组用会被 Array.isArray 判 false 后静默丢弃。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
 export function constraintLevelLabel(value) {
   const hit = CONSTRAINT_LEVELS.find(o => o.value === value);
   return hit ? hit.label : '应当响应';   // 缺省 / 未知值按 recommended 显示
@@ -385,9 +399,20 @@ export function moveOutlineNodeToLevel(nodes, id, targetIndex, level) {
 
 /** 同上，但整组（位置可原地，只改层级也要保存）。 */
 export function moveOutlineNodesToLevel(nodes, ids, targetIndex, level) {
+  // ⚠️ moveOutlineNodesTo 的 null 有**两种**含义："位置没变"与"落点在自己的子树里"。
+  // 这里必须先自己判定后者 —— 否则 `|| nodes` 会把"拖进自己子树"当成"原地"放行，
+  // 于是树被插入到自身内部（结构会坏）。
+  const selIds = new Set((ids || []).map(String));
+  const firstSel = nodes.find((n) => selIds.has(String(n.id)));
+  if (firstSel) {
+    const [fs, fe] = outlineSubtreeRange(nodes, firstSel.id);
+    if (targetIndex > fs && targetIndex < fe) return null;
+  }
   const reordered = moveOutlineNodesTo(nodes, ids, targetIndex) || nodes;   // null = 位置没变（允许）
   const sel = new Set((ids || []).map(String));
-  const anchorNode = nodes.find((n) => sel.has(String(n.id)));
+  // ⚠️ 基准层级必须取**重排之后**的：moveOutlineNodesTo 自己会把块对齐到落点层级，
+  // 若再按"重排前"的层级算 delta，就会把那次变化叠加一次（实测整组降一级变成降两级）。
+  const anchorNode = reordered.find((n) => sel.has(String(n.id)));
   if (!anchorNode) return null;
   const delta = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1)) - (Number(anchorNode.level) || 1);
   if (delta === 0 && reordered === nodes) return null;

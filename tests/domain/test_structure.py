@@ -113,3 +113,29 @@ def test_subtree_range_leaf_is_single_slot():
 
 def test_subtree_range_missing_id():
     assert subtree_range([_node("a", 1)], "nope") == (-1, -1)
+
+
+def test_outline_matrix_consistency_flags_only_stale():
+    """**判据是"没有陈旧键"，不是"两边相等"**。
+
+    陈旧（矩阵里有、目录里没有）危险：下游 generate 的"toc 之外兜底"会照着它
+    把用户删掉的章节又生成回来。
+    缺失（目录里有、矩阵里没有）正常：用户手写的章节本来就没有派生行。
+    """
+    from domain.spec.structure import outline_matrix_consistency
+
+    # 目录 3 项，矩阵只有其中 2 项 + 1 个已删章节 → 陈旧 1 个，缺失 1 个（正常）
+    r = outline_matrix_consistency(["s1", "s2", "s3"], {"s1": {}, "s2": {}, "s9": {}})
+    assert r["stale"] == ["s9"]
+    assert r["missing"] == ["s3"]
+
+    # 有陈旧 → 必须裁；裁完 stale 为空即视为一致
+    assert outline_matrix_consistency(["s1", "s2", "s3"], {"s1": {}, "s2": {}})["stale"] == []
+
+    # 空矩阵：没有任何陈旧键 → 一致（只是下游拿不到派生信息，属于降级不报错）
+    r2 = outline_matrix_consistency(["s1", "s2"], {})
+    assert r2["stale"] == []
+    assert r2["missing"] == ["s1", "s2"]
+
+    # None 也当空处理
+    assert outline_matrix_consistency(["s1"], None)["stale"] == []

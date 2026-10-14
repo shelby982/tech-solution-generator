@@ -468,3 +468,83 @@ test('pushHistory：返回新数组，不改原栈', () => {
   assert.equal(a.length, 1);
   assert.equal(b.length, 2);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// null 语义契约
+// ---------------------------------------------------------------------------
+// 约定：返回数组 = 改后的完整结构（调用方直接保存）；返回 null = 空操作/非法，
+// 调用方**必须不写库**。这张表把每个函数的 null 场景钉住 ——
+// 本会话已经因为"没核实返回值就调用"出过 5 次事故，其中一次正是
+// "位置没变时返回 null 被当成非法拖动 → 整条保存被丢弃"。
+// ══════════════════════════════════════════════════════════════════════════
+// 真正嵌套：a 的子树 = [a, a1, a1x]（"拖进自己子树"这类用例必须有子树才有意义）
+const T = () => [N('a', 1), N('a1', 2), N('a1x', 3), N('b', 1), N('c', 2), N('d', 2)];
+
+test('null 语义 · moveOutlineNode：找不到 id / 已是第一个或最后一个同级', () => {
+  assert.equal(moveOutlineNode(T(), 'nope', -1), null, '找不到 id');
+  const first = [N('a', 1), N('b', 1)];
+  assert.equal(moveOutlineNode(first, 'a', -1), null, '已是第一个同级');
+  assert.equal(moveOutlineNode(first, 'b', +1), null, '已是最后一个同级');
+  assert.ok(Array.isArray(moveOutlineNode(first, 'b', -1)), '能移动时返回数组');
+});
+
+test('null 语义 · moveOutlineNodeTo：找不到 id / 拖进自己子树 / 位置没变', () => {
+  assert.equal(moveOutlineNodeTo(T(), 'nope', 0), null);
+  assert.equal(moveOutlineNodeTo(T(), 'a', 2), null, '2 落在 a 的子树内');
+  assert.equal(moveOutlineNodeTo(T(), 'a', 0), null, '位置没变');
+  assert.ok(moveOutlineNodeTo(T(), 'b', 0));
+});
+
+test('null 语义 · moveOutlineNodesTo：空选择 / 拖进自己子树 / 位置没变', () => {
+  assert.equal(moveOutlineNodesTo(T(), [], 0), null, '空选择');
+  assert.equal(moveOutlineNodesTo(T(), ['a'], 2), null, '2 落在 a 的子树内');
+  // 注意：整组版"原地"落点也可能**合法地改变层级**（落点同级规则：拖到谁旁边就成为它的同级），
+  // 所以这里不断言 null —— 那是有意义的改动，不是空操作。
+  assert.ok(moveOutlineNodesTo(T(), ['b'], 0), '能移动时返回数组');
+});
+
+test('null 语义 · moveOutlineNodeToLevel：位置没变但层级变了 → **不是 null**', () => {
+  // 用户实测反馈的那条：原地往右拖一级必须生效
+  const r = moveOutlineNodeToLevel(T(), 'd', 5, 3);
+  assert.ok(Array.isArray(r), '原地降一级要返回数组（不是 null）');
+  assert.equal(r.find((n) => n.id === 'd').level, 3);
+  assert.equal(moveOutlineNodeToLevel(T(), 'nope', 0, 2), null, '找不到 id');
+  assert.equal(moveOutlineNodeToLevel(T(), 'a', 2, 2), null, '2 落在 a 的子树内');
+  assert.equal(moveOutlineNodeToLevel(T(), 'd', 5, 2), null, '位置与层级都没变');
+});
+
+test('null 语义 · moveOutlineNodesToLevel：同上（整组）', () => {
+  const r = moveOutlineNodesToLevel(T(), ['c', 'd'], 4, 3);
+  assert.ok(Array.isArray(r), '整组原地降一级要返回数组');
+  assert.deepEqual(r.filter((n) => ['c', 'd'].includes(n.id)).map((n) => n.level), [3, 3]);
+  assert.equal(moveOutlineNodesToLevel(T(), [], 0, 2), null, '空选择');
+  assert.equal(moveOutlineNodesToLevel(T(), ['a'], 2, 2), null, '拖进自己子树');
+});
+
+test('null 语义 · indentOutlineNode：首个节点 / 到安全上限 / 前一个不是同级', () => {
+  assert.equal(indentOutlineNode([N('a', 1), N('b', 1)], 'a'), null, '第一个节点没法降');
+  // c 在 T() 里是第 5 个，前一个 b(1 级) 与它(2 级)不同级 → 拒绝
+  assert.equal(indentOutlineNode(T(), 'c'), null, '前一个不是同级');
+  assert.ok(indentOutlineNode(T(), 'd'), 'd 的前一个 c 是同级 → 可降');
+  const deep = [N('x', MAX_LEVEL), N('y', MAX_LEVEL)];
+  assert.equal(indentOutlineNode(deep, 'y'), null, '到安全上限');
+});
+
+test('null 语义 · outdentOutlineNode：找不到 id / 已是一级', () => {
+  assert.equal(outdentOutlineNode(T(), 'nope'), null);
+  assert.equal(outdentOutlineNode([N('a', 1)], 'a'), null, '已是一级');
+  assert.ok(outdentOutlineNode([N('a', 1), N('a1', 2)], 'a1'));
+});
+
+test('null 语义 · insertSiblingAfter / insertChildOf：找不到 id / 到安全上限', () => {
+  assert.equal(insertSiblingAfter(T(), 'nope', N('z', 1)), null);
+  assert.equal(insertChildOf(T(), 'nope', N('z', 1)), null);
+  assert.equal(insertChildOf([N('a', MAX_LEVEL)], 'a', N('z', 1)), null, '到安全上限');
+  assert.ok(insertSiblingAfter(T(), 'a', N('z', 1)));
+});
+
+test('null 语义 · removeOutlineSubtree：找不到 id 时不报错，removed=0', () => {
+  const r = removeOutlineSubtree(T(), 'nope');
+  assert.equal(r.removed, 0);
+  assert.deepEqual(ids(r.nodes), ids(T()), '结构不变');
+});

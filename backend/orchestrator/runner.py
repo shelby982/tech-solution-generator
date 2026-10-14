@@ -922,14 +922,19 @@ class WorkflowRunner:
         # 删掉/改名后目录外的章节若留在矩阵里，下游 generate 的"toc 之外兜底"会照着它
         # 生成一节正文 —— 用户删掉的章节又长回来了。
         new_ids = {d["id"] for d in new_toc}
-        pruned_matrix = {
-            bid: row for bid, row in (spec.get("outline_matrix") or {}).items()
-            if bid in new_ids
-        }
-        if len(pruned_matrix) != len(spec.get("outline_matrix") or {}):
-            logger.info(
-                f"update_outline_structure：裁剪掉 %d 个目录外的矩阵条目",
-                len(spec.get("outline_matrix") or {}) - len(pruned_matrix),
+        old_matrix = spec.get("outline_matrix") or {}
+        # 一致性检查放在 domain（纯函数 + 有 pytest）：
+        # **陈旧键**（矩阵里有、目录里没有）是危险的那一半 —— 下游 generate 的
+        # "toc 之外兜底"会照着它把用户删掉的章节又生成回来；缺失键是正常的
+        # （用户手写的章节本来就没有派生行）。
+        from domain.spec.structure import outline_matrix_consistency
+        _consistency = outline_matrix_consistency(new_ids, old_matrix)
+        pruned_matrix = {bid: row for bid, row in old_matrix.items() if bid in new_ids}
+        if _consistency["stale"]:
+            logger.warning(
+                "update_outline_structure：矩阵里有 %d 个目录外的章节（如 %s），已裁掉 —— "
+                "若不裁剪，下游会按它们把用户删掉的章节生成回来",
+                len(_consistency["stale"]), _consistency["stale"][:5],
             )
         async with self._checkpointer_provider() as saver:
             graph = self._build(saver, None, thread_id=thread_id)

@@ -67,6 +67,26 @@ def validate_structure(nodes) -> list[dict]:
     return clamp_levels(clean)
 
 
+def outline_matrix_consistency(toc_ids: Iterable[str], matrix: dict | None) -> dict:
+    """检查 ``spec.outline_matrix`` 与 ``spec.toc`` 是否一致。
+
+    返回 ``{"stale": [...], "missing": [...]}``：
+
+    - **stale**（矩阵里有、目录里没有）= **危险**：下游 ``generate`` 有"toc 之外兜底"，
+      会照着矩阵里已删的章节生成一节正文 —— 用户删掉的章节又长回来。必须裁掉。
+    - **missing**（目录里有、矩阵里没有）= **正常**：用户手写的章节本来就没有派生行
+      （``outline_draft`` 只为派生出的章节写矩阵）。不要当成错误。
+
+    所以判据是"stale 为空"，不是"两边相等"。
+    """
+    ids = {str(x) for x in toc_ids}
+    keys = {str(k) for k in (matrix or {})}
+    return {
+        "stale": sorted(keys - ids),
+        "missing": sorted(ids - keys),
+    }
+
+
 def clamp_levels(nodes: Iterable[dict]) -> list[dict]:
     """层级自洽化：clamp 到 1..4，且不允许比前一个节点深两级以上。
 
