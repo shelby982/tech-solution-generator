@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v67';
+import { api } from './api.js?v=20261016-v69';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v67';
+       } from './workspace.js?v=20261016-v69';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v67';
+       } from './workspace-model.mjs?v=20261016-v69';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v67';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v69';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2780,20 +2780,37 @@ async function toggleWriteMaterials() {
   if (!box || !b) return;
   if (!box.hidden) { box.hidden = true; return; }
   box.hidden = false;
+  const evidence = String(b.evidence_required || '').trim();   // 降级提示要用
   box.innerHTML = '<div class="sr-note">正在检索本章相关素材…</div>';
+  // 两条通道，如实标注用的是哪条：
+  //  ① material-search —— **按需检索**（用本章的举证要求/要点即时找，不写库）
+  //  ② matched-sources —— 预匹配阶段已存下的依据（人工挂载的也在这里）
+  const card = (x) => `
+    <div class="sr-wmat">
+      <div class="sr-wmatsrc">${escapeHtml(x.filename || x.source_file || '素材')}${
+        x.page ? ` · 第 ${x.page} 页` : ''}</div>
+      <div class="sr-wmattxt">${escapeHtml(String(x.content || x.snippet || '').slice(0, 200))}</div>
+    </div>`;
   try {
+    const sr = await fetch(`/api/blocks/${b.id}/material-search`);
+    const sd = sr.ok ? await sr.json() : null;
+    const hits = sd?.results || [];
+    if (hits.length) {
+      const why = { evidence_required: '按本章举证要求检索', key_points: '按本章应标重点检索',
+                    title: '按章节标题检索' }[sd.query_source] || '按需检索';
+      box.innerHTML = `<div class="sr-note">${why} · 命中 ${hits.length} 段（关键词：${
+        (sd.terms || []).slice(0, 5).map(escapeHtml).join('、')}）</div>`
+        + hits.map(card).join('')
+        + '<div class="sr-note">按需检索不写库；要挂成本章依据请用下方「已匹配依据」里的引用动作。</div>';
+      return;
+    }
     const r = await fetch(`/api/blocks/${b.id}/matched-sources`);
     const data = r.ok ? await r.json() : null;
-    const list = Array.isArray(data) ? data : (data?.sources || []);
+    const list = Array.isArray(data) ? data : (data?.matched_sources || data?.sources || []);
     box.innerHTML = list.length
-      ? list.slice(0, 8).map((x) => `
-          <div class="sr-wmat">
-            <div class="sr-wmatsrc">${escapeHtml(x.filename || x.source_file || '素材')}${
-              x.page ? ` · 第 ${x.page} 页` : ''}</div>
-            <div class="sr-wmattxt">${escapeHtml(String(x.content || x.snippet || '').slice(0, 180))}</div>
-          </div>`).join('')
-        + '<div class="sr-note">这里只做按需查看；引用动作在「方案编辑」页的素材抽屉里完成。</div>'
-      : '<div class="sr-note">暂无匹配素材。先在素材库上传并匹配。</div>';
+      ? `<div class="sr-note">已匹配依据（预匹配阶段存下的）</div>` + list.slice(0, 8).map(card).join('')
+      : '<div class="sr-note">本章暂无相关素材：按需检索没命中，也没有预匹配依据。'
+        + (evidence ? '本章有举证要求，可在素材库补充。' : '本章无需强制举证。') + '</div>';
   } catch (e) {
     box.innerHTML = `<div class="sr-flash err">素材加载失败：${escapeHtml(e.message)}</div>`;
   }

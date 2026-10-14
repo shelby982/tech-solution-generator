@@ -85,6 +85,29 @@ async def get_block_matched_sources(block_id: int):
     return JSONResponse(content={"matched_sources": sources})
 
 
+# ── GET /api/blocks/{block_id}/material-search ───────────
+
+@router.get("/blocks/{block_id}/material-search")
+async def search_block_material(block_id: int, limit: int = 8, q: str | None = None):
+    """**按需检索**素材：用本章的举证要求/要点去素材库找相关片段。
+
+    与 `/matched-sources` 的区别（两者都要保留）：
+    - `matched-sources`：返回预匹配阶段**已存**在 `block.source` 里的依据（人工挂载的也在这里）；
+    - 本接口：**不写库、不预计算**，按当前章节的需求即时检索 —— 对应
+      "有些内容不需要素材，编写时按需补充"（没跑过批量匹配的章节也有得用）。
+    """
+    from services.material_search import search_block_materials
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+        if block is None:
+            raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
+        if q:
+            block = {**block, "evidence_required": q}
+        data = await search_block_materials(db, block, limit=max(1, min(limit, 30)))
+    return JSONResponse(content=data)
+
+
 # ── PUT /api/blocks/{block_id}/evidence ──────────────────
 # 人工挂接 / 解绑素材依据。写库 + 写 checkpoint 都在 runner.set_chapter_evidence 里
 # （两处都要写：库是页面与撰写读的权威，state 是下一轮匹配"已有依据"的来源）。
