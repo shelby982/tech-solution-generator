@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v99';
+import { api } from './api.js?v=20261016-v100';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v99';
+       } from './workspace.js?v=20261016-v100';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v99';
+       } from './workspace-model.mjs?v=20261016-v100';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v99';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v100';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3396,7 +3396,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           技术规范书要求 ${specCount ? `已拆出 ${specCount} 条` : '还没拆出'}。
         </div>
       </div>` : `
-      <h4>待确认：确认后生成产物</h4>
+      <!-- 不再重复阶段名（阶段头已经写着"待确认 + 待确认 N 项"）；
+           这里只留"产物是什么"的定义 —— 那是阶段头给不出的信息。 -->
       <div class="sr-note">产物的定义（用户口径）：<b>(a) 对应的目录</b>、
         <b>(b) 最终的技术与评分点映射矩阵</b>。它们只在确认完成后出现。</div>
 
@@ -3514,7 +3515,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       return parts.length ? parts.join(' · ') : '还没有拆分结果';
     }
     if (st === '2') {
-      return analyzedAll ? `待确认 ${pending.length} 项；确认完才会输出产物` : '等三块拆分完成';
+      if (!analyzedAll) return '等三块拆分完成';
+      // 0 项时别写"待确认 0 项"（绕口）：直接说可以往下走了
+      return pending.length ? `待确认 ${pending.length} 项` : '已全部确认，可生成产物';
     }
     if (st === '3') {
       if (!categoriesConfirmed) return '还没确认，确认后展示';
