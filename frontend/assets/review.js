@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v78';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v78';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v79';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v79';
 const $ = id => document.getElementById(id);
 let activeId = new URLSearchParams(location.search).get('blockId');
 let mode = 'current', visibleLimit = 100;
@@ -46,7 +46,7 @@ function refreshActions() {
 }
 function renderDetail() {
   const b = workspace.chapters.find(b=>b.block_id===activeId);
-  if (!b) { $('quality-document-body').innerHTML='<p>暂无章节。请先在“要求与大纲”完成提炼。</p>'; return; }
+  if (!b) { $('quality-document-body').innerHTML='<p>暂无章节。请先在面板里完成拆分。</p>'; return; }
   $('quality-title').textContent = b.title;
   $('quality-breadcrumb').textContent = `${statusLabels[b.status]} · 当前已保存正文`;
   $('quality-edit').hidden = false; $('quality-edit').href = workspaceUrl('editor',b.block_id);
@@ -120,7 +120,7 @@ async function renderVerdict() {
             <td>${c.score_weight != null ? c.score_weight : '—'}</td></tr>`).join('')
           || '<tr><td colspan="4" class="ws-muted">该评分点暂无承载章节</td></tr>'}</tbody>
       </table>
-    </details>`).join('') : '<p class="ws-muted">暂未拆分出评分点。先在「要求与大纲」完成拆分。</p>';
+    </details>`).join('') : '<p class="ws-muted">暂未拆分出评分点。先在面板里完成拆分。</p>';
 }
 
 subscribe(() => {

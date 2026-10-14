@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v78" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v79" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -276,7 +276,7 @@ body[data-view="matching"] .init-materials-panel { display: none; }
 body[data-view="matching"] #mat-section-req { display: none; }
 /* 解析大纲视图：隐藏原始素材模块（仅在素材匹配视图才需要看到素材） */
 body[data-view="outline"] #mat-section-src { display: none; }
-/* 提炼要求只作用于「解析大纲」阶段（闸门 1 的整版重出） */
+/* 拆分要求只作用于「解析大纲」阶段（闸门 1 的整版重出） */
 body[data-view="matching"] #mat-section-instruction { display: none; }
 
 /* 底部操作区 */
@@ -416,7 +416,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   min-height: 48px;
 }
 /* 状态栏模块已按用户要求"去掉"：它显示的是运行阶段/进度，与五阶段面板的逻辑重复。
-   保留其中的**动作区**（取消 / 确认目录 / 继续提炼 / 重新提炼…是流程必需，没有替代入口），
+   保留其中的**动作区**（取消 / 确认目录 / 继续准备 / 重新拆分评分点…是流程必需，没有替代入口），
    其余（阶段文案、进度条、进度环）全部隐藏；进度改由面板头显示。 */
 .extract-status-bar[data-state="idle"] { display: flex; }
 #status-label, #status-bar .status-bar-center, #status-bar .sidebar-ring-wrap { display: none !important; }
@@ -425,7 +425,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .status-bar-left {
   font-size: 12.5px; color: var(--muted); white-space: nowrap;
   /* 可收缩 + 省略号：文案变长时截断自己，而不是把右侧按钮挤出可视区
-     （实测「继续提炼（剩余 8 节）」那种长标签会把主按钮顶出右边界） */
+     （实测「继续准备（剩余 8 节）」那种长标签会把主按钮顶出右边界） */
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .status-bar-center { flex: 1; display: flex; align-items: center; gap: 10px; }
@@ -581,7 +581,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .block-status-badge.extracting { background: #fef9c3; color: #854d0e; }
 .block-status-badge.done { background: #dcfce7; color: #166534; }
 .block-status-badge.error { background: #fee2e2; color: #991b1b; }
-/* 无原文：正常结果，中性色 —— 不能和"提炼失败"同色，否则用户会以为坏了 */
+/* 无原文：正常结果，中性色 —— 不能和"准备失败"同色，否则用户会以为坏了 */
 .block-status-badge.no_source { background: var(--bg-2); color: #475569; }
 .block-card-progress {
   height: 2px; background: var(--line);
@@ -600,7 +600,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   display: flex; flex-direction: column;
 }
 
-/* 章节卡片：提炼结果 8 个字段单栏铺开（目录派生阶段不渲染字段，只有结构树） */
+/* 章节卡片：准备结果 8 个字段单栏铺开（目录派生阶段不渲染字段，只有结构树） */
 .block-card-body {
   display: grid;
   grid-template-columns: 1fr;
@@ -618,9 +618,9 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .block-field-label.bonus { color: #16a34a; }
 .block-field-label.score { color: #2563eb; }
 .block-field-value { font-size: 12.5px; color: var(--text); line-height: 1.55; white-space: pre-wrap; }
-/* 已提炼但该字段为空：显示「—」而不是骨架，别让人以为还在提炼 */
+/* 已准备但该字段为空：显示「—」而不是骨架，别让人以为还在准备 */
 .block-field-empty { font-size: 12.5px; color: var(--muted); }
-/* constraint_level：三选一下拉。默认 disabled，只在提炼结果确认页（makeOutlineEditable）解禁 */
+/* constraint_level：三选一下拉。默认 disabled，只在准备结果确认页（makeOutlineEditable）解禁 */
 .block-field-select {
   font: inherit; font-size: 12.5px; color: var(--text);
   background: var(--panel); border: 1px solid var(--line);
@@ -632,7 +632,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   font-size: 12.5px; color: var(--text); line-height: 1.6;
 }
 .block-field-list li { margin-bottom: 2px; }
-/* 「提炼中」占位：一行说明 + 转圈，替代过去的 7 行空骨架 */
+/* 「准备中」占位：一行说明 + 转圈，替代过去的 7 行空骨架 */
 .block-card-extracting {
   display: flex; flex-direction: column; gap: 4px;
   padding: 14px 16px; align-items: flex-start;
@@ -1307,7 +1307,7 @@ body[data-view="matching"] .match-detail { display: block; }
       .doc-outline-item .chap-badge { margin-left: 0; }
 
       /* ── 本章要求 bar（编辑区顶部）──────────────────────────────
-         写作时必须常驻的只有"本章要回应什么"；8 项提炼字段折在「展开全部字段」里。
+         写作时必须常驻的只有"本章要回应什么"；8 项准备字段折在「展开全部字段」里。
          条目标号（R1/K1/V1…）与「素材库」用的是同一份 response_items，四处同构。 */
 
       #gen-status-card[hidden] { display: none !important; }
@@ -1388,7 +1388,7 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .mat-drawer-wb-head .mw-btn { margin-left: auto; }
 
-      /* ── 提炼参考折叠区 ── */
+      /* ── 准备参考折叠区 ── */
 
       .ref-section {
         flex: 0 0 auto;
@@ -2880,7 +2880,7 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .edit-modal-btn.save:disabled { opacity: 0.5; cursor: not-allowed; }
 
-      /* ── 顶部提炼进度条 ── */
+      /* ── 顶部准备进度条 ── */
 
       .extract-action-bar {
         flex: 0 0 auto;
@@ -3256,8 +3256,8 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v78" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v78" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v79" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v79" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3303,16 +3303,16 @@ body[data-view="matching"] .match-detail { display: block; }
           <button class="btn-go-review" type="button">进入评审 →</button>
         </div>
 
-        <!-- 提炼操作栏（有材料但无/少 blocks 时显示） -->
+        <!-- 准备操作栏（有材料但无/少 blocks 时显示） -->
         <div class="extract-action-bar hidden" id="extract-action-bar">
-          <span class="extract-action-label">大纲提炼</span>
-          <button type="button" class="extract-action-btn" id="btn-start-extract">提炼</button>
+          <span class="extract-action-label">大纲准备</span>
+          <button type="button" class="extract-action-btn" id="btn-start-extract">准备</button>
         </div>
 
-        <!-- 提炼进度条（autoExtract 模式显示） -->
+        <!-- 准备进度条（autoExtract 模式显示） -->
         <div class="extract-progress-bar hidden" id="extract-progress-bar">
           <span class="extract-progress-spinner" id="extract-spinner"></span>
-          <span class="extract-progress-label">提炼大纲</span>
+          <span class="extract-progress-label">准备大纲</span>
           <div class="extract-progress-track">
             <div class="extract-progress-fill" id="extract-progress-fill"></div>
           </div>
@@ -3485,7 +3485,7 @@ body[data-view="matching"] .match-detail { display: block; }
 
             <!-- 本章回应（写作时最该常驻的信息）：这个评分点多少分、得分口径是什么、
                  需要什么举证。数据来自块上的 review_point_ids / criterion_text /
-                 score_weight / evidence_required（拆分与提炼时已写好）。 -->
+                 score_weight / evidence_required（拆分与准备时已写好）。 -->
             <section class="chap-points" id="chap-points" hidden>
               <div class="cp-row">
                 <span class="cp-k">本章回应</span>
@@ -3509,7 +3509,7 @@ body[data-view="matching"] .match-detail { display: block; }
             </div>
 
             <!-- 本章要求（写作时唯一必须常驻的参照）：条目标号与「素材库」一致，
-                 默认展开 requirement；8 项提炼字段折在「展开全部字段」里。
+                 默认展开 requirement；8 项准备字段折在「展开全部字段」里。
                  以前这 8 张卡常驻在右栏 320px，把正文挤到 950px 且与第 1 步重复。 -->
             <section class="req-bar" id="req-bar" hidden>
               <header class="req-bar-head">
@@ -3692,7 +3692,7 @@ body[data-view="matching"] .match-detail { display: block; }
                     <button type="button" class="ced-tool-btn" id="btn-toggle-materials" title="本章匹配到的素材（第 2 步「素材库」的产物），按需打开">素材 <span id="mat-drawer-count">0</span> ▸</button>
                     <!-- 来源图例 -->
                     <div class="ced-tone-group" id="source-legend">
-                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#bfdbfe;color:#1e40af;font-weight:600;">提炼指导</span>
+                      <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#bfdbfe;color:#1e40af;font-weight:600;">准备指导</span>
                       <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#a7f3d0;color:#065f46;font-weight:600;">引用素材</span>
                       <span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 8px;border-radius:4px;background:#fde68a;color:#92400e;font-weight:600;">AI 补充</span>
                     </div>
@@ -3944,16 +3944,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v78"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v78"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v79"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v79"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v78',
-                        './assets/mode-editor.js?v=20261016-v78']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v79',
+                        './assets/mode-editor.js?v=20261016-v79']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v78"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v79"></script>
   </body>
 </html>

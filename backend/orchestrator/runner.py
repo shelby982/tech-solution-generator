@@ -397,6 +397,47 @@ class WorkflowRunner:
                 await graph.aupdate_state({"configurable": {"thread_id": thread_id}}, patch, as_node=entry)
             run.task = asyncio.create_task(self._resume_until_pause(run, {}), name=f"wf-{thread_id}-{action}")
 
+    async def resume_auto(self, thread_id: str) -> str:
+        """按图的 ``next`` **自动续跑**被中断的准备步骤，返回做了什么。
+
+        为什么需要它：新的信息架构里「准备（逐章抽取要求）」不是用户动作（用户只看得到
+        评分点 → 待确认 → 产物 → 编写 → 评审）。所以页面不该给「继续准备」按钮，
+        而是发现"上次没跑完"就自己接上 —— 后端重启、标签页关早了都会留下这种状态。
+
+        只在**没有 task 在跑**时生效；`paused`（用户主动取消）不自动续跑，尊重用户意图。
+        """
+        run = self._runs.get(thread_id)
+        if run is not None and run.task and not run.task.done():
+            return "running"          # 已有任务在跑，不重复起
+        state = await self.state(thread_id)
+        if not state or not state.get("project_id"):
+            raise KeyError(thread_id)
+        if state.get("cancel_requested"):
+            return "cancelled"
+        if state.get("stage") == "paused":
+            return "paused"           # 用户自己停的，不擅自续跑
+        async with self._checkpointer_provider() as saver:
+            graph = self._build(saver, None, thread_id=thread_id)
+            try:
+                snap = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+            except Exception as e:
+                logger.warning(f"resume_auto：读 checkpoint 失败（{e}）")
+                return "unknown"
+        stage = next_phase_stage(set(getattr(snap, "next", ()) or set()))
+        if stage == "extracting":
+            await self.resume_extract(thread_id)
+            return "extracting"
+        if stage == "matching":
+            await self.rerun_match(thread_id)
+            return "matching"
+        if stage == "generating":
+            await self.resume_generation(thread_id)
+            return "generating"
+        if stage == "reviewing":
+            await self.skip_to_review(thread_id)
+            return "reviewing"
+        return "nothing_to_do"
+
     async def rerun_match(self, thread_id: str, *, full: bool = False) -> None:
         """触发素材匹配：把 thread 状态指针拨回 NODE_EXTRACT 节点，再 ainvoke 让 graph
         跑 shen_kuo_match → gate_materials。

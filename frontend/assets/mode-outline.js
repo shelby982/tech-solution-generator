@@ -2,15 +2,15 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v78';
+import { api } from './api.js?v=20261016-v79';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
-// 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
+// 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v78';
+       } from './workspace.js?v=20261016-v79';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v78';
+       } from './workspace-model.mjs?v=20261016-v79';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -51,7 +51,7 @@ if (_backendParam && projectId) {
     const STAGE_ORDER_LITERAL = ['parsing', 'matching', 'generating', 'reviewing'];
     const STAGE_MAP_LITERAL = {
       parsing: 'parsing', outline_review: 'parsing',
-      // extracting：闸门 1 放行后的逐节提炼，同属「解析大纲」这一步（后端运行期 stage）
+      // extracting：闸门 1 放行后的逐节准备，同属「解析大纲」这一步（后端运行期 stage）
       extracting: 'parsing',
       matching: 'matching', materials_review: 'matching',
       generating: 'generating',
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v78';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v79';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -156,7 +156,7 @@ const blocksById = new Map();
 // ── 视图模式：outline（拆分评分点） / matching（素材匹配） ──
 // 优先级：URL ?view=... 显式指定 > 后端 stage > 大纲完成度。
 // 这样从顶部进度条点击「解析大纲」/「素材匹配」可以强制切到对应视图，
-// 即使大纲已全部提炼完成也能回到 outline 视图查看 / 编辑。
+// 即使大纲已全部编写准备完成也能回到 outline 视图查看 / 编辑。
 let pageViewOverride = (_viewParam === 'outline' || _viewParam === 'matching') ? _viewParam : null;
 function applyPageView() {
   // 视图判定：单一规则 = 由 backend stage 决定，与项目实际所处步骤严格对齐。
@@ -173,7 +173,7 @@ function applyPageView() {
     auto = 'outline';
   } else {
     // 没 backend stage（新项目）：停在「要求与大纲」。素材匹配是素材库视图里的动作，
-    // 由那边的「素材匹配」按钮触发，不按提炼完成度自动切过去。
+    // 由那边的「素材匹配」按钮触发，不按编写准备完成度自动切过去。
     auto = 'outline';
   }
   // 三模式合并（2026-10-13）：body[data-view] 的所有权归 mode-dispatch.js，
@@ -243,7 +243,7 @@ const STAGE_MAP = {
   // 闸门停留态映射回当前阶段：进度条颜色与"项目实际所处步骤"一致，
   // 避免"进度条点亮方案撰写但页面还是素材匹配"的认知冲突。
   outline_review: 'parsing',
-  // extracting：闸门 1 放行后的逐节提炼，仍属「解析大纲」这一步。
+  // extracting：闸门 1 放行后的逐节准备，仍属「解析大纲」这一步。
   // 后端在续跑前把它写进 workflow_runs（节点只能在结束时写 checkpoint），
   // boot 的兜底 fetch 会拿它点亮进度条。
   extracting: 'parsing',
@@ -794,7 +794,7 @@ function renderMats(container, mats, showRole) {
 }
 
 // ── 状态栏 ──
-// 顶栏文案：页面（有 blocks 计数 + SSE 帧）比 checkpoint 更清楚"提炼到哪了"。
+// 顶栏文案：页面（有 blocks 计数 + SSE 帧）比 checkpoint 更清楚"准备到哪了"。
 // 返回 '' 表示交回共享壳按 stageLabels 兜底（素材库视图 / 闸门 1 等）。
 function headerStageLabel(state) {
   const total = Number(totalBlocks) || 0;
@@ -808,17 +808,17 @@ function headerStageLabel(state) {
       document.getElementById('btn-start-split')?.addEventListener('click', restartExtraction);
     });
   } else if (state === 'extracting') {
-    // 拆分期间（解析 + 梳理目录）不能显示「提炼要点中（0/530）」——那时还没开始逐节提炼，
-    // 而且 totalBlocks 还是上一版的数字（用户反馈：解析时显示"提炼要点中"很奇怪）。
+    // 拆分期间（解析 + 梳理目录）不能显示「编写准备中（0/530）」——那时还没开始逐节准备，
+    // 而且 totalBlocks 还是上一版的数字（用户反馈：解析时显示"编写准备中"很奇怪）。
     if (splitInProgress) return '拆分中（解析材料）';
     if (outlineDrafting) return '拆分中（梳理目录）';
-    return total ? `提炼要点中（${done}/${total}）` : '提炼要点中';
+    return total ? `编写准备中（${done}/${total}）` : '编写准备中';
   }
   if (state === 'paused' && total > 0 && done < total) {
-    return failed ? `提炼到一半（${done}/${total}，${failed} 节失败）` : `提炼到一半（${done}/${total}）`;
+    return failed ? `编写准备到一半（${done}/${total}，${failed} 节失败）` : `编写准备到一半（${done}/${total}）`;
   }
   if (state === 'done' && document.body.dataset.view !== 'matching') {
-    return failed ? `提炼完成（${failed} 节失败，可重试）` : '提炼完成，待确认内容';
+    return failed ? `编写准备完成（${failed} 节失败，可重试）` : '编写准备完成，待确认内容';
   }
   return '';   // gate_outline / gate_materials / 素材库视图：沿用共享壳的词
 }
@@ -884,11 +884,11 @@ function setStatusBar(state, label, pct, totalB, doneB) {
   // 用户按下的瞬间节点可能刚被替换 → click 落在已移除的节点上，"点了没反应"。
   // 各分支用 setStatusActions(签名, html, bind) 渲染，同签名时只留现有节点。
   if (state === 'extracting') {
-    // 「取消」只在**逐节提炼**这类长任务里给：它停止后续模型调用、保留已提炼的章节，
-    // 「继续提炼」会用 skip_ids 接着跑（每章一次调用，中途停下能省额度）。
+    // 「取消」只在**逐节准备**这类长任务里给：它停止后续模型调用、保留已准备的章节，
+    // 「继续准备」会用 skip_ids 接着跑（每章一次调用，中途停下能省额度）。
     // 「梳理应答目录」是秒级短任务：取消它保不住任何东西，只会让人以为必须点它才能重跑，
     // 所以那个阶段不显示（用户反馈后调整）。
-    // 只在"真的提炼出过章节"时才给「取消」：解析阶段、梳理目录阶段取消都保不住东西
+    // 只在"真的准备出过章节"时才给「取消」：解析阶段、梳理目录阶段取消都保不住东西
     // （解析还没产出章节，梳理是秒级短任务），给了反而让用户以为重跑必须先点它。
     const hasProgress = Number(doneBlocks) > 0 || Number(totalBlocks) > 0;
     if (outlineDrafting || !hasProgress) {
@@ -901,8 +901,8 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     }
   } else if (state === 'points_pending') {
     // 第①步停留态：唯一该做的就是去生成目录（按钮直接展开「拆分结果」）。
-    // 这里**不能**给「确认目录，开始提炼要点」——那会用上一版目录继续提炼（自相矛盾）。
-    // 回退类动作（重新拆分评分点 / 重新拆分目录 / 重新提炼）统一收在面板头的「重做 ▾」里，
+    // 这里**不能**给「确认目录」——那会用上一版目录继续准备（自相矛盾）。
+    // 回退类动作（重新拆分评分点 / 重新拆分目录 / 重新拆分评分点）统一收在面板头的「重做 ▾」里，
     // 这里只留**前进**动作，避免同一动作两处出现（用户反馈"逻辑重复"）。
     setStatusActions('points_pending', `
       <button class="btn-status-primary" id="btn-gen-outline">生成所选目录 ▸</button>`, () => {
@@ -923,11 +923,11 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     // 闸门 1 不再给「取消」：运行已停住、不消耗资源，点它只会把 run 标成作废；
     // 要重来用「重新拆分目录」。
     setStatusActions('gate_outline', `
-      <button class="btn-status-primary" id="btn-confirm-outline">确认目录，开始提炼要点</button>`, () => {
+      <button class="btn-status-primary" id="btn-confirm-outline">确认目录</button>`, () => {
       document.getElementById('btn-confirm-outline').addEventListener('click', confirmOutlineGate);
     });
     // 闸门 1 只审**目录结构**（增删改/上下移/缩进走每行的「编辑」按钮）；8 字段此刻
-    // 还没提炼，没有可编辑内容 —— 这里不再 makeOutlineEditable()，否则只是空转。
+    // 还没准备，没有可编辑内容 —— 这里不再 makeOutlineEditable()，否则只是空转。
     freezeOutlineEdit();
   } else if (state === 'gate_materials') {
     setStatusActions('gate_materials', `
@@ -938,7 +938,7 @@ function setStatusBar(state, label, pct, totalB, doneB) {
     });
     freezeOutlineEdit();
   } else if (state === 'done') {
-    // 文案随当前视图变：outline 视图是「要点提炼完、等确认内容大纲」，
+    // 文案随当前视图变：outline 视图是「要点准备完、等确认内容大纲」，
     // matching 视图是「素材匹配完、等进入撰写」。
     const isMatchingView = document.body.dataset.view === 'matching';
     if (isMatchingView) {
@@ -955,14 +955,14 @@ function setStatusBar(state, label, pct, totalB, doneB) {
         <button class="btn-status-primary" id="btn-to-matching">确认内容大纲及要求</button>`, () => {
         document.getElementById('btn-to-matching').addEventListener('click', confirmOutlineContent);
       });
-      // 确认前允许修改：这份提炼结果正是用户要审的内容，只读就没法改
+      // 确认前允许修改：这份准备结果正是用户要审的内容，只读就没法改
       makeOutlineEditable();
     }
   } else if (state === 'failed') {
     // 硬失败（如目录派生失败）：不是「等一会就好」，给明确的重试入口。
     // 线程保留 —— 要求文件已经解析好，重出目录复用的是同一个 thread 的 checkpoint。
     // 失败态只留一个**上下文重试**（最常见的那条：重出目录）；
-    // 其它范围（重新拆分评分点 / 重新提炼）在面板头的「重做 ▾」里。
+    // 其它范围（重新拆分评分点 / 重新拆分评分点）在面板头的「重做 ▾」里。
     // 失败原因不再铺在界面上 → 由面板头的运行状态提示指向「运行详情」。
     setStatusActions('failed', `
       <button class="btn-status-primary" id="btn-retry-outline">重试</button>`, () => {
@@ -979,24 +979,24 @@ function setStatusBar(state, label, pct, totalB, doneB) {
         document.getElementById('btn-resume-match').addEventListener('click', () => startMatching());
       });
     } else {
-      // 「提炼到一半」的按钮组：此时**不该**再出现「确认目录，开始提炼要点」——
-      // 目录早就确认过了，用户要做的是把剩下的章节接着提炼（只补剩余、不重复调用），
+      // 「编写准备到一半」的按钮组：此时**不该**再出现「确认目录」——
+      // 目录早就确认过了，用户要做的是把剩下的章节接着准备（只补剩余、不重复调用），
       // 或者改目录 / 从头再来（这两条才是要付代价的路径）。运行中才有「取消」，
       // 这个状态下已经没有在跑的东西，所以不再放取消。
       const remain = Math.max((totalBlocks || 0) - (doneBlocks || 0), 0);
       const redraftGate = redraftAllowedByStage();
       setStatusActions('paused_outline', `
-        <button class="btn-status-secondary" id="btn-reextract">重新提炼</button>
+        <button class="btn-status-secondary" id="btn-reextract">重新拆分评分点</button>
         <button class="btn-status-secondary" id="btn-redraft-outline"
           ${redraftGate.ok ? '' : 'disabled'}
-          title="${redraftGate.ok ? '换一版提炼要求重新派生目录'
-                               : '本次运行已过闸门，目录不能再改；请用「重新提炼」'}">重新拆分目录</button>
+          title="${redraftGate.ok ? '换一版要求重新派生目录'
+                               : '本次运行已过闸门，目录不能再改；请用「重新拆分评分点」'}">重新拆分目录</button>
         <button class="btn-status-primary" id="btn-resume-extract"
-          title="只提炼还没做的章节；已完成的章节不会重复调用模型">继续提炼${
+          title="只准备还没做的章节；已完成的章节不会重复调用模型">继续准备${
           remain ? `（${remain} 节）` : ''}</button>`, () => {
         document.getElementById('btn-reextract').addEventListener('click', confirmReextract);
         document.getElementById('btn-redraft-outline').addEventListener('click', redraftOutline);
-        // 继续提炼 = resume 同一条 run（跳过已完成的章节），不是重新起一条
+        // 继续准备 = resume 同一条 run（跳过已完成的章节），不是重新起一条
         document.getElementById('btn-resume-extract').addEventListener('click', continueExtraction);
       });
     }
@@ -1069,10 +1069,10 @@ function firstLine(text) {
   return s.length ? s[0] : '';
 }
 
-// no_source：这节本来就没有可提炼的原文（用户新增 / 纯目录节点）——**不是失败**，
-// 但要和"已完成"区分开，否则用户看到空字段会以为提炼坏了。
-const BADGE_TEXT = { pending: '待提炼', extracting: '提炼中', done: '已完成 ✓',
-                     error: '提炼失败', no_source: '无需提炼' };
+// no_source：这节本来就没有可准备的原文（用户新增 / 纯目录节点）——**不是失败**，
+// 但要和"已完成"区分开，否则用户看到空字段会以为准备坏了。
+const BADGE_TEXT = { pending: '待准备', extracting: '准备中', done: '已完成 ✓',
+                     error: '准备失败', no_source: '无需准备' };
 
 
 
@@ -1129,7 +1129,7 @@ function renderBlockCard(block, status = 'pending') {
   host.appendChild(node);
 }
 // ── 响应矩阵 8 字段：渲染与提交的**唯一定义** ──
-// 卡片网格、SSE 结果更新、提炼结果确认页的编辑提交三处都从这里取字段表，避免各写
+// 卡片网格、SSE 结果更新、准备结果确认页的编辑提交三处都从这里取字段表，避免各写
 // 一份顺序、或与后端 OutlineMatrixRow / blocks 表的列名对不上（历史上 UI 只认 7 个，
 // constraint_level 从未被渲染，而它偏偏决定正文字数档）。
 //
@@ -1149,7 +1149,7 @@ const OUTLINE_FIELDS = [
 
 // 8 字段里的 constraint_level：三档枚举定义在 workspace-model.mjs（与 workbench 共用）
 
-// 已提炼但该字段为空 → 显示「—」（不显示骨架条：骨架会被读成"还在提炼"）。
+// 已准备但该字段为空 → 显示「—」（不显示骨架条：骨架会被读成"还在准备"）。
 function renderField(label, value, cls, key = '') {
   const isEmpty = !value;
   let content;
@@ -1169,7 +1169,7 @@ function renderField(label, value, cls, key = '') {
   </div>`;
 }
 
-// 强制等级：默认 disabled —— 只有 makeOutlineEditable()（提炼结果确认页）解禁，
+// 强制等级：默认 disabled —— 只有 makeOutlineEditable()（准备结果确认页）解禁，
 // 与文本字段的 contenteditable 共用同一套开关（见 makeOutlineEditable/freezeOutlineEdit）。
 function renderConstraintField(value) {
   const cur = CONSTRAINT_LEVELS.some(o => o.value === value) ? value : 'recommended';
@@ -1191,7 +1191,7 @@ function renderFieldsGrid(row) {
 
 // 挂载/替换卡片的 8 字段网格。
 // 「解析目录」阶段（pending）的卡片**不带**网格：那时 8 字段一个都还没有，渲染出来
-// 只是空噪声；提炼中挂单行占位（见 mountExtractingPlaceholder）；结果到达时换成它。
+// 只是空噪声；准备中挂单行占位（见 mountExtractingPlaceholder）；结果到达时换成它。
 function mountOutlineFields(card, row) {
   const body = card?.querySelector('.block-card-body');
   if (!body) return null;
@@ -1217,7 +1217,7 @@ let sourceMaterialCount = 0;     // 素材池里有几份原始素材（空状�
 
 // 行内徽标：章节状态 +「依据 N」。
 // 状态文案来自 workspace-model 的 chapterBadges（与筛选、覆盖矩阵、撰写页同一份判定）；
-// 但**提炼中是瞬态**，SSE 帧比 blocks 行更新得快，所以那一档以入参 status 为准。
+// 但**准备中是瞬态**，SSE 帧比 blocks 行更新得快，所以那一档以入参 status 为准。
 // 类名沿用 `block-status-badge {status} ot-badge`：setBlockBadge/updateBlockCard 按它找节点。
 // 本模块只负责**取数**（依据数 / 条目覆盖来自各自的缓存），拼装交给共享实现，
 // 于是「要求与大纲 / 素材库 / 方案编辑」三处的徽标标记只有一份。
@@ -1304,7 +1304,7 @@ function renderMatchTreeHead() {
     </div>
     <div class="chap-chips">
       ${chip('all', '全部')}${chip('without_evidence', '无依据')}
-      ${chip('unwritten', '未撰写')}${chip('pending', '待提炼')}
+      ${chip('unwritten', '未撰写')}${chip('pending', '待准备')}
     </div>
     <div class="chap-search">
       <input type="search" id="match-chapter-search" placeholder="搜索章节名称" value="${escapeHtml(matchSearch)}">
@@ -1368,7 +1368,7 @@ function selectMatchChapter(blockId, { keepOpen = false } = {}) {
   blocksList.querySelectorAll('.ot-node').forEach(n =>
     n.classList.toggle('mw-selected', n.dataset.blockId === selectedMatchBlockId));
   // **不**自动展开卡片：匹配页的目录默认收起，点行 = 右侧看详情。
-  // 想核对 8 项提炼字段就点行首的 ›（展开态记在匹配页自己的记忆里，不影响大纲页）。
+  // 想核对 8 项准备字段就点行首的 ›（展开态记在匹配页自己的记忆里，不影响大纲页）。
   scrollToOutlineNode(selectedMatchBlockId);
   renderMatchDetail();
 }
@@ -1742,7 +1742,7 @@ async function toggleScoringRisk() {
   });
 }
 
-// 覆盖矩阵（跨章节一屏看全）：行 = 章节，列 = 提炼 / 依据 / 条目覆盖 / 正文。
+// 覆盖矩阵（跨章节一屏看全）：行 = 章节，列 = 准备 / 依据 / 条目覆盖 / 正文。
 // 挂在素材库视图上：它回答的正是"哪些章节还没找到素材"。
 function toggleCoverageMatrix() {
   const el = document.getElementById('match-detail');
@@ -1807,23 +1807,23 @@ async function loadResponseItems() {
 // 依据变化（匹配跑完 / 重新匹配）由 loadExistingBlocks 整版重绘覆盖（onDone → resyncFromDb），
 // 不另开一条"就地刷新"路径 —— 少一条路径就少一处状态不同步的可能。
 
-// 「提炼中」占位：一行说明 + 转圈，而不是 7 行空字段。
-// 逐节提炼是串行的，单节十几秒到一分钟；空字段看起来像"这一节没有内容"，
-// 用户会以为提炼失败或没跑。结果到达后 updateBlockCard 会整块换成 8 字段网格。
+// 「准备中」占位：一行说明 + 转圈，而不是 7 行空字段。
+// 逐节准备是串行的，单节十几秒到一分钟；空字段看起来像"这一节没有内容"，
+// 用户会以为准备失败或没跑。结果到达后 updateBlockCard 会整块换成 8 字段网格。
 function mountExtractingPlaceholder(card) {
   const body = card?.querySelector('.block-card-body');
   if (!body) return;
   body.innerHTML = `
     <div class="block-card-extracting">
       <span class="extract-spinner" aria-hidden="true"></span>
-      <span class="extract-text">正在提炼本节 8 项要求…</span>
+      <span class="extract-text">正在准备本节 8 项要求…</span>
       <span class="extract-hint">应标要求 · 应标重点 · 否决项 · 加分项 · 评分项 · 证明材料 · 强制等级 · 量化指标</span>
     </div>`;
 }
 
-// 提炼完成 / 中止后：把**已有内容**的章节保持展开。
-// 用户刚提炼出来的 8 字段不该因为一次 resync 或流程收尾就整体折叠起来
-// （反馈原话：「提炼完成之后 8 个字段的模块直接会隐藏」）。
+// 编写准备完成 / 中止后：把**已有内容**的章节保持展开。
+// 用户刚准备出来的 8 字段不该因为一次 resync 或流程收尾就整体折叠起来
+// （反馈原话：「编写准备完成之后 8 个字段的模块直接会隐藏」）。
 function openAllExtractedNodes() {
   const set = readOpenSet();
   let changed = false;
@@ -1982,8 +1982,8 @@ function updateBlockCard(blockId, data) {
   badge.textContent = BADGE_TEXT[badgeState] || badgeState;
   badge.title = data.error || '';
   card.querySelector('.block-card-progress')?.classList.remove('active');
-  // 结果到达：整块重建 8 字段（闸门 1 的卡片本来没有网格；提炼中的骨架也要换成值）。
-  // 空字段走「—」而不是骨架 —— 骨架会让用户以为这一节还在提炼。
+  // 结果到达：整块重建 8 字段（闸门 1 的卡片本来没有网格；准备中的骨架也要换成值）。
+  // 空字段走「—」而不是骨架 —— 骨架会让用户以为这一节还在准备。
   mountOutlineFields(card, data);
   syncOutlineRow(blockId);
 }
@@ -2021,8 +2021,8 @@ async function recoverFromDeadThread(err) {
   if (await switchToLatestUsableRun()) return true;   // 切走后页面会重载
   setStatusBar('paused',
     code === 'workflow_aborted'
-      ? '当前运行已作废（已取消或中断），已清空。点「重新提炼」会新建一次运行。'
-      : '找不到这次运行（可能已被清理），已清空。点「重新提炼」会新建一次运行。',
+      ? '当前运行已作废（已取消或中断），已清空。点「重新拆分评分点」会新建一次运行。'
+      : '找不到这次运行（可能已被清理），已清空。点「重新拆分评分点」会新建一次运行。',
     0, totalBlocks, doneBlocks);
   return true;
 }
@@ -2039,16 +2039,16 @@ let editingBlockId = null;
 let structureSaveChain = Promise.resolve();
 let pendingRenameId = null;
 
-// 「已提炼」以 status 字段为权威：upsert 时写 'outline_done' 才算完成。
+// 「已准备」以 status 字段为权威：upsert 时写 'outline_done' 才算完成。
 // 不能用 key_points/requirement 是否为空兜底 —— 部分章节（纯目录、分组节点）
-// LLM 提炼后这两个字段就是空串，会被误判为未完成。
+// LLM 准备后这两个字段就是空串，会被误判为未完成。
 // isDoneBlock / badgeStatusOf 的实现搬到了 assets/workspace-model.mjs：
 // 「失败不算完成」是条契约，放到有 node --test 覆盖的纯函数里才守得住。
 // 见 import 处的别名。
 
 function structureEditable() {
   if (extractionState === 'gate_outline') return true;
-  // 提炼完成后的目录视图也允许调整（此时 8 字段可编辑，改名/调序不该被禁）
+  // 编写准备完成后的目录视图也允许调整（此时 8 字段可编辑，改名/调序不该被禁）
   return extractionState === 'done' && document.body.dataset.view !== 'matching';
 }
 
@@ -2122,7 +2122,7 @@ function applyStructureNodes(nodes) {
 }
 
 // 右上角「N/M 模块 · x%」与进度条只在 setStatusBar 里写过 —— 结构增删后章节数变了，
-// 提炼完成后的目录视图（done 态）不会再调 setStatusBar，不刷就会一直显示旧数字。
+// 编写准备完成后的目录视图（done 态）不会再调 setStatusBar，不刷就会一直显示旧数字。
 function refreshStatusCounters() {
   const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
   statusPct.textContent = `${doneBlocks}/${totalBlocks} 模块 · ${pct}%`;
@@ -2425,7 +2425,7 @@ document.addEventListener('keydown', (e) => {
  * 实测（项目 19 run efe2ac4c）：那次运行在 **parsing 阶段被 abort**，parse 已经把
  * 531 个**招标文件原始目录**写成占位 blocks（"1.招标条件 / 2.项目概况…"），
  * 而派生目录还没跑。页面却把这批占位当成"应答目录"显示，还邀请用户
- * 「确认目录，开始提炼要点」—— 一旦确认就会去提炼 531 个原始章节。
+ * 「确认目录」—— 一旦确认就会去准备 531 个原始章节。
  *
  * 判据用后端预检的 `has_outline`（= outline_revision 有没有值），比在前端
  * 比对 source_toc 与 toc 更可靠。
@@ -2445,7 +2445,7 @@ async function resolvePanelThreadId(tid) {
 /**
  * 投标范围选择器：**一次设定、贯穿全程**。
  *
- * "我们投哪个标包"是投标人的属性，不该每次从提炼要求里的文字去猜 ——
+ * "我们投哪个标包"是投标人的属性，不该每次从拆分要求里的文字去猜 ——
  * 实测多标包文件里推错范围 = 整份技术应答目录错。选项来自评分地图的标包索引。
  *
  * ⚠️ 这个函数曾被整段删除过（重写 openSplitReport 时连带删掉），而调用点还在，
@@ -2520,7 +2520,7 @@ let reviewSummary = {};
 let verdictCache = { key: '', data: null };
 // 「确认即放行」：在面板里点过「确认并生成目录」后，闸门 1 不再要求用户第二次确认
 // ——范围/类别的确认与目录结构的确认是**同一次决策**（审计 P2-2：
-// 两套确认语义曾让界面自相矛盾：产物还没确认、而目录已经派生完并在提炼）。
+// 两套确认语义曾让界面自相矛盾：产物还没确认、而目录已经派生完并在准备）。
 // 带时间戳，避免用户中途改主意后这个标记一直挂在那儿。
 let autoConfirmOutlineAt = 0;
 // 是否正在「梳理应答目录」这一**短任务**阶段（派生目录：秒级~1 分钟）。
@@ -2607,7 +2607,7 @@ function refreshPanelRunState() {
   if (st === 'failed') text = '上次运行失败 · 原因见「运行详情」';
   else if (splitInProgress || st === 'parsing') text = '正在解析要求文件…';
   else if (outlineDrafting) text = '正在梳理应答目录…';
-  else if (st === 'extracting' && total) text = `已提炼 ${done}/${total} 章节`;
+  else if (st === 'extracting' && total) text = `已准备 ${done}/${total} 章节`;
   else if (st === 'matching') text = '正在匹配素材…';
   else if (st === 'generating' && total) text = `正在生成正文 ${done}/${total} 章节`;
   else if (st === 'reviewing') text = '正在评审…';
@@ -3432,8 +3432,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
         <span class="sr-run" id="sr-run-state"></span>
         <!-- 右侧按钮已按用户要求整组删除。
-             ⚠️ 注意：这组按钮曾承载「继续提炼（resume-extract）」——那是**唯一**能接着跑完
-             被暂停的提炼的入口（编辑器里的「继续生成」是生成阶段的事，不是提炼）。
+             ⚠️ 注意：这组按钮曾承载「继续准备（resume-extract）」——那是**唯一**能接着跑完
+             被暂停的准备的入口（编辑器里的「继续生成」是生成阶段的事，不是准备）。
              要恢复的话，把它作为**唯一**的上下文主按钮放回这里即可（只在真有暂停/闸门时出现）。 -->
         <span class="sr-head-actions"></span>
       </div>
@@ -3765,12 +3765,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       await restartExtraction();
       return;
     }
-    // 「重新拆分目录」= 用当前解析结果/提炼要求重新派生目录（带后端预检）
+    // 「重新拆分目录」= 用当前解析结果/拆分要求重新派生目录（带后端预检）
     if (e.target.closest?.('[data-act="redraft-outline"]')) {
       await redraftOutline();
       return;
     }
-    // 「重新提炼」= 从头跑提炼（会清掉已提炼内容，内部有二次确认）
+    // 「重新拆分评分点」= 从头跑准备（会清掉已准备内容，内部有二次确认）
     if (e.target.closest?.('[data-act="reextract"]')) {
       await confirmReextract();
       return;
@@ -3940,7 +3940,7 @@ async function warnIfOutlineNotDerived(tid) {
   box.innerHTML = `
     <strong>当前显示的是招标文件原始目录（${chk.source_sections} 节），应答目录未派生。</strong>
     <span>那次运行在解析阶段就中断了。请点上方「重新拆分目录」按已解析的内容派生应答目录；
-          确认目录前不要直接开始提炼。</span>`;
+          确认目录前不要直接开始准备。</span>`;
   blocksList.parentElement?.insertBefore(box, blocksList);
 }
 
@@ -4017,7 +4017,7 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   // 应答条目 + 匹配总览先拿到：详情要按**条目**分组、树/筛选要按依据计数，
   // 后拿到的话会先渲染成章节级再闪一下重排。
   await Promise.all([loadResponseItems(), loadMatchOverview()]);
-  // 是否「已提炼」以 status 字段为权威（见 isDoneBlock）
+  // 是否「已准备」以 status 字段为权威（见 isDoneBlock）
   const isDone = isDoneBlock;
 
   totalBlocks = blocks.length;
@@ -4088,10 +4088,10 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
     const pct = Math.round(doneBlocks / totalBlocks * 100);
     const isMatching = document.body.dataset.view === 'matching';
     if (doneBlocks >= totalBlocks) {
-      setStatusBar('done', isMatching ? '匹配完成' : '提炼完成', pct, totalBlocks, doneBlocks);
+      setStatusBar('done', isMatching ? '匹配完成' : '编写准备完成', pct, totalBlocks, doneBlocks);
     } else {
-      // 部分提炼/匹配（取消后保留的进度）：进入 paused 态，让用户继续 / 重新触发。
-      // 大纲视图用统一文案（还剩 N 节 + 继续提炼只补剩余），素材库视图保持原样。
+      // 部分准备/匹配（取消后保留的进度）：进入 paused 态，让用户继续 / 重新触发。
+      // 大纲视图用统一文案（还剩 N 节 + 继续准备只补剩余），素材库视图保持原样。
       if (!isMatching) {
         setPartialOutlineBar();
       } else {
@@ -4100,18 +4100,18 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
       }
     }
   } else if (totalBlocks > 0 && currentStage !== 'outline_review') {
-    // 已解析章节但一节都没提炼。**排除闸门 1**：目录已拆好、等用户确认，这是正常
-    // 等待态而非中断 —— 写「可继续提炼」会把用户从「先确认目录」引偏，paused 的
-    // 按钮组也会盖掉闸门的「确认目录，开始提炼要点」。闸门的文案由 boot /
+    // 已解析章节但一节都没准备。**排除闸门 1**：目录已拆好、等用户确认，这是正常
+    // 等待态而非中断 —— 写「可继续准备」会把用户从「先确认目录」引偏，paused 的
+    // 按钮组也会盖掉闸门的「确认目录」。闸门的文案由 boot /
     // onGateOpen / restoreSettledThread 负责。
-    setStatusBar('paused', `已解析 ${totalBlocks} 个章节，可继续提炼`, 0, totalBlocks, 0);
+    setStatusBar('paused', `已解析 ${totalBlocks} 个章节，可继续准备`, 0, totalBlocks, 0);
   }
 }
 
 // 运行终止 / 断流后的唯一对齐手段：以数据库为准重绘，等价于用户手动刷新一次。
 // 运行期间页面上的章节来自 SSE 帧，库只在 parse / outline_draft 两处写入；两者不一致时
 // 只有重读库能把卡片、进度、状态栏一起拉回真实状态。否则卡片会永远停在最后一帧的样子
-// （最常见的是「提炼中…」+ 进度条卡在中途）。
+// （最常见的是「准备中…」+ 进度条卡在中途）。
 async function resyncFromDb() {
   // 闸门期间不重绘：用户可能正在编辑目录，整版替换会丢掉改动（与 scheduleOutlineTree 同一约定）
   if (extractionState === 'gate_outline' || extractionState === 'gate_materials') return;
@@ -4122,7 +4122,7 @@ async function resyncFromDb() {
   }
 }
 
-// ── 提炼流程（新 workflow driver） ──
+// ── 准备流程（新 workflow driver） ──
 function resetWorkflowUi() {
   blocksList.innerHTML = '';
   blocksEmpty.innerHTML = '<p>上传应标文件后点击「拆分评分点」开始</p>';
@@ -4222,8 +4222,8 @@ async function recoverStreamAfterDrop() {
   const tid = currentThreadId || params.get('threadId') || getThread(projectId);
   if (!tid) return;
   // **先读状态再决定**，别一断流就喊"后端可能已重启"。
-  // 逐节提炼每跑完一轮，后端都会主动关掉事件流（emitter.aclose）；这属于正常收尾，
-  // 而"恢复额度"只在闸门事件里重置（提炼过程没有闸门事件）—— 于是连着跑完两轮之后，
+  // 逐节准备每跑完一轮，后端都会主动关掉事件流（emitter.aclose）；这属于正常收尾，
+  // 而"恢复额度"只在闸门事件里重置（准备过程没有闸门事件）—— 于是连着跑完两轮之后，
   // 第三次关流必然撞上额度上限，弹出那条**假警报**。先看 state 就能区分：
   const snap = await api.workflow.state(tid).catch(() => null);
   if (!snap || !snap.project_id) {
@@ -4235,7 +4235,7 @@ async function recoverStreamAfterDrop() {
     return;
   }
   if (await longPhaseRunning(snap)) {
-    // 提炼/匹配还在跑：只是连接掉了，重连继续等帧（不 recover，免得空跑一轮）
+    // 准备/匹配还在跑：只是连接掉了，重连继续等帧（不 recover，免得空跑一轮）
     attachStream(tid);
     return;
   }
@@ -4283,7 +4283,7 @@ function attachStream(threadId) {
   currentEventSource = api.workflow.stream(threadId, {
     onStreamError: () => { void recoverStreamAfterDrop(); },
     // 收到**任意**一帧就说明连接是好的 → 重置断流恢复额度。
-    // 只靠 stage_change 重置不够：逐节提炼期间没有闸门事件，连续跑完两轮之后
+    // 只靠 stage_change 重置不够：逐节准备期间没有闸门事件，连续跑完两轮之后
     // 第三次"正常关流"就会撞上额度上限、弹出假的"事件流已断开"。
     onAnyEvent: () => { streamRecoverCount = 0; },
     onStageChange: (data) => {
@@ -4321,12 +4321,12 @@ function attachStream(threadId) {
       const badge = card.querySelector('.block-status-badge');
       if (badge) {
         badge.className = 'block-status-badge extracting';
-        badge.textContent = '提炼中…';
+        badge.textContent = '准备中…';
       }
       const prog = card.querySelector('.block-card-progress');
       if (prog) prog.classList.add('active');
-      // 闸门 1 的卡片不带 8 字段网格（那时一个都没提炼）。到"提炼中"挂一个**单行占位**，
-      // 不挂 7 行空骨架：逐节提炼是串行的，每节要跑十几秒到一分钟，7 个空字段看着
+      // 闸门 1 的卡片不带 8 字段网格（那时一个都没准备）。到"准备中"挂一个**单行占位**，
+      // 不挂 7 行空骨架：逐节准备是串行的，每节要跑十几秒到一分钟，7 个空字段看着
       // 像"这一节没内容"（用户明确反馈过这个体验）。结果到达时再整块换成 8 字段网格。
       mountExtractingPlaceholder(card);
       // 自动展开当前节并把展开状态**存下来**：断流/刷新触发的一次 resync 不该把用户
@@ -4339,8 +4339,8 @@ function attachStream(threadId) {
         writeOpenSet(openSet);
       }
       syncOutlineRow(blockId);
-      // 滚动到当前正在提炼的节点，但**只在它不在视口内时**滚：
-      // 33 节文档里每节都抢一次滚动，用户想回看已提炼的内容就会被反复拽走。
+      // 滚动到当前正在准备的节点，但**只在它不在视口内时**滚：
+      // 33 节文档里每节都抢一次滚动，用户想回看已准备的内容就会被反复拽走。
       if (!document.querySelector('.block-card.scroll-locked')) {
         const rect = card.getBoundingClientRect();
         const offscreen = rect.top < 0 || rect.bottom > window.innerHeight;
@@ -4364,7 +4364,7 @@ function attachStream(threadId) {
         bonus_items: matrix.bonus_items || '',
         score_items: matrix.score_items || '',
         evidence_required: matrix.evidence_required || '',
-        // 第 8 个字段以前没进这个对象 → 卡片永远显示默认值，提炼结果里的
+        // 第 8 个字段以前没进这个对象 → 卡片永远显示默认值，准备结果里的
         // mandatory 会在页面上消失（而它决定正文字数档）
         constraint_level: matrix.constraint_level || 'recommended',
         indicators: matrix.indicators || '',
@@ -4424,7 +4424,7 @@ function attachStream(threadId) {
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0;
       const failed = failedBlockCount();
       setStatusBar('extracting',
-        `张衡提炼 ${doneBlocks}/${totalBlocks} 章节${failed ? `（${failed} 节失败）` : ''}`,
+        `准备编写依据 ${doneBlocks}/${totalBlocks} 章节${failed ? `（${failed} 节失败）` : ''}`,
         pct, totalBlocks, doneBlocks);
     },
     onOutlineDraftStart: (data) => {
@@ -4440,7 +4440,7 @@ function attachStream(threadId) {
       const ver = draftRevision ? `（第 ${draftRevision} 版）` : '';
       outlineDrafting = true;
       setStatusBar('extracting', `张衡梳理应答目录${ver}…`, 0, totalBlocks, doneBlocks);
-      blocksEmpty.innerHTML = '<p>正在依据要求文件与提炼要求梳理应答目录…</p>';
+      blocksEmpty.innerHTML = '<p>正在依据要求文件梳理应答目录…</p>';
       blocksEmpty.style.display = 'block';
     },
     onOutlineDraft: (data) => {
@@ -4470,7 +4470,7 @@ function attachStream(threadId) {
       buildToc(toc);
       updateSidebarProgress();
       const ver = draftRevision ? `第 ${draftRevision} 版` : '';
-      // 逐节提炼已移到闸门1 之后，此刻只有目录到手、什么都没在跑，不能写「正在提炼章节要求」
+      // 逐节准备已移到闸门1 之后，此刻只有目录到手、什么都没在跑，不能写「正在准备章节要求」
       setStatusBar('extracting', `目录已更新${ver ? `（${ver}）` : ''}…`,
         0, totalBlocks, 0);
       // 两阶段 UI 的**主入口**：目录一到手就展示拆分清单。
@@ -4513,7 +4513,7 @@ function attachStream(threadId) {
       currentGate = gate;
       const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
       if (gate === 'review_outline') {
-        // 快照是后端权威：刷新后靠它回填提炼要求、显示版本号与降级提示
+        // 快照是后端权威：刷新后靠它回填拆分要求、显示版本号与降级提示
         const snap = data?.snapshot || {};
         if (Number(snap.outline_revision)) draftRevision = Number(snap.outline_revision);
         if (typeof snap.outline_error === 'string' && snap.outline_error) {
@@ -4537,8 +4537,8 @@ function attachStream(threadId) {
         }
         setStatusBar('gate_outline',
           degrades.length
-            ? `大纲提炼完成${ver}；${degrades.join('；')}`
-            : `大纲提炼完成${ver}，请检查并编辑后开始提炼要点`,
+            ? `大纲编写准备完成${ver}；${degrades.join('；')}`
+            : `大纲编写准备完成${ver}，请检查并编辑后开始准备要点`,
           pct, totalBlocks, doneBlocks);
       } else if (gate === 'review_materials') {
         setStatusBar('gate_materials', '素材匹配完成，请确认后进入撰写', pct, totalBlocks, doneBlocks);
@@ -4579,11 +4579,11 @@ function attachStream(threadId) {
     onAborted: (data) => {
       console.warn('[workflow] aborted', data);
       closeStream();
-      // **不清 thread**：与 cancelExtraction 同一道理 —— 已提炼的章节是这次 run 的成果，
-      // 「继续提炼」必须能 resume 回同一条 run（否则会重新解析 + 重新派生目录 + 全量重算）。
+      // **不清 thread**：与 cancelExtraction 同一道理 —— 已准备的章节是这次 run 的成果，
+      // 「继续准备」必须能 resume 回同一条 run（否则会重新解析 + 重新派生目录 + 全量重算）。
       currentGate = null;
       setExtractDisabled(false);
-      // 中止后卡片仍停在最后一帧（在被中止的那一节上显示「提炼中…」）。以库为准重绘，
+      // 中止后卡片仍停在最后一帧（在被中止的那一节上显示「准备中…」）。以库为准重绘，
       // 库里还保留着中止前已落库的进度，正好就是刷新之后会看到的样子。
       resyncFromDb().then(() => openAllExtractedNodes());
     },
@@ -4595,7 +4595,7 @@ function attachStream(threadId) {
       if (eeDone) { eeDone.hidden = true; eeDone.innerHTML = ''; }
       // 运行结束但没进闸门（例如被后端中止 / 图跑到尽头）时同样要回读库，
       // 否则页面停在运行期的帧上，只有手动刷新才会对齐。
-      // 收尾后把已提炼的章节保持展开：用户下一步就是核对这 8 个字段。
+      // 收尾后把已准备的章节保持展开：用户下一步就是核对这 8 个字段。
       resyncFromDb().then(async () => {
         const st = data?.stage || '';
         // 第①步「只拆评分点」结束时：不生成目录、图直接收尾 —— 这时要主动把
@@ -4621,8 +4621,34 @@ function attachStream(threadId) {
 
 // 停在闸门 / 终态的 thread 不会自己再往下走：recover 只是把 _Run 重建回来（停在闸门时
 // ainvoke(None) 是空跑），后端不会再发任何帧。这时照常 attachStream 等帧，页面就永远停在
-// 「准备提炼…」。必须直接按 state 恢复视图。
-const SETTLED_STAGES = new Set(['points_review', 'outline_review', 'materials_review', 'report_review', 'done', 'paused', 'aborted', 'failed']);   // failed：终态，没有帧可等，直接按 state 恢复视图
+// 「正在准备…」。必须直接按 state 恢复视图。
+const SETTLED_STAGES = new Set(['points_review', 'outline_review', 'materials_review', 'report_review', 'done', 'paused', 'aborted', 'failed']);
+// 运行期阶段（"准备中"）：新 IA 里这不是用户动作 —— 页面发现上次没跑完就自己接上，
+// 见 maybeAutoResume()。用户主动取消（paused）不在其列。
+const RUNNING_STAGES = new Set(['parsing', 'extracting', 'matching', 'generating', 'reviewing']);
+let autoResumeTried = false;
+
+/** 自动续跑被中断的准备步骤（后端按图的 next 决定接着跑哪一步）。
+ *  为什么不做成按钮：新信息架构里只有 评分点 → 待确认 → 产物 → 编写 → 评审，
+ *  "准备（逐章抽取要求）"是内部环节，不该出现在用户的操作面上。 */
+async function maybeAutoResume(stage) {
+  if (autoResumeTried || !RUNNING_STAGES.has(stage)) return;
+  autoResumeTried = true;
+  const tid = currentThreadId || params.get('threadId') || getThread(projectId);
+  if (!tid) return;
+  try {
+    const r = await fetch(`/api/workflow/${tid}/resume-auto`, { method: 'POST' });
+    if (!r.ok) return;
+    const data = await r.json().catch(() => ({}));
+    if (data?.resumed && data.resumed !== 'nothing_to_do' && data.resumed !== 'running') {
+      const el = document.getElementById('sr-run-state');
+      if (el) el.textContent = '已自动继续上次未完成的准备工作…';
+      console.info('[workflow] 自动续跑：', data.resumed);
+    }
+  } catch (e) {
+    console.warn('[workflow] 自动续跑失败（不影响查看）', e);
+  }
+}   // failed：终态，没有帧可等，直接按 state 恢复视图
 
 // 需要「按 state 恢复视图」的停留态（闸门）。failed/done 除外：它们是终态。
 // points_review：第①步（只拆评分点）结束的停留态 —— 没有目录可确认，
@@ -4646,6 +4672,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     return;
   }
   setStage(stage); // 同时按 stage 切 outline / matching 视图并重绘进度条
+  maybeAutoResume(stage);   // 上次没跑完 → 自己接上（不是用户动作）
   await loadExistingBlocks({ silent: true });
   const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
   if (stage === 'failed') {
@@ -4653,14 +4680,14 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     // 状态栏**不再写技术报错原文**（用户要求去掉）：一是那段话又长又是给开发者看的，
     // 二是 checkpoint 的 errors 是累加语义、清不掉，重试成功后仍会显示上一次的旧报错
     // ——留着只会误导。失败原因保留在「运行详情」里（showRun 会列 state.errors），
-    // 需要定位问题时去那里看。此处只留动作：重新拆分目录 / 从头重新提炼。
+    // 需要定位问题时去那里看。此处只留动作：重新拆分目录 / 从头重新拆分评分点。
     setStatusBar('failed', '', pct, totalBlocks, doneBlocks);
     return;
   }
   if (stage === 'paused') {
-    // 暂停有两种，靠"还有没有章节没提炼"区分（与闸门态同一套判据）：
-    //   还有剩余 → 提炼中途取消：留在本页给「继续提炼」（resume-extract 只补剩余部分）
-    //   全都提炼过 → 生成阶段的暂停，不在本页处理，去质量检查
+    // 暂停有两种，靠"还有没有章节没准备"区分（与闸门态同一套判据）：
+    //   还有剩余 → 准备中途取消：留在本页给「继续准备」（resume-extract 只补剩余部分）
+    //   全都准备过 → 生成阶段的暂停，不在本页处理，去质量检查
     if (totalBlocks > 0 && doneBlocks < totalBlocks) {
       currentGate = null;
       setPartialOutlineBar({ note });
@@ -4683,19 +4710,19 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     return;
   }
   if (stage === 'outline_review') {
-    // 与 boot 同一套判定：checkpoint 停在 outline_review，但章节已全部提炼 = 第二步
+    // 与 boot 同一套判定：checkpoint 停在 outline_review，但章节已全部准备 = 第二步
     // 其实跑完了（extract 收尾时图直接 END，没有节点再改 stage），别再引导用户
-    // 「确认目录，开始提炼要点」—— 那会再起一次提炼（后端有互斥兜底，但体验是错的）。
+    // 「确认目录」—— 那会再起一次准备（后端有互斥兜底，但体验是错的）。
     if (totalBlocks > 0 && doneBlocks >= totalBlocks) {
       currentGate = null;
-      setStatusBar('done', `提炼完成${note ? `；${note}` : ''}`, 100, totalBlocks, doneBlocks);
+      setStatusBar('done', `编写准备完成${note ? `；${note}` : ''}`, 100, totalBlocks, doneBlocks);
       return;
     }
-    // 部分章节已提炼 = 提炼被打断（正在跑的情况由调用方先判掉，见 boot / 兜底轮询）。
-    // 此时仍停在闸门 1 的确认按钮上 —— 它是**唯一**能继续提炼的入口：extract 会跳过
+    // 部分章节已准备 = 准备被打断（正在跑的情况由调用方先判掉，见 boot / 兜底轮询）。
+    // 此时仍停在闸门 1 的确认按钮上 —— 它是**唯一**能继续准备的入口：extract 会跳过
     // 已完成的章节接着跑（skip_ids）。只是把文案说清楚，别让人以为要从头来。
     if (doneBlocks > 0) {
-      // 提炼到一半（被打断）：给「继续提炼」那套按钮，别再引导"确认目录开始提炼"
+      // 编写准备到一半（被打断）：给「继续准备」那套按钮，别再引导"确认目录开始准备"
       currentGate = null;
       setPartialOutlineBar({ note });
       openAllExtractedNodes();
@@ -4717,7 +4744,7 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
       if (err) degrade += `；目录派生提示：${err}`;
     } catch { /* 读不到就不提示，不阻断恢复 */ }
     setStatusBar('gate_outline',
-      `已恢复上次进度：大纲已就绪，请检查确认后开始提炼要点${degrade}${note ? `；${note}` : ''}`,
+      `已恢复上次进度：大纲已就绪，请检查确认后开始准备要点${degrade}${note ? `；${note}` : ''}`,
       pct, totalBlocks, doneBlocks);
   } else {
     currentGate = 'review_materials';
@@ -4855,10 +4882,10 @@ async function restartExtraction() {
 }
 
 async function startExtraction(forceRestart = false) {
-  // forceRestart：用户点「重新提炼」，先 abort 旧 thread 再起新
+  // forceRestart：用户点「重新拆分评分点」，先 abort 旧 thread 再起新
   resetWorkflowUi();
   if (forceRestart) {
-    // 重新提炼回到「解析大纲」视图：清掉视图覆盖；不直接重置 currentStage 到 'parsing'，
+    // 重新拆分评分点回到「解析大纲」视图：清掉视图覆盖；不直接重置 currentStage 到 'parsing'，
     // 否则进度条 active 会回退到「解析大纲」蓝色（但 graph 实际仍处于更后阶段）。
     // 真实 stage 由 graph 跑起来时 SSE / state 返回。
     pageViewOverride = 'outline';
@@ -4882,7 +4909,7 @@ async function startExtraction(forceRestart = false) {
       currentThreadId = null;
     }
     if (forceRestart) {
-      // 重新提炼：清空已落库的 blocks，避免 extract 节点把旧 outline_done 当已完成跳过
+      // 重新拆分评分点：清空已落库的 blocks，避免 extract 节点把旧 outline_done 当已完成跳过
       try { await api.blocks.clear(projectId); } catch (e) { console.warn('clear blocks failed', e); }
     }
 
@@ -4927,7 +4954,7 @@ async function startExtraction(forceRestart = false) {
     }
     attachStream(threadId);
   } catch (e) {
-    // 以前这里只 console.error + 清状态栏 ——「重新提炼」失败时页面上**零提示**，
+    // 以前这里只 console.error + 清状态栏 ——「重新拆分评分点」失败时页面上**零提示**，
     // 用户看到的就是"点了没反应"（实测：abort 之后没有任何后续请求，blocks 也没清，
     // 页面上却什么都不说）。失败必须说清原因与下一步。
     console.error('[workflow] startExtraction 失败', e);
@@ -4935,13 +4962,13 @@ async function startExtraction(forceRestart = false) {
     const msg = (e && (e.message || e.detail)) || String(e || '未知错误');
     const canFallback = !!(currentThreadId || getThread(projectId));
     statusActions.innerHTML = canFallback
-      ? `<button class="btn-status-primary" id="btn-force-restart">重新提炼（强制新建运行）</button>`
+      ? `<button class="btn-status-primary" id="btn-force-restart">重新拆分评分点（强制新建运行）</button>`
       : '';
     const btnForce = document.getElementById('btn-force-restart');
     if (btnForce) btnForce.addEventListener('click', () => forceRestartRun());
     setStatusBar('idle',
-      `重新提炼失败：${msg}。` +
-      (canFallback ? '可点「重新提炼（强制新建运行）」重试。' : '请刷新页面后重试。'),
+      `重新拆分评分点失败：${msg}。` +
+      (canFallback ? '可点「重新拆分评分点（强制新建运行）」重试。' : '请刷新页面后重试。'),
       0, 0, 0);
   }
 }
@@ -4949,7 +4976,7 @@ async function startExtraction(forceRestart = false) {
 /**
  * 强制新建运行：不依赖 sessionStorage 里的旧 thread，直接把当前 thread 作废后走 start。
  *
- * 为什么单独留一条：正常「重新提炼」会先 abort 旧 run 再新建；一旦 abort 之后
+ * 为什么单独留一条：正常「重新拆分评分点」会先 abort 旧 run 再新建；一旦 abort 之后
  * 任何一步失败（网络、5xx、页面里的异常），用户就被卡在"旧目录 + 无提示"，
  * 实测连续点 25 次「重新拆分目录」也没用（它不重跑解析）。这条路径把每一步的
  * 失败都报出来，并且**先建新 run 再谈其它**。
@@ -4985,16 +5012,16 @@ async function startMatching() {
   //
   // ⚠️ 不能拿 checkpoint 的 stage 当"闸门 1 过没过"的判据 —— 这是本函数踩过的坑：
   // extract 是这条分支的最后一个节点，跑完图直接 END，**checkpoint 只会停在闸门 1
-  // 留下的 'outline_review'**；于是"提炼已完成"与"闸门 1 还没放行"在 /state 里长得
+  // 留下的 'outline_review'**；于是"准备已完成"与"闸门 1 还没放行"在 /state 里长得
   // 一模一样（真实数据：项目 18 thread f0e6f7ae → workflow_runs='done'、33/33 节
   // outline_done、checkpoint stage='outline_review'）。以前这里信了 checkpoint，
-  // 点「素材匹配」被判成"还没提炼"，`setStage('outline_review')` + `switchView('outline')`
-  // 把人拽回要求与大纲并弹「请先在『要求与大纲』确认目录并提炼要点」—— 而那边其实
+  // 点「素材匹配」被判成"还没准备"，`setStage('outline_review')` + `switchView('outline')`
+  // 把人拽回要求与大纲并弹「请先在『要求与大纲』确认目录并准备要点」—— 而那边其实
   // 无事可做，用户被卡死（用户报的正是这个）。
-  // 真实判据 = **已提炼章节数**（doneBlocks，页面自己按 blocks 算，比 checkpoint 新）。
-  // - 一节都没提炼 → 闸门 1 真的没过：回「要求与大纲」引导（语义正确）。
-  // - 已有提炼结果 → 就是"开始匹配"：rerun-match 把指针拨回 NODE_EXTRACT 之后跑 match。
-  // - 长阶段还在跑（提炼/匹配）→ 让它跑完，不发请求也不动视图。
+  // 真实判据 = **已准备章节数**（doneBlocks，页面自己按 blocks 算，比 checkpoint 新）。
+  // - 一节都没准备 → 闸门 1 真的没过：回「要求与大纲」引导（语义正确）。
+  // - 已有准备结果 → 就是"开始匹配"：rerun-match 把指针拨回 NODE_EXTRACT 之后跑 match。
+  // - 长阶段还在跑（准备/匹配）→ 让它跑完，不发请求也不动视图。
   const tid0 = currentThreadId || params.get('threadId') || getThread(projectId);
   setExtractDisabled(true);
   matchedIds.clear();
@@ -5006,12 +5033,12 @@ async function startMatching() {
     if (tid) {
       try { snap = await api.workflow.state(tid); } catch {}
     }
-    // 提炼 / 匹配还在跑：后端 rerun_match 会 409，而且此刻切视图只会让人更困惑
+    // 准备 / 匹配还在跑：后端 rerun_match 会 409，而且此刻切视图只会让人更困惑
     const running = tid ? await longPhaseRunning(snap) : null;
     if (running) {
       setExtractDisabled(false);
       setStatusBar('extracting',
-        running === 'extracting' ? '正在提炼要点，等这一轮跑完再开始匹配。' : '正在匹配素材，请稍候…',
+        running === 'extracting' ? '正在准备要点，等这一轮跑完再开始匹配。' : '正在匹配素材，请稍候…',
         totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
       return;
     }
@@ -5020,7 +5047,7 @@ async function startMatching() {
     const extracted = Number(doneBlocks) || 0;
     const stage = snap?.stage || currentStage;
     // 该走哪条路由纯函数判定（matchEntryDecision，有 node --test 覆盖）：判据是
-    // **已提炼章节数**而不是 checkpoint 的 stage —— 理由见函数头与模型层注释。
+    // **已准备章节数**而不是 checkpoint 的 stage —— 理由见函数头与模型层注释。
     const decision = matchEntryDecision({ stage, totalBlocks: total, doneBlocks: extracted, running });
 
     if (!tid) {
@@ -5037,10 +5064,10 @@ async function startMatching() {
       setThread(projectId, tid);
       currentThreadId = tid;
       attachStream(tid);
-      // 全新 run：一节都没提炼，下面必然走"先确认目录再提炼"的引导
+      // 全新 run：一节都没准备，下面必然走"先确认目录再准备"的引导
       setExtractDisabled(false);
       switchView('outline');
-      setStatusBar('extracting', '已新建一次运行：请先在「要求与大纲」确认目录并提炼要点',
+      setStatusBar('extracting', '已新建一次运行：请先在面板里确认目录',
                    0, totalBlocks, doneBlocks);
       return;
     }
@@ -5050,18 +5077,18 @@ async function startMatching() {
     // 真正要干活的分支（下面 rerun-match / 新起 run）各自 attach，那里才是必要的。
 
     if (decision === MATCH_ENTRY.GATE_OUTLINE) {
-      // 闸门 1 还没放行。匹配依赖提炼产出的矩阵，不能在这儿代放闸门 —— 那会让
-      // 「素材匹配」按钮顺手烧掉 N 次逐节提炼调用，用户还看不到提炼结果。送回
-      // 「要求与大纲」，走「确认目录，开始提炼要点」。
+      // 闸门 1 还没放行。匹配依赖准备产出的矩阵，不能在这儿代放闸门 —— 那会让
+      // 「素材匹配」按钮顺手烧掉 N 次逐节准备调用，用户还看不到准备结果。送回
+      // 「要求与大纲」，走「确认目录」。
       setStage(stage);
       setExtractDisabled(false);
       switchView('outline');
-      setStatusBar('gate_outline', '请先在「要求与大纲」确认目录并提炼要点', 0, totalBlocks, doneBlocks);
+      setStatusBar('gate_outline', '请先在面板里确认目录', 0, totalBlocks, doneBlocks);
       return;
     }
     if (decision === MATCH_ENTRY.START) {
       if (stage === 'outline_review') {
-        // 提炼已完成、checkpoint 仍写着 outline_review：只把进度条挪到匹配步，
+        // 准备已完成、checkpoint 仍写着 outline_review：只把进度条挪到匹配步，
         // **不调 setStage/switchView**（它们会按 stale 闸门态把视图切回要求与大纲）。
         currentStage = 'matching';
         renderStageBar();
@@ -5104,23 +5131,23 @@ async function cancelExtraction() {
     try { await api.workflow.abort(currentThreadId); } catch (e) { console.warn('abort failed', e); }
   }
   closeStream();
-  // **不清 thread**：已提炼的章节是这次 run 的成果（后端逐节 upsert 落库），
+  // **不清 thread**：已准备的章节是这次 run 的成果（后端逐节 upsert 落库），
   // 取消只是"停一下"。清掉 thread 引用会带来两个真问题（实测）：
-  //   ① 「继续提炼」找不到原 run → startExtraction 起一条**全新** run → 重新解析 +
+  //   ① 「继续准备」找不到原 run → startExtraction 起一条**全新** run → 重新解析 +
   //      重新派生目录（目录可能与用户刚审过的那版不同）→ 用户看到「目录结构变了」；
-  //   ② 那等于把已提炼的部分全部重算一遍 —— 每章一次模型调用，白烧钱。
-  // 保留 thread 后，「继续提炼」= resume 同一个 run，extract 会跳过 status='outline_done'
+  //   ② 那等于把已准备的部分全部重算一遍 —— 每章一次模型调用，白烧钱。
+  // 保留 thread 后，「继续准备」= resume 同一个 run，extract 会跳过 status='outline_done'
   // 的章节（skip_ids），只补没做的。
   currentGate = null;
   setExtractDisabled(false);
   // 用库里的计数，不用内存里的 doneBlocks/totalBlocks：中止时最后一节可能还没落库，
   // 内存计数会比库里多，状态栏数字和刷新后看到的不一致。
   await resyncFromDb();
-  // 已提炼的章节保持展开：用户刚看到的内容不该因为"取消"就从屏幕上消失
+  // 已准备的章节保持展开：用户刚看到的内容不该因为"取消"就从屏幕上消失
   openAllExtractedNodes();
 }
 
-// 「继续提炼」：复用当前 run 从检查点接着跑（不重新派生目录、不重算已完成章节）。
+// 「继续准备」：复用当前 run 从检查点接着跑（不重新派生目录、不重算已完成章节）。
 // 用 resume-extract 而不是普通 resume：取消时图已经收尾（next 为空），普通 ainvoke
 // 是空跑；该端点借闸门 1 的出边把指针拨回 extract 之前，extract 自己跳过已完成的章节。
 async function continueExtraction() {
@@ -5129,13 +5156,13 @@ async function continueExtraction() {
     // 没有可复用的 run（比如换了浏览器/清过会话）：只能从头，先说清楚代价
     const go = await uiConfirm(
       '找不到这次运行的记录，只能重新跑一遍：\n' +
-      '重新解析要求文件 → 重新派生目录 → 重新逐节提炼（每章一次模型调用）。\n\n' +
+      '重新解析要求文件 → 重新派生目录 → 重新逐节准备（每章一次模型调用）。\n\n' +
       '确定继续？');
     if (!go) return;
     return startExtraction(true);
   }
   setExtractDisabled(true);
-  setStatusBar('extracting', '继续提炼剩余章节…', 
+  setStatusBar('extracting', '继续准备剩余章节…', 
                totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
   try {
     await api.workflow.resumeExtract(tid);
@@ -5145,16 +5172,16 @@ async function continueExtraction() {
   } catch (e) {
     console.error('[workflow] continueExtraction 失败', e);
     setExtractDisabled(false);
-    setStatusBar('paused', `继续提炼失败：${e?.message || e}`, 
+    setStatusBar('paused', `继续准备失败：${e?.message || e}`, 
                  totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
   }
 }
 
-// 「提炼到一半」的顶栏（文案 + 按钮组）。按钮组由 setStatusBar 的 paused 分支渲染：
-// 重新提炼 / 重新拆分目录 / 继续提炼（剩余 N 节）。
+// 「编写准备到一半」的顶栏（文案 + 按钮组）。按钮组由 setStatusBar 的 paused 分支渲染：
+// 重新拆分评分点 / 重新拆分目录 / 继续准备（剩余 N 节）。
 // 单独抽出来是因为 boot、断流恢复、取消之后三处都必须落到同一个形态 —— 以前它们都
-// 走闸门 1 那栏，于是半个提炼进度下还在显示「确认目录，开始提炼要点」，语义是错的。
-// 当前项目里提炼失败的章节数（blocksById 是页面的权威副本）
+// 走闸门 1 那栏，于是半个准备进度下还在显示「确认目录」，语义是错的。
+// 当前项目里准备失败的章节数（blocksById 是页面的权威副本）
 function failedBlockCount() {
   let n = 0;
   blocksById.forEach(b => { if ((b?.error_kind || '') === 'failed') n++; });
@@ -5195,26 +5222,26 @@ function setPartialOutlineBar({ note = '' } = {}) {
   // 文案尽量短：右侧已经有三颗按钮，长句子会把它们挤出去（实测被挤出右边界）。
   // "只补剩余、不重复调用"这句解释挂在按钮 title 上。
   const failed = failedBlockCount();
-  const bits = [`已提炼 ${done}/${total} 章节${remain ? `，还剩 ${remain} 节` : ''}`];
-  if (failed > 0) bits.push(`${failed} 节提炼失败，可点「继续提炼」重试`);
+  const bits = [`已准备 ${done}/${total} 章节${remain ? `，还剩 ${remain} 节` : ''}`];
+  if (failed > 0) bits.push(`${failed} 节准备失败，可点「继续准备」重试`);
   if (note) bits.push(note);
   return setStatusBar('paused', bits.join('；'), pct, total, done);
 }
 
-// 「重新提炼」= 从头再来：清空已提炼内容 + 新起一条 run（重新解析 → 重新派生目录 → 逐节提炼）。
+// 「重新拆分评分点」= 从头再来：清空已准备内容 + 新起一条 run（重新解析 → 重新派生目录 → 逐节准备）。
 // 这是**最贵**的路径，而且新派生的目录可能与用户刚审过的那版不同，所以必须先说清代价，
-// 并把"只想接着提炼剩下的章节"的用户引导到「继续提炼」。
+// 并把"只想接着准备剩下的章节"的用户引导到「继续准备」。
 async function confirmReextract() {
   const n = Number(doneBlocks) || 0;
   const total = Number(totalBlocks) || 0;
   const go = await uiConfirm(
-    '「重新提炼」会从头跑一遍：\n' +
-    `① 清空已提炼的 ${n}${total ? `/${total}` : ''} 个章节内容；\n` +
+    '「重新拆分评分点」会从头跑一遍：\n' +
+    `① 清空已准备的 ${n}${total ? `/${total}` : ''} 个章节内容；\n` +
     '② 重新解析要求文件；\n' +
     '③ 重新派生应答目录（新目录可能与当前这版不同）；\n' +
     `④ 重新逐节调用模型${total ? `（约 ${total} 次调用）` : ''}。\n\n` +
-    (n > 0 ? '只想接着提炼剩下的章节？请点「继续提炼」（不重复调用已完成的章节）。\n\n' : '') +
-    '确定重新提炼？');
+    (n > 0 ? '只想继续剩下的章节？点「继续准备」（已完成的章节不会重复调用）。\n\n' : '') +
+    '确定重新拆分评分点？');
   if (go) await startExtraction(true);
 }
 
@@ -5234,26 +5261,26 @@ async function confirmOutlineGate() {
   try {
     // 立即给反馈：下面的结构保存队列可能因为一次卡住的请求迟迟不回，而以前状态栏是
     // 在 await 之后才切的 —— 于是"点了没反应"。
-    setStatusBar('extracting', '张衡提炼章节要求中…',
+    setStatusBar('extracting', '正在准备编写依据…',
                  totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
-    // 提炼要求只影响派生：改过却没重新拆分时，目录与输入框不一致。这里问一句，
-    // 避免用户在"以为按新要求拆了"的前提下接着提炼要点。
+    // 拆分要求只影响派生：改过却没重新拆分时，目录与输入框不一致。这里问一句，
+    // 避免用户在"以为按新要求拆了"的前提下接着准备要点。
     const ta = instructionInput();
     if (ta && instructionDirty(ta.value, appliedInstruction)) {
       const go = await uiConfirm(
-        '提炼要求已修改，但当前目录仍是按上一版要求生成的。\n' +
-        '继续确认（按当前目录提炼要点）？\n\n' +
+        '拆分要求已修改，但当前目录仍是按上一版要求生成的。\n' +
+        '继续确认（按当前目录准备要点）？\n\n' +
         '要按新要求重拆，请先取消，再点「重新拆分目录」。');
       if (!go) {
         if (btn) btn.disabled = false;
-        // 撤回刚才那句"提炼中"，回到闸门（否则按钮禁用着、状态栏还写着提炼中）
+        // 撤回刚才那句"准备中"，回到闸门（否则按钮禁用着、状态栏还写着准备中）
         currentGate = 'review_outline';
         setStatusBar('gate_outline', '已取消：目录没有变化，核完后可再确认。',
                      totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
         return;
       }
     }
-    // 闸门 1 只放行「目录结构」：此刻 8 字段还一个都没提炼（卡片里根本没有字段网格，
+    // 闸门 1 只放行「目录结构」：此刻 8 字段还一个都没准备（卡片里根本没有字段网格，
     // 见 renderBlockCard 的 pending 分支）。历史上这里会把 collectOutlineEdits() 的
     // N 行**全空**矩阵塞给 resume，而 extract 是用新结果整体替换 spec.outline_matrix
     // 的，那 N 行谁都没读过 —— 纯 checkpoint 噪声，去掉。
@@ -5261,7 +5288,7 @@ async function confirmOutlineGate() {
     freezeOutlineEdit();
     // 结构编辑是**逐次立即保存**的（增删改/排序各有一次 POST）。若用户刚点完上移/
     // 删除就马上点「确认目录…」，resume 可能先到后端 —— extract 读的是 spec.toc，
-    // 于是被提炼的目录与页面看到的目录不一致（少一节或多一节）。这里等保存队列排空，
+    // 于是被准备的目录与页面看到的目录不一致（少一节或多一节）。这里等保存队列排空，
     // 但**限时 4s**：一次卡住的保存请求不该让确认变成"点了没反应"。
     let structureSaved = true;
     try {
@@ -5272,11 +5299,11 @@ async function confirmOutlineGate() {
     } catch { /* 保存失败：面板已报错，且 persistStructure 会把 DOM 回滚到库里的版本 */ }
     if (!structureSaved) {
       // 保存还没落地就放行，extract 读到的 spec.toc 会是旧版 —— 页面显示的目录与
-      // 实际被提炼的目录发散。宁可让用户等两秒再点，也不要用旧目录烧一遍模型。
+      // 实际被准备的目录发散。宁可让用户等两秒再点，也不要用旧目录烧一遍模型。
       if (btn) btn.disabled = false;
       currentGate = 'review_outline';
       setStatusBar('gate_outline',
-        '目录还在保存中，请稍候两秒再点「确认目录」（避免按旧目录提炼）。',
+        '目录还在保存中，请稍候两秒再点「确认目录」（避免按旧目录准备）。',
         totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
       return;
     }
@@ -5288,7 +5315,7 @@ async function confirmOutlineGate() {
     currentThreadId = tid;
     setThread(projectId, tid);
     // 后端可能已经换了一份 emitter（服务重启后 _runs 被清空，或上一段流收尾时
-    // aclose 过）—— 旧 SSE 连接收不到任何提炼帧，卡片会停在骨架屏、等刷新读库
+    // aclose 过）—— 旧 SSE 连接收不到任何准备帧，卡片会停在骨架屏、等刷新读库
     // 才更新。attachStream 内部先 close 再建，直接续上当前 emitter。
     attachStream(tid);
   } catch (e) {
@@ -5300,13 +5327,13 @@ async function confirmOutlineGate() {
     if (msg) {
       currentGate = 'review_outline';
       setStatusBar('gate_outline',
-        `未能开始提炼：${msg}。若是刚刷新过页面，请等这一轮跑完再操作。`,
+        `未能开始准备：${msg}。若是刚刷新过页面，请等这一轮跑完再操作。`,
         totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0, totalBlocks, doneBlocks);
     }
   }
 }
 
-// ── 提炼要求输入（左侧面板底部，闸门 1 可反复改） ──
+// ── 拆分要求输入（左侧面板底部，闸门 1 可反复改） ──
 const OUTLINE_INSTRUCTION_KEY = (pid) => `outlineInstruction:${pid}`;
 
 function instructionInput() {
@@ -5325,7 +5352,7 @@ function readOutlineInstruction() {
   try { return (localStorage.getItem(OUTLINE_INSTRUCTION_KEY(projectId)) || '').trim(); } catch { return ''; }
 }
 
-// 当前目录**是按哪一版提炼要求拆的** —— 以后端闸门快照为准（它是派生的真实输入）。
+// 当前目录**是按哪一版拆分要求拆的** —— 以后端闸门快照为准（它是派生的真实输入）。
 let appliedInstruction = '';
 
 // 回填：闸门快照（后端权威）负责「哪一版生效」，输入框负责「用户正在打什么」。
@@ -5345,7 +5372,7 @@ function restoreOutlineInstruction({ text = '', force = false } = {}) {
   updateInstructionDirtyHint();
 }
 
-// 「提炼要求改过但没应用到目录」的可见提示（含下一步动作）
+// 「拆分要求改过但没应用到目录」的可见提示（含下一步动作）
 function updateInstructionDirtyHint() {
   const hint = document.getElementById('outline-instruction-dirty');
   const ta = instructionInput();
@@ -5354,8 +5381,8 @@ function updateInstructionDirtyHint() {
   hint.hidden = !dirty;
   if (!dirty) { hint.textContent = ''; return; }
   hint.textContent = appliedInstruction
-    ? '提炼要求已修改：当前目录仍是按上一版要求生成的，点「重新拆分目录」后才会生效。'
-    : '这段提炼要求还没用于生成目录：点「拆分评分点」（或「重新拆分目录」）后生效。';
+    ? '拆分要求已修改：当前目录仍是按上一版要求生成的，点「重新拆分目录」后才会生效。'
+    : '这段拆分要求还没用于生成目录：点「拆分评分点」（或「重新拆分目录」）后生效。';
 }
 
 instructionInput()?.addEventListener('input', () => {
@@ -5363,7 +5390,7 @@ instructionInput()?.addEventListener('input', () => {
   updateInstructionDirtyHint();
 });
 
-// 闸门 1：换一份提炼要求，让张衡整版重出目录。
+// 闸门 1：换一份拆分要求，让张衡整版重出目录。
 // 刻意不走 startExtraction(true) —— 那条路会 abort + 重跑 parse（几百页 PDF 再 OCR 一遍）。
 // 目录重出只在**闸门处**成立。run 推进到更后阶段后目录不能再改（改了正文就对不上），
 // 后端会 409 拒绝 —— 但只把这句话显示出来，用户点几次都一样，无从下手（实测点了 3 次）。
@@ -5376,7 +5403,7 @@ function redraftAllowedByStage() {
   return {
     ok: false,
     reason: '本次运行已推进到「撰写/评审」之后，目录不能再改（改了正文就对不上）。\n' +
-            '若刚上传了新的要求文件（如技术规范书），请点「重新提炼」—— 会新建一次运行并重新解析全部要求文件。',
+            '若刚上传了新的要求文件（如技术规范书），请点「重新拆分评分点」—— 会新建一次运行并重新解析全部要求文件。',
   };
 }
 
@@ -5384,7 +5411,7 @@ async function redraftOutline() {
   autoConfirmOutlineAt = 0;   // 主动重来 → 不再自动放行闸门
   // ① 先问后端：能不能重拆。原料变过（删旧文件/传新文件）或已过闸门时，
   //    「重新拆分目录」用的是 checkpoint 里的**旧解析结果**，点下去会返回 200
-  //    但页面毫无变化 —— 实测用户连点 8 次。这里直接改走「重新提炼」。
+  //    但页面毫无变化 —— 实测用户连点 8 次。这里直接改走「重新拆分评分点」。
   const tidForCheck = currentThreadId || params.get('threadId') || getThread(projectId);
   console.log('[redraft] 入口', { tidForCheck, totalBlocks, doneBlocks, extractionState });
   if (tidForCheck) {
@@ -5401,10 +5428,10 @@ async function redraftOutline() {
       if (reason === 'requirement_files_changed') {
         // 不再用 window.confirm 做闸门：对话框没被接受就完全没反应（实测用户点了 23 次
         // 预检、一次重拆都没发出去）。直接执行用户本来要做的事 ——
-        // 「重新提炼」= 新建运行 + 重新解析全部要求文件，并在状态栏说清为什么。
+        // 「重新拆分评分点」= 新建运行 + 重新解析全部要求文件，并在状态栏说清为什么。
         setStatusBar('extracting',
           '要求文件已变更：目录是按上一次解析的结果生成的，「重新拆分目录」带不上新文件。' +
-          '正在改为「重新提炼」（重新解析全部要求文件）…', 0, totalBlocks, doneBlocks);
+          '正在改为「重新拆分评分点」（重新解析全部要求文件）…', 0, totalBlocks, doneBlocks);
         await startExtraction(true);
         return;
       }
@@ -5416,15 +5443,15 @@ async function redraftOutline() {
     }
   }
 
-  // 已经提炼过一部分时先讲清代价：重出目录 = 换一版 block_id，已提炼的内容不再对应
-  // （等于要重新提炼）。想改标题/顺序/层级应该用每行的「编辑」，想接着提炼用「继续提炼」。
+  // 已经准备过一部分时先讲清代价：重出目录 = 换一版 block_id，已准备的内容不再对应
+  // （等于要重新拆分评分点）。想改标题/顺序/层级应该用每行的「编辑」，想接着准备用「继续准备」。
   if (Number(doneBlocks) > 0) {
     const go = await uiConfirm(
-      `当前已提炼 ${doneBlocks}/${totalBlocks} 个章节。\n` +
-      '重新拆分目录会用当前的提炼要求重新派生一版目录，已提炼的内容不再对应新目录' +
-      '（需要重新提炼）。\n\n' +
+      `当前已准备 ${doneBlocks}/${totalBlocks} 个章节。\n` +
+      '重新拆分目录会用当前的拆分要求重新派生一版目录，已准备的内容不再对应新目录' +
+      '（需要重新拆分评分点）。\n\n' +
       '· 只想改章节标题 / 顺序 / 层级？用目录每行的「编辑」。\n' +
-      '· 想接着提炼剩下的章节？点「继续提炼」。\n\n' +
+      '· 剩下的章节会在流程继续时自动准备。\n\n' +
       '确定重新拆分目录？');
     if (!go) return;
   }
@@ -5445,7 +5472,7 @@ async function redraftOutline() {
     // runner 会重建 emitter，旧 SSE 连接收不到新一版的帧
     attachStream(tid);
     outlineDrafting = true;
-    setStatusBar('extracting', '已提交提炼要求，张衡重新梳理应答目录…', 0, totalBlocks, doneBlocks);
+    setStatusBar('extracting', '已提交，正在重新梳理应答目录…', 0, totalBlocks, doneBlocks);
   } catch (e) {
     console.error('[workflow] redraftOutline 失败', e);
     if (await recoverFromDeadThread(e)) return;   // 已作废/线程未知 → 切到可用运行或提示新建
@@ -5453,11 +5480,11 @@ async function redraftOutline() {
     const pct = totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 100;
     const msg = String(e?.message || e || '');
     // 后端因"已过闸门"拒绝 → 这是**终态**，不再重绘「重新拆分目录」（点了还是失败）。
-    // 明确指向唯一有效路径：重新提炼（会重新解析要求文件）。
-    if (msg.includes('重新提炼') || !redraftAllowedByStage().ok) {
+    // 明确指向唯一有效路径：重新拆分评分点（会重新解析要求文件）。
+    if (msg.includes('重新拆分评分点') || !redraftAllowedByStage().ok) {
       setStatusBar('done', `目录不能再改：${msg}`, pct, totalBlocks, doneBlocks);
       statusActions.innerHTML =
-        `<button class="btn-status-primary" id="btn-reextract-now">重新提炼（重新解析要求文件）</button>`;
+        `<button class="btn-status-primary" id="btn-reextract-now">重新拆分评分点（重新解析要求文件）</button>`;
       document.getElementById('btn-reextract-now')
         .addEventListener('click', () => confirmReextract());
       return;
@@ -5466,7 +5493,7 @@ async function redraftOutline() {
   }
 }
 
-// ── 提炼结果确认页：可编辑工具 ──
+// ── 准备结果确认页：可编辑工具 ──
 // 字段键从 OUTLINE_FIELDS 派生（见该常量注释），不再手抄一份顺序 —— 漏一个字段
 // 就会让那一列在提交时被静默丢回默认值（constraint_level 以前就是这样）。
 const OUTLINE_FIELD_KEYS = OUTLINE_FIELDS.map(f => f.key);
@@ -5535,7 +5562,7 @@ function collectOutlineEdits() {
   return matrix;
 }
 
-// 「确认内容大纲及要求」：把用户在提炼结果上的编辑提交，再进素材库。
+// 「确认内容大纲及要求」：把用户在准备结果上的编辑提交，再进素材库。
 // 图此时已收尾，所以走 confirm-outline 端点写回（blocks 表 + 图里的矩阵）——
 // 不能复用闸门 resume，那条路会 ainvoke 继续往下跑。
 async function confirmOutlineContent() {
@@ -5648,7 +5675,7 @@ async function uploadFile(file, role, btn) {
 // 调试/自救入口：页面上的按钮若因状态判断被隐藏或事件未绑定，可在控制台直接调用。
 // （实测出现过"按钮在、点了没反应"，与控制台自查相比，直接给入口更快定位。）
 window.dsv = {
-  reextract: () => startExtraction(true),      // 重新提炼（重新解析全部要求文件）
+  reextract: () => startExtraction(true),      // 重新拆分评分点（重新解析全部要求文件）
   forceRestart: () => forceRestartRun(),       // 强制新建运行（不依赖旧 thread）
   redraft: () => redraftOutline(),             // 重新拆分目录
   state: () => ({ extractionState, currentThreadId, totalBlocks, doneBlocks,
@@ -5700,14 +5727,14 @@ document.addEventListener('click', () => {
   if (toc) toc.style.display = 'none';
 });
 
-// 自动提炼：立即显示提炼状态栏，材料加载完后发请求
+// 自动准备：立即显示准备状态栏，材料加载完后发请求
 if (params.get('autoExtract') === '1') {
   statusBar.dataset.state = 'extracting';
-  statusLabel.textContent = '准备提炼…';
+  statusLabel.textContent = '正在准备…';
   progressTrack.style.display = 'block';
   progressBar.style.width = '0%';
   statusPct.textContent = '0/0 模块 · 0%';
-  statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel">取消提炼</button>`;
+  statusActions.innerHTML = `<button class="btn-status-secondary" id="btn-cancel">取消</button>`;
   statusActions.querySelector('#btn-cancel')?.addEventListener('click', cancelExtraction);
   setExtractDisabled(true);
   blocksReady = loadExistingBlocks();
@@ -5726,7 +5753,7 @@ if (params.get('autoExtract') === '1') {
       if (skel) skel.hidden = true;
     });
   loadModels();
-  // 提炼要求：先按 localStorage 回填，闸门 1 快照到达后再以后端值覆盖空输入框
+  // 拆分要求：先按 localStorage 回填，闸门 1 快照到达后再以后端值覆盖空输入框
   restoreOutlineInstruction();
 }
 
@@ -5775,7 +5802,7 @@ bindMatchDetailActions();
     if (!latest) return;
     // thread_id 的恢复**不能**依赖 stage 是否在 STAGE_MAP 里：paused / done / aborted
     // 这些值不在表里，以前会把整段跳过 → currentThreadId 一直是空 → 闸门 1 的
-    // 「确认目录，开始提炼要点」变成静默 return（用户看到"点了没反应"）。
+    // 「确认目录」变成静默 return（用户看到"点了没反应"）。
     if (!currentThreadId && latest.thread_id) {
       setThread(projectId, latest.thread_id);
       currentThreadId = latest.thread_id;
@@ -5793,7 +5820,7 @@ bindMatchDetailActions();
     // 这里只清过期 threadId，**不再用它的 stage 覆盖视图**。
     // sessionStorage 里这个 thread 可能是上一次停留的（比如上次已经匹配过素材），
     // 它的 stage 比项目最新一次 run 更靠后，照它去 setStage 会把页面切成素材匹配视图，
-    // 而状态栏文案已经按当前视图写好了 —— 顶栏说「已提炼」、右栏是匹配面板，自相矛盾。
+    // 而状态栏文案已经按当前视图写好了 —— 顶栏说「已准备」、右栏是匹配面板，自相矛盾。
     // 视图与进度一律以 workflow-runs[0]（项目最新一次 run）为准。
     if (stage === 'failed') {
       // 派生失败等硬失败：**保留 thread**（重试派生要用它），说清原因并给重试入口
@@ -5814,54 +5841,54 @@ bindMatchDetailActions();
         if (await switchToLatestUsableRun()) return;   // 切走即重载
         // 没有可用的历史运行：明确给出下一步，别让用户停在空状态里
         await blocksReady;
-        setStatusBar('paused', '这次运行已作废（已取消或中断），已清空。点「重新提炼」新建一次运行。',
+        setStatusBar('paused', '这次运行已作废（已取消或中断），已清空。点「重新拆分评分点」新建一次运行。',
                      0, totalBlocks, doneBlocks);
       }
       return;
     }
     // 后端重启会清空 runner 内存里的 _Run，但 checkpoint 还停在「跑了一半」的 stage 上，
     // 这个 run 已经没有任何东西在推进了（详见 isOrphanedRun）。而 loadExistingBlocks()
-    // 只会按库里的章节数写「已解析 N 个章节，可继续提炼」—— 中断被包装成了一份正常待办。
-    // 这里必须说清楚，并且给出路：继续提炼走 recover() 从检查点续跑。
+    // 只会按库里的章节数写「已解析 N 个章节，可继续准备」—— 中断被包装成了一份正常待办。
+    // 这里必须说清楚，并且给出路：继续准备走 recover() 从检查点续跑。
     // 正常停在闸门 1：loadExistingBlocks 只会按数据写「已解析 N 个章节」（那是给中断
-    // 场景的文案），这里补回闸门自己的按钮组 —— 先确认目录，再开始提炼。
+    // 场景的文案），这里补回闸门自己的按钮组 —— 先确认目录，再开始准备。
     if (!isOrphanedRun(s)) {
       if (s?.stage === 'outline_review') {
         await blocksReady;
-        // checkpoint 停在 outline_review 有三种场景，靠"已提炼章节数 + workflow_runs"
+        // checkpoint 停在 outline_review 有三种场景，靠"已准备章节数 + workflow_runs"
         // 区分（extract / match 节点只能在自己结束时写 checkpoint，运行期看不到）：
-        //   workflow_runs=extracting 且进程仍认得这个 run → 提炼正在跑：重连 SSE 等帧，
-        //     不要露出闸门 1 的确认按钮（那会再起一次提炼）。
-        //   doneBlocks === totalBlocks → 提炼已跑完，按完成态停住。
-        //   0 < doneBlocks < totalBlocks → 被打断：闸门 1 的确认按钮就是"继续提炼"
+        //   workflow_runs=extracting 且进程仍认得这个 run → 准备正在跑：重连 SSE 等帧，
+        //     不要露出闸门 1 的确认按钮（那会再起一次准备）。
+        //   doneBlocks === totalBlocks → 准备已跑完，按完成态停住。
+        //   0 < doneBlocks < totalBlocks → 被打断：闸门 1 的确认按钮就是"继续准备"
         //     入口（extract 会跳过已完成的章节）。
         const running = await longPhaseRunning(s);
         if (running === 'extracting') {
-          outlineDrafting = false;      // 进入逐节提炼：长任务，允许「取消」
-      setStatusBar('extracting', '张衡提炼章节要求中…',
+          outlineDrafting = false;      // 进入逐节准备：长任务，允许「取消」
+      setStatusBar('extracting', '正在准备编写依据…',
                        Math.round(doneBlocks / Math.max(totalBlocks, 1) * 100), totalBlocks, doneBlocks);
           attachStream(tid);
           return;
         }
         if (totalBlocks > 0 && doneBlocks >= totalBlocks) {
-          setStatusBar('done', '提炼完成', 100, totalBlocks, doneBlocks);
+          setStatusBar('done', '编写准备完成', 100, totalBlocks, doneBlocks);
           return;
         }
         if (doneBlocks > 0) {
-          // 提炼到一半：给「继续提炼 / 重新拆分目录 / 重新提炼」，不是闸门 1 的确认
+          // 编写准备到一半：给「继续准备 / 重新拆分目录 / 重新拆分评分点」，不是闸门 1 的确认
           currentGate = null;
           setPartialOutlineBar();
           return;
         }
         currentGate = 'review_outline';
-        setStatusBar('gate_outline', '目录已拆分，请检查并确认后开始提炼要点', 0, totalBlocks, doneBlocks);
+        setStatusBar('gate_outline', '目录已拆分，请检查并确认后开始准备要点', 0, totalBlocks, doneBlocks);
       }
       return;
     }
     await blocksReady;  // 等它先写完，否则提示会被它的文案盖掉
     setStatusBar(
       'paused',
-      '本次运行已中断（后端重启），章节进度来自上一次运行。点「继续提炼」接着跑，或「重新提炼」从头开始。',
+      '本次运行已中断（后端重启），章节进度来自上一次运行。点「继续准备」接着跑，或「重新拆分评分点」从头开始。',
       totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0,
       totalBlocks,
       doneBlocks,

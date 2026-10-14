@@ -477,3 +477,44 @@ statusBar display=none、高度 0 ✅  动作区父节点 = sr-head-actions ✅
 内容头 ① = 商务评分点 8 · 技术评分点 8 · 技术规范书要求 153（= 实时状态，非重复）✅
 __bootErrors=[] ✅
 ```
+
+---
+
+## 十七、按新信息架构清理「提炼」这个动作与用词
+
+### 用户判断
+> 按照现在的信息架构，不存在提炼的动作了。
+
+同意：新 IA 只有 **评分点 → 待确认 → 产物 → 编写 → 评审** 五阶段。
+逐章抽取（8 字段）是 产物→编写 之间的**内部准备环节**，既不该有按钮，也不该出现在文案里。
+
+### 处理
+1. **用户可见文案里的「提炼」全部替换**（前端复查为 0 处）：
+   | 旧 | 新 |
+   |---|---|
+   | 确认目录，开始提炼要点 | **确认目录** |
+   | 提炼要点中（x/y） | **编写准备中（x/y）** |
+   | 提炼到一半 | 编写准备到一半 |
+   | 提炼完成，待确认内容 | 编写准备完成，待确认内容 |
+   | 张衡提炼章节要求中… | 正在准备编写依据… |
+   | 已提炼 x/y 章节 | 已准备 x/y 章节 |
+   | 重新提炼 / 继续提炼 | （动作已从界面移除） |
+   | 「要求与大纲」页（页名已不存在） | 面板 |
+2. **不给按钮，改成系统自动接上**：新增 `POST /api/workflow/{tid}/resume-auto`，
+   后端按图的 `next` 决定续跑哪一步（extracting→resume-extract / matching→rerun-match /
+   generating→resume-generation / reviewing→skip-to-review）；页面加载时调用一次。
+   - 只在**没有 task 在跑**时生效；
+   - **用户主动取消（paused）不自动续跑**（尊重意图，也避免白烧额度）；
+   - 已跑完 → 返回 `nothing_to_do`。
+
+### 实测
+```
+接口：已完成运行 → {"resumed":"nothing_to_do"} ✅   未知线程 → 404 ✅
+页面：document.body.innerText 里已无「提炼」✅   面板头 0 个按钮 ✅
+      head = 左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审
+      内容头 ① = 商务评分点 8 · 技术评分点 8 · 技术规范书要求 153
+测试：新增 test_resume_auto_only_acts_on_preparation_stages（钉住"只在无 task 时生效 +
+      paused 不续跑 + 四个可续跑阶段"）
+后端 764 passed / 前端 102 passed
+```
+截图：docs/screenshots/ia-no-extract-term.png

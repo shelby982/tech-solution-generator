@@ -296,6 +296,23 @@ async def resume_generation(thread_id: str):
     return JSONResponse({"thread_id": thread_id, "status": "resuming_generation"})
 
 
+@router.post("/{thread_id}/resume-auto")
+async def resume_auto(thread_id: str):
+    """**自动续跑**被中断的准备步骤（新 IA 下"准备"不是用户动作）。
+
+    页面加载时发现上一次没跑完就调它一次；后端按图的 ``next`` 决定接着跑哪一步。
+    用户主动取消（paused）不在此列。
+    """
+    runner = get_runner()
+    try:
+        action = await runner.resume_auto(thread_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread_id 未知")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse({"thread_id": thread_id, "resumed": action})
+
+
 @router.post("/{thread_id}/resume-extract")
 async def resume_extract(thread_id: str):
     """取消/暂停后接着逐节提炼：复用同一条 run，跳过已完成的章节。"""

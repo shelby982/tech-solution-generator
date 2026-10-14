@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v78';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v79';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v78';
+} from './material-roles.mjs?v=20261016-v79';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -19,7 +19,7 @@ const _pid = (params.get('projectId') || '').match(/\d+/)?.[0] || '';
 export const workspace = { projectId: _pid, threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
   // runStage：workflow_runs 里的阶段（运行期会被 runner 更新，见 orchestrator/runner.py
   // 的 _mark_next_phase）。stageLabel：**页面自己**给出的阶段文案（project-init 最清楚
-  // "提炼到哪了"，它一设这里就盖过 stageLabels 的默认词）。
+  // "准备到哪了"，它一设这里就盖过 stageLabels 的默认词）。
   runStage: null, stageLabel: '', blocks: [] };
 let timer, loading = false, lastProjection = null;
 const listeners = new Set();
@@ -50,8 +50,8 @@ function currentView() {
 }
 export function renderWorkspaceChrome() { renderChrome(); }
 
-// checkpoint 停在闸门态（outline_review / paused）时它区分不了三种子态：一节没提炼 /
-// 提炼到一半 / 全提炼完了 —— extract 收尾时图直接 END，没有节点再改 stage。
+// checkpoint 停在闸门态（outline_review / paused）时它区分不了三种子态：一节没准备 /
+// 编写准备到一半 / 全准备完了 —— extract 收尾时图直接 END，没有节点再改 stage。
 // 这里用 blocks 计数补齐，**不依赖具体页面**：project-init / review / workbench /
 // diff-review 都挂这条顶栏，只在某个页面里做覆盖是不够的（实测 review 页就还显示
 // 「待确认目录」）。
@@ -59,18 +59,18 @@ function outlinePhaseLabel(stage) {
   if (stage !== 'outline_review' && stage !== 'paused') return '';
   const blocks = workspace.blocks || [];
   if (!blocks.length) return '';
-  // 'paused' 也可能是"生成阶段暂停"：那种情况不需要这套提炼文案
+  // 'paused' 也可能是"生成阶段暂停"：那种情况不需要这套准备文案
   if (stage === 'paused' && Object.keys(workspace.state?.proposal?.blocks || {}).length) return '';
   const total = blocks.length;
   const done = blocks.filter(b => isExtractDone(b)).length;
   const failed = blocks.filter(b => (b.error_kind || '') === 'failed').length;
   if (done >= total) {
-    return failed ? `提炼完成（${failed} 节失败，可重试）` : '提炼完成，待确认内容';
+    return failed ? `编写准备完成（${failed} 节失败，可重试）` : '编写准备完成，待确认内容';
   }
   if (done > 0) {
-    return failed ? `提炼到一半（${done}/${total}，${failed} 节失败）` : `提炼到一半（${done}/${total}）`;
+    return failed ? `编写准备到一半（${done}/${total}，${failed} 节失败）` : `编写准备到一半（${done}/${total}）`;
   }
-  return '';   // 一节都没提炼：闸门 1 的「待确认目录」才是对的
+  return '';   // 一节都没准备：闸门 1 的「待确认目录」才是对的
 }
 function renderChrome() {
   const nav = document.getElementById('workspace-nav');
@@ -113,22 +113,22 @@ function renderChrome() {
   // 反过来，运行期阶段必须算 busy，否则 10s 才刷一次、标签看着像死的。
   workspace.busy = (activeStages.has(stage) || running) && !workspace.orphaned;
   const round = Number(state.iteration || 0) + 1;
-  // 优先级：页面自己给的（最实时，带 x/y 计数）→ 按 blocks 推出的提炼进度 → 默认词
+  // 优先级：页面自己给的（最实时，带 x/y 计数）→ 按 blocks 推出的准备进度 → 默认词
   const label = workspace.stageLabel || outlinePhaseLabel(stage) || stageLabels[stage] || stage;
   const runLabel = null;   // 共享壳已移除；阶段文案由页面状态行显示
   if (runLabel) runLabel.textContent = workspace.threadId
     ? `第 ${round} 轮 · ${label}${workspace.orphaned ? '（已中断）' : ''}`
     : '开始准备方案';
-  // 大纲阶段别显示"正文 x/y"（那时还没有正文），换成提炼进度更有意义
+  // 大纲阶段别显示"正文 x/y"（那时还没有正文），换成准备进度更有意义
   const extracting = stage === 'outline_review' || stage === 'paused' || stage === 'extracting';
   const stats = extracting && workspace.blocks?.length
-    ? `已提炼 ${workspace.blocks.filter(b => isExtractDone(b)).length}/${workspace.blocks.length} 章节`
+    ? `已准备 ${workspace.blocks.filter(b => isExtractDone(b)).length}/${workspace.blocks.length} 章节`
     : (summary.total
       ? `正文 ${summary.written}/${summary.total} · 已通过 ${summary.counts.passed || 0} · 待处理 ${summary.needsAction}`
       : '');
   const runDetail = null;
   if (runDetail) runDetail.textContent = workspace.orphaned
-    ? `后端重启导致该任务中断，进度来自上次运行${stats ? ` · ${stats}` : ''}。可在「要求与大纲」页点「继续提炼」接着跑`
+    ? `后端重启导致该任务中断，进度来自上次运行${stats ? ` · ${stats}` : ''}。可在面板点「继续准备」接着跑`
     : (stats || '上传要求后确认大纲，可随时切换工作区');
   // busy/orphaned 现在挂在 body 上，供样式与状态行使用（原来挂在共享壳上）
   document.body.dataset.busy = String(workspace.busy);
@@ -155,7 +155,7 @@ export async function refreshWorkspace() {
     const blocksUrl = `/api/projects/${workspace.projectId}/blocks`
       + (workspace.threadId ? `?threadId=${encodeURIComponent(workspace.threadId)}` : '');
     const rows = workspace.projectId ? await request(blocksUrl) : [];
-    workspace.blocks = rows;          // 原始行：顶栏要靠 error_kind/status 判断提炼进度
+    workspace.blocks = rows;          // 原始行：顶栏要靠 error_kind/status 判断准备进度
     workspace.chapters = projectChapters(state, rows);
     workspace.ready = true;
     renderChrome();

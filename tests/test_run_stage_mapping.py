@@ -49,3 +49,22 @@ def test_multi_node_next_picks_earliest_in_graph_order():
     assert next_phase_stage({"zhuge_liang_generate", "aggregate_review"}) == "generating"
     assert next_phase_stage({"wang_anshi_review", "zhang_heng_extract"}) == "extracting"
     assert next_phase_stage({"gate_materials", "zhuge_liang_generate"}) == "materials_review"
+
+
+def test_resume_auto_only_acts_on_preparation_stages():
+    """自动续跑只处理"准备/生成/评审"这类运行期阶段；paused 与空 next 一律不动。
+
+    新 IA 里"准备"不是用户动作 → 断点由系统自己接上；但用户主动取消（paused）
+    必须尊重，不能擅自续跑（那会变成"取消不掉"，还会白烧模型额度）。
+    """
+    import inspect
+    from orchestrator.runner import WorkflowRunner
+
+    src = inspect.getsource(WorkflowRunner.resume_auto)
+    # 只在没有 task 在跑时生效
+    assert "run.task and not run.task.done()" in src
+    # paused 直接返回，不续跑
+    assert 'state.get("stage") == "paused"' in src
+    # 四个可续跑阶段各有一条分支
+    for stage in ("extracting", "matching", "generating", "reviewing"):
+        assert f'"{stage}"' in src, stage

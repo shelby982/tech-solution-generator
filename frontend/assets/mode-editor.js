@@ -2,13 +2,13 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v78';
+import { GenerateSession } from './generate-session.js?v=20261016-v79';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v78';
-import { initContextPanel } from './context-panel.js?v=20261016-v78';
-import { api } from './api.js?v=20261016-v78';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v79';
+import { initContextPanel } from './context-panel.js?v=20261016-v79';
+import { api } from './api.js?v=20261016-v79';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction ,
-         uiAlert, uiConfirm} from './workspace.js?v=20261016-v78';
+         uiAlert, uiConfirm} from './workspace.js?v=20261016-v79';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -16,12 +16,12 @@ import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapte
 // 那时本声明还没执行 → `Cannot access 'responseItemsByBlock' before initialization`
 // （TDZ，整页脚本报错；由启动自检面板捕获后才发现）。
 let responseItemsByBlock = {};
-// 提炼字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
+// 准备字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
 // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v78';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v79';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -84,7 +84,7 @@ const STAGE_MAP = {
   parsing: 'parsing',
   // 闸门停留态映射回当前阶段：进度条与项目实际所处步骤一致
   outline_review: 'parsing',
-  // extracting：闸门 1 放行后的逐节提炼，仍属「解析大纲」这一步
+  // extracting：闸门 1 放行后的逐节准备，仍属「解析大纲」这一步
   extracting: 'parsing',
   matching: 'matching',
   materials_review: 'matching',
@@ -361,7 +361,7 @@ _refreshGoReviewBtn();
   switch (stage) {
     case 'parsing':
     case 'outline_review':
-    // extracting：逐节提炼还在跑，同样属于「前置步骤未完成」
+    // extracting：逐节准备还在跑，同样属于「前置步骤未完成」
     case 'extracting':
     case 'matching':
       // 前置阶段：用户大概率从 stage-progress 点击「方案撰写」误进；不再硬 redirect
@@ -989,7 +989,7 @@ async function loadResponseItems() {
 const ITEM_CODE = (id) => String(id || '').split('#').pop();
 // ── 本章回应：回应哪个评分点 / 多少分 / 得分口径 / 需什么举证 ──
 // 写作时最该常驻的信息。评分点的名称与分值来自评分点结论接口（按 point_id 索引，缓存一次）；
-// 得分口径与举证要求直接读块上的 criterion_text / evidence_required（拆分与提炼时已写好）。
+// 得分口径与举证要求直接读块上的 criterion_text / evidence_required（拆分与准备时已写好）。
 async function loadPointMeta() {
   if (pointMetaCache) return pointMetaCache;
   pointMetaCache = {};
@@ -1067,7 +1067,7 @@ function renderReqBar(b) {
 
   const main = document.getElementById('req-bar-main');
   if (main) {
-    main.textContent = (b.requirement || '').trim() || '本章暂无提炼出的应标要求（可直接撰写）。';
+    main.textContent = (b.requirement || '').trim() || '本章暂无准备出的应标要求（可直接撰写）。';
   }
 
   const chips = document.getElementById('req-bar-items');
@@ -1236,7 +1236,7 @@ function renderRefCards(b) {
   }
 }
 
-// 提炼参考卡片点击 → 弹窗编辑
+// 准备参考卡片点击 → 弹窗编辑
 document.querySelectorAll('.ref-card-body').forEach(body => {
   body.addEventListener('click', () => {
     if (!currentBlock) return;
@@ -1302,7 +1302,7 @@ function openRefEditModal(refType, title, content) {
       overlay.remove();
       renderRefCards(currentBlock);
     } catch (err) {
-      console.error('提炼内容保存失败', err);
+      console.error('章节要求保存失败', err);
       uiAlert('保存失败');
       saveBtn.disabled = false;
       saveBtn.textContent = '保存';
@@ -1682,8 +1682,8 @@ function openPromptPreview() {
     },
     {
       key: 'guidance',
-      title: '提炼要求（应标指导）',
-      tag: '来自提炼',
+      title: '拆分要求（应标指导）',
+      tag: '来自准备',
       content: [
         block.requirement ? `核心要求：${block.requirement}` : '',
         block.key_points ? `策略要点：${block.key_points}` : '',
@@ -1694,7 +1694,7 @@ function openPromptPreview() {
         block.constraint_level
           ? `强制性：${constraintLevelLabel(block.constraint_level)}` : '',
         block.indicators ? `量化指标：${block.indicators}` : '',
-      ].filter(Boolean).join('\n') || '（暂无提炼内容）',
+      ].filter(Boolean).join('\n') || '（暂无准备内容）',
       collapsed: false,
     },
     {
@@ -1765,7 +1765,7 @@ function openPromptPreview() {
     });
   }
 
-  // 默认显示"提炼要求"
+  // 默认显示"拆分要求"
   showSection(1);
 
   // 导航点击切换
@@ -2263,13 +2263,13 @@ matModalClose?.addEventListener('click', () => matModalBackdrop.classList.remove
 matModalBackdrop?.addEventListener('click', e => { if (e.target === matModalBackdrop) matModalBackdrop.classList.remove('open'); });
 btnMatModalUpload?.addEventListener('click', () => srcFileInput.click());
 
-// ── autoExtract: 边提炼边在 workbench 渲染 ──
+// ── autoExtract: 边准备边在 workbench 渲染 ──
 const autoExtract = params.get('autoExtract') === '1';
 if (autoExtract) {
   startWorkbenchExtraction();
 }
 
-// ── 提炼按钮逻辑 ──
+// ── 准备按钮逻辑 ──
 const extractActionBar = document.getElementById('extract-action-bar');
 const btnStartExtract = document.getElementById('btn-start-extract');
 if (!autoExtract) {
@@ -2279,7 +2279,7 @@ if (!autoExtract) {
       extractActionBar.classList.remove('hidden');
       const outline = document.querySelector('.doc-outline');
       const hasBlocks = outline && outline.children.length > 0;
-      btnStartExtract.textContent = hasBlocks ? '重新提炼' : '提炼';
+      btnStartExtract.textContent = hasBlocks ? '重新拆分评分点' : '准备';
     }
   });
 }
@@ -2349,9 +2349,9 @@ function openBatchPromptPreview() {
     },
     {
       key: 'guidance',
-      title: '提炼要求（应标指导）',
+      title: '拆分要求（应标指导）',
       tag: '各模块独立',
-      content: '各模块自动使用对应的提炼内容（核心要求、策略要点、否决项、加分项）',
+      content: '各模块自动使用对应的章节要求（核心要求、策略要点、否决项、加分项）',
       placeholder: '',
     },
     {
@@ -2761,7 +2761,7 @@ async function startWorkbenchExtraction() {
     const extractModelParam = window.__selectedModel || '';
     const outlineUrl = `/api/projects/${projectId}/outline` + (extractModelParam ? `?model=${encodeURIComponent(extractModelParam)}` : '');
     const resp = await fetch(outlineUrl, { method: 'POST' });
-    if (!resp.ok || !resp.body) throw new Error('提炼请求失败');
+    if (!resp.ok || !resp.body) throw new Error('准备请求失败');
     extractReader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
@@ -2791,7 +2791,7 @@ async function startWorkbenchExtraction() {
           doneSec++;
           updateProgress(doneSec, totalSec);
 
-          // 暂停"边提炼边生成"：提炼完成后由用户手动点"批量生成"
+          // 暂停"边准备边生成"：编写准备完成后由用户手动点"批量生成"
           // if (ev.id) {
           //   generateBlockInBackground(ev.id, ev.block_id);
           // }
@@ -2811,7 +2811,7 @@ async function startWorkbenchExtraction() {
           if (typeof window.__loadBlocks === 'function') {
             await window.__loadBlocks();
           }
-          // 提炼成功完成 → 清除 URL 上 autoExtract，防止刷新重跑
+          // 准备成功完成 → 清除 URL 上 autoExtract，防止刷新重跑
           const url = new URL(location.href);
           url.searchParams.delete('autoExtract');
           history.replaceState({}, '', url);
@@ -2821,7 +2821,7 @@ async function startWorkbenchExtraction() {
           bar.classList.add('error');
           cancelBtn.classList.add('hidden');
           if (spinner) spinner.style.display = 'none';
-          if (stage) stage.textContent = '提炼失败：' + ev.message;
+          if (stage) stage.textContent = '准备失败：' + ev.message;
         }
       }
     }
@@ -2832,7 +2832,7 @@ async function startWorkbenchExtraction() {
     cancelBtn.classList.add('hidden');
     retryBtn.classList.remove('hidden');
     if (spinner) spinner.style.display = 'none';
-    if (stage) stage.textContent = '提炼失败：' + (err.message || '网络错误');
+    if (stage) stage.textContent = '准备失败：' + (err.message || '网络错误');
   }
 }
     
