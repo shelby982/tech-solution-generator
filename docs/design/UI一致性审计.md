@@ -667,3 +667,28 @@ project list 生成的地址 = /three-mode?projectId=26&threadId=…&backend=don
 落点：url=/three-mode ✅  rail 在 ✅  stage=⑤评审 ✅  无门控 ✅
       「已确认：标的1 / 标包2」✅  KPI 5 / 100 ✅  __bootErrors=[] ✅
 ```
+
+---
+
+## 二十二、去掉「按运行阶段定位」，阶段交回用户
+
+用户要求：「按运行阶段定位，这个逻辑可以去掉了」。同意 —— 阶段应由用户自己点，
+自动定位会让"我点了确认标包，怎么跑到评审去了"这种意外（实测）。
+
+### 删除
+- `syncPanelStageFromRunOnce()`（进项目后按后端 stage 自动跳到③/④/⑤）+ `panelStageSynced` 标志
+  + 它在 `loadExistingBlocks` 末尾的触发
+- `restoreSettledThread` 里 `panelStage='5'/'4'` 的指定 → 留在面板但**从①开始**
+
+### 保留
+- "不要跳到 /review 独立页"这条（面板内三处 + 项目列表的按阶段分流都已去掉整页跳转）
+- `/review` 页保留「← 作业面板」链接（非自动重定向：重定向会与「处理待办」冲突）
+- 半途进度补到筛选行右侧：`已准备 33/121 章节（未跑完）`（状态栏模块去掉后，这句信息没地方放了）
+
+### 实测
+```
+进项目（backend=done）→ url=/three-mode、stage=①、rail 在、__bootErrors=[] ✅
+点「确认标包」→ stage=①、「已确认：标的1 / 标包2」✅
+筛选行右侧 = 已准备 33/121 章节（未跑完）✅
+后端 765 passed / 前端 102 passed
+```
