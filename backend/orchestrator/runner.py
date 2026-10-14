@@ -843,6 +843,7 @@ class WorkflowRunner:
 
     async def update_outline_structure(
         self, thread_id: str, nodes: list[dict], *, purge: bool = False,
+        removed_ids: list[str] | None = None,
     ) -> dict:
         """闸门 1 的目录结构编辑：增删章节 / 改标题 / 上下移动 / 缩进。
 
@@ -873,6 +874,24 @@ class WorkflowRunner:
             raise ValueError("当前任务仍在运行，请等这一步结束后再调整目录")
 
         clean = validate_structure(nodes)   # 非法时抛 StructureError（路由转 400）
+
+        # **少了但没声明的章节 → 拒绝**。这是"面板列表陈旧 → 保存静默删掉差额"的根治闸：
+        # 客户端把用户主动删掉的 id 放在 removed_ids 里，其余任何缺失都视为提交方不可信。
+        from services.block_store import list_blocks as _list_blocks
+        from db import get_db as _get_db
+        async with _get_db() as _db:
+            _existing = await _list_blocks(_db, int((await self.state(thread_id)).get("project_id")),
+                                           run_thread_id=thread_id)
+        _existing_ids = {str(b.get("block_id")) for b in _existing}
+        _submitted = {str(n.get("block_id")) for n in clean}
+        _declared = {str(x) for x in (removed_ids or [])}
+        _undeclared = sorted(_existing_ids - _submitted - _declared)
+        if _undersized := _undeclared:
+            if len(_undeclared) > max(5, int(0.2 * max(1, len(_existing_ids)))):
+                raise StructureError(
+                    f"提交的目录比库里少了 {len(_undeclared)} 个章节，且未声明为主动删除"
+                    f"（如 {_undeclared[:3]}）—— 已拒绝，以免误删目录；请刷新后重试。"
+                )
 
         project_id = int(state["project_id"])
         spec = state.get("spec") or {}

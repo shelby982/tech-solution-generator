@@ -87,10 +87,11 @@ class FakeRunner:
         if thread_id == "busy":
             raise ValueError("当前任务仍在运行，请等待完成后再操作")
 
-    async def update_outline_structure(self, thread_id, nodes, *, purge=False):
+    async def update_outline_structure(self, thread_id, nodes, *, purge=False, removed_ids=None):
         from domain.spec.structure import StructureError, validate_structure
 
-        self.calls.append(("update_outline_structure", (thread_id, nodes, purge)))
+        self.calls.append(
+            ("update_outline_structure", (thread_id, nodes, purge, tuple(removed_ids or []))))
         if thread_id == "missing":
             raise KeyError(thread_id)
         if thread_id == "busy":

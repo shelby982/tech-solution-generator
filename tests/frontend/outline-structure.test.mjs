@@ -24,6 +24,7 @@ import {
   outdentManyOutlineNodes,
   removeManyOutlineSubtrees,
   MAX_LEVEL,
+  pushHistory,
 } from '../../frontend/assets/workspace-model.mjs';
 
 const N = (id, level, title = id) => ({id, level, title});
@@ -450,4 +451,20 @@ test('Notion 式拖动（单个）：位置不变、只降一级也要生效', (
 test('Notion 式拖动：位置与层级都没变 → null（不写库）', () => {
   const nodes = [N('a', 1), N('b', 2)];
   assert.equal(moveOutlineNodeToLevel(nodes, 'b', 1, 2), null);
+});
+
+// ── 撤销历史栈 ──
+test('pushHistory：压入并只保留最近 N 条（旧的自动丢）', () => {
+  let stack = [];
+  for (let i = 1; i <= 25; i++) stack = pushHistory(stack, { n: i }, 20);
+  assert.equal(stack.length, 20);
+  assert.equal(stack[0].n, 6);
+  assert.equal(stack[19].n, 25);
+});
+
+test('pushHistory：返回新数组，不改原栈', () => {
+  const a = [{ n: 1 }];
+  const b = pushHistory(a, { n: 2 });
+  assert.equal(a.length, 1);
+  assert.equal(b.length, 2);
 });

@@ -89,6 +89,10 @@ class OutlineStructureReq(BaseModel):
     （见 domain/spec/structure.py），所以没有 parent 字段。
     """
     nodes: list[dict] = Field(default_factory=list)
+    # **客户端明确删除**的章节 id。服务端据此校验"少了但没声明"的提交：
+    # 那说明提交方的列表是陈旧的（实测：面板列表比库少 → 保存把差额删掉，
+    # 还写回 spec.toc，图恢复时再删一轮 —— 目录被静默削掉 8 行 / 33 行）。
+    removed_ids: list[str] = Field(default_factory=list)
     # 用户主动删除章节时可选「连正文一起删」：默认 False 沿用"保留用户内容"的约定，
     # 但保留的行仍会出现在导出里，所以要在确认框里让用户明确选择。
     purge: bool = False
@@ -248,7 +252,9 @@ async def update_outline_structure(thread_id: str, req: OutlineStructureReq):
     from orchestrator.runner import WorkflowAbortedError
 
     try:
-        stats = await runner.update_outline_structure(thread_id, req.nodes, purge=req.purge)
+        stats = await runner.update_outline_structure(
+            thread_id, req.nodes, purge=req.purge, removed_ids=req.removed_ids,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="thread_id 未知")
     except StructureError as exc:

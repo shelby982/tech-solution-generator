@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v133';
+} from './material-roles.mjs?v=20261016-v135';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -174,6 +174,16 @@ export function newOutlineId(existingIds = []) {
   let seq = used.size + 1;
   while (used.has('n' + seq)) seq++;
   return 'n' + seq;
+}
+
+/** 目录编辑的历史栈（撤销用）：压入一条并只保留最近 limit 条。
+ *
+ * 纯函数、返回新数组 —— 面板那边只管调用，不自己维护边界
+ * （避免"忘了截断 / 忘了清空重做栈"这类只在特定操作序列下才暴露的错）。
+ */
+export function pushHistory(stack, entry, limit = 20) {
+  const next = [...(stack || []), entry];
+  return next.length > limit ? next.slice(next.length - limit) : next;
 }
 
 /** 节点及其子树的下标区间 [start, end)；找不到返回 [-1, -1]。 */

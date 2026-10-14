@@ -1,5 +1,5 @@
 // frontend/assets/api.js
-// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v133' 使用
+// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v135' 使用
 
 // workflow 动作的统一调用：非 2xx 时抛出**带 code 的** Error。
 // code 来自后端响应头 X-Error-Code（如 workflow_aborted）—— 前端据此决定
@@ -280,8 +280,9 @@ export const api = {
 
     // 闸门 1 的目录结构编辑（增删章节 / 改标题 / 上下移动 / 缩进）。
     // nodes 是**有序**列表，顺序即目录顺序；层级由顺序推导（没有 parent 字段）。
-    updateOutlineStructure: (threadId, nodes, purge = false) =>
-      workflowAction(`/api/workflow/${threadId}/outline-structure`, { nodes, purge },
+    updateOutlineStructure: (threadId, nodes, purge = false, removedIds = []) =>
+      workflowAction(`/api/workflow/${threadId}/outline-structure`,
+                     { nodes, purge, removed_ids: removedIds },
                      '目录保存失败'),
 
     recover: (threadId) =>

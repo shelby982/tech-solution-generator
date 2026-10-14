@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v133';
+import { api } from './api.js?v=20261016-v135';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,13 +10,14 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v133';
+       } from './workspace.js?v=20261016-v135';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
          moveOutlineNodeTo, moveOutlineNodesTo,
          moveOutlineNodeToLevel, moveOutlineNodesToLevel, levelRangeAt,
          removeManyOutlineSubtrees,
+         pushHistory,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
          CONSTRAINT_LEVELS, constraintLevelLabel,
          isExtractDone as isDoneBlock, extractBadgeState as badgeStatusOf,
@@ -28,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v133';
+       } from './workspace-model.mjs?v=20261016-v135';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -114,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v133';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v135';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2148,11 +2149,11 @@ function refreshStatusCounters() {
 
 // ── 保存 ──
 // 串行化：连点「上移」时请求依次发出，最后一个请求携带的顺序即最终顺序。
-function queueStructureSave(nodes, purge = false) {
+function queueStructureSave(nodes, purge = false, removedIds = []) {
   const tid = outlineTid();
   const payload = structurePayload(nodes);
   const run = structureSaveChain.then(() =>
-    api.workflow.updateOutlineStructure(tid, payload, purge));
+    api.workflow.updateOutlineStructure(tid, payload, purge, removedIds));
   structureSaveChain = run.catch(() => {});   // 单次失败不能断链
   return run;
 }
@@ -2528,6 +2529,8 @@ let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 const batchIds = new Set();   // 批量操作选中的章节（跨渲染保留，方便连着挪几格）
 const removedByUser = new Set();   // 用户**明确删掉**的章节 id（区别于"本地列表少了"）
+// 撤销栈：只存"操作之前的完整结构"快照（最多 20 步）。纯逻辑用模型层的 pushHistory。
+let undoStack = [];
 // 「已确认」的确认项默认展示**结果**；点「修改」才展开控件（否则确认完信息就消失了 ——
 // 用户反馈："确认进入对应目录后需要能够查到确认的结果情况"）
 let confirmEditOpen = {};
@@ -2673,7 +2676,7 @@ function applyStructureToModel(nodes) {
 }
 
 /** 面板内的结构保存：乐观更新模型 → 串行保存（与目录树同一条队列）→ 采纳服务端归一化 → 重绘面板 */
-async function saveStructureFromPanel(next, { afterSave = null, label = '' } = {}) {
+async function saveStructureFromPanel(next, { afterSave = null, label = '', fromHistory = false } = {}) {
   // 传进来的必须是**节点数组**。这里以前是静默 return —— 结果"点了没反应"查了很久。
   // 宁可控制台报错、界面说实话，也不要静默丢弃用户的操作。
   if (!Array.isArray(next) || !next.length) {
@@ -2697,10 +2700,18 @@ async function saveStructureFromPanel(next, { afterSave = null, label = '' } = {
     await openSplitReport({ stage: '2' });
     return;
   }
+  // 撤销用的快照：这里记的是"**操作之前**"的完整结构（撤销就回到它）。
+  // 撤销/重做自身触发的保存不再入栈，否则栈会被自己的回退操作淹没。
+  if (!fromHistory) {
+    const before = structureNodesFromModel();
+    if (before.length) undoStack = pushHistory(undoStack, { nodes: before, label: label || '编辑' });
+  }
   applyStructureToModel(next);
   let res = null;
   try {
-    res = await queueStructureSave(next);
+    // 把"用户主动删掉的 id"一起报给服务端 —— 服务端据此判断提交是否可信
+    // （少了但没声明的章节会被拒绝，见 runner.update_outline_structure）。
+    res = await queueStructureSave(next, false, [...removedByUser]);
   } catch (e) {
     console.error('[panel-structure] 保存失败', e);
     await loadExistingBlocks({ silent: true });
@@ -2904,6 +2915,29 @@ async function handleBatchStruct(action) {
   }
   await saveStructureFromPanel(r.nodes, {
     label: r.skipped ? `${label}（${r.skipped} 项动不了）` : label,
+  });
+}
+
+/** 撤销上一步目录操作：把"操作之前的完整结构"再存一次。
+ *
+ * 只保留"操作前快照"，不自己维护重做栈 —— 用户要的是"能退回去"，
+ * 而每次保存都会入栈，所以连点撤销就是逐步回退。
+ */
+async function handleUndoStructure() {
+  if (!undoStack.length) {
+    structSaveNote = '没有可撤销的操作';
+    await openSplitReport({ stage: '2' });
+    return;
+  }
+  const entry = undoStack[undoStack.length - 1];
+  undoStack = undoStack.slice(0, -1);
+  // 撤销"删除"时，被恢复的章节要从 removedByUser 里移出 ——
+  // 否则它又被当成"用户同意它消失"，后续的陈旧保存仍可能把它删掉。
+  entry.nodes.forEach((n) => removedByUser.delete(String(n.id)));
+  const nowIds = new Set(structureNodesFromModel().map((n) => String(n.id)));
+  entry.nodes.forEach((n) => { if (!nowIds.has(String(n.id))) removedByUser.add(String(n.id)); });
+  await saveStructureFromPanel(entry.nodes, {
+    label: `撤销「${entry.label}」`, fromHistory: true,
   });
 }
 
@@ -3859,6 +3893,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-answer">
         <button class="mw-btn" data-act="struct-new" data-op="sibling">＋ 新增同级章节</button>
         <button class="mw-btn" data-act="struct-new" data-op="child">＋ 新增子章节</button>
+        <button class="mw-btn" data-act="undo-structure"${undoStack.length ? '' : ' disabled'}
+          title="${undoStack.length ? `撤销「${escapeHtml(String(undoStack[undoStack.length - 1].label))}」` : '没有可撤销的操作'}">↶ 撤销</button>
         <span class="sr-dim">${structSaveNote || '点一行 → 该行出现操作；改动即时保存'}</span>
       </div>
       ${structureBlockNote()}`;
@@ -4516,6 +4552,24 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     handleBatchStruct(btn.dataset.batch);
   }));
   el.querySelectorAll('.sr-grip').forEach((g) => g.addEventListener('pointerdown', startRowDrag));
+  el.querySelector('[data-act="undo-structure"]')?.addEventListener('click', () => {
+    handleUndoStructure();
+  });
+
+  // Cmd/Ctrl+Z 也能撤销（输入框里不拦，免得抢掉改标题时的原生撤销）
+  if (!window.__undoKeyBound) {
+    window.__undoKeyBound = true;
+    window.addEventListener('keydown', (e) => {
+      const t = e.target;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (typing) return;
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'z') {
+        if (!document.getElementById('split-panel-inline')?.querySelector('[data-act="undo-structure"]')) return;
+        e.preventDefault();
+        handleUndoStructure();
+      }
+    });
+  }
   applyStage(); applySub();
   refreshPanelRunState();
   hydrateStage(panelStage);
