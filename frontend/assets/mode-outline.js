@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v96';
+import { api } from './api.js?v=20261016-v97';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v96';
+       } from './workspace.js?v=20261016-v97';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v96';
+       } from './workspace-model.mjs?v=20261016-v97';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v96';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v97';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3217,10 +3217,32 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           <td class="sr-num">${(i.sub_items || []).length}</td>
           <td class="sr-crit">${(i.sub_items || []).map(x => escapeHtml(x.title)).join('、') || '<span class="sr-dim">—</span>'}</td></tr>`).join('')}`).join('');
 
-  const techRows = (tm.topics || []).map(t => `
-    <tr><td>${escapeHtml(t.topic)}</td><td class="sr-num">${t.count}</td>
-        <td class="sr-crit">${(t.requirements || []).slice(0, 3).map(r => escapeHtml(r.title || (r.text || '').slice(0, 40))).join('；')}</td>
-        <td class="sr-dim">${escapeHtml((t.source_files || []).join('、') || '—')}</td></tr>`).join('');
+  // 技术规范书要求：**逐条列出要求原文**（结构化）。
+  // 以前这里只渲染 r.title（章节路径），而且 .slice(0, 3) 每个主题只显示 3 条 ——
+  // 153 条要求里绝大多数根本看不到，用户反馈"看不出来具体要求是什么"。
+  const REQ_LEVEL = {
+    mandatory: ['必须响应', 'is-warn'],
+    required: ['应响应', 'is-none'],
+    informational: ['参考', 'is-none'],
+  };
+  const specRows = (tm.topics || []).map((t) => {
+    const head = `<tr class="sr-group"><td colspan="3">
+        <b>${escapeHtml(t.topic)}</b>
+        <span class="sr-dim">${t.count} 条${
+          (t.source_files || []).length ? ` · ${(t.source_files || []).map(escapeHtml).join('、')}` : ''}</span>
+      </td></tr>`;
+    const rows = (t.requirements || []).map((r, i) => {
+      const [label, cls] = REQ_LEVEL[String(r.mandatory_level || '').toLowerCase()]
+        || [String(r.mandatory_level || '—'), 'is-none'];
+      return `<tr class="sr-req">
+        <td class="sr-num sr-req-no">${i + 1}</td>
+        <td class="sr-req-text">${escapeHtml(r.text || '')}${
+          r.title ? `<div class="sr-dim">${escapeHtml(r.title)}</div>` : ''}</td>
+        <td class="sr-req-level"><span class="ui-pill ${cls}">${escapeHtml(label)}</span></td>
+      </tr>`;
+    }).join('');
+    return head + rows;
+  }).join('');
 
   const mapRows = (mp.point_to_requirement || []).map(m => `
     <tr><td>${escapeHtml(m.factor)}<div class="sr-dim">${escapeHtml(m.item)}</div></td>
@@ -3384,9 +3406,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <b>${specCount} 条要求 / ${tm.topic_count || 0} 个主题</b>${
         (tm.source_files || []).length
           ? `　来源：${(tm.source_files || []).map(escapeHtml).join('、')}` : ''}。</div>
-      <table class="sr-table"><thead><tr><th>主题</th><th class="sr-num">条数</th>
-        <th>要求</th><th>来源文件</th></tr></thead>
-        <tbody>${techRows}</tbody></table>` : notAnalyzedHint('技术规范书要求');
+      <table class="sr-table sr-req-table">
+        <thead><tr><th class="sr-num">#</th><th>要求（原文）</th><th>响应要求</th></tr></thead>
+        <tbody>${specRows}</tbody></table>` : notAnalyzedHint('技术规范书要求');
   const reviewPanes = {
     commerce: catTable(commerceStat, '商务'),
     tech: catTable(techStat, '技术'),
@@ -3647,6 +3669,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  .sr-req-table .sr-group td{background:var(--panel-soft,#f8fafc);border-top:1px solid var(--line);
+    font-size:12.5px;padding:6px 10px}
+  .sr-req-table .sr-group .sr-dim{margin-left:6px}
+  .sr-req-table .sr-req-no{color:var(--muted);vertical-align:top}
+  .sr-req-table .sr-req-text{line-height:1.65;white-space:pre-wrap}
+  .sr-req-table .sr-req-text .sr-dim{font-size:11px;margin-top:2px}
+  .sr-req-table .sr-req-level{white-space:nowrap;vertical-align:top}
   .sr-kpis{display:flex;gap:8px;flex-wrap:wrap;padding:10px 15px 4px}
   .sr-kpi{flex:1 1 140px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;background:var(--panel,#fff);
     display:flex;flex-direction:column;gap:1px}
