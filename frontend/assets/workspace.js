@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v127';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v128';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v127';
+} from './material-roles.mjs?v=20261016-v128';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -204,7 +204,10 @@ export function uiConfirm(message, { title = '请确认', confirmText = '确认'
     dialog.querySelector('[data-ok]').onclick = () => finish(true);
     dialog.querySelector('[data-cancel]').onclick = () => finish(false);
     dialog.addEventListener('close', () => finish(false));   // Esc / 点遮罩
-    dialog.querySelector('[data-ok]').focus();
+    // 危险操作把默认焦点给**取消**按钮（普通操作给确认）。
+    // 否则"弹窗一出现，按 Enter 就执行危险操作" —— 实测被这个坑过：
+    // 自动化截图流程误触 Enter，删掉了几行目录。
+    (danger ? dialog.querySelector('[data-cancel]') : dialog.querySelector('[data-ok]')).focus();
   });
 }
 
