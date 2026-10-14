@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v100';
+import { api } from './api.js?v=20261016-v103';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v100';
+       } from './workspace.js?v=20261016-v103';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v100';
+       } from './workspace-model.mjs?v=20261016-v103';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v100';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v103';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2052,7 +2052,13 @@ let pendingRenameId = null;
 // 「失败不算完成」是条契约，放到有 node --test 覆盖的纯函数里才守得住。
 // 见 import 处的别名。
 
+// 用户在②目录确认里主动点了「调整结构」→ 允许编辑。
+// （结构编辑能力本来只在 gate_outline / done 开放，而②可能停在别的阶段；
+//   用户主动要求调整时不该被阶段卡住。）
+let structureEditRequested = false;
+
 function structureEditable() {
+  if (structureEditRequested) return true;
   if (extractionState === 'gate_outline') return true;
   // 编写准备完成后的目录视图也允许调整（此时 8 字段可编辑，改名/调序不该被禁）
   return extractionState === 'done' && document.body.dataset.view !== 'matching';
@@ -3387,43 +3393,90 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     </div>`;
 
   // ② 待确认：唯一需要用户决定的界面；确认后才会出现产物
-  const confirmPane = !analyzedAll ? `
-      <div class="sr-empty">
-        <b>待确认还差一步</b>：三块拆分（${pointTabs.map(t => t.label).join(' / ')} / 技术规范书要求）
-        都完成后，这里才会出现需要你确认的内容。
-        <div class="sr-dim" style="margin-top:5px">
-          ${pointTabs.length ? `评分点已拆出 ${pointTabs.map(t => `${t.label} ${t.badge} 个`).join('、')}；` : ''}
-          技术规范书要求 ${specCount ? `已拆出 ${specCount} 条` : '还没拆出'}。
-        </div>
+  // ── ② 待确认 = **单一决策面：目录确认**（产品设计分析：docs/design/产品设计分析-待确认模块.md）──
+  // 原实现把 8 项 confirmations 全列出来让用户逐个确认，其中
+  //   决策 2 项（主题归属 / 目录结构）+ 重复决策 3 项（标包、类别、评分表 —— 别处已确认）
+  //   + 系统自检 3 项（分值合计、标星覆盖、评分点清单）。
+  // "让人对自己判断不了的事负责，就是在教他忽略这个界面。"
+  // 所以：自检 → 一行摘要（异常才升级）；已确认过的 → 只读回显；只留两个真决策。
+  const SELF_CHECK_KEYS = new Set(['score_sum', 'starred']);
+  const ECHO_KEYS = new Set(['scope', 'category', 'scope_excluded', 'review_points']);
+  const selfChecks = allConfs.filter((c) => SELF_CHECK_KEYS.has(c.key));
+  const echoes = allConfs.filter((c) => ECHO_KEYS.has(c.key));
+  const decisions = allConfs.filter((c) =>
+    !SELF_CHECK_KEYS.has(c.key) && !ECHO_KEYS.has(c.key));
+
+  const checkLine = selfChecks.length ? `
+      <div class="sr-checks">${selfChecks.map((c) => {
+        const bad = !!c.needs_confirm;
+        const label = (c.detected || c.question || '').toString().replace(/是否.*$/, '').trim();
+        return `<span class="sr-check ${bad ? 'warn' : 'ok'}" title="${escapeHtml(c.detail || '')}">
+          ${bad ? '⚠' : '✅'} ${escapeHtml(String(label).slice(0, 34))}${
+          bad ? `<span class="sr-dim">${escapeHtml((c.detail || '').slice(0, 40))}</span>` : ''}</span>`;
+      }).join('')}</div>` : '';
+
+  // 已确认过的（标包 / 类别 / 评分点 / 评分表）→ 只读回显，不再要求确认
+  const echoLine = echoes.length ? `
+      <div class="sr-echo">
+        ${echoes.map((c) => `<span class="sr-echo-item"><b>${escapeHtml(
+          (c.question || '').replace(/[?？]/g, '').replace(/(按哪个|是否正确|是否)/g, '').slice(0, 12))}</b>
+          ${escapeHtml(String(c.detected || (c.answered ? '已确认' : '')).slice(0, 40))}</span>`).join('')}
+      </div>` : '';
+
+  // 目录结构：把（已派生或草稿的）目录**直接摆出来**，每章带上 评分点 与 挂载的规范书要求
+  // data.review_points 是 {items:[…], count, score_total} —— 不是按 point_id 索引的字典，
+  // 直接 rp[pid] 会取到 undefined，界面上就显示成 rp-xxxx 这样的内部 id（实测）。
+  const pointMeta = new Map(((rp && rp.items) || []).map((x) => [String(x.point_id), x]));
+  const reqNameOf = (pid) => {
+    const m = pointMeta.get(String(pid));
+    return (m && (m.item || m.factor)) || '';
+  };
+  const structBlocks = [...blocksById.values()]
+    .filter((b) => b && b.level)
+    .sort((a, b2) => (Number(a.order_idx) || 0) - (Number(b2.order_idx) || 0));
+  const parseIds = (raw) => {
+    try { const v = JSON.parse(raw || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+  };
+  const structRows = structBlocks.map((b) => {
+    const pts = parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean);
+    const reqs = parseIds(b.spec_requirement_ids).length;
+    return `<div class="sr-struct-row l${Math.min(Number(b.level) || 1, 3)}">
+      <span class="sr-struct-title">${escapeHtml(b.title || '')}</span>
+      ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 24))}</span>` : ''}
+      ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
+      ${reqs ? `<span class="sr-struct-meta">规范书 ${reqs} 条</span>` : ''}
+    </div>`;
+  }).join('');
+
+  const structureBlock = structBlocks.length ? `
+      <h5 class="sr-sec">① 目录结构（${structBlocks.length} 章）</h5>
+      <div class="sr-struct">${structRows}</div>
+      <div class="sr-answer">
+        <button class="mw-btn" data-act="edit-structure">调整结构（改名 / 增删 / 上下移 / 缩进）</button>
+        <span class="sr-dim">在下方目录树里编辑，改完回来确认</span>
       </div>` : `
-      <!-- 不再重复阶段名（阶段头已经写着"待确认 + 待确认 N 项"）；
-           这里只留"产物是什么"的定义 —— 那是阶段头给不出的信息。 -->
+      <h5 class="sr-sec">① 目录结构</h5>
+      <div class="sr-note">还没有派生目录 —— 确认后会按评分点结构生成（可在「产物」里查看）。</div>`;
+
+  const topicBlock = decisions.filter((c) => c.answer_key === 'topic_placement')
+    .map(confItem).join('')
+    || '<div class="sr-dim">这份材料里没有需要归属的技术规范书主题。</div>';
+  const structureConfirm = decisions.filter((c) => c.answer_key === 'structure')
+    .map(confItem).join('');
+
+  const confirmPane = !analyzedAll ? `
+      <div class="sr-empty">还没拆分完成。先回到①「评分点」把三块内容拆出来（评分点 / 类别 / 技术规范书要求）。</div>` : `
       <div class="sr-note">产物的定义（用户口径）：<b>(a) 对应的目录</b>、
         <b>(b) 最终的技术与评分点映射矩阵</b>。它们只在确认完成后出现。</div>
-
-      <h5 class="sr-sec">① 投标范围（标包）</h5>
-      <div class="sr-answer"><span class="sr-scope-chip">${escapeHtml(viewLabel)}</span>
-        <span class="sr-dim">要改就在面板顶部「筛选 · 标包」切换</span></div>
-
-      <h5 class="sr-sec">② 要生成哪些类别</h5>
-      <div class="sr-answer">
-        ${pointTabs.map(t => `
-          <label class="sr-cat"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
-            ${((confirmedCats.length ? confirmedCats : pointTabs.map(x => x.id)).includes(t.id)) ? 'checked' : ''}>
-            ${escapeHtml(t.label.replace('评分点', ''))}</label>`).join('')}
-        <span class="sr-dim">勾选的类别会合成这一份应答目录</span>
-      </div>
-
-      <h5 class="sr-sec">③ 技术规范书主题归属（可选）</h5>
-      ${(allConfs.filter(c => c.answer_key === 'topic_placement').map(confItem).join('')
-        || '<div class="sr-dim">这份材料里没有需要归属的技术规范书主题。</div>')}
-
-      <h5 class="sr-sec">④ 其他确认项</h5>
-      ${(allConfs.filter(c => c.answer_key !== 'topic_placement').map(confItem).join('')
-        || '<div class="sr-dim">没有其他确认项。</div>')}
-
+      ${checkLine}
+      ${echoLine}
+      ${structureBlock}
+      <h5 class="sr-sec">② 技术规范书内容如何结合</h5>
+      <div class="sr-note">下面每个主题可以指定挂到哪一章；不指定就进「技术规范书要求应答」章节。</div>
+      ${topicBlock}
+      ${structureConfirm}
       <div class="sr-answer" style="margin-top:12px">
-        <button class="mw-btn primary" data-act="confirm-generate">确认，生成目录与映射矩阵</button>
+        <button class="mw-btn primary" data-act="confirm-generate">确认目录，生成产物</button>
         <span class="sr-dim">确认即生成（生成中会显示进度；产物页签随确认出现）</span>
       </div>
       <div class="sr-dim" data-flash-for="generate"></div>`;
@@ -3718,6 +3771,25 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  /* ② 目录确认：自检摘要（一行）+ 已确认回显 + 目录结构 */
+  .sr-checks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:12.5px}
+  .sr-check{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);
+    border-radius:999px;padding:2px 10px;background:var(--panel,#fff)}
+  .sr-check.ok{color:var(--success);border-color:var(--success-soft);background:var(--success-soft)}
+  .sr-check.warn{color:var(--warn);border-color:var(--warn-soft);background:var(--warn-soft)}
+  .sr-check .sr-dim{color:inherit;opacity:.75;font-size:11px}
+  .sr-echo{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);
+    padding:6px 0 2px}
+  .sr-echo-item b{color:var(--text);font-weight:600;margin-right:4px}
+  .sr-struct{border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff);
+    max-height:46vh;overflow:auto;padding:4px 0;margin:6px 0}
+  .sr-struct-row{display:flex;align-items:center;gap:8px;padding:3px 10px;font-size:12.5px}
+  .sr-struct-row:hover{background:var(--panel-soft,#fafbfc)}
+  .sr-struct-row.l2{padding-left:24px}
+  .sr-struct-row.l3{padding-left:38px;color:var(--muted)}
+  .sr-struct-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-struct-meta{font-size:11px;color:var(--muted);white-space:nowrap}
+  .sr-struct-score{font-size:11.5px;color:var(--success);white-space:nowrap}
   .sr-conf-result-wrap{margin:6px 0}
   .sr-conf-result{margin:0}
   .sr-conf-result th,.sr-conf-result td{padding:4px 8px}
@@ -3942,6 +4014,20 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
 
   el.addEventListener('click', async (e) => {
     // 收起：拆下面板，露出目录（确认与否都能收起，收起不等于确认）
+
+    // 「调整结构」：目录结构编辑能力一直挂在下方目录树上（增删/改名/上下移/缩进），
+    // 只是面板打开时被 hideLaneTreeWhenPanelShows() 隐藏了 —— 这里按需露出来并切到可编辑态。
+    if (e.target.closest?.('[data-act="edit-structure"]')) {
+      structureEditRequested = true;          // 允许编辑（见 structureEditable 的说明）
+      const list = document.getElementById('blocks-list');
+      if (list) {
+        list.hidden = false;
+        list.style.display = '';
+        refreshStructureEditable();           // 现在会加上 .structure-editable
+        list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
 
     // 「修改」：把已确认项重新展开成控件（确认结果默认展示，避免"确认完就查不到"）
     const editBtn = e.target.closest?.('[data-act="edit-confirm"]');
