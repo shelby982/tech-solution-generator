@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v57';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v57';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v58';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v58';
 const $ = id => document.getElementById(id);
 let activeId = new URLSearchParams(location.search).get('blockId');
 let mode = 'current', visibleLimit = 100;
@@ -65,10 +65,68 @@ function renderDetail() {
     <button class="ws-button" id="quality-select-current">选择本章处理</button>`;
   $('quality-select-current').onclick = () => { selected.add(b.block_id); renderQueue();refreshActions(); };
 }
+// ── 按评分点：评分点级评审结论（得分预估 / 缺口 / 举证 / 章节下钻）──
+const RISK_LABEL = {ok:'满足', medium:'部分满足', high:'不满足', unreviewed:'未评审'};
+const RISK_CLASS = {ok:'ok', medium:'part', high:'bad', unreviewed:'none'};
+let verdictCache = {key:'', data:null};
+async function renderVerdict() {
+  if (!workspace.projectId) return;
+  // 只在"项目/线程/阶段"变化时重拉，避免工作区每次 tick 都打接口
+  const key = `${workspace.projectId}|${workspace.threadId||''}|${workspace.state.stage||''}`;
+  if (key !== verdictCache.key) {
+    verdictCache.key = key;
+    try {
+      const q = workspace.threadId ? `?threadId=${encodeURIComponent(workspace.threadId)}` : '';
+      verdictCache.data = await request(`/api/projects/${workspace.projectId}/scoring-verdict${q}`);
+    } catch (e) {
+      $('verdict-kpis').innerHTML = `<span class="ws-error">评分点结论取不到：${esc(e.message)}</span>`;
+      $('verdict-rows').innerHTML = '';
+      return;
+    }
+  }
+  const data = verdictCache.data; if (!data) return;
+  const s = data.summary || {};
+  const pct = s.score_max ? Math.round((s.score_estimated||0)/s.score_max*100) : 0;
+  $('verdict-kpis').innerHTML = [
+    ['score ok',  '得分预估', `${s.score_estimated ?? 0} / ${s.score_max ?? 0}`, `${pct}% 满分${s.score_pending ? ` · 另有 ${s.score_pending} 分待评` : ''}`],
+    ['warn',      '缺口',     `${s.gaps ?? 0} 项`, '未满足的得分要点'],
+    ['',          '不满足 / 部分满足', `${s.high ?? 0} / ${s.medium ?? 0}`, `满足 ${s.ok ?? 0} · 未评审 ${s.unreviewed ?? 0}`],
+    ['',          '需举证章节', `${s.evidence_chapters ?? 0} 章`, '有 evidence_required 的章节'],
+    ['',          '成本',     `${Math.round((s.cost_tokens||0)/10000)} 万 token`, '本标段累计'],
+  ].map(([cls,label,value,sub]) => `<div class="verdict-kpi ${cls}">
+      <span>${label}</span><strong>${value}</strong><em>${sub}</em></div>`).join('');
+
+  const rows = data.points || [];
+  $('verdict-rows').innerHTML = rows.length ? rows.map(p => `
+    <details class="verdict-row" data-point="${esc(p.point_id)}">
+      <summary>
+        <span class="v-point">${esc(p.item || p.factor || p.point_id)}
+          <em>${esc(p.factor || '')}</em></span>
+        <span class="v-num">${p.points} 分</span>
+        <span class="v-num">${p.chapters_total} 章</span>
+        <span class="v-pill ${RISK_CLASS[p.verdict] || 'none'}">${esc(RISK_LABEL[p.verdict] || p.verdict)}</span>
+        <span class="v-miss">${(p.missing_points||[]).slice(0,2).map(esc).join('；') || '—'}</span>
+        <span class="v-pill ${p.evidence_chapters ? 'part' : 'none'}"
+          title="有举证要求的章节数（是否真的引用了素材尚未落库）">
+          ${p.evidence_chapters ? `需举证 ${p.evidence_chapters} 章` : '无需举证'}</span>
+        <span class="v-est">${p.estimated_score == null ? '待评' : `${p.estimated_score} 分`}</span>
+      </summary>
+      <table class="v-chapters">
+        <thead><tr><th>章节</th><th>评审</th><th>缺失的得分要点</th><th>分值权重</th></tr></thead>
+        <tbody>${(p.chapters||[]).map(c => `<tr>
+            <td>${esc(c.title)}</td>
+            <td><span class="v-pill ${RISK_CLASS[c.risk] || 'none'}">${esc(RISK_LABEL[c.risk] || c.risk)}</span></td>
+            <td>${(c.missing_points||[]).map(esc).join('；') || '—'}</td>
+            <td>${c.score_weight != null ? c.score_weight : '—'}</td></tr>`).join('')
+          || '<tr><td colspan="4" class="ws-muted">该评分点还没有承载章节</td></tr>'}</tbody>
+      </table>
+    </details>`).join('') : '<p class="ws-muted">还没有拆解出评分点。先在「要求与大纲」完成拆分。</p>';
+}
+
 subscribe(() => {
   if (!activeId || !workspace.chapters.some(b=>b.block_id===activeId)) activeId = workspace.chapters.find(b=>attention.has(b.status))?.block_id || workspace.chapters[0]?.block_id;
   for (const id of selected) if (!workspace.chapters.some(b=>b.block_id===id)) selected.delete(id);
-  renderSummary();renderQueue();renderDetail();refreshActions();
+  renderSummary();renderQueue();renderDetail();refreshActions();renderVerdict();
 });
 $('quality-list').addEventListener('click',e=> {
   const button = e.target.closest('[data-chapter]');

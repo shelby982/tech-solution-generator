@@ -216,6 +216,23 @@ async def get_split_report(project_id: int, threadId: str | None = None):
     return JSONResponse(content=report)
 
 
+@router.get("/projects/{project_id}/scoring-verdict")
+async def get_scoring_verdict(project_id: int, threadId: str | None = None):
+    """**评分点级评审结论**：评审页主视图（得分预估 / 缺口 / 举证 / 章节下钻）。
+
+    得分按评分点给，而 reviews 按章节存 —— 这个接口把两者对起来，
+    回答"这个评分点现在能拿几分、差在哪"，而不是"这章写得好不好"。
+    """
+    from services.block_store import current_run_thread_id
+    from services.scoring_verdict import build_scoring_verdict
+
+    async with get_db() as db:
+        tid = threadId or await current_run_thread_id(db, project_id)
+    async with get_db() as db:
+        data = await build_scoring_verdict(db, project_id, tid)
+    return JSONResponse(content=data)
+
+
 @router.get("/projects/{project_id}/scoring-risk")
 async def get_scoring_risk(project_id: int, threadId: str | None = None):
     """**得分风险**：把逐章审查结论按评分点聚合。

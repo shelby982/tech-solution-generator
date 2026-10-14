@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · 质量检查</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v57" />
-    <link rel="stylesheet" href="./assets/review.css?v=20261016-v57" />
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v57" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v58" />
+    <link rel="stylesheet" href="./assets/review.css?v=20261016-v58" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v58" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -38,6 +38,15 @@
         </header>
 
         <div class="quality-content">
+          <!-- 按评分点：得分是按评分点给的，这里回答"能拿多少分、差在哪"（评审页主视图） -->
+          <section class="verdict" id="verdict" aria-label="评分点评审结论">
+            <div class="verdict-head">
+              <h2>按评分点</h2>
+              <span class="ws-muted">得分按评分点计；点一行看该评分点下的章节明细</span>
+            </div>
+            <div class="verdict-kpis" id="verdict-kpis"><span class="ws-muted">加载中…</span></div>
+            <div class="verdict-rows" id="verdict-rows"></div>
+          </section>
           <section class="quality-summary" id="quality-summary" aria-label="质量概览"></section>
           <details class="quality-report"><summary>全局报告与运行结论</summary>
             <div id="quality-report-body"></div>
@@ -76,7 +85,7 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/review.js?v=20261016-v57"></script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v57"></script>
+    <script type="module" src="./assets/review.js?v=20261016-v58"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v58"></script>
   </body>
 </html>
