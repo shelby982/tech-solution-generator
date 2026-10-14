@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v93';
+import { api } from './api.js?v=20261016-v95';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v93';
+       } from './workspace.js?v=20261016-v95';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v93';
+       } from './workspace-model.mjs?v=20261016-v95';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v93';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v95';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2921,37 +2921,6 @@ function hideLaneTreeWhenPanelShows() {
   if (empty) { empty.hidden = true; empty.innerHTML = ''; }
 }
 
-/** 进入项目后，把面板定位到**运行真实所在的阶段**（一次性）。
-
-为什么需要：从项目列表进来时 URL 只带 projectId，boot 的几条路径（恢复闸门 / 自动开面板 /
-兜底轮询）各自可能把面板停在①评分点，于是"运行其实已经到评审了，页面却显示评分点"。
-这里按后端权威阶段做一次对齐（只做一次，避免和用户的点击抢）。
-*/
-let panelStageSynced = false;
-async function syncPanelStageFromRunOnce() {
-  if (panelStageSynced) return;
-  const tid = currentThreadId;
-  if (!tid) return;
-  panelStageSynced = true;
-  let stage = '';
-  try {
-    stage = (await api.workflow.state(tid).catch(() => null))?.stage || '';
-    if (!stage) stage = (await api.workflow.latestRunStage(projectId).catch(() => null)) || '';
-  } catch { return; }
-  const MAP = {
-    points_review: '1', outline_review: '1',
-    extracting: '3', matching: '3', materials_review: '3', paused: '3',
-    generating: '4',
-    reviewing: '5', report_review: '5', done: '5',
-  };
-  const want = MAP[stage];
-  if (!want || want === panelStage) return;
-  panelStage = want;
-  panelSub = '';
-  await openSplitReport({ stage: want });
-  console.info(`[panel] 按运行阶段 ${stage} 定位到第 ${want} 步`);
-}
-
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
   if (!confirmedPkg) confirmedPkg = readConfirmedPkg();   // 刷新后仍记得确认过哪个标包
@@ -3863,6 +3832,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       rememberConfirmedPkg({ target, package_no });
       panelViewPkg = { target, package_no };
       splitPanelAutoOpenedFor = 0;
+      // 确认标包后**从第①步开始**（阶段由用户自己往下走，不做自动定位）
+      panelStage = '1';
+      panelSub = '';
       await openSplitReport({ stage: '1' });
     } catch (err) {
       if (stat) stat.textContent = `确认失败：${String(err?.message || err).slice(0, 80)}`;
@@ -4209,8 +4181,6 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
     blocksList.hidden = false;
     blocksList.style.display = '';
   }
-  // 面板已按当前数据渲染完 → 再按运行的权威阶段对齐一次（见上面的说明）
-  setTimeout(() => { syncPanelStageFromRunOnce().catch(() => {}); }, 400);
   applyPageView();             // 先定视图：下面的总览/筛选/详情都按当前视图渲染
   renderMatchSummary();
   renderMatchTreeHead();
@@ -4812,10 +4782,9 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     setStage(stage);
     await loadExistingBlocks({ silent: true });
     setStatusBar(stage === 'done' ? 'done' : 'report_review', '', 100, totalBlocks, doneBlocks);
-    panelStage = '5';
-    panelSub = '';
+    // 不再"按运行阶段定位"（用户明确要求去掉）：阶段由用户自己点，进来从①开始。
     splitPanelAutoOpenedFor = 0;
-    await openSplitReport({ stage: '5' });
+    await openSplitReport({ stage: '1' });
     return;
   }
   setStage(stage); // 同时按 stage 切 outline / matching 视图并重绘进度条
@@ -4846,10 +4815,8 @@ async function restoreSettledThread(threadId, stage, { note = '' } = {}) {
     await loadExistingBlocks({ silent: true });
     setStatusBar('paused', '', totalBlocks ? Math.round(doneBlocks / totalBlocks * 100) : 0,
                  totalBlocks, doneBlocks);
-    panelStage = '4';
-    panelSub = '';
     splitPanelAutoOpenedFor = 0;
-    await openSplitReport({ stage: '4' });
+    await openSplitReport({ stage: '1' });
     return;
   }
   if (stage === 'points_review') {
@@ -5258,10 +5225,10 @@ async function startMatching() {
     } else if (decision === MATCH_ENTRY.REVIEW) {
       // 补充的素材由局部修订入口实时读取 —— 不再整页跳质量检查，落在面板⑤评审里
       // （同一套壳，用户不用在页面之间被搬来搬去）。
-      panelStage = '5';
+      panelStage = '1';
       panelSub = '';
       splitPanelAutoOpenedFor = 0;
-      await openSplitReport({ stage: '5' });
+      await openSplitReport({ stage: '1' });
     } else {
       // 例如正在 parse / 派生目录（checkpoint 的 stage 还没落到闸门）：说清原因，
       // 别把状态栏清空 —— 那看起来就是"点了没反应"。
