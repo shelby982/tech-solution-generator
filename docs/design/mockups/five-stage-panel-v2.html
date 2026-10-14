@@ -22,8 +22,10 @@
   .topbar .model{margin-left:auto;color:var(--muted);font-size:12.5px}
 
   /* ── 材料条（原左栏上传区改为顶部一行，宽度还给内容）── */
-  .materials{display:flex;align-items:center;gap:10px;background:var(--surface);
-    border:1px solid var(--line);border-top:1px solid var(--line2);padding:8px 14px;flex-wrap:wrap}
+  .materials{background:var(--surface);border:1px solid var(--line);border-top:1px solid var(--line2);
+    padding:8px 14px}
+  .mrow1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mrow2{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}
   .materials .k{font-weight:600;font-size:12.5px;color:var(--muted);flex:0 0 auto}
   .file{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:8px;
     padding:4px 9px;background:#fbfcfd;font-size:12.5px;max-width:340px}
@@ -34,7 +36,31 @@
   .file .x{color:var(--muted);cursor:pointer}
   .add{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--line);border-radius:8px;
     padding:4px 10px;color:var(--muted);font-size:12.5px;cursor:pointer;background:#fff}
-  .materials .hint{margin-left:auto;color:var(--muted);font-size:11.5px}
+  .mrow1 .hint{margin-left:auto;color:var(--muted);font-size:11.5px}
+  .materials .sep{width:1px;height:18px;background:var(--line)}
+  /* 分组摘要：文件多时先给"构成"，不必逐个看 */
+  .gsum{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+  .gsum .d{width:7px;height:7px;border-radius:50%;display:inline-block}
+  /* 折叠文件条：默认显示前 3 个，其余隐藏；展开后整行可换行 */
+  .files{display:flex;gap:8px;flex-wrap:nowrap;align-items:center;min-width:0;overflow:hidden;width:100%}
+  .files.expanded{flex-wrap:wrap;overflow:visible}
+  .file.extra{display:none}
+  .files.expanded .file.extra{display:inline-flex}
+  .more{font-size:12px;color:var(--blue);cursor:pointer;white-space:nowrap;
+    border:1px solid #bfdbfe;background:var(--blue-soft);border-radius:999px;padding:1px 9px}
+  .files.expanded .more{background:#fff;border-color:var(--line);color:var(--muted)}
+  .file .up{color:var(--blue)} .file .bad{color:var(--red)}
+  .file.uploading{border-style:dashed}
+  .file.failed{border-color:#fca5a5;background:var(--red-soft)}
+  .tag.r1{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+  .tag.r2{background:#ecfeff;color:#0e7490;border-color:#a5f3fc}
+  .tag.r3{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe}
+  /* 完整材料面板 */
+  .matpanel{background:var(--surface);border:1px solid var(--line);border-top:none;
+    border-radius:0 0 10px 10px;margin-bottom:10px;overflow:hidden}
+  .mp-head{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line2);
+    background:#fafbfc;font-size:12.5px}
+  .mp-head .right{margin-left:auto;display:flex;gap:8px}
 
   /* ── 唯一一条状态行（口径随阶段变）── */
   .statusline{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);
@@ -166,13 +192,79 @@
 
   <!-- 材料条：原来的左栏上传区搬到这里，一行放完 -->
   <div class="materials">
-    <span class="k">材料</span>
-    <span class="file"><span class="tag">招标文件</span>
-      <span class="fn">1_广东电网…技术招标文件.docx</span><span class="sz">5.7 MB</span><span class="x">✕</span></span>
-    <span class="file"><span class="tag">技术规范书</span>
-      <span class="fn">4_高可靠技术专题研究与验证.docx</span><span class="sz">235 KB</span><span class="x">✕</span></span>
+    <div class="mrow1">
+    <span class="k">材料 <b>7</b></span>
+    <!-- 分组摘要：文件多时先看构成 -->
+    <span class="gsum"><i class="d" style="background:#2563eb"></i>招标文件 1</span>
+    <span class="gsum"><i class="d" style="background:#0891b2"></i>技术规范书 2</span>
+    <span class="gsum"><i class="d" style="background:#7c3aed"></i>素材 4</span>
     <span class="add">＋ 添加文件</span>
-    <span class="hint">上传即识别类型（招标文件 / 技术规范书 / 素材）；重新上传同类型会自动替换旧文件</span>
+    <span class="hint">可一次选多个；上传即识别类型，同类型自动替换旧文件
+      <a href="#" id="openMat" style="color:var(--blue);margin-left:6px">管理材料</a></span>
+    </div>
+    <!-- 第二行：文件条。默认只显示前 3 个，其余折叠；展开后整行换行 -->
+    <div class="mrow2">
+    <span class="files" id="fileChips">
+      <span class="file"><span class="tag r1">招标</span><span class="fn">1_广东电网…技术招标文件.docx</span><span class="sz">5.7 MB</span><span class="x">✕</span></span>
+      <span class="file"><span class="tag r2">规范</span><span class="fn">4_高可靠技术专题研究与验证.docx</span><span class="sz">235 KB</span><span class="x">✕</span></span>
+      <span class="file"><span class="tag r2">规范</span><span class="fn">前置表_技术规范书附件.docx</span><span class="sz">88 KB</span><span class="x">✕</span></span>
+      <span class="file extra"><span class="tag r3">素材</span><span class="fn">XX项目合同.pdf</span><span class="sz">2.1 MB</span><span class="x">✕</span></span>
+      <span class="file extra"><span class="tag r3">素材</span><span class="fn">客户档案管理方案.pptx</span><span class="sz">6.4 MB</span><span class="x">✕</span></span>
+      <span class="file extra uploading"><span class="tag r3">素材</span><span class="fn">ISO9001证书.pdf</span>
+        <span class="sz"><span class="up">上传中 62%</span></span><span class="x">✕</span></span>
+      <span class="file extra failed"><span class="tag r3">素材</span><span class="fn">资质汇总表.xlsx</span>
+        <span class="sz"><span class="bad">格式不支持</span></span><span class="x">✕</span></span>
+      <span class="more" id="moreBtn" title="展开/收起其余文件">还有 4 个 ▾</span>
+    </span>
+    </div>
+  </div>
+
+  <!-- 展开后的完整材料面板（分组 + 解析状态 + 逐条操作） -->
+  <div class="matpanel" id="matPanel" hidden>
+    <div class="mp-head">
+      <b>材料（7）</b>
+      <span class="note">同类型可替换（招标文件 / 技术规范书各留一份）；素材允许多份</span>
+      <span class="right"><button class="ghost">全部重新解析</button>
+        <button class="ghost" id="closeMat">收起</button></span>
+    </div>
+    <table>
+      <thead><tr><th style="width:90px">类型</th><th>文件</th><th style="width:80px">大小</th>
+        <th style="width:150px">解析状态</th><th style="width:190px">操作</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag r1">招标文件</span></td>
+          <td>1_广东电网…技术招标文件.docx</td><td>5.7 MB</td>
+          <td><span class="pill ok">已解析 · 96 页</span></td>
+          <td><button class="ghost">预览</button> <button class="ghost">替换</button> <button class="ghost">删除</button></td></tr>
+        <tr><td><span class="tag r2">技术规范书</span></td>
+          <td>4_高可靠技术专题研究与验证.docx</td><td>235 KB</td>
+          <td><span class="pill ok">已解析 · 19 主题</span></td>
+          <td><button class="ghost">预览</button> <button class="ghost">替换</button> <button class="ghost">删除</button></td></tr>
+        <tr><td><span class="tag r2">技术规范书</span></td>
+          <td>前置表_技术规范书附件.docx</td><td>88 KB</td>
+          <td><span class="pill ok">已解析</span></td>
+          <td><button class="ghost">预览</button> <button class="ghost">删除</button></td></tr>
+        <tr><td><span class="tag r3">素材</span></td>
+          <td>XX项目合同.pdf</td><td>2.1 MB</td>
+          <td><span class="pill ok">已解析 · 42 页</span></td>
+          <td><button class="ghost">预览</button> <button class="ghost">删除</button></td></tr>
+        <tr><td><span class="tag r3">素材</span></td>
+          <td>客户档案管理方案.pptx</td><td>6.4 MB</td>
+          <td><span class="pill">解析中 · 62%</span></td>
+          <td><button class="ghost">取消</button></td></tr>
+        <tr><td><span class="tag r3">素材</span></td>
+          <td>ISO9001证书.pdf</td><td>1.2 MB</td>
+          <td><span class="pill bad">解析失败：OCR 不可用</span></td>
+          <td><button class="ghost">重试</button> <button class="ghost">删除</button></td></tr>
+        <tr><td><span class="tag r3">素材</span></td>
+          <td>资质汇总表.xlsx</td><td>64 KB</td>
+          <td><span class="pill bad">格式不支持</span></td>
+          <td><button class="ghost">删除</button></td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="padding:6px 14px 10px">
+      只支持 PDF / DOCX / DOC（Excel、PPT 请转成 PDF 或 DOCX 后上传）。
+      解析失败的文件不会进入检索，但保留在列表里可重试。
+    </div>
   </div>
 
   <!-- 唯一一条状态行：阶段 + 主动作 + 阶段口径的进度 -->
@@ -419,6 +511,21 @@
   document.getElementById('btn-cite').addEventListener('click',()=>{
     document.getElementById('cite-state').className=''; 
     document.getElementById('cite-state').textContent='已引用 2 条（合同关键页 · 客户档案管理方案）';});
+  // 多文件：折叠条展开/收起 + 完整材料面板
+  document.getElementById('moreBtn').addEventListener('click', (ev)=>{
+    ev.stopPropagation();
+    const box=document.getElementById('fileChips');
+    box.classList.toggle('expanded');
+    document.getElementById('moreBtn').textContent = box.classList.contains('expanded')
+      ? '收起 ▴' : '还有 4 个 ▾';
+  });
+  document.getElementById('openMat').addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    const p=document.getElementById('matPanel'); p.hidden=!p.hidden;
+  });
+  document.getElementById('closeMat').addEventListener('click', ()=>{
+    document.getElementById('matPanel').hidden = true;
+  });
   document.querySelectorAll('tr.clickable[data-detail]').forEach(tr=>tr.addEventListener('click',()=>{
     const el=document.getElementById(tr.dataset.detail); el.style.display=el.style.display==='none'?'':'none';}));
 </script>
