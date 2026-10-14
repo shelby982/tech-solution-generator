@@ -854,3 +854,41 @@ def build_subpoints_user(criterion: str) -> str:
         '**只输出 JSON，不要任何解释、前言、标题或 Markdown 围栏**：'
         '{"points": ["要点1", "要点2", ...]}'
     )
+
+
+# ── 标包整理（只做合并/命名，不许衍生）───────────────────────────────────────────
+PACKAGE_MERGE_SYSTEM = (
+    "你是招标文件信息整理助手。用户会给你从招标文件正文里**检索到的**标包事实"
+    "（每条都带原文片段、文件名、页码）。\n"
+    "你**只能做两件事**：\n"
+    "  1. 合并：把指同一个标包的多种写法合并成一条（例如「标的1标包2」与「包2」）；\n"
+    "  2. 命名：为每个标包给出一个名字，名字**必须来自给出的原文片段**。\n"
+    "严禁：新增原文里没有的标包；推测缺失的编号；改写或提炼原文内容。\n"
+    "拿不准就保持原样、名字留空。\n"
+    "只输出 JSON："
+    '{"groups":[{"target":"","package_no":"","package_name":"","aliases":["标的1标包2","包2"]}]}'
+)
+
+
+def build_package_merge_user(facts: list, source_texts: list[str] | None = None) -> str:
+    """构造「标包整理」的 user prompt。
+
+    只把**已经检索到的事实**交给模型（含原文片段），并附上原文片段供它核对名字；
+    不含任何"请补充/请推断"的措辞 —— 这是用户口径的硬要求。
+    """
+    lines = []
+    for i, f in enumerate(facts or []):
+        lines.append(
+            f"[{i}] 标的={f.get('target') or '（空）'} 标包={f.get('package_no') or '（空）'} "
+            f"提到 {f.get('mentions', 0)} 次 置信度={f.get('confidence', '')}"
+        )
+        for ev in (f.get("evidence") or [])[:3]:
+            lines.append(f"     原文：「{str(ev.get('quote') or '')[:120]}」"
+                         f"（{ev.get('filename') or ''}{(' 第%s页' % ev.get('page')) if ev.get('page') else ''}）")
+    facts_block = "\n".join(lines) or "（没有检索到任何标包事实）"
+    text_block = "\n---\n".join(str(t)[:1200] for t in (source_texts or [])[:3]) or "（未提供原文）"
+    return (
+        "【检索到的标包事实】\n" + facts_block
+        + "\n\n【原文片段（仅用于核对名字，不要改写）】\n" + text_block
+        + "\n\n请只做合并与命名；没有原文依据的一律不要输出。"
+    )

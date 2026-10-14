@@ -593,7 +593,7 @@ async def map_sources(project_id: int):
 # 用户口径：「从招标文件里面去找到标的对应的标包或标段……以招标文件的事实为准，
 # 模型不能去做额外的衍生或者提炼」+「一个文件可能会属于多个标包」。
 @router.get("/projects/{project_id}/package-analysis")
-async def get_package_analysis(project_id: int, refresh: int = 0):
+async def get_package_analysis(project_id: int, refresh: int = 0, use_llm: int = 0):
     """标包清单（含**原文出处**）+ 文件↔标包的多对多关联。
 
     - 默认返回已落库结果；库里为空、或 ``refresh=1`` → 重新分析并覆盖
@@ -604,17 +604,33 @@ async def get_package_analysis(project_id: int, refresh: int = 0):
         load_analysis, load_material_packages, run_analysis,
     )
 
+    # ?use_llm=1 时让模型**只做合并/命名**（结果经溯源校验，编造的丢弃）
+    call_model = None
+    if use_llm:
+        try:
+            from infra.llm import dispatch_package_merge_json
+            from services.config_store import config_store
+            _cfg, _rr = config_store.get_configs_and_next_index()
+
+            async def call_model(payload, _c=_cfg, _r=_rr):
+                return await dispatch_package_merge_json(_c, _r, payload)
+        except Exception as e:      # 没配置模型就照旧走规则，不报错
+            logger.info(f"标包分析：模型整理不可用（{e}），按规则结果返回")
+
     async with get_db() as db:
         packages = await load_analysis(db, project_id)
+        note = ""
         if refresh or not packages:
-            packages = await run_analysis(db, project_id)
+            packages, note = await run_analysis(db, project_id, use_llm=bool(use_llm),
+                                                call_model=call_model)
         links = await load_material_packages(db, project_id)
         chunk_n = (await (await db.execute(
             """SELECT COUNT(*) FROM material_chunks c JOIN materials m ON m.id = c.material_id
                 WHERE m.project_id = ? AND m.deleted_at IS NULL""", (project_id,))).fetchone())[0]
 
-    note = ""
-    if not chunk_n:
+    if note:
+        pass                      # 模型整理已给出说明，保留它
+    elif not chunk_n:
         note = "还没有解析出的正文，无法从招标文件里检索标包；请先上传并等待解析完成。"
     elif not packages:
         note = ("已检索全部正文，但**没有找到**「标的 / 标包 / 标段」的表述 —— "
@@ -703,3 +719,27 @@ async def set_material_packages_route(project_id: int, material_id: int, payload
             raise HTTPException(status_code=404, detail="材料不存在")
         n = await set_material_packages(db, project_id, material_id, packages)
     return JSONResponse({"material_id": material_id, "packages": n})
+
+
+@router.get("/projects/{project_id}/materials/integrity")
+async def materials_integrity(project_id: int):
+    """素材文件**丢失检测**：记录在库里、但磁盘上的文件不见了（或为 0 字节）。
+
+    这类问题不显式暴露的话，界面一切正常，直到真正要用原文时才发现素材是空的。
+    """
+    from services.material_integrity import check_materials
+
+    async with get_db() as db:
+        rows = await (await db.execute(
+            """SELECT id, filename, role, file_path, parse_status
+                 FROM materials WHERE project_id = ? AND deleted_at IS NULL
+                ORDER BY id""", (project_id,))).fetchall()
+        counts = {str(c[0]): c[1] for c in await (await db.execute(
+            """SELECT m.id, COUNT(c.id) FROM materials m
+                 LEFT JOIN material_chunks c ON c.material_id = m.id
+                WHERE m.project_id = ? AND m.deleted_at IS NULL
+                GROUP BY m.id""", (project_id,))).fetchall()}
+    mats = [{"id": r[0], "filename": r[1], "role": r[2], "file_path": r[3],
+             "parse_status": r[4]} for r in rows]
+    result = check_materials(mats, chunk_counts=counts)
+    return JSONResponse(result)

@@ -1091,3 +1091,53 @@ async def generate_letter_content(
 
     logger.error(f"公文章节无可用 API：{errors.exhausted_summary(configs, last_error)}")
     return ""
+
+
+async def dispatch_package_merge_json(
+    configs: list,
+    rr_start_index: int,
+    payload: dict,
+) -> dict:
+    """标包整理（**只做合并与命名**）：把检索到的事实交给模型整理，返回解析后的 JSON。
+
+    与 ``dispatch_scope_select_json`` 同一套轮询/兜底；调用方（package_analysis）
+    还会对结果做**逐条溯源校验**：模型新增的标包、原文里找不到的名字一律丢弃 ——
+    即"模型不能做额外的衍生"。
+    """
+    from agents.prompts import PACKAGE_MERGE_SYSTEM, build_package_merge_user
+
+    n = len(configs)
+    if n == 0:
+        raise ValueError("未配置任何 API，请先添加模型配置")
+
+    user = build_package_merge_user(payload.get("facts") or [],
+                                    payload.get("source_texts") or [])
+    last_error: Exception | None = None
+    usable = errors.available_configs(configs, rr_start_index)
+    for i, config in enumerate(usable):
+        try:
+            logger.info(f"使用 API [{config.provider}/{config.model}] 整理标包")
+            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
+                result = await clients.generate_oneshot_openai(
+                    config, PACKAGE_MERGE_SYSTEM, user, max_tokens=800,
+                    call_site="package_merge",
+                )
+            else:
+                result = await clients.generate_oneshot_claude(
+                    config, PACKAGE_MERGE_SYSTEM, user, max_tokens=800,
+                    call_site="package_merge",
+                )
+            obj = _extract_json_object(result)
+            if not isinstance(obj, dict):
+                raise ValueError("模型输出不是 JSON 对象")
+            return obj
+        except Exception as e:
+            last_error = e
+            kind = errors.note_failure(config, e)
+            logger.warning(
+                f"API [{config.provider}/{config.model}] 标包整理失败（{errors.describe_error(e)}），"
+                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
+            )
+            if errors.blocks_chain(kind):
+                break
+    raise errors.exhausted_error(configs, last_error)

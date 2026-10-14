@@ -229,7 +229,8 @@ async def load_analysis(db, project_id: int) -> list[dict]:
     return out
 
 
-async def run_analysis(db, project_id: int) -> list[dict]:
+async def run_analysis(db, project_id: int, *, use_llm: bool = False,
+                       call_model=None) -> tuple[list[dict], str]:
     """从库里读 chunks + materials → 分析 → 落库 → 返回结果。
 
     没有 chunks（文件丢了/没解析）时返回**空清单**并如实说明，不猜。
@@ -245,8 +246,13 @@ async def run_analysis(db, project_id: int) -> list[dict]:
             ORDER BY c.material_id, c.chunk_index""", (project_id,))).fetchall()
     chs = [{"material_id": r[0], "chunk_index": r[1], "page": r[2], "content": r[3]} for r in chunks]
     packages = analyze_packages(chs, mats)
+    note = ""
+    if use_llm and packages and call_model is not None:
+        # 模型只做合并/命名；结果经溯源校验，编造的一律丢弃（见 validate_merge_proposal）
+        packages, note = await merge_with_llm(
+            packages, [str(c.get("content") or "")[:2000] for c in chs[:5]], call_model)
     await save_analysis(db, project_id, packages)
-    return packages
+    return packages, note
 
 
 async def load_material_packages(db, project_id: int) -> dict:
@@ -283,3 +289,120 @@ async def set_material_packages(db, project_id: int, material_id: int,
         n += 1
     await db.commit()
     return n
+
+
+# ── 模型整理（只允许"合并 + 命名"，且必须能溯源）──────────────────────────────
+# 用户口径：「可能需要借助模型去做一下整理和分类。但这一块要以招标文件的事实为准，
+# 模型不能去做额外的衍生或者提炼，一切以招标文件内容为准。」
+def _norm(s: str) -> str:
+    """比较用归一化：去掉所有空白（原文里「标的 1 标包 2」很常见）。"""
+    return re.sub(r"\s+", "", str(s or ""))
+
+
+def validate_merge_proposal(facts: list[dict], proposal: dict,
+                            source_texts: list[str] | None = None) -> list[dict]:
+    """把模型提案变成**只含可溯源信息**的标包清单（纯函数，安全层）。
+
+    规则：
+      1. 模型**不能新增标包**：每个 group 必须匹配到已检索到的事实
+         （target+package_no 相同，或其 aliases 命中某条事实的原文片段）；
+      2. 命中的多条事实**合并**成一条（别名归一）；
+      3. ``package_name`` 必须是原文里出现的**连续子串**，否则**留空**（不编造名字）；
+      4. 提案没覆盖到的**事实原样保留**（不丢事实）；
+      5. 证据 / 提到次数 / 置信度取并集与最高。
+    """
+    facts = list(facts or [])
+    by_key = {(str(f.get("target") or ""), str(f.get("package_no") or "")): f for f in facts}
+    haystack = _norm(" ".join(str(t) for t in (source_texts or []))) + " " + _norm(
+        " ".join(str((ev or {}).get("quote") or "") for f in facts for ev in (f.get("evidence") or [])))
+
+    used: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    conf_rank = {"low": 0, "medium": 1, "high": 2}
+
+    for g in (proposal or {}).get("groups") or []:
+        if not isinstance(g, dict):
+            continue
+        target = str(g.get("target") or "")
+        package_no = str(g.get("package_no") or "")
+        aliases = [str(a) for a in (g.get("aliases") or []) if a]
+
+        hits: list[dict] = []
+        if (target, package_no) in by_key:
+            hits.append(by_key[(target, package_no)])
+        # 别名**同样要收**：密钥命中不等于已覆盖全部写法
+        # （实测：group 写 package_no=2、别名写「标的1标包2」，只按密钥匹配会漏掉后者）
+        for f in facts:
+            key_f = (str(f.get("target") or ""), str(f.get("package_no") or ""))
+            if key_f in used or any(f is h for h in hits):
+                continue
+            quotes = _norm(" ".join(str((ev or {}).get("quote") or "") for ev in (f.get("evidence") or [])))
+            if any(_norm(a) and _norm(a) in quotes for a in aliases):
+                hits.append(f)
+        if not hits:
+            continue                      # ← 模型新增的标包：**直接丢弃**
+
+        # 名字必须在原文里出现；否则留空（不编造）
+        raw_name = _norm(g.get("package_name") or "")
+        name = str(g.get("package_name") or "").strip() if (raw_name and raw_name in haystack) else ""
+
+        merged_ev: list[dict] = []
+        srcs: list[str] = []
+        mentions = 0
+        best = "low"
+        for f in hits:
+            used.add((str(f.get("target") or ""), str(f.get("package_no") or "")))
+            merged_ev += list(f.get("evidence") or [])
+            srcs += list(f.get("source_material_ids") or [])
+            mentions += int(f.get("mentions") or 0)
+            if conf_rank.get(str(f.get("confidence")), 0) > conf_rank.get(best, 0):
+                best = str(f.get("confidence"))
+        # 合并后 target/package_no 取"事实里最具体"的那个（都用空就保持空）
+        target2 = target or next((str(f.get("target") or "") for f in hits if f.get("target")), "")
+        pkg2 = package_no or next((str(f.get("package_no") or "") for f in hits if f.get("package_no")), "")
+        out.append({
+            "target": target2, "package_no": pkg2, "package_name": name,
+            "mentions": mentions, "confidence": best,
+            "source_material_ids": sorted({s for s in srcs if s}),
+            "evidence": merged_ev[:5],
+            "merged_from": [f"{f.get('target') or ''}|{f.get('package_no') or ''}" for f in hits],
+        })
+
+    # 未被提案覆盖的事实原样保留（模型漏掉的不能丢）
+    for f in facts:
+        if (str(f.get("target") or ""), str(f.get("package_no") or "")) not in used:
+            keep = dict(f)
+            keep.setdefault("merged_from", [f"{keep.get('target') or ''}|{keep.get('package_no') or ''}"])
+            out.append(keep)
+    out.sort(key=lambda x: (x.get("target") or "", x.get("package_no") or ""))
+    # 出口归一：无论来自模型合并还是"未被覆盖的事实"，字段都齐全（调用方不用猜）
+    for p in out:
+        p.setdefault("package_name", "")
+        p.setdefault("mentions", 0)
+        p.setdefault("confidence", "low")
+        p.setdefault("evidence", [])
+        p.setdefault("source_material_ids", [])
+    return out
+
+
+async def merge_with_llm(facts: list[dict], source_texts: list[str] | None,
+                         call_model) -> tuple[list[dict], str]:
+    """让模型整理标包（**只做合并/命名**）。返回 ``(packages, note)``。
+
+    ``call_model`` 是注入的异步调用（便于单测注入假模型）。任何失败都**降级为规则结果**，
+    绝不让"模型不可用"影响标包识别本身。
+    """
+    facts = list(facts or [])
+    if not facts:
+        return facts, ""
+    try:
+        proposal = await call_model({"facts": facts, "source_texts": source_texts or []})
+    except Exception as e:                     # 模型不可用 → 规则结果照旧
+        return facts, f"模型整理失败（{type(e).__name__}），已按原文检索结果展示"
+    merged = validate_merge_proposal(facts, proposal or {}, source_texts)
+    # 只有确实发生了合并/命名才说"整理过"，避免用户以为模型做了什么
+    renamed = sum(1 for p in merged if p.get("package_name"))
+    merged_n = sum(1 for p in merged if len(p.get("merged_from") or []) > 1)
+    if not renamed and not merged_n:
+        return facts, ""
+    return merged, f"已由模型整理：合并 {merged_n} 组，命名 {renamed} 个（名字均取自原文）"

@@ -27,6 +27,9 @@ export const api = {
     // 标包分析：从招标文件正文抽出的标包事实（含原文出处）
     packageAnalysis: (projectId, q = '') =>
       fetch(`/api/projects/${projectId}/package-analysis${q}`).then(r => r.json()),
+    // 素材完整性：文件丢失 / 解析完成却没有正文
+    materialsIntegrity: (projectId) =>
+      fetch(`/api/projects/${projectId}/materials/integrity`).then(r => r.json()),
     // 某份文件的标包归属（多对多；可空 = 未指定）
     setMaterialPackages: (projectId, materialId, packages) =>
       fetch(`/api/projects/${projectId}/materials/${materialId}/packages`, {

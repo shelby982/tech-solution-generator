@@ -122,7 +122,7 @@ async def test_run_analysis_persists_packages_and_many_to_many_links(tmp_path):
 
     conn = await _make_db_with_content(tmp_path)
     try:
-        pkgs = await run_analysis(conn, 1)
+        pkgs, _note = await run_analysis(conn, 1)
         assert {(p["target"], p["package_no"]) for p in pkgs} == {("1", "2"), ("1", "3")}
 
         loaded = await load_analysis(conn, 1)
@@ -151,7 +151,7 @@ async def test_run_analysis_empty_when_no_chunks(tmp_path):
     await conn.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
     await conn.commit()
     try:
-        assert await run_analysis(conn, 1) == []
+        assert (await run_analysis(conn, 1))[0] == []
     finally:
         await conn.close()
 
@@ -187,3 +187,87 @@ async def test_set_material_packages_is_many_to_many(tmp_path):
         assert await load_material_packages(conn, 1) == {}
     finally:
         await conn.close()
+
+
+# ── 模型整理：只允许合并/命名，且必须可溯源 ───────────────────────────────────
+def _facts():
+    return [
+        {"target": "1", "package_no": "2", "package_name": "", "mentions": 2, "confidence": "high",
+         "source_material_ids": ["m1"],
+         "evidence": [{"quote": "本项目分标的1标包2、标的1标包3", "filename": "a.pdf", "page": 3}]},
+        {"target": "", "package_no": "2", "package_name": "", "mentions": 1, "confidence": "low",
+         "source_material_ids": ["m2"],
+         "evidence": [{"quote": "包2的技术要求见第五章", "filename": "b.docx", "page": 9}]},
+    ]
+
+
+def test_validate_merge_merges_aliases_and_names_from_source():
+    """别名指向同一标包 → 合并；名字取自原文 → 保留。"""
+    from services.package_analysis import validate_merge_proposal
+
+    texts = ["本项目分标的1标包2、标的1标包3；包2验收标准；包2的技术要求见第五章"]
+    got = validate_merge_proposal(_facts(), {"groups": [
+        {"target": "", "package_no": "2", "package_name": "包2验收标准", "aliases": ["标的1标包2"]},
+    ]}, texts)
+    p2 = [x for x in got if x["package_no"] == "2"]
+    assert len(p2) == 1, "两条事实应合并成一条"
+    assert p2[0]["mentions"] == 3, "提到次数取并集"
+    assert p2[0]["confidence"] == "high", "置信度取最高"
+    assert p2[0]["package_name"] == "包2验收标准"
+    assert len(p2[0]["merged_from"]) == 2
+
+
+def test_validate_merge_drops_invented_package():
+    """**模型新增的标包必须被丢弃**（用户口径：不能做额外的衍生）。"""
+    from services.package_analysis import validate_merge_proposal
+
+    got = validate_merge_proposal(_facts(), {"groups": [
+        {"target": "9", "package_no": "9", "package_name": "虚构标包", "aliases": ["标的9标包9"]},
+    ]}, ["本项目分标的1标包2"])
+    assert all(x["target"] != "9" for x in got), "编造的标包不能出现在结果里"
+    assert len(got) == 2, "原有事实原样保留"
+
+
+def test_validate_merge_blanks_name_not_in_source():
+    """名字在原文里找不到 → **留空**，不编造。"""
+    from services.package_analysis import validate_merge_proposal
+
+    got = validate_merge_proposal(_facts(), {"groups": [
+        {"target": "1", "package_no": "2", "package_name": "高可靠技术专题标包"},
+    ]}, ["本项目分标的1标包2"])
+    p2 = [x for x in got if x["target"] == "1"][0]
+    assert p2["package_name"] == ""
+
+
+def test_validate_merge_keeps_uncovered_facts():
+    """模型漏掉的事实不能被丢掉。"""
+    from services.package_analysis import validate_merge_proposal
+
+    got = validate_merge_proposal(_facts(), {"groups": [
+        {"target": "1", "package_no": "2", "package_name": "", "aliases": ["标的1标包2"]},
+    ]}, ["标的1标包2"])
+    assert {(x["target"], x["package_no"]) for x in got} == {("1", "2"), ("", "2")}
+
+
+async def test_merge_with_llm_degrades_when_model_fails():
+    """模型不可用 → 原样返回规则结果（标包识别不能被模型拖垮）。"""
+    from services.package_analysis import merge_with_llm
+
+    async def boom(_payload):
+        raise RuntimeError("no api")
+
+    got, note = await merge_with_llm(_facts(), ["x"], boom)
+    assert got == _facts()
+    assert "失败" in note
+
+
+async def test_merge_with_llm_reports_nothing_when_no_change():
+    """模型什么都没做（没合并、没命名）→ 不吹嘘"已整理"。"""
+    from services.package_analysis import merge_with_llm
+
+    async def echo(_payload):
+        return {"groups": []}
+
+    got, note = await merge_with_llm(_facts(), ["x"], echo)
+    assert note == ""
+    assert len(got) == 2

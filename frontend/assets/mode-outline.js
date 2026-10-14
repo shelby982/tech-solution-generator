@@ -688,6 +688,7 @@ function refreshMaterialSummary() {
 }
 
 async function loadMaterials() {
+  await loadMaterialIntegrity();
   const list = await api.materials.list(projectId);
   const reqRoles = ['spec', 'main_rfp', 'requirement', 'scoring', 'evaluation'];
   const reqs = list.filter(m => reqRoles.includes(m.role));
@@ -777,7 +778,7 @@ function renderMats(container, mats, showRole) {
         title="这份文件属于哪些标包（可多选；一份文件可以属于多个标包）">${
         mine.length ? escapeHtml(mine.map(pkgLabelOf).join('、')) : '未指定标包'}</button>
       ${roleCell}
-      ${parseStatusBadge(m.parse_status)}
+      ${matLossBadge(m.id) || parseStatusBadge(m.parse_status)}
       ${showRole ? '' : materialUsageHtml(m)}
       <span class="mat-size">${fmtSize(m.file_size)}</span>
       <button class="mat-del" data-id="${m.id}" title="删除">×</button>
@@ -2537,6 +2538,30 @@ let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 let topicSaveNote = '';    // 归属保存结果 —— 保存后\*\*面板会重绘\*\*，所以用模块变量而不是就地写 DOM
 // 文件↔标包（多对多）：一个人工可改的归属
+/** 文件丢失/未解析出正文的标记（比"已解析"更重要：说了完成但素材是空的）。 */
+function matLossBadge(materialId) {
+  const reason = matIntegrity[String(materialId)];
+  if (!reason) return '';
+  const text = { missing: '文件已丢失', empty: '文件为空', no_path: '无文件路径',
+    no_chunks: '未解析出正文' }[reason] || reason;
+  const tip = { missing: '记录还在，但磁盘上的文件不见了 —— 请重新上传',
+    empty: '磁盘上的文件是 0 字节 —— 请重新上传',
+    no_path: '这条记录没有文件路径（历史数据）',
+    no_chunks: '解析标记为完成，却一个正文片段都没有 —— 素材实际是空的，请重新上传或重新解析' }[reason] || '';
+  return `<span class="mat-bad" title="${escapeHtml(tip)}">${escapeHtml(text)}</span>`;
+}
+
+/** 拉取素材完整性（丢失 / 未解析出正文）。失败只记 console，不影响材料条。 */
+async function loadMaterialIntegrity() {
+  try {
+    const d = await api.projects.materialsIntegrity(projectId);
+    matIntegrity = {};
+    for (const x of (d.lost || [])) matIntegrity[String(x.id)] = x.reason;
+  } catch (e) {
+    console.warn('[materials] 完整性检查失败', e);
+  }
+}
+
 function materialPackagesOf(materialId) {
   const map = (pkgAnalysis && pkgAnalysis.material_packages) || {};
   return map[String(materialId)] || [];
@@ -2545,6 +2570,8 @@ function pkgLabelOf(x) {
   const t = x && x.target ? `标的${x.target} ` : '';
   return `${t}标包${(x && x.package_no) || '—'}`;
 }
+let pkgMergeNote = '';      // 模型整理结果说明（只做合并/命名）
+let matIntegrity = {};      // {material_id: reason} —— 文件丢失/未解析出正文（加载时拉取）
 let pkgAnalysis = null;    // 标包分析结果（GET package-analysis；null = 还没取）
 // 类别短名：**模块级** —— 模块级渲染函数看不到 openSplitReport 内部的 CAT_HINT（实测 ReferenceError）
 const CAT_NAME = { commerce: '商务', tech: '技术', price: '报价', other: '其他' };
@@ -2693,10 +2720,13 @@ async function openMaterialPackagesPicker(materialId, btn) {
 }
 
 /** 取标包分析结果（来自招标文件正文的事实 + 出处）。失败不阻断面板，只标记。 */
-async function loadPackageAnalysis({ refresh = false } = {}) {
+async function loadPackageAnalysis({ refresh = false, useLlm = false } = {}) {
   if (pkgAnalysis && !refresh) return pkgAnalysis;
   try {
-    const q = refresh ? '?refresh=1' : '';
+    const qs = [];
+    if (refresh) qs.push('refresh=1');
+    if (useLlm) qs.push('use_llm=1');
+    const q = qs.length ? `?${qs.join('&')}` : '';
     pkgAnalysis = await api.projects.packageAnalysis(projectId, q);
   } catch (e) {
     console.warn('[packages] 标包分析获取失败', e);
@@ -2731,7 +2761,10 @@ function renderPackageCards() {
   }).join('');
   return `<div class="sr-pkg-cards">${cards}</div>
     <div class="sr-dim">标包只按招标文件原文列出；名字需要你确认（系统不编造）。
-      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:6px">重新分析</button></div>`;
+      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:6px">重新分析</button>
+      <button class="sr-mini" data-act="merge-packages" style="margin-left:4px"
+        title="让模型把同一标包的多种写法合并、并从原文里取名；编造的内容会被丢弃">用模型整理</button>
+      ${pkgMergeNote ? `<span style="margin-left:8px;color:var(--success)">${escapeHtml(pkgMergeNote)}</span>` : ''}</div>`;
 }
 
 /** 评分点对齐行：**解析事实 vs 已落库**（差异可见 + 一键对齐，不花模型）。 */
@@ -4474,6 +4507,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
   /* 材料行里的标包归属（多选） */
+  .mat-bad{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--danger-soft,#fef2f2);
+    color:var(--danger,#dc2626);border:1px solid #fecaca;white-space:nowrap}
   .mat-pkg{font:inherit;font-size:11px;padding:1px 7px;border:1px solid var(--line);border-radius:999px;
     background:#fff;color:var(--accent);cursor:pointer;white-space:nowrap;max-width:190px;
     overflow:hidden;text-overflow:ellipsis}
@@ -4845,7 +4880,17 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   // 标包卡片：重新分析 / 用它拆分
   el.querySelector('[data-act="reanalyze-packages"]')?.addEventListener('click', async () => {
     pkgAnalysis = null;
+    pkgMergeNote = '';
     await loadPackageAnalysis({ refresh: true });
+    await openSplitReport({ stage: '1' });
+  });
+  // 用模型整理：只做合并与命名；编造的标包/原文里没有的名字都会被丢弃
+  el.querySelector('[data-act="merge-packages"]')?.addEventListener('click', async () => {
+    const b = el.querySelector('[data-act="merge-packages"]');
+    if (b) { b.disabled = true; b.textContent = '模型整理中…'; }
+    pkgAnalysis = null;
+    await loadPackageAnalysis({ refresh: true, useLlm: true });
+    pkgMergeNote = (pkgAnalysis && pkgAnalysis.note) || '模型没有可整理的内容（已是原文原样）';
     await openSplitReport({ stage: '1' });
   });
   el.querySelectorAll('[data-act="pick-package"]').forEach((b) => b.addEventListener('click', async () => {
