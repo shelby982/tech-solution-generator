@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v136';
+import { api } from './api.js?v=20261016-v137';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v136';
+       } from './workspace.js?v=20261016-v137';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -29,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v136';
+       } from './workspace-model.mjs?v=20261016-v137';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -115,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v136';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v137';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3906,25 +3906,25 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-two">
         <nav class="sr-sub2">
           <div class="sr-sub2-item on" data-sub2="1"><span class="sr-dot">1</span>
-            <span><span class="sr-lab">目录确认与调整</span><span class="sr-sub">看结构 · 就地改</span></span></div>
-          <div class="sr-sub2-item" data-sub2="2"><span class="sr-dot">2</span>
             <span><span class="sr-lab">技术规范书确认</span><span class="sr-sub">要求挂到哪一章</span></span></div>
+          <div class="sr-sub2-item" data-sub2="2"><span class="sr-dot">2</span>
+            <span><span class="sr-lab">目录确认与调整</span><span class="sr-sub">挂载后做最后调整</span></span></div>
         </nav>
         <div class="sr-two-main">
           <div class="sr2-pane on" data-sub2="1">
-            <div class="sr2-head"><span class="t">目录确认与调整</span>
-              <span class="sr-dim">看结构是否完整；要改就直接改（点一行 → 出现该行操作）</span></div>
-            <div class="sr2-body">${pane1}</div>
+            <div class="sr2-head"><span class="t">技术规范书确认</span>
+              <span class="sr-dim">基于当前目录结构，为<b>全部 ${(data.topic_options || []).length} 个主题</b>指定挂载章节；不指定就进「技术规范书要求应答」</span></div>
+            <div class="sr2-body">${topicRows}</div>
           </div>
           <div class="sr2-pane" data-sub2="2">
-            <div class="sr2-head"><span class="t">技术规范书确认</span>
-              <span class="sr-dim">${(data.topic_options || []).length} 个主题；不指定就进「技术规范书要求应答」</span></div>
-            <div class="sr2-body">${topicRows}</div>
+            <div class="sr2-head"><span class="t">目录确认与调整</span>
+              <span class="sr-dim">规范书要求已经挂进来了；在这里做最后调整（点一行 → 出现该行操作）</span></div>
+            <div class="sr2-body">${pane1}</div>
           </div>
         </div>
       </div>
       <div class="sr-two-foot">
-        <span class="sr-dim">最后一步会把目录与技术规范书归属<b>一起</b>生成产物。</span>
+        <span class="sr-dim">技术规范书归属与目录调整都完成后，第 2 步确认会把两者<b>一起</b>生成产物。</span>
         <span class="sr-two-nav">
           <button class="mw-btn" data-step-nav="prev">← 上一步</button>
           <button class="mw-btn primary" data-step-nav="next">下一步 →</button>
