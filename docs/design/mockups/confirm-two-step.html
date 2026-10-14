@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>原型：待确认（目录确认 → 调整 → 技术规范书确认）</title>
+<title>原型：待确认（目录确认与调整 → 技术规范书确认）</title>
 <style>
   :root{
     --bg:#f2f4f7; --panel:#fff; --panel-soft:#f8fafc; --line:#e5e7eb; --line2:#eef1f5;
@@ -167,23 +167,21 @@
 
       <section class="stack">
         <div class="stage-head"><span class="t">待确认</span>
-          <span class="hint">目录确认 → 调整 → 技术规范书确认；最后一步确认生成产物</span></div>
+          <span class="hint">目录确认与调整 → 技术规范书确认；最后一步确认生成产物</span></div>
 
         <!-- ② 待确认：左侧三步 + 右侧内容 -->
         <div class="nested">
           <nav class="subrail" id="subrail">
-            <div class="sub-item on done" data-sub="1"><span class="n">1</span>
-              <span><span class="lab">目录确认</span><span class="sub">结构是否完整</span></span></div>
+            <div class="sub-item on" data-sub="1"><span class="n">1</span>
+              <span><span class="lab">目录确认与调整</span><span class="sub">看结构 · 就地改</span></span></div>
             <div class="sub-item" data-sub="2"><span class="n">2</span>
-              <span><span class="lab">调整</span><span class="sub">改名 / 增删 / 移动</span></span></div>
-            <div class="sub-item" data-sub="3"><span class="n">3</span>
               <span><span class="lab">技术规范书确认</span><span class="sub">要求挂到哪一章</span></span></div>
           </nav>
 
           <div class="subpane on" data-sub="1">
-            <div class="pane-head"><span class="t">目录确认</span>
-              <span class="dim">先看目录结构是否完整；要改就下一步</span>
-              <span class="right"><button class="btn" data-goto="2">去调整 →</button></span></div>
+            <div class="pane-head"><span class="t">目录确认与调整</span>
+              <span class="dim">看结构是否完整；要改就直接改（点一行 → 出现该行操作）</span>
+              <span class="right"><button class="btn btn-primary" data-goto="2">去确认技术规范书 →</button></span></div>
             <div class="pane-body">
               <div class="checks">
                 <span class="check ok">✅ 分值合计 100 / 100</span>
@@ -198,41 +196,19 @@
                 <span><b>评分点</b>8 个，合计 100 分</span>
               </div>
 
-              <div class="sec">目录结构（121 章）</div>
-              <div class="struct">
-                <div class="srow"><span class="ti">技术条款差异性</span><span class="meta">评分点：技术条款差异性</span></div>
-                <div class="srow l2"><span class="ti">投标响应度</span><span class="score">10 分</span></div>
-                <div class="srow l2"><span class="ti">招标技术要求满足情况</span><span class="score">10 分</span></div>
-                <div class="srow l2"><span class="ti">高可靠技术专题验证工具研发</span><span class="meta">规范书 1 条</span></div>
-                <div class="srow"><span class="ti">对项目的理解</span><span class="meta">评分点：对项目的理解正确、深入、全面</span></div>
-                <div class="srow l2"><span class="ti">对项目的理解正确、深入、全面</span><span class="score">10 分</span></div>
-                <div class="srow l3"><span class="ti">项目背景现状目标</span></div>
-                <div class="srow l3"><span class="ti">建设范围</span></div>
-                <div class="srow"><span class="ti">技术方案可行性</span><span class="meta">评分点：技术方案可行性</span></div>
-                <div class="srow l2"><span class="ti">技术方案完整性</span><span class="score">12 分</span><span class="meta">规范书 3 条</span></div>
-              </div>
-              <div class="dim" style="margin-top:8px">结构完整 = 每个评分点都有承载章节；缺的会在上面以 ⚠ 提示。</div>
-            </div>
-          </div>
-
-          <div class="subpane" data-sub="2">
-            <div class="pane-head"><span class="t">调整目录</span>
-              <span class="dim">点一行选中，右侧出现该行操作；改动即时保存</span>
-              <span class="right"><button class="btn" data-goto="1">← 上一步</button>
-                <button class="btn btn-primary" data-goto="3">去确认规范书 →</button></span></div>
-            <div class="pane-body">
+              <div class="sec">目录结构（121 章）· 点一行即可改</div>
               <div class="struct">
                 <div class="erow" data-row><span class="ti">技术条款差异性</span>
                   <span class="acts">
                     <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
                     <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
                     <button class="btn btn-sm">删除</button></span></div>
-                <div class="erow on l2" data-row><span class="ti">投标响应度</span><span class="score">10 分</span>
+                <div class="erow l2" data-row><span class="ti">投标响应度</span><span class="score">10 分</span>
                   <span class="acts">
                     <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
                     <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
                     <button class="btn btn-sm">删除</button></span></div>
-                <div class="erow l2" data-row><span class="ti">招标技术要求满足情况</span><span class="score">10 分</span>
+                <div class="erow on l2" data-row><span class="ti">招标技术要求满足情况</span><span class="score">10 分</span>
                   <span class="acts">
                     <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
                     <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
@@ -247,19 +223,44 @@
                     <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
                     <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
                     <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l2" data-row><span class="ti">对项目的理解正确、深入、全面</span><span class="score">10 分</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l3" data-row><span class="ti">项目背景现状目标</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l3" data-row><span class="ti">建设范围</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow" data-row><span class="ti">技术方案可行性</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
+                <div class="erow l2" data-row><span class="ti">技术方案完整性</span><span class="score">12 分</span><span class="meta">规范书 3 条</span>
+                  <span class="acts">
+                    <button class="btn btn-sm">改名</button><button class="btn btn-sm">上移</button>
+                    <button class="btn btn-sm">下移</button><button class="btn btn-sm">缩进</button>
+                    <button class="btn btn-sm">删除</button></span></div>
               </div>
               <div class="actbar">
                 <button class="btn">＋ 新增同级章节</button>
                 <button class="btn">＋ 新增子章节</button>
-                <span class="dim">改动即时保存；失败会回到服务端的结构</span>
+                <span class="dim">改动即时保存；失败会回到服务端的结构。结构完整 = 每个评分点都有承载章节。</span>
               </div>
             </div>
           </div>
 
-          <div class="subpane" data-sub="3">
+          <div class="subpane" data-sub="2">
             <div class="pane-head"><span class="t">技术规范书确认</span>
               <span class="dim">19 个主题 / 153 条要求；指定挂到哪一章，不指定就进「技术规范书要求应答」</span>
-              <span class="right"><button class="btn" data-goto="2">← 上一步</button></span></div>
+              <span class="right"><button class="btn" data-goto="1">← 上一步</button></span></div>
             <div class="pane-body">
               <table>
                 <thead><tr><th>技术规范书主题</th><th style="width:70px">条数</th>
@@ -289,7 +290,7 @@
         </div>
 
         <div class="footer">
-          <span class="dim">两步都已确认？最后一步会把目录与技术规范书归属<b>一起</b>生成产物。</span>
+          <span class="dim">目录确认与调整 → 技术规范书确认；最后一步会把目录与归属<b>一起</b>生成产物。</span>
           <span class="right">
             <button class="btn" id="btn-prev">← 上一步</button>
             <button class="btn btn-primary" id="btn-next">下一步 →</button>
@@ -310,12 +311,12 @@
   let cur = 1;
 
   function show(n) {
-    cur = Math.max(1, Math.min(3, Number(n)));
+    cur = Math.max(1, Math.min(2, Number(n)));
     panes.forEach(p => p.classList.toggle('on', p.dataset.sub === String(cur)));
     subs.forEach(s => s.classList.toggle('on', s.dataset.sub === String(cur)));
     prev.disabled = cur === 1;
-    next.style.display = cur === 3 ? 'none' : '';
-    final.style.display = cur === 3 ? '' : 'none';
+    next.style.display = cur === 2 ? 'none' : '';
+    final.style.display = cur === 2 ? '' : 'none';
     // 完成态：走过的步骤标 done
     subs.forEach(s => s.classList.toggle('done', Number(s.dataset.sub) < cur));
   }
