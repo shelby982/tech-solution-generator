@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>原型：评分点驱动的五阶段作业面板</title>
+<style>
+  :root{
+    --bg:#f2f4f7; --surface:#fff; --line:#e5e7eb; --line2:#eef1f5;
+    --text:#16202c; --muted:#6b7280; --blue:#2563eb; --blue-soft:#eff6ff;
+    --green:#047857; --green-soft:#ecfdf5; --amber:#92400e; --amber-soft:#fffbeb;
+    --red:#b91c1c; --red-soft:#fef2f2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .page{max-width:1280px;margin:0 auto;padding:12px}
+
+  /* 顶栏（四模式导航已移除） */
+  .topbar{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;padding:10px 14px}
+  .topbar .name{font-weight:600}
+  .topbar .model{margin-left:auto;color:var(--muted);font-size:12.5px}
+
+  /* 只有一条状态行（口径随阶段变） */
+  .statusline{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);
+    border-top:none;border-radius:0 0 10px 10px;padding:9px 14px;margin-bottom:12px}
+  .statusline .stage{font-weight:600}
+  .statusline .metric{color:var(--muted)}
+  .statusline .grow{flex:1}
+  .statusline .bar{flex:0 0 220px;height:6px;border-radius:999px;background:#eef1f5;overflow:hidden}
+  .statusline .bar>i{display:block;height:100%;background:var(--blue)}
+
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    box-shadow:0 2px 10px rgba(16,24,40,.05)}
+  .panel-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .panel-head b{font-size:14px}
+  .panel-head .hint{color:var(--muted);font-size:12px}
+  .panel-head .right{margin-left:auto;display:flex;gap:8px}
+
+  .filter{display:flex;align-items:center;gap:10px;padding:9px 16px;background:#f8fafc;
+    border-bottom:1px solid var(--line);flex-wrap:wrap;font-size:12.5px}
+  .filter .k{font-weight:600;color:var(--muted)}
+  .filter select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+    border-radius:7px;background:#fff;max-width:330px}
+
+  .body{display:flex;align-items:stretch}
+  /* 左侧：五个阶段 */
+  .rail{flex:0 0 186px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0}
+  .rail-item{position:relative;display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer}
+  .rail-item+.rail-item{margin-top:2px}
+  .dot{flex:0 0 20px;height:20px;border-radius:50%;border:1.5px solid var(--line);background:#fff;
+    color:var(--muted);font-size:11.5px;display:flex;align-items:center;justify-content:center;font-weight:600}
+  .lab{font-size:13px}
+  .sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+  .rail-item:not(:last-of-type)::after{content:"";position:absolute;left:23px;top:30px;bottom:-12px;
+    width:1.5px;background:var(--line)}
+  .rail-item.done .dot{background:var(--green-soft);border-color:#a7f3d0;color:var(--green)}
+  .rail-item.done:not(:last-of-type)::after{background:#a7f3d0}
+  .rail-item.on{background:var(--blue-soft)}
+  .rail-item.on .dot{background:var(--blue);border-color:var(--blue);color:#fff}
+  .rail-item.on .lab{font-weight:600;color:var(--blue)}
+  .rail-item.gated .dot{border-style:dashed}
+
+  .stack{flex:1;min-width:0;background:#fcfcfd}
+  .pane{display:none}
+  .pane.on{display:block}
+  .pane-head{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--line2);
+    background:#fff}
+  .pane-head .t{font-weight:600;font-size:13.5px}
+  .pane-head .hint{color:var(--muted);font-size:11.5px}
+  .pane-head .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .pane-body{padding:12px 15px 18px}
+
+  .subtabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+  .subtabs span{font-size:12.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--muted);cursor:pointer}
+  .subtabs span.on{background:var(--blue-soft);border-color:#bfdbfe;color:var(--blue);font-weight:600}
+  .subtabs .n{color:var(--muted);font-weight:400;margin-left:4px}
+
+  .note{color:var(--muted);font-size:11.5px}
+  .sec{margin:14px 0 4px;font-size:12.5px;font-weight:600}
+  .row{display:flex;align-items:center;gap:10px;margin:9px 0;flex-wrap:wrap}
+  .row .k{font-size:12.5px;font-weight:600;color:var(--muted);flex:0 0 96px}
+  .box{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;font-size:12.5px}
+  .cb{display:flex;align-items:center;gap:5px;font-size:12.5px;border:1px solid var(--line);
+    border-radius:8px;padding:4px 9px;background:#fff}
+  .primary{background:var(--blue);border:1px solid var(--blue);color:#fff;font:inherit;font-size:12.5px;
+    font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
+  .ghost{background:#fff;border:1px solid var(--line);color:var(--text);font:inherit;font-size:12.5px;
+    padding:6px 12px;border-radius:8px;cursor:pointer}
+
+  /* 评分点卡片（结构化评分口径） */
+  .pc{border:1px solid var(--line);border-radius:9px;margin:8px 0;background:#fff}
+  .pc-h{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:#fafbfc;border-radius:9px 9px 0 0}
+  .pc-h .f{font-size:11.5px;color:var(--blue);background:var(--blue-soft);border:1px solid #bfdbfe;
+    border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .pc-h .i{font-weight:600;font-size:12.5px;flex:1}
+  .pc-h .s{font-weight:600;font-size:12.5px;color:var(--green);white-space:nowrap}
+  .pc ul{margin:6px 0 8px;padding-left:22px}
+  .pc li{display:flex;gap:8px;align-items:flex-start;margin:3px 0;font-size:12.5px}
+  .pc li .t{flex:1}
+  .band{flex:0 0 auto;font-size:11.5px;color:var(--green);background:var(--green-soft);
+    border:1px solid #a7f3d0;border-radius:999px;padding:0 7px;white-space:nowrap}
+  .band.cap{color:var(--amber);background:var(--amber-soft);border-color:#fcd34d}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line2);vertical-align:top}
+  th{color:var(--muted);font-weight:600;background:#fafbfc}
+  tr.clickable{cursor:pointer}
+  tr.clickable:hover{background:#fafbfc}
+  .pill{font-size:11.5px;border-radius:999px;padding:0 7px;border:1px solid var(--line);white-space:nowrap}
+  .pill.ok{color:var(--green);background:var(--green-soft);border-color:#a7f3d0}
+  .pill.part{color:var(--amber);background:var(--amber-soft);border-color:#fcd34d}
+  .pill.bad{color:var(--red);background:var(--red-soft);border-color:#fca5a5}
+  .miss{color:var(--red)}
+
+  /* 评审页顶部的三件事：得分预估 / 缺口 / 成本 */
+  .kpis{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .kpi{flex:1 1 150px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:#fff}
+  .kpi .l{font-size:11.5px;color:var(--muted)}
+  .kpi .v{font-size:17px;font-weight:600}
+  .kpi .s{font-size:11px;color:var(--muted)}
+  .kpi.ok{border-color:#a7f3d0;background:var(--green-soft)}
+  .kpi.warn{border-color:#fcd34d;background:var(--amber-soft)}
+
+  /* 编写页：章头常驻 + 按需素材抽屉 */
+  .chap-head{display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line);border-radius:9px;
+    padding:10px 12px;background:#fff}
+  .chap-head .col{flex:1;min-width:0}
+  .chap-head .k{font-size:11.5px;color:var(--muted)}
+  .chap-head .v{font-weight:600;font-size:12.5px}
+  .chap-head .ev{font-size:12.5px}
+  .editor{margin-top:10px;border:1px solid var(--line);border-radius:9px;background:#fff;overflow:hidden}
+  .editor .toolbar{display:flex;gap:8px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:#fafbfc;font-size:12.5px;color:var(--muted)}
+  .editor .toolbar .right{margin-left:auto}
+  .editor .content{padding:12px 14px;min-height:170px;font-size:13px;line-height:1.75}
+  .editor .content p{margin:0 0 9px}
+  .drawer{margin-top:10px;border:1px dashed var(--line);border-radius:9px;background:#fafbfc;
+    padding:10px 12px;display:none}
+  .drawer.on{display:block}
+  .chunk{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:7px 0}
+  .chunk .src{font-size:11.5px;color:var(--blue)}
+  .chunk .txt{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .no-ev{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar">
+    <span class="name">新建项目</span>
+    <span class="model">● deepseek-v4-pro ▾</span>
+  </div>
+
+  <!-- 只有一条状态行：阶段 + 一个主动作 + 阶段口径的进度 -->
+  <div class="statusline">
+    <span class="stage" id="st-stage">拆分评审点</span>
+    <span class="metric" id="st-metric">已解析 530 章 · 评分点 16 个（商务 8 / 技术 8）</span>
+    <span class="grow"></span>
+    <span class="bar"><i id="st-bar" style="width:22%"></i></span>
+    <button class="ghost" id="st-action">重新拆分评审点</button>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <b>投标作业面板</b>
+      <span class="hint">一条主线：拆分评审点 → 待确认 → 产物 → 编写 → 评审</span>
+      <span class="right"><button class="ghost">导出投标文件</button></span>
+    </div>
+
+    <div class="filter">
+      <span class="k">标段</span>
+      <select>
+        <option>标的1 / 标包2 · 高可靠技术专题研究与验证标包（技术8·商务8）</option>
+        <option>标的1 / 标包1 · 关键业务场景研究与验证标包（商务13）</option>
+        <option>标的1 / 标包3 · 主数据管理研究及全过程技术管控标包（商务8）</option>
+      </select>
+      <span class="note">切换标段 = 切换这套作业（目录 / 编写 / 评审各自独立）</span>
+    </div>
+
+    <div class="body">
+      <!-- 左侧：五个阶段 -->
+      <nav class="rail" id="rail">
+        <div class="rail-item on done" data-pane="1"><span class="dot">1</span><span><span class="lab">拆分评审点</span><span class="sub">商务 / 技术 / 规范书</span></span></div>
+        <div class="rail-item" data-pane="2"><span class="dot">2</span><span><span class="lab">待确认</span><span class="sub">范围 · 类别 · 归属</span></span></div>
+        <div class="rail-item" data-pane="3"><span class="dot">3</span><span><span class="lab">产物</span><span class="sub">目录 · 映射矩阵</span></span></div>
+        <div class="rail-item" data-pane="4"><span class="dot">4</span><span><span class="lab">编写</span><span class="sub">按章 · 按需举证</span></span></div>
+        <div class="rail-item" data-pane="5"><span class="dot">5</span><span><span class="lab">评审</span><span class="sub">按评分点把关</span></span></div>
+      </nav>
+
+      <section class="stack">
+        <!-- ① 拆分评审点 -->
+        <div class="pane on" data-pane="1">
+          <div class="pane-head"><span class="t">拆分评审点</span>
+            <span class="hint">来自招标文件 + 技术规范书</span></div>
+          <div class="pane-body">
+            <div class="subtabs"><span class="on">商务评分点<span class="n">8</span></span>
+              <span>技术评分点<span class="n">8</span></span>
+              <span>技术规范书拆解<span class="n">153</span></span></div>
+            <div class="note">来自<b>招标文件</b>的商务评分表：8 个评分点 · 合计 100 分。评分口径已按"得分条件"逐条展开，分值单列。</div>
+            <div class="pc">
+              <div class="pc-h"><span class="f">商务投标文件质量</span><span class="i">投标文件章节内容</span><span class="s">5 分</span></div>
+              <ul>
+                <li><span class="t">1. 商务投标文件各章节内容准确对应招标文件格式要求的得 5 分;</span><span class="band">5 分</span></li>
+                <li><span class="t">2. 存在漏放、不按章节规定位置编写、提供与本章节要求无关内容的，每出现一处扣 1 分;</span><span class="band">1 分</span></li>
+                <li><span class="t">3. 本项最低得 0 分。</span><span class="band">0 分</span></li>
+              </ul>
+            </div>
+            <div class="pc">
+              <div class="pc-h"><span class="f">项目业绩</span><span class="i">项目业绩</span><span class="s">30 分</span></div>
+              <ul>
+                <li><span class="t">(1) 具有数字化应用建设运营类项目有效业绩（合同金额 ≥ 400 万元），每个得 6 分，最高得 30 分;</span><span class="band">6 分</span></li>
+                <li><span class="t">(4) 其他情况不得分，总得分最高不超过 30 分。</span><span class="band cap">最多 30 分</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- ② 待确认 -->
+        <div class="pane" data-pane="2">
+          <div class="pane-head"><span class="t">待确认</span><span class="hint">共 3 项；确认后才能进入产物</span></div>
+          <div class="pane-body">
+            <div class="row"><span class="k">① 投标范围</span><span class="box">标的1 / 标包2 · 高可靠技术专题研究与验证标包</span>
+              <span class="note">要改就在上方「标段」切换</span></div>
+            <div class="row"><span class="k">② 生成类别</span>
+              <span class="cb"><input type="checkbox" checked> 商务</span>
+              <span class="cb"><input type="checkbox" checked> 技术</span>
+              <span class="note">勾选的类别合成这一份应答目录</span></div>
+            <div class="row"><span class="k">③ 主题归属</span><span class="box" style="flex:1;color:var(--muted)">可选：把未归属的技术规范书主题挂到指定章节</span></div>
+            <div class="row"><span class="k">④ 分值自检</span><span class="box">商务 100 分 + 技术 100 分，合计 200 分（与评分表一致）</span></div>
+            <div class="row" style="margin-top:12px"><button class="primary">确认，生成产物</button>
+              <span class="note">确认后进入「产物」阶段</span></div>
+          </div>
+        </div>
+
+        <!-- ③ 产物 -->
+        <div class="pane" data-pane="3">
+          <div class="pane-head"><span class="t">产物</span><span class="hint">目录骨架 + 评分点↔要求映射</span></div>
+          <div class="pane-body">
+            <div class="kpis">
+              <div class="kpi ok"><div class="l">目录章节</div><div class="v">176</div><div class="s">L1 15 / L2 54 / L3 107</div></div>
+              <div class="kpi ok"><div class="l">评分点覆盖</div><div class="v">16 / 16</div><div class="s">分值 200 / 200</div></div>
+              <div class="kpi ok"><div class="l">规范要求落点</div><div class="v">153 / 153</div><div class="s">19 个主题</div></div>
+            </div>
+            <div class="subtabs"><span class="on">目录</span><span>技术与评分点映射矩阵</span></div>
+            <table>
+              <thead><tr><th>评分因素</th><th>详细评审项</th><th>分值</th><th>章节</th></tr></thead>
+              <tbody>
+                <tr><td>技术方案</td><td>技术方案可行性</td><td>12 分</td><td>技术方案 › 技术方案可行性</td></tr>
+                <tr><td>财务状况</td><td>营业净利率</td><td>10 分</td><td>财务状况 › 营业净利率</td></tr>
+                <tr><td>项目业绩</td><td>项目业绩</td><td>30 分</td><td>项目业绩 › 项目业绩</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ④ 编写：按章，章头常驻，素材按需 -->
+        <div class="pane" data-pane="4">
+          <div class="pane-head"><span class="t">编写</span>
+            <span class="hint">3 / 176 章已写</span>
+            <span class="right"><button class="ghost">上一章</button><button class="ghost">下一章</button></span></div>
+          <div class="pane-body">
+            <div class="chap-head">
+              <div class="col"><div class="k">本章回应</div>
+                <div class="v">技术方案 › 技术方案可行性（12 分）</div>
+                <div class="ev note">得分口径：1) 方案完整可行得 5 分；2) 每处不可行扣 1 分；本项最低 0 分</div></div>
+              <div class="col" style="flex:0 0 300px"><div class="k">需提供举证</div>
+                <div class="ev">项目合同关键页 / 服务内容页（来自提炼的 evidence_required）</div>
+                <div class="k" style="margin-top:6px">当前引用素材</div>
+                <div class="ev" id="cite-state">未引用（<span class="miss">本章有举证要求</span>）</div></div>
+            </div>
+
+            <div class="editor">
+              <div class="toolbar">
+                <span>正文</span>
+                <span class="right"><button class="ghost" id="btn-drawer">按需插入素材 ▾</button></span>
+              </div>
+              <div class="content">
+                <p>一、方案总体可行性。我方依据招标文件技术条款与本标段技术规范书要求，采用"统一数据模型 + 双活部署"的总体架构……</p>
+                <p>二、关键难点与对策。针对客户档案多源异构现状，采用主数据治理与规则引擎相结合的方式……</p>
+                <p class="note">（示例正文，正式版本由生成与人工修订共同产出）</p>
+              </div>
+            </div>
+
+            <div class="drawer" id="drawer">
+              <div class="note">按需检索素材：只列出与本章要求相关的片段（不预先全量挂载）</div>
+              <div class="chunk"><div class="src">《XX 项目合同》· 第 12 页 · 服务内容</div>
+                <div class="txt">乙方为本项目提供统一客户档案管理模块的设计、开发与实施服务，服务期 12 个月……</div></div>
+              <div class="chunk"><div class="src">《客户档案管理方案》· 第 3 页 · 技术路线</div>
+                <div class="txt">采用主数据管理平台对客户档案进行统一建模、清洗与授权管理……</div></div>
+              <div class="chunk"><div class="src">《资质证书》· 第 1 页 · ISO9001</div>
+                <div class="txt">▲ 与"技术方案可行性"无关（本章不需要资质类举证）</div></div>
+              <div style="margin-top:6px"><button class="primary" id="btn-cite">插入引用</button>
+                <span class="note">插入后本章的"引用素材"与评审页的"举证"会同步</span></div>
+            </div>
+
+            <div class="note" style="margin-top:10px">
+              说明：<b>不需要素材的章节</b>（如"项目理解""技术方案思路"）不会出现"需提供举证"，
+              按钮显示为「本章无需强制举证」——避免无谓操作。
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑤ 评审：按评分点 -->
+        <div class="pane" data-pane="5">
+          <div class="pane-head"><span class="t">评审</span>
+            <span class="hint">以评分点为单位；点一行看该评分点下的章节明细</span>
+            <span class="right"><button class="ghost">全部重新评审</button><button class="primary">对缺口重写</button></span></div>
+          <div class="pane-body">
+            <div class="kpis">
+              <div class="kpi ok"><div class="l">得分预估</div><div class="v">168 / 200</div><div class="s">按评审结论估算（满分 200）</div></div>
+              <div class="kpi warn"><div class="l">缺口</div><div class="v">4 项</div><div class="s">未满足的得分要点</div></div>
+              <div class="kpi warn"><div class="l">举证缺失</div><div class="v">2 章</div><div class="s">有举证要求但未引用素材</div></div>
+              <div class="kpi"><div class="l">成本</div><div class="v">138 万 token</div><div class="s">本次标段累计</div></div>
+            </div>
+
+            <table>
+              <thead><tr><th>评分点</th><th>分值</th><th>章节</th><th>满足度</th><th>缺失的得分要点</th><th>举证</th></tr></thead>
+              <tbody>
+                <tr class="clickable" data-detail="d1">
+                  <td><b>技术方案可行性</b><div class="note">技术方案</div></td><td>12</td><td>1</td>
+                  <td><span class="pill part">部分满足</span></td>
+                  <td class="miss">第 2 条：未说明双活切换的演练方案</td>
+                  <td><span class="pill ok">齐备</span></td></tr>
+                <tr class="clickable" data-detail="d2">
+                  <td><b>营业净利率</b><div class="note">财务状况</div></td><td>10</td><td>1</td>
+                  <td><span class="pill bad">不满足</span></td>
+                  <td class="miss">缺近三年审计报告（数据来源）</td>
+                  <td><span class="pill bad">缺失</span></td></tr>
+                <tr class="clickable"><td><b>项目业绩</b><div class="note">项目业绩</div></td><td>30</td><td>3</td>
+                  <td><span class="pill part">部分满足</span></td><td class="miss">仅列出 3 个 ≥400 万合同（可得 18/30）</td>
+                  <td><span class="pill bad">缺 2 份合同页</span></td></tr>
+                <tr class="clickable"><td><b>管理体系认证</b><div class="note">管理体系认证</div></td><td>15</td><td>1</td>
+                  <td><span class="pill ok">满足</span></td><td>—</td><td><span class="pill ok">齐备</span></td></tr>
+                <tr class="clickable"><td><b>商务投标文件质量</b><div class="note">商务投标文件质量</div></td><td>5</td><td>1</td>
+                  <td><span class="pill ok">满足</span></td><td>—</td><td><span class="pill ok">—</span></td></tr>
+              </tbody>
+            </table>
+
+            <!-- 下钻：评分点 → 章节明细 -->
+            <div id="d1" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:9px;background:#fff">
+              <div style="padding:9px 12px;border-bottom:1px solid var(--line2);font-weight:600">
+                技术方案可行性 · 章节明细</div>
+              <table><thead><tr><th>章节</th><th>评审</th><th>缺失要点</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr><td>技术方案 › 技术方案可行性</td><td><span class="pill part">部分满足</span></td>
+                      <td class="miss">未说明双活切换的演练方案</td>
+                      <td><button class="ghost">重写本章</button></td></tr>
+                </tbody></table>
+            </div>
+            <div id="d2" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:9px;background:#fff">
+              <div style="padding:9px 12px;border-bottom:1px solid var(--line2);font-weight:600">
+                营业净利率 · 章节明细</div>
+              <table><thead><tr><th>章节</th><th>评审</th><th>缺失要点</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr><td>财务状况 › 营业净利率</td><td><span class="pill bad">不满足</span></td>
+                      <td class="miss">缺近三年审计报告</td>
+                      <td><button class="ghost">去补素材</button> <button class="ghost">重写本章</button></td></tr>
+                </tbody></table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 左侧阶段切换（点即切换右侧内容）
+  const rail = [...document.querySelectorAll('.rail-item')];
+  const panes = [...document.querySelectorAll('.pane')];
+  const STAGE_META = {
+    1: ['拆分评审点', '已解析 530 章 · 评分点 16 个（商务 8 / 技术 8）', '22%', '重新拆分评审点'],
+    2: ['待确认',       '3 项待确认：范围 · 类别 · 主题归属',              '35%', '确认，生成产物'],
+    3: ['产物',         '目录 176 章 · 覆盖 16/16 评分点 · 要求 153/153',   '55%', '进入编写'],
+    4: ['编写',         '已写 3 / 176 章 · 2 章有举证要求未引用素材',        '60%', '下一章'],
+    5: ['评审',         '已评 16 / 16 评分点 · 得分预估 168/200 · 缺口 4 项','100%','对缺口重写'],
+  };
+  function show(n) {
+    panes.forEach(p => p.classList.toggle('on', p.dataset.pane === String(n)));
+    rail.forEach(r => r.classList.toggle('on', r.dataset.pane === String(n)));
+    const [s, m, w, a] = STAGE_META[n];
+    document.getElementById('st-stage').textContent = s;
+    document.getElementById('st-metric').textContent = m;
+    document.getElementById('st-bar').style.width = w;
+    document.getElementById('st-action').textContent = a;
+  }
+  rail.forEach(r => r.addEventListener('click', () => show(r.dataset.pane)));
+
+  // 阶段内子页签
+  document.querySelectorAll('.subtabs').forEach(g => g.addEventListener('click', e => {
+    if (e.target.tagName !== 'SPAN') return;
+    [...g.children].forEach(x => x.classList.remove('on'));
+    e.target.classList.add('on');
+  }));
+
+  // 编写页：按需素材抽屉
+  document.getElementById('btn-drawer').addEventListener('click', () => {
+    const d = document.getElementById('drawer');
+    d.classList.toggle('on');
+    document.getElementById('btn-drawer').textContent = d.classList.contains('on')
+      ? '收起素材 ▴' : '按需插入素材 ▾';
+  });
+  document.getElementById('btn-cite').addEventListener('click', () => {
+    document.getElementById('cite-state').innerHTML =
+      '已引用 2 条（合同关键页 · 客户档案管理方案）';
+    document.getElementById('drawer').classList.remove('on');
+    document.getElementById('btn-drawer').textContent = '按需插入素材 ▾';
+  });
+
+  // 评审页：点行下钻
+  document.querySelectorAll('tr.clickable[data-detail]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const id = tr.dataset.detail;
+      const el = document.getElementById(id);
+      el.style.display = el.style.display === 'none' ? '' : 'none';
+    });
+  });
+</script>
+</body>
+</html>
