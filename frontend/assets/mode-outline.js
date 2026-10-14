@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v123';
+import { api } from './api.js?v=20261016-v125';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v123';
+       } from './workspace.js?v=20261016-v125';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -27,7 +27,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v123';
+       } from './workspace-model.mjs?v=20261016-v125';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -113,7 +113,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v123';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v125';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2657,6 +2657,12 @@ function structureNodesFromModel() {
 
 /** 把新结构写回模型（blocksById）—— 面板据此重绘；目录树下次加载时自然同步 */
 function applyStructureToModel(nodes) {
+  // **删除也要同步**：只更新存在的项会让被删节点留在 blocksById 里，
+  // 重绘时又画出来 —— 界面看起来删了没反应（实测）。
+  const keep = new Set(nodes.map((n) => String(n.id)));
+  for (const key of [...blocksById.keys()]) {
+    if (!keep.has(String(key))) blocksById.delete(key);
+  }
   nodes.forEach((n, i) => {
     const key = String(n.id);
     const b = blocksById.get(key) || blocksById.get(Number(key));
@@ -2666,7 +2672,14 @@ function applyStructureToModel(nodes) {
 
 /** 面板内的结构保存：乐观更新模型 → 串行保存（与目录树同一条队列）→ 采纳服务端归一化 → 重绘面板 */
 async function saveStructureFromPanel(next, { afterSave = null, label = '' } = {}) {
-  if (!Array.isArray(next) || !next.length) return;
+  // 传进来的必须是**节点数组**。这里以前是静默 return —— 结果"点了没反应"查了很久。
+  // 宁可控制台报错、界面说实话，也不要静默丢弃用户的操作。
+  if (!Array.isArray(next) || !next.length) {
+    console.error('[panel-structure] 期望节点数组，实际收到：', next);
+    structSaveNote = '保存失败：内部数据结构不对（已跳过，详见控制台）';
+    await openSplitReport({ stage: '2' });
+    return;
+  }
   applyStructureToModel(next);
   let res = null;
   try {
@@ -2867,10 +2880,13 @@ async function handleStructAct(blockId, op) {
   if (op === 'delete') {
     const ok = await uiConfirm(`删除章节「${current.title}」？其子树会一并删除（已写正文保留在库里）。`);
     if (!ok) return;
-    const next = removeOutlineSubtree(nodes, blockId);
-    if (!next) return;
+    // ⚠️ removeOutlineSubtree 返回的是 **{nodes, removed}**，不是数组 ——
+    // 当成数组用会让 saveStructureFromPanel 的 Array.isArray 判 false 后静默返回，
+    // 界面上就是"点了确认但什么都没发生"（实测踩到）。
+    const { nodes: next, removed } = removeOutlineSubtree(nodes, blockId);
+    if (!removed) return;
     selectedStructId = null;
-    await saveStructureFromPanel(next);
+    await saveStructureFromPanel(next, { label: `删除 ${removed} 节` });
     return;
   }
   let next = null;

@@ -20,6 +20,12 @@
 .ws-dialog footer {display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
 button.ws-primary {background:var(--accent);color:var(--panel);border-color:var(--accent);}
 button:disabled {opacity:.5;cursor:not-allowed;}
+/* 弹窗里的按钮：.ws-dialog button 是后代选择器（0,1,1），会压过 .ui-btn--primary（0,1,0）——
+   结果"确认"按钮背景被刷回面板白、而 color:#fff 仍生效 → **白底白字，看不见**（实测截图）。
+   这里用同等特异性的变体规则把它盖回来。 */
+.ws-dialog button.ui-btn--primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+.ws-dialog button.ui-btn--primary:hover{background:var(--accent-strong,var(--accent));border-color:var(--accent-strong,var(--accent));}
+.ws-dialog button.ui-btn--danger{background:var(--danger-soft);border-color:var(--danger-soft);color:var(--danger);}
 .ws-dialog button:focus-visible,#workspace-nav a:focus-visible,.ws-status a:focus-visible {outline:2px solid var(--accent);outline-offset:3px;}
 .ws-diff {display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .ws-diff section {min-width:0;background:var(--panel-soft);border:1px solid var(--line);border-radius:8px;padding:14px;}

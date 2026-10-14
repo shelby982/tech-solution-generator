@@ -352,3 +352,22 @@ test('Notion 式拖动：原位 + 同层级 → null（不写库）', () => {
   const nodes = flat(['s1', 's2']);
   assert.equal(moveOutlineNodeToLevel(nodes, 's1', 0, 1), null);
 });
+
+// 契约：这几个函数返回 {nodes, …} **对象**，不是数组。
+// 踩过一次：面板把 removeOutlineSubtree 的返回值当数组传给保存函数，
+// Array.isArray 判 false 后静默返回 —— 界面上"点了确认但什么都没发生"。
+test('返回 {nodes, …} 的函数：形状固定（调用方必须解构 .nodes）', () => {
+  const rm = removeOutlineSubtree(flat(['s1', 's2']), 's1');
+  assert.ok(Array.isArray(rm.nodes), 'removeOutlineSubtree.nodes 必须是数组');
+  assert.equal(typeof rm.removed, 'number');
+  assert.deepEqual(ids(rm.nodes), ['s2']);
+
+  const mv = moveManyOutlineNodes(flat(['s1', 's2']), ['s2'], -1);
+  assert.ok(Array.isArray(mv.nodes), 'moveManyOutlineNodes.nodes 必须是数组');
+  assert.equal(typeof mv.moved, 'number');
+
+  const ind = indentManyOutlineNodes(flat(['s1', 's2']), ['s2']);
+  assert.ok(Array.isArray(ind.nodes));
+  const out = outdentManyOutlineNodes(flat(['s1', 's2']), ['s1']);
+  assert.ok(Array.isArray(out.nodes));
+});

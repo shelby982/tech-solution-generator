@@ -799,3 +799,36 @@ pending.filter(c => c.answer_key === 'topic_placement').map(confItem)
 嵌套②  dot=[235,20] lab.x=264  pad=14px  gap=9px  （末项无连接线 ✅）
 圆点 20×20、标签偏移 = 圆点 + 20 + 9 —— 两级完全一致 ✅
 ```
+
+---
+
+## 二十六、删除章节两个 bug（用户反馈「确认按钮没显示 / 点了确认没删除」）
+
+### 核实到的三个独立问题
+| 现象 | 根因 |
+|---|---|
+| 弹窗里「确认」按钮**看不见** | `workspace.css` 的 `.ws-dialog button{background:var(--panel)}` 是**后代选择器**（特异性 0,1,1），压过 `.ui-btn--primary`（0,1,0）→ 背景被刷回白色，而 `color:#fff` 仍生效 → **白底白字** |
+| 点确认后**目录没变化** | `removeOutlineSubtree()` 返回 **`{nodes, removed}` 对象**，面板当成数组用 → `Array.isArray` 为 false → `saveStructureFromPanel` **静默 return** |
+| 服务端删了、界面还显示 | `applyStructureToModel` 只**更新**存在的项，不删除已移除的项 → `blocksById` 里残留被删节点，重绘又画出来 |
+
+### 改法
+1. 弹窗按钮用同等特异性覆盖：`.ws-dialog button.ui-btn--primary{background:var(--accent);color:#fff}`
+   （外加 danger 变体）。实测按钮变成 `color:#fff / background:rgb(37,99,235)` ✅
+2. 按契约解构：`const { nodes: next, removed } = removeOutlineSubtree(...)`，并把删除节数写进提示
+   「删除 1 节 · 已保存：改名/调整 120 · 删除 1」✅
+3. `applyStructureToModel` 增加**同步删除**（`blocksById` 里不在新结构中的键删掉）→ 界面行数正确变化 ✅
+4. **静默 return 改成响亮失败**：`saveStructureFromPanel` 收到非数组时 `console.error` + 界面提示
+   「内部数据结构不对」—— 同类"点了没反应"已经吃过两次亏（另一次是接口 200 静默重建目录）
+
+### 新增契约测试
+`outline-structure.test.mjs`：钉住 `removeOutlineSubtree / moveManyOutlineNodes /
+indentManyOutlineNodes / outdentManyOutlineNodes` 返回的是 **`{nodes, …}` 对象**而不是数组。
+
+### 实测
+```
+点删除 → 弹窗按钮 color=#fff / bg=rgb(37,99,235)（可见）✅
+点确认 → 请求 {"created":0,"updated":120,"removed":1} ✅
+        界面 121 → 120 行、被删行消失 ✅ 提示「删除 1 节 · 已保存：改名/调整 120 · 删除 1」
+还原（原始目录 POST）→ created:1 / updated:120 → 121 行 / 5 章正文 ✅
+后端 768 passed / 前端 124 passed
+```
