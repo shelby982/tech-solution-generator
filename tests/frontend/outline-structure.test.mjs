@@ -23,6 +23,7 @@ import {
   indentManyOutlineNodes,
   outdentManyOutlineNodes,
   removeManyOutlineSubtrees,
+  MAX_LEVEL,
 } from '../../frontend/assets/workspace-model.mjs';
 
 const N = (id, level, title = id) => ({id, level, title});
@@ -109,9 +110,26 @@ test('上一个节点不是同级时不能缩进（避免钻到别人子树里�
   assert.deepEqual(levels(indentOutlineNode(siblings, 'a2')), [1, 2, 3]);
 });
 
-test('4 级节点不能再缩进', () => {
-  const nodes = [N('x', 1), N('y', 2), N('z', 3), N('w', 4), N('v', 4)];
-  assert.equal(indentOutlineNode(nodes, 'v'), null);   // 前驱同级，但已到最深
+test('层级没有 4 级上限：同级兄弟可以一路往下嵌', () => {
+  // 用户要求：「级数限制不要仅限于四层…不要限制层级」
+  // 缩进的语义是"成为**上一个同级兄弟**的子级"，所以要往下嵌得先有同级兄弟。
+  // 这里从 5 级继续嵌到 6 级 —— 4 级上限在的时候这一步会返回 null。
+  const nodes = [N('a', 1), N('b', 2), N('c', 3), N('d', 4), N('e', 5), N('f', 5)];
+  const out = indentOutlineNode(nodes, 'f');
+  assert.equal(out.find((n) => n.id === 'f').level, 6);
+  assert.equal(out.find((n) => n.id === 'e').level, 5);     // 兄弟不动
+});
+
+test('层级有安全上限（挡异常数据，不是产品限制）', () => {
+  const chain = [N('a', 1)];
+  for (let lvl = 2; lvl <= MAX_LEVEL; lvl++) {
+    chain.push(N(`n${lvl}`, lvl));            // 造一条到安全上限的链
+  }
+  chain.push(N('x', MAX_LEVEL));               // 同级的兄弟 → 想再嵌一级
+  assert.equal(indentOutlineNode(chain, 'x'), null, '超过安全上限应被拒');
+  // 上限之内仍然可以嵌
+  const ok = [N('a', 1), N('b', MAX_LEVEL - 1), N('c', MAX_LEVEL - 1)];
+  assert.equal(indentOutlineNode(ok, 'c').find((n) => n.id === 'c').level, MAX_LEVEL);
 });
 
 test('取消缩进：整棵子树一起升，一级节点无操作', () => {
@@ -155,9 +173,11 @@ test('新增子级：插在子树末尾，层级 +1', () => {
   assert.deepEqual(levels(out), [1, 2, 3, 2, 1, 2]);
 });
 
-test('4 级节点不能再加子级', () => {
-  const nodes = [N('a', 1), N('b', 4)];
-  assert.equal(insertChildOf(nodes, 'b', N('new', 1)), null);
+test('深层节点仍可加子级（第 5 级）', () => {
+  const nodes = [N('a', 1), N('b', 2), N('c', 3), N('d', 4), N('e', 5)];
+  const out = insertChildOf(nodes, 'e', N('new', 1));
+  assert.deepEqual(ids(out), ['a', 'b', 'c', 'd', 'e', 'new']);
+  assert.equal(out.find((n) => n.id === 'new').level, 6);   // 比父深一级
 });
 
 test('新增子级到已有子级之后（不会插到别的章节里）', () => {

@@ -18,7 +18,9 @@ from typing import Iterable
 
 MAX_NODES = 300
 MIN_LEVEL = 1
-MAX_LEVEL = 4
+# **不是产品限制**：层级可以一直往下嵌（每次只能降一级，见 clamp_levels）。
+# 这个上限只是挡住异常数据（例如前端算错导致 level=9999 把界面/DB 撑坏）。
+MAX_LEVEL = 12
 
 
 class StructureError(ValueError):

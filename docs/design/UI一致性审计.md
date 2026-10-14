@@ -883,3 +883,36 @@ dialog.querySelector('[data-ok]').focus();   // 把焦点默认给了「确认�
 ### 状态
 最终校验：121 行 / 缺失 [] / 5 章正文 ✅（结构与正文与事故前一致）
 后端 768 passed / 前端 127 passed
+
+---
+
+## 二十九、去掉「最多 4 级」的限制
+
+用户要求：「级数限制不要仅限于四层…不要限制层级」（每次只能降一级这条保留）。
+
+### 改动
+| 位置 | 原来 | 现在 |
+|---|---|---|
+| 后端 `domain/spec/structure.py` | `MAX_LEVEL = 4` | `MAX_LEVEL = 12`（**只是挡异常数据**，不是产品限制） |
+| 前端 `workspace-model.mjs` | 6 处 `Math.min(4, …)` + `level >= 4` | 统一用导出常量 `MAX_LEVEL = 12` |
+| `indentOutlineNode` 守卫 | `level >= 4` | `level >= MAX_LEVEL` |
+| `insertChildOf` 守卫 | `level >= 4` | `level >= MAX_LEVEL` |
+| `levelRangeAt`（Notion 式拖动的最深限制） | `min(4, 前一个节点+1)` | `min(MAX_LEVEL, 前一个节点+1)` |
+| 结构行渲染 | `l${Math.min(level,3)}`（>3 级都画成 l3） | **按层级动态 `padding-left`**（`10 + (level-1)*16`），≥3 级弱化色 |
+| ④编写 章节列表 | 同上 | 同上（`8 + (level-1)*16`） |
+| 拖动缩进常量 | 18px | 16px（与行缩进对齐） |
+
+保留不变的规则：**每次只能降一级**（`clamp_levels` 的"不得跨级"）—— 这是层级语义，
+不是数量限制；缩进仍要求"上一个节点是同级"（即成为前一个同级兄弟的子级）。
+
+### 实测
+```
+POST 一条 1..7 级的合法链 → {"created":0,"updated":121,"removed":0}
+库里层级 = [1,2,3,4,5,6,7,…]  ✅（4 级上限已不存在）
+面板渲染：data-level = 1..7，padding-left = 10/26/42/58/74/90/106px ✅ 阶梯正确
+还原原始目录 → {"created":0,"updated":121} → 121 行 / 5 章正文 / 最高层级回到 4 ✅
+后端 768 passed / 前端 127 passed
+```
+
+> 注：改完后端常量后**必须重启 uvicorn** —— 第一次验证时库里仍是 `[1,2,3,4,4,4]`，
+> 因为进程还在跑旧代码（不是逻辑错，是没重启）。

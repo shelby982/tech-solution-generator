@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v128';
+import { api } from './api.js?v=20261016-v129';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v128';
+       } from './workspace.js?v=20261016-v129';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -28,7 +28,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v128';
+       } from './workspace-model.mjs?v=20261016-v129';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -114,7 +114,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v128';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v129';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2767,7 +2767,7 @@ function startRowDrag(ev) {
   rows.forEach((r) => { if (selected.has(r.dataset.struct)) r.classList.add('is-drag-src'); });
   list.classList.add('is-dragging');
 
-  const INDENT = 18;          // 每级缩进（与 .sr-erow.l2/l3 的 padding 对齐）
+  const INDENT = 16;          // 每级缩进（与结构行的 padding-left 对齐）
   let at = null;
   let level = null;           // 当前投影层级（Notion 式：由水平位置决定）
   const computeAt = (clientY) => {
@@ -2791,7 +2791,7 @@ function startRowDrag(ev) {
     if (!r) return;
     const top = i < rows.length ? r.offsetTop : r.offsetTop + r.offsetHeight;
     line.style.top = `${top}px`;
-    line.style.marginLeft = `${(lvl - 1) * INDENT}px`;        // 指示线按层级缩进
+    line.style.marginLeft = `${(lvl - 1) * INDENT}px`;   // 指示线跟着层级缩进        // 指示线按层级缩进
     const rel = lvl - (natural || lvl);
     tagEl.textContent = rel > 0 ? `成为子级（第 ${lvl} 级）`
       : rel < 0 ? `上级（第 ${lvl} 级）` : `同级（第 ${lvl} 级）`;
@@ -3016,9 +3016,13 @@ function paintWriteList(keyword = '') {
   list.innerHTML = writeBlocks
     .filter((b) => !kw || String(b.title || '').toLowerCase().includes(kw))
     .slice(0, 400)
-    .map((b) => `<div class="sr-wnode l${Math.min(Number(b.level) || 1, 3)}${String(b.block_id) === writeActiveId ? ' on' : ''}" data-bid="${escapeHtml(String(b.block_id))}">
+    .map((b) => {
+      const lvl = Math.max(1, Number(b.level) || 1);
+      return `<div class="sr-wnode${lvl >= 3 ? ' is-deep' : ''}${String(b.block_id) === writeActiveId ? ' on' : ''}"
+      style="padding-left:${8 + (lvl - 1) * 16}px" data-bid="${escapeHtml(String(b.block_id))}">
         <span class="sr-wname">${escapeHtml(b.title || '')}</span>
-        <span class="sr-wtag">${(b.content || '').trim() ? '已写' : '待写'}</span></div>`).join('')
+        <span class="sr-wtag">${(b.content || '').trim() ? '已写' : '待写'}</span></div>`;
+    }).join('')
     || '<div class="sr-note">没有匹配的章节。</div>';
 }
 
@@ -3763,8 +3767,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const structRows = structBlocks.map((b, i) => {
     const pts = parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean);
     const reqs = parseIds(b.spec_requirement_ids).length;
-    return `<div class="sr-erow l${Math.min(Number(b.level) || 1, 3)}${
-        selectedStructId === String(b.block_id || b.id) ? ' on' : ''}" data-struct="${escapeHtml(String(b.block_id || b.id))}" data-i="${i}">
+    const lvl = Math.max(1, Number(b.level) || 1);
+    return `<div class="sr-erow${lvl >= 3 ? ' is-deep' : ''}${
+        selectedStructId === String(b.block_id || b.id) ? ' on' : ''}"
+      style="padding-left:${10 + (lvl - 1) * 16}px"
+      data-struct="${escapeHtml(String(b.block_id || b.id))}" data-level="${lvl}" data-i="${i}">
       <span class="sr-grip" data-grip="${escapeHtml(String(b.block_id || b.id))}"
         title="按住上下拖动排序（勾选多行可整组拖）">⠿</span>
       <input type="checkbox" class="sr-pick" data-pick="${escapeHtml(String(b.block_id || b.id))}"
@@ -4181,6 +4188,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-struct-edit{max-height:52vh}
   .sr-erow{display:flex;align-items:center;gap:8px;padding:3px 10px;font-size:12.5px;cursor:pointer;border-radius:6px}
   .sr-erow:hover{background:var(--panel-soft,#fafbfc)}
+  .sr-erow.is-deep{color:var(--muted)}
   .sr-erow.on{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
   .sr-erow.l2{padding-left:26px}
   .sr-erow.l3{padding-left:42px;color:var(--muted)}

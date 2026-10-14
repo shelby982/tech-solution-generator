@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v128';
+} from './material-roles.mjs?v=20261016-v129';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -124,7 +124,7 @@ export function buildOutlineTree(sections = []) {
   const roots = [];
   const stack = []; // [{level, entry}]，level 严格递增
   for (const node of sections) {
-    const level = Math.max(1, Math.min(4, Number(node?.level) || 1));
+    const level = Math.max(1, Math.min(MAX_LEVEL, Number(node?.level) || 1));
     while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
     const entry = {node, children: []};
     if (!stack.length) roots.push(entry);
@@ -177,6 +177,9 @@ export function newOutlineId(existingIds = []) {
 }
 
 /** 节点及其子树的下标区间 [start, end)；找不到返回 [-1, -1]。 */
+// 层级**没有产品上限**（可以一直往下嵌，每次降一级）。这个常量只是挡异常数据。
+export const MAX_LEVEL = 12;
+
 export function outlineSubtreeRange(nodes, id) {
   const start = nodes.findIndex(n => n.id === id);
   if (start < 0) return [-1, -1];
@@ -188,7 +191,7 @@ export function outlineSubtreeRange(nodes, id) {
 
 function _shiftLevels(nodes, start, end, delta) {
   return nodes.map((n, i) => i >= start && i < end
-    ? {...n, level: Math.max(1, Math.min(4, (Number(n.level) || 1) + delta))}
+    ? {...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta))}
     : n);
 }
 
@@ -285,7 +288,7 @@ export function moveOutlineNodeTo(nodes, id, targetIndex) {
   ));
   if (at === start) return null;                       // 原地不动
   const anchor = rest[at] || rest[rest.length - 1] || null;
-  const level = anchor ? Math.max(1, Math.min(4, Number(anchor.level) || 1)) : 1;
+  const level = anchor ? Math.max(1, Math.min(MAX_LEVEL, Number(anchor.level) || 1)) : 1;
   const delta = level - (Number(nodes[start].level) || 1);
   const moved = delta === 0 ? subtree : _shiftLevels(subtree, 0, subtree.length, delta);
   return [...rest.slice(0, at), ...moved, ...rest.slice(at)];
@@ -301,7 +304,7 @@ export function moveOutlineNodeTo(nodes, id, targetIndex) {
  */
 export function levelRangeAt(nodes, targetIndex) {
   const before = targetIndex > 0 ? nodes[targetIndex - 1] : null;
-  const max = before ? Math.min(4, (Number(before.level) || 1) + 1) : 1;
+  const max = before ? Math.min(MAX_LEVEL, (Number(before.level) || 1) + 1) : 1;
   const after = nodes[targetIndex] || null;
   const natural = after ? (Number(after.level) || 1) : (before ? (Number(before.level) || 1) : 1);
   return { min: 1, max, natural: Math.max(1, Math.min(max, natural)) };
@@ -319,7 +322,7 @@ export function moveOutlineNodeToLevel(nodes, id, targetIndex, level) {
     rest.length,
     targetIndex > start ? targetIndex - (end - start) : targetIndex,
   ));
-  const lvl = Math.max(1, Math.min(4, Number(level) || 1));
+  const lvl = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1));
   const delta = lvl - (Number(nodes[start].level) || 1);
   const moved = delta === 0 ? subtree : _shiftLevels(subtree, 0, subtree.length, delta);
   const result = [...rest.slice(0, at), ...moved, ...rest.slice(at)];
@@ -336,7 +339,7 @@ export function moveOutlineNodesToLevel(nodes, ids, targetIndex, level) {
   const sel = new Set((ids || []).map(String));
   const anchorNode = nodes.find((n) => sel.has(String(n.id)));
   if (!anchorNode) return null;
-  const delta = Math.max(1, Math.min(4, Number(level) || 1)) - (Number(anchorNode.level) || 1);
+  const delta = Math.max(1, Math.min(MAX_LEVEL, Number(level) || 1)) - (Number(anchorNode.level) || 1);
   if (delta === 0) return moved;
   const baseIds = new Set((ids || []).map(String));
   // 只对"块内的顶层节点"（不在其他选中项子树里的）位移
@@ -350,7 +353,7 @@ export function moveOutlineNodesToLevel(nodes, ids, targetIndex, level) {
   const shift = new Set();
   for (const [rs, re] of roots) for (let i = rs; i < re; i++) shift.add(nodes[i].id);
   return moved.map((n) => (shift.has(n.id)
-    ? { ...n, level: Math.max(1, Math.min(4, (Number(n.level) || 1) + delta)) }
+    ? { ...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta)) }
     : n));
 }
 
@@ -385,10 +388,10 @@ export function moveOutlineNodesTo(nodes, ids, targetIndex) {
   const at = Math.max(0, Math.min(keep.length, targetIndex - removedBefore));
 
   const anchor = keep[at] || keep[keep.length - 1] || null;
-  const level = anchor ? Math.max(1, Math.min(4, Number(anchor.level) || 1)) : 1;
+  const level = anchor ? Math.max(1, Math.min(MAX_LEVEL, Number(anchor.level) || 1)) : 1;
   const delta = level - (Number(block[0].level) || 1);
   const moved = delta === 0 ? block : block.map((n) => ({
-    ...n, level: Math.max(1, Math.min(4, (Number(n.level) || 1) + delta)),
+    ...n, level: Math.max(1, Math.min(MAX_LEVEL, (Number(n.level) || 1) + delta)),
   }));
   const result = [...keep.slice(0, at), ...moved, ...keep.slice(at)];
   // 位置与层级都没变 → 当作没动（不写库）
@@ -451,7 +454,7 @@ export function indentOutlineNode(nodes, id) {
   const [start, end] = outlineSubtreeRange(nodes, id);
   if (start <= 0) return null;
   const level = Number(nodes[start].level) || 1;
-  if (level >= 4) return null;
+  if (level >= MAX_LEVEL) return null;
   const prevLevel = Number(nodes[start - 1].level) || 1;
   if (prevLevel !== level) return null;   // 上一个节点不是同级（是上级或更深的后代）
   return _shiftLevels(nodes, start, end, +1);
@@ -485,7 +488,7 @@ export function insertChildOf(nodes, id, node) {
   const [start, end] = outlineSubtreeRange(nodes, id);
   if (start < 0) return null;
   const level = Number(nodes[start].level) || 1;
-  if (level >= 4) return null;
+  if (level >= MAX_LEVEL) return null;
   return [...nodes.slice(0, end), {...node, level: level + 1}, ...nodes.slice(end)];
 }
 
