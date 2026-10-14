@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v142';
+import { api } from './api.js?v=20261016-v143';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v142';
+       } from './workspace.js?v=20261016-v143';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -29,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v142';
+       } from './workspace-model.mjs?v=20261016-v143';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -115,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v142';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v143';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2527,7 +2527,10 @@ let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当�
 let selectedStructId = null;
 let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
-let topicSaveNote = '';    // 归属保存结果 —— 保存后**面板会重绘**，所以用模块变量而不是就地写 DOM
+let topicSaveNote = '';    // 归属保存结果 —— 保存后\*\*面板会重绘\*\*，所以用模块变量而不是就地写 DOM
+let pkgAnalysis = null;    // 标包分析结果（GET package-analysis；null = 还没取）
+// 类别短名：**模块级** —— 模块级渲染函数看不到 openSplitReport 内部的 CAT_HINT（实测 ReferenceError）
+const CAT_NAME = { commerce: '商务', tech: '技术', price: '报价', other: '其他' };
 const batchIds = new Set();   // 批量操作选中的章节（跨渲染保留，方便连着挪几格）
 const removedByUser = new Set();   // 用户**明确删掉**的章节 id（区别于"本地列表少了"）
 // 撤销栈：只存"操作之前的完整结构"快照（最多 20 步）。纯逻辑用模型层的 pushHistory。
@@ -2617,6 +2620,63 @@ async function maybeAutoOpenSplitReport() {
   if (splitPanelAutoOpenedFor === rev) return;      // 同一版只自动展示一次
   splitPanelAutoOpenedFor = rev;
   await openSplitReport({ auto: true });
+}
+
+/** 取标包分析结果（来自招标文件正文的事实 + 出处）。失败不阻断面板，只标记。 */
+async function loadPackageAnalysis({ refresh = false } = {}) {
+  if (pkgAnalysis && !refresh) return pkgAnalysis;
+  try {
+    const q = refresh ? '?refresh=1' : '';
+    pkgAnalysis = await api.projects.packageAnalysis(projectId, q);
+  } catch (e) {
+    console.warn('[packages] 标包分析获取失败', e);
+    pkgAnalysis = { packages: [], note: '标包分析获取失败（不影响其它功能）', chunks: 0 };
+  }
+  return pkgAnalysis;
+}
+
+/** 标包卡片：**每张卡都带原文出处**（用户口径：一切以招标文件为准，不衍生）。 */
+function renderPackageCards() {
+  const d = pkgAnalysis;
+  if (!d) return '<div class="sr-dim">正在读取标包分析…</div>';
+  const pkgs = d.packages || [];
+  if (!pkgs.length) {
+    return `<div class="sr-note">${escapeHtml(d.note || '还没有识别到标包。')}
+      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:8px">重新分析</button></div>`;
+  }
+  const cards = pkgs.map((p) => {
+    const label = p.package_name || `${p.target ? `标的${p.target} · ` : ''}标包${p.package_no || '—'}`;
+    const conf = { high: '高', medium: '中', low: '低' }[p.confidence] || p.confidence;
+    const ev = (p.evidence || [])[0];
+    return `<div class="sr-pkg-card">
+      <div class="sr-pkg-head"><b>${escapeHtml(label)}</b>
+        <span class="ui-pill ${p.confidence === 'low' ? 'is-warn' : 'is-ok'}">置信度 ${escapeHtml(conf)}</span>
+        <button class="sr-mini" data-act="pick-package" data-target="${escapeHtml(p.target)}"
+          data-pkg="${escapeHtml(p.package_no)}">用它拆分</button></div>
+      <div class="sr-dim">来源文件：${escapeHtml((p.source_material_ids || []).length ? `${(p.source_material_ids || []).length} 个` : '未记录')}
+        ｜原文提到 ${p.mentions} 次</div>
+      ${ev ? `<div class="sr-pkg-ev">「${escapeHtml(String(ev.quote || ''))}」
+        <span class="sr-dim">— ${escapeHtml(ev.filename || '')}${ev.page ? ` 第 ${ev.page} 页` : ''}</span></div>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="sr-pkg-cards">${cards}</div>
+    <div class="sr-dim">标包只按招标文件原文列出；名字需要你确认（系统不编造）。
+      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:6px">重新分析</button></div>`;
+}
+
+/** 评分点对齐行：**解析事实 vs 已落库**（差异可见 + 一键对齐，不花模型）。 */
+function renderPointsAlignment(alignment) {
+  const a = (alignment || null);
+  if (!a || a.expected == null) return '';
+  const cats = Object.entries(a.by_category || {})
+    .map(([c, v]) => `${CAT_NAME[c] || c} ${v.expected}`).join(' · ');
+  if (a.aligned) {
+    return `<div class="sr-align ok">✅ 评分点已落库 <b>${a.persisted}</b> 条（${escapeHtml(cats)}），与解析事实一致</div>`;
+  }
+  const miss = (a.missing || []).length;
+  return `<div class="sr-align warn">⚠ 解析到 <b>${a.expected}</b> 条（${escapeHtml(cats)}），
+    已落库 <b>${a.persisted}</b> 条${miss ? `，缺 ${miss} 条` : ''}
+    <button class="sr-mini" data-act="sync-points" style="margin-left:8px">一键对齐（不花模型）</button></div>`;
 }
 
 /** ② 待确认的两步切换（本地切换 class，不重绘面板 —— 保留滚动位置） */
@@ -3408,6 +3468,7 @@ function hideLaneTreeWhenPanelShows() {
 
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
+  await loadPackageAnalysis().catch(() => {});   // 标包卡片要用；失败不阻断面板
   if (!confirmedPkg) confirmedPkg = readConfirmedPkg();   // 刷新后仍记得确认过哪个标包
   // 面板头那行运行进度：只在真在跑 / 有进度时显示（原来在状态栏，已随该模块去掉）
   setTimeout(refreshPanelRunState, 0);
@@ -3962,14 +4023,31 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   // 「要生成哪些类别」：**确认生成时必填**（生成处理器读 [data-confirm-cat]:checked）。
   // 改版时这块被我删掉了 —— 结果用户点确认只看到「请至少勾选一个类别。」却无处可勾（实测 bug）。
   // 归属放在「目录确认与调整」这一步：类别决定这份应答目录由哪几块合成。
+  // 类别区块（用户口径的"生成应答目录时选择商务或技术"）：
+  // 每类**显示实际评分点数**，让选择有依据；0 个的类别明确提示，避免勾了却没内容。
+  const alignByCat = (data.points_alignment || {}).by_category || {};
+  const catCount = (id) => {
+    const v = alignByCat[id];
+    if (!v) return null;
+    return (v.persisted != null && v.persisted > 0) ? v.persisted : v.expected;
+  };
   const catPick = (pointTabs || []).length ? `
       <h5 class="sr-sec">① 要生成哪些类别</h5>
       <div class="sr-answer">
-        ${(pointTabs || []).map((t) => `<label class="sr-cat"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
-          ${((confirmedCats.length ? confirmedCats : (pointTabs || []).map((x) => x.id)).includes(t.id)) ? 'checked' : ''}>
-          ${escapeHtml(String(t.label).replace('评分点', ''))}</label>`).join('')}
-        <span class="sr-dim">勾选的类别会合成这一份应答目录</span>
-      </div>` : '';
+        ${(pointTabs || []).map((t) => {
+          const n = catCount(t.id);
+          const zero = n === 0;
+          return `<label class="sr-cat${zero ? ' is-empty' : ''}" title="${
+            zero ? '该类别没有已落库的评分点，生成后可能没有内容' : ''}"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
+            ${((confirmedCats.length ? confirmedCats : (pointTabs || []).map((x) => x.id)).includes(t.id)) ? 'checked' : ''}>
+            ${escapeHtml(String(t.label).replace('评分点', ''))}${
+            n == null ? '' : `<span class="sr-dim">（${n} 个评分点）</span>`}</label>`;
+        }).join('')}
+        <span class="sr-dim">勾选的类别会合成这一份应答目录；只勾技术就是纯技术应答目录</span>
+      </div>
+      ${Object.entries(alignByCat).some(([, v]) => !v.persisted)
+        ? `<div class="sr-align warn">有类别还没落库（解析到了、库里没有）——
+            先回第①步点「一键对齐」，再生成目录，否则产物会缺内容。</div>` : ''}` : '';
 
   const pane1 = `
       ${checkLine}
@@ -4187,6 +4265,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
             <div class="sr-stage-head"><span class="t">评分点</span>
               <span class="hint">${stageHint('1')}</span></div>
             <div class="sr-stage-body">
+              <h5 class="sr-sec">标包（来自招标文件原文）</h5>
+              ${renderPackageCards()}
+              ${renderPointsAlignment(data.points_alignment)}
               <div class="sr-subtabs">${reviewSubs.map(x => `
                 <span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
               ${reviewSubs.map(x => `
@@ -4322,6 +4403,19 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
   .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
   .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+  /* 标包卡片（第①步顶部）：事实 + 出处 */
+  .sr-pkg-cards{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+  .sr-pkg-card{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff}
+  .sr-pkg-head{display:flex;align-items:center;gap:8px}
+  .sr-pkg-head b{font-size:12.5px}
+  .sr-pkg-head .sr-mini{margin-left:auto}
+  .sr-pkg-ev{margin-top:3px;font-size:12px;color:var(--text);background:var(--panel-soft,#f8fafc);
+    border-left:2px solid var(--line);padding:4px 8px;border-radius:4px}
+  .sr-align{margin:6px 0;padding:6px 10px;border-radius:8px;font-size:12.5px}
+  .sr-align.ok{background:var(--success-soft);color:var(--success)}
+  .sr-cat.is-empty{opacity:.6}
+  .sr-cat.is-empty .sr-dim{color:var(--warn)}
+  .sr-align.warn{background:var(--warn-soft);color:var(--warn)}
   /* ② 两步：左两步 + 右内容 */
   /* 归属章节：点开的完整目录选择器（带层级徽标 + 搜索） */
   .sr-mount-cell{position:relative}
@@ -4668,6 +4762,39 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     handleBatchStruct(btn.dataset.batch);
   }));
   el.querySelectorAll('.sr-grip').forEach((g) => g.addEventListener('pointerdown', startRowDrag));
+  // 标包卡片：重新分析 / 用它拆分
+  el.querySelector('[data-act="reanalyze-packages"]')?.addEventListener('click', async () => {
+    pkgAnalysis = null;
+    await loadPackageAnalysis({ refresh: true });
+    await openSplitReport({ stage: '1' });
+  });
+  el.querySelectorAll('[data-act="pick-package"]').forEach((b) => b.addEventListener('click', async () => {
+    // 选中该标包 → 联动顶部「筛选·标包」下拉，并滚动过去让用户点「确认标包」
+    const sel = document.getElementById('sr-view-pkg');
+    const want = `${b.dataset.target}|${b.dataset.pkg}`;
+    if (sel) {
+      const opt = [...sel.options].find((o) => o.value === want);
+      if (opt) sel.value = want;
+      sel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      splitPanelFlash = `已选中「标的${b.dataset.target || '—'} / 标包${b.dataset.pkg || '—'}」，请点「确认标包」`;
+      const host = document.querySelector('.sr-filter');
+      if (host) inlineFlash(host, splitPanelFlash, 'ok');
+    }
+  }));
+  // 一键对齐：把解析事实按已确认范围/类别落库（不花模型）
+  el.querySelector('[data-act="sync-points"]')?.addEventListener('click', async () => {
+    const btn = el.querySelector('[data-act="sync-points"]');
+    if (btn) { btn.disabled = true; btn.textContent = '正在对齐…'; }
+    try {
+      const r = await api.projects.syncPoints(projectId, { threadId: currentThreadId || '' });
+      splitPanelFlash = `已对齐：落库 ${r?.written || 0} 条评分点`;
+      await openSplitReport({ stage: '1' });
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '一键对齐（不花模型）'; }
+      console.error('[points] 对齐失败', e);
+    }
+  });
+
   el.querySelectorAll('[data-topic-open]').forEach((b) => b.addEventListener('click', (ev) => {
     ev.stopPropagation();
     openTopicPicker(b.dataset.topicOpen, b);
