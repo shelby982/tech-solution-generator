@@ -950,9 +950,10 @@ async def _drain_frames(runner, tid, limit=60, timeout=0.5):
 async def test_mark_next_phase_writes_runtime_stage(runner_env):
     """续跑前按下一个节点写运行期 stage：extract → extracting / match → matching。
 
-    节点只能在**结束时**返回 stage，所以「正在提炼」的这十几分钟必须由 runner 先写
-    workflow_runs —— 否则页面刷新读到的仍是 outline_review（闸门 1），会误导用户
-    再确认一次。
+    节点只能在**结束时**返回 stage，所以「正在提炼/生成」的这十几分钟必须由 runner 先写
+    workflow_runs —— 否则页面刷新读到的仍是上一版 stage（实测：检查点 generating，
+    表里还写着 paused，界面显示的阶段是错的）。
+    这份映射是**单一来源**（orchestrator.runner._NEXT_PHASE_STAGE + next_phase_stage）。
     """
     runner, project_id, db_path = runner_env
     tid = await runner.start(project_id, config={})
@@ -972,11 +973,20 @@ async def test_mark_next_phase_writes_runtime_stage(runner_env):
     await runner._mark_next_phase(_FakeGraph((NODE_MATCH,)), config, tid)
     assert await _db_stage(db_path, tid) == "matching"
 
-    # 不在长阶段上（如 parse）不动 stage；读不到 next 也不动
+    # parse 也是长阶段（解析 164 页要几分钟）→ 同样要写 parsing（旧实现只认 extract/match，
+    # 于是"回修生成"期间表里一直停在上一版 stage）
     await runner._mark_next_phase(_FakeGraph((NODE_PARSE,)), config, tid)
-    assert await _db_stage(db_path, tid) == "matching"
+    assert await _db_stage(db_path, tid) == "parsing"
+    # 评审循环里的任意节点都显示 reviewing
+    from orchestrator.graph import NODE_TECH_REVIEW, NODE_AGGREGATE
+    await runner._mark_next_phase(_FakeGraph((NODE_TECH_REVIEW,)), config, tid)
+    assert await _db_stage(db_path, tid) == "reviewing"
+    # 生成与评审同时出现在 next 时，取图上更早的 generating（不能按字典序选 reviewing）
+    await runner._mark_next_phase(_FakeGraph((NODE_AGGREGATE, "zhuge_liang_generate")), config, tid)
+    assert await _db_stage(db_path, tid) == "generating"
+    # 读不到 next（图已收尾）不动 stage —— 保持上一步写下的值
     await runner._mark_next_phase(_FakeGraph(()), config, tid)
-    assert await _db_stage(db_path, tid) == "matching"
+    assert await _db_stage(db_path, tid) == "generating"
 
 
 async def test_resume_marks_extracting_during_extract(runner_env, monkeypatch):

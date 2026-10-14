@@ -96,6 +96,64 @@ def recorded_requirement_filenames(spec: dict) -> set[str]:
     }
 
 
+# ── 运行期 stage：图的"下一个节点" → workflow_runs.stage ──
+# 这份映射是**唯一**的运行期 stage 来源（前端 boot / 状态行 / 阶段导航都读它）。
+# 少一个节点就会表现为"库里停在上一版 stage"（实测 workspace_action 生成期间如此）。
+# 运行期（非终态）stage：只在"有 task 在跑"时才算数；重启后它们可能残留在 checkpoint 里
+_RUNNING_STAGES = {"parsing", "extracting", "matching", "generating", "reviewing"}
+
+_NEXT_PHASE_STAGE = {
+    "zhang_heng_parse": "parsing",
+    "zhang_heng_outline_draft": "outline_review",
+    "gate_outline": "outline_review",
+    "zhang_heng_extract": "extracting",
+    "shen_kuo_match": "matching",
+    "gate_materials": "materials_review",
+    "zhuge_liang_generate": "generating",
+    "wang_anshi_review": "reviewing",
+    "bao_zheng_review": "reviewing",
+    "aggregate_review": "reviewing",
+    "collect_gaps": "reviewing",
+    "check_convergence": "reviewing",
+    "build_feedback": "reviewing",
+    "gate_report": "report_review",
+}
+
+
+# 优先级 = **图上的推进顺序**。必须按它挑，不能按节点名字典序：
+# 生成与评审可能同时出现在 next 里（生成完直接进评审），字典序会选中
+# aggregate_review → 显示 reviewing，而实际正在 generating（实测踩到）。
+_PHASE_ORDER = (
+    "zhang_heng_parse",
+    "zhang_heng_outline_draft",
+    "gate_outline",
+    "zhang_heng_extract",
+    "shen_kuo_match",
+    "gate_materials",
+    "zhuge_liang_generate",
+    "wang_anshi_review",
+    "bao_zheng_review",
+    "aggregate_review",
+    "collect_gaps",
+    "check_convergence",
+    "build_feedback",
+    "gate_report",
+)
+
+
+def next_phase_stage(next_nodes) -> str | None:
+    """给定图的下一个节点集合，返回应显示的运行期 stage（无匹配返回 None）。
+
+    多个候选时按**图上推进顺序**取最早的那个（见 _PHASE_ORDER 的说明）。
+    """
+    nxt = {str(x) for x in (next_nodes or ())}
+    for node in _PHASE_ORDER:
+        if node in nxt:
+            return _NEXT_PHASE_STAGE[node]
+    return None
+
+
+
 class WorkflowRunner:
     """工作流外观。
 
@@ -268,7 +326,15 @@ class WorkflowRunner:
             if state.get("cancel_requested") or state.get("stage") == "aborted":
                 raise WorkflowAbortedError("该工作流已作废，请创建新的工作流")
             if state.get("stage") not in {"report_review", "done", "paused", "materials_review"}:
-                raise ValueError("请先完成大纲和素材确认，或等待当前运行结束")
+                # 后端重启会把内存里的 task 丢掉，但 **checkpoint 仍停在运行期 stage**
+                # （实测：重启后 stage=generating → workspace-action 一直 409，
+                #  这个 thread 就再也操作不了了）。上面已确认没有 task 在跑，
+                # 这种"陈旧运行期 stage"可以安全地从确定入口（GATE_MATERIALS/NODE_GENERATE）重入。
+                if state.get("stage") not in _RUNNING_STAGES:
+                    raise ValueError("请先完成大纲和素材确认，或等待当前运行结束")
+                logger.info(
+                    "workspace_action: checkpoint 停在运行期 stage=%s 但没有 task 在跑"
+                    "（后端重启过？），按可恢复处理", state.get("stage"))
             if action not in {"review", "revise"}:
                 raise ValueError("不支持的章节操作")
             ids = list(dict.fromkeys(block_ids))
@@ -1072,19 +1138,31 @@ class WorkflowRunner:
             logger.warning(f"runner: 读 checkpoint 失败（{e}），跳过运行期 stage 标注")
             return
         nxt = set(getattr(snap, "next", ()) or ())
-        if not nxt:
+        stage = next_phase_stage(nxt)
+        if stage is None:
             return
-        from orchestrator.graph import NODE_EXTRACT, NODE_MATCH
+        await self._write_stage(thread_id, stage)
 
-        mapping = {NODE_EXTRACT: "extracting", NODE_MATCH: "matching"}
-        for node, stage in mapping.items():
-            if node in nxt:
-                async with get_db() as db:
-                    await WorkflowRunRepository(db).update_stage(thread_id, stage)
-                run = self._runs.get(thread_id)
-                if run is not None:
-                    await run.emitter.emit(events.checkpoint(thread_id, stage))
-                return
+    async def _write_stage(self, thread_id: str, stage: str) -> None:
+        """把运行期 stage 写进 workflow_runs（**单一来源**）+ 推 checkpoint 事件。
+
+        运行期 stage 只能由 runner 写：节点只能在**结束时**返回 stage（checkpoint 才
+        落盘），而提炼/生成要跑十几分钟，这期间前端读 workflow_runs 点亮进度条。
+        以前只有 extract/match 会写，于是 workspace_action（回修生成）期间库里一直停在
+        上一版 stage —— 实测：检查点是 generating，表里还是 paused。
+
+        ⚠️ 两个 store 的语义**不同**，别把它们当成同一个值：
+        - `workflow_runs.stage`（本方法写的）= **图接下来要做什么**（按 next 节点推导），
+          界面/状态行/阶段导航都读它 —— 这是"当前阶段的单一来源"；
+        - `checkpoint.stage` = 最后一次节点结束或 patch 写入的值，可能滞后于 next
+          （实测：workspace_action 的 patch 写了 generating，而图实际已走向评审）。
+        要判断"还在不在跑"，看 `_runs[tid].task.done()`，不要只看任一 store 的 stage。
+        """
+        async with get_db() as db:
+            await WorkflowRunRepository(db).update_stage(thread_id, stage)
+        run = self._runs.get(thread_id)
+        if run is not None:
+            await run.emitter.emit(events.checkpoint(thread_id, stage))
 
     def _assert_idle(self, thread_id: str) -> None:
         """同一 thread 同时只允许一个后台 task。

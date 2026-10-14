@@ -221,3 +221,40 @@ projects 页：#btn-new-project 计算值 rgb(37,99,235) ✅（原为黑）
 ### 8.5 仍待做（P2）
 合并两套"确认"语义 · 旧页 `/project-init` `/workbench` 下线 · 状态单一来源 ·
 清理旧页面里散落的硬编码字号/圆角 · 素材从"全量预匹配"改成"编写时按需"（产品侧 P2）。
+
+---
+
+## 九、整改进展（P2-1：状态单一来源）
+
+### 问题
+界面读 `workflow_runs.stage`，但运行期 stage 只有 **extract / match** 两个节点会写。
+于是"回修生成"（`workspace_action`）期间表里一直是上一版值 —— 实测：检查点 `generating`，
+表里还是 `paused`，**界面显示的阶段是错的**。
+
+### 改法
+1. 把"下一个节点 → 运行期 stage"抽成**单一来源** `orchestrator.runner.next_phase_stage()`，
+   并补齐全部节点（parse / outline / extract / match / gate_materials / generate /
+   五个评审节点 / gate_report）。
+2. 多候选时按**图上推进顺序**取（不能按字典序）：`{generate, aggregate_review}` 必须选
+   `generating`，字典序会误选 `reviewing`（实测踩到）。
+3. 顺手修一个真 bug：后端重启后 checkpoint 可能停在运行期 stage（如 `generating`），
+   而 `workspace_action` 只接受 settled stage → **这个 thread 再也操作不了**。
+   现在"没有 task 在跑"时按可恢复处理（从确定入口 GATE_MATERIALS/NODE_GENERATE 重入）。
+
+### 实测
+```
+修复前：workspace-action → 409「请先完成大纲和素材确认，或等待当前运行结束」（重启后永久卡死）
+修复后：workspace-action → 200；workflow_runs.stage 从 paused → 被持续写入（不再停滞）
+```
+
+### 残留（已写进代码注释，不假装已解决）
+两个 store 语义不同：`workflow_runs.stage` = **图接下来要做什么**（界面读它，是阶段单一来源）；
+`checkpoint.stage` = 最后一次节点结束/patch 写入的值，可能滞后。实测同一条 thread 上
+出现过"表里 reviewing / 检查点 generating"。要判断"还在不在跑"，应看 `_runs[tid].task.done()`。
+
+### 测试
+- 新增 `tests/test_run_stage_mapping.py`（5 条：全节点映射 / 评审循环 / 空与未知 / 值必须合法 /
+  多节点优先级）
+- 更新旧测试 `test_mark_next_phase_writes_runtime_stage`（原来断言"parse 不写 stage"，
+  与新口径冲突 —— parse 解析 164 页要几分钟，属于长阶段）
+- 后端 **756 passed**
