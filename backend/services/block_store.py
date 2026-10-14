@@ -1227,6 +1227,18 @@ async def apply_outline_structure(
             ", ".join(str(b.get("block_id")) for b in kept[:10]),
         )
 
+    # 一次保存删掉"异常多"的节点 → 响亮告警。
+    # 背景：调试期间出现过两次"库里有、但提交的列表里没有"导致成批删除
+    # （8 行 / 22 行），日志里只有一条 200，事后很难定位。
+    # 这里不阻塞（用户确实可能批量删），但必须留痕：谁、删了多少、剩多少。
+    _kept_n = len([b for b in existing if b.get("block_id") not in ids])
+    if _kept_n > max(5, int(0.2 * max(1, len(existing)))):
+        logger.warning(
+            "apply_outline_structure 异常：一次保存移出了 %d 个节点（原有 %d → 提交 %d）。"
+            "若这不是用户主动批量删除，说明提交方（前端）的列表比库里少 —— "
+            "block_ids=%s", _kept_n, len(existing), len(nodes),
+            ", ".join(str(b.get("block_id")) for b in existing if b.get("block_id") not in ids)[:300],
+        )
     created = updated = 0
     for idx, node in enumerate(nodes):
         block_id = node["block_id"]
