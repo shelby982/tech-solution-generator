@@ -764,3 +764,38 @@ pending.filter(c => c.answer_key === 'topic_placement').map(confItem)
    「修改」按钮 ×3（已确认项各有）✅   __bootErrors=[]
 ```
 截图：docs/screenshots/confirm-shows-result.png
+
+---
+
+## 二十五、两级左导航对齐（用户反馈「这个 UI 没有对齐」）
+
+### 核实
+量了两组导航的几何（CDP）发现**规格不一致** —— 嵌套两步导航是我自己另写的一套：
+
+| | 顶层 `.sr-rail-item` | 嵌套 `.sr-sub2-item`（修前） |
+|---|---|---|
+| 圆点 | `.sr-dot` 20×20 | `.n` **18×18** |
+| gap | 9px | **8px** |
+| padding | 10px 14px | **8px 12px** |
+| 连接线 left | 23px | **20px** |
+| 标签字号 | 13px | **12.5px** |
+
+差一点点，叠起来就是肉眼可见的"没对齐"。
+
+### 改法：两级**共用同一套规则**（而不是再抄一份调好的数值）
+- 嵌套导航的内部 class 改成与顶层相同（`.sr-dot` / `.sr-lab` / `.sr-sub`）
+- CSS 里把两组选择器写在一起：
+  ```css
+  .sr-rail-item,.sr-sub2-item{…gap:9px;padding:10px 14px}
+  .sr-rail-item:not(:last-of-type)::after,.sr-sub2-item:not(:last-of-type)::after{…left:23px…}
+  .sr-rail-item.on .sr-dot,.sr-sub2-item.on .sr-dot{…}
+  ```
+  以后改一处，两级都跟着走 —— 不会再出现"差一点点"。
+
+### 实测（CDP 量几何）
+```
+顶层   dot=[47,20]  lab.x=76   pad=14px  gap=9px  连接线=23px
+嵌套①  dot=[235,20] lab.x=264  pad=14px  gap=9px  连接线=23px
+嵌套②  dot=[235,20] lab.x=264  pad=14px  gap=9px  （末项无连接线 ✅）
+圆点 20×20、标签偏移 = 圆点 + 20 + 9 —— 两级完全一致 ✅
+```

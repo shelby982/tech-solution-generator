@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v121';
+import { api } from './api.js?v=20261016-v123';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v121';
+       } from './workspace.js?v=20261016-v123';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -27,7 +27,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v121';
+       } from './workspace-model.mjs?v=20261016-v123';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -113,7 +113,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v121';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v123';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3808,10 +3808,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <b>(b) 最终的技术与评分点映射矩阵</b>。它们只在确认完成后出现。</div>
       <div class="sr-two">
         <nav class="sr-sub2">
-          <div class="sr-sub2-item on" data-sub2="1"><span class="n">1</span>
-            <span><span class="lab">目录确认与调整</span><span class="sub">看结构 · 就地改</span></span></div>
-          <div class="sr-sub2-item" data-sub2="2"><span class="n">2</span>
-            <span><span class="lab">技术规范书确认</span><span class="sub">要求挂到哪一章</span></span></div>
+          <div class="sr-sub2-item on" data-sub2="1"><span class="sr-dot">1</span>
+            <span><span class="sr-lab">目录确认与调整</span><span class="sr-sub">看结构 · 就地改</span></span></div>
+          <div class="sr-sub2-item" data-sub2="2"><span class="sr-dot">2</span>
+            <span><span class="sr-lab">技术规范书确认</span><span class="sr-sub">要求挂到哪一章</span></span></div>
         </nav>
         <div class="sr-two-main">
           <div class="sr2-pane on" data-sub2="1">
@@ -4130,17 +4130,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-two{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;
     overflow:hidden;background:#fff;margin-top:8px}
   .sr-sub2{flex:0 0 168px;border-right:1px solid var(--line);background:#fafbfc;padding:6px 0}
-  .sr-sub2-item{position:relative;display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer}
-  .sr-sub2-item .n{flex:0 0 18px;height:18px;border-radius:50%;border:1.5px solid var(--line);
-    background:#fff;color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
-  .sr-sub2-item:not(:last-child)::after{content:"";position:absolute;left:20px;top:28px;bottom:-8px;
-    width:1.5px;background:var(--line)}
-  .sr-sub2-item .lab{font-size:12.5px}
-  .sr-sub2-item .sub{display:block;font-size:11px;color:var(--muted)}
-  .sr-sub2-item.on{background:var(--accent-soft)}
-  .sr-sub2-item.on .n{background:var(--accent);border-color:var(--accent);color:#fff}
-  .sr-sub2-item.on .lab{font-weight:600;color:var(--accent)}
-  .sr-sub2-item.done .n{background:var(--success-soft);border-color:#a7f3d0;color:var(--success)}
+  /* 嵌套两步导航：**与顶层五阶段共用同一套几何与规范**（都是 .sr-dot/.sr-lab/.sr-sub），
+     这里只加外层容器的边框。之前我自己另写了一套（gap 8 / padding 8px 12px / 连接线 20px），
+     与顶层（9 / 10px 14px / 23px）差一点点 —— 界面上就是"没对齐"。 */
   .sr-two-main{flex:1;min-width:0}
   .sr2-pane{display:none}
   .sr2-pane.on{display:block}
@@ -4264,19 +4256,21 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-body{display:flex;align-items:stretch;min-height:0}
   .sr-rail{flex:0 0 172px;border-right:1px solid var(--line);background:#fafbfc;padding:12px 0;
     align-self:stretch}
-  .sr-rail-item{position:relative;display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer}
-  .sr-rail-item + .sr-rail-item{margin-top:2px}
+  /* 顶层五阶段与嵌套两步**共用同一套导航规则**，以后改一处两级都跟着走 */
+  .sr-rail-item,.sr-sub2-item{position:relative;display:flex;align-items:center;gap:9px;
+    padding:10px 14px;cursor:pointer}
+  .sr-rail-item + .sr-rail-item,.sr-sub2-item + .sr-sub2-item{margin-top:2px}
   .sr-dot{flex:0 0 20px;height:20px;border-radius:50%;border:1.5px solid var(--line);background:#fff;
     color:var(--muted);font-size:11.5px;display:flex;align-items:center;justify-content:center;font-weight:600}
   .sr-lab{font-size:13px}
   .sr-sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
-  .sr-rail-item:not(:last-of-type)::after{content:"";position:absolute;left:23px;top:30px;bottom:-12px;
-    width:1.5px;background:var(--line)}
-  .sr-rail-item.done .sr-dot{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+  .sr-rail-item:not(:last-of-type)::after,.sr-sub2-item:not(:last-of-type)::after{content:"";
+    position:absolute;left:23px;top:30px;bottom:-12px;width:1.5px;background:var(--line)}
+  .sr-rail-item.done .sr-dot,.sr-sub2-item.done .sr-dot{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
   .sr-rail-item.done:not(:last-of-type)::after{background:#a7f3d0}
-  .sr-rail-item.on{background:#eff6ff}
-  .sr-rail-item.on .sr-dot{background:#2563eb;border-color:#2563eb;color:#fff}
-  .sr-rail-item.on .sr-lab{font-weight:600;color:#2563eb}
+  .sr-rail-item.on,.sr-sub2-item.on{background:#eff6ff}
+  .sr-rail-item.on .sr-dot,.sr-sub2-item.on .sr-dot{background:#2563eb;border-color:#2563eb;color:#fff}
+  .sr-rail-item.on .sr-lab,.sr-sub2-item.on .sr-lab{font-weight:600;color:#2563eb}
   .sr-rail-item.gated .sr-dot{border-style:dashed}
   .sr-stack{flex:1;min-width:0;background:#fcfcfd}
   .sr-stage{display:none}
