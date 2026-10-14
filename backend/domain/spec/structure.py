@@ -48,6 +48,14 @@ def validate_structure(nodes) -> list[dict]:
             raise StructureError(f"节点 id 重复：{block_id}")
         if not title:
             raise StructureError("章节标题不能为空")
+        # 目录 id 只有两种合法来源：派生（s1 / s1.1 / s1.2.3）与新增（n + base36）。
+        # **纯数字**只可能来自"把数据库行 id 当成 block_id 传"（实测发生过一次：
+        # 121 个节点被当成新节点、116 个原占位被删）。这里直接拒，别让破坏性请求走完。
+        if block_id.isdigit():
+            raise StructureError(
+                f"节点 id 是纯数字（{block_id}）：这看着像数据库行 id，不是目录 id（如 s1.1）。"
+                "已拒绝本次提交，目录未做任何改动。"
+            )
         seen.add(block_id)
         clean.append({
             "block_id": block_id,

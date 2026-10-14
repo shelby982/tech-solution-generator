@@ -380,3 +380,62 @@ async def test_apply_structure_purge_deletes_rows_with_content(db):
 
     assert stats["removed"] == 1 and stats["kept"] == 0
     assert [r["block_id"] for r in await list_blocks(conn, pid)] == ["s1"]
+
+
+async def test_apply_structure_rejects_numeric_block_ids(db):
+    """**纯数字 block_id 必须拒**：那是数据库行 id，不是目录 id。
+
+    实测事故：前端误把 b.id（36873）当 block_id 提交，服务端把 121 个节点当新节点，
+    一次 HTTP 200 实际 `created:121, removed:116`，整份目录被重建。
+    """
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, sync_outline_placeholders
+    from domain.spec.structure import StructureError
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "技术方案"), _Sec("s2", 1, "服务方案")])
+    before = await list_blocks(conn, pid)
+
+    with pytest.raises(StructureError) as exc:
+        await apply_outline_structure(conn, pid, [
+            {"block_id": "36873", "level": 1, "title": "技术方案"},
+            {"block_id": "37519", "level": 1, "title": "服务方案"},
+        ])
+    assert "纯数字" in str(exc.value)
+
+    # 关键：拒绝时**不能动库**
+    after = await list_blocks(conn, pid)
+    assert [(r["block_id"], r["title"]) for r in after] == [(r["block_id"], r["title"]) for r in before]
+
+
+async def test_apply_structure_rejects_mass_unknown_ids(db):
+    """大量"库里不存在"的 id → 拒（另一道闸：防别的 id 体系误用）。"""
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, sync_outline_placeholders
+    from domain.spec.structure import StructureError
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "技术方案")])
+    before = await list_blocks(conn, pid)
+
+    with pytest.raises(StructureError) as exc:
+        # 20 个全新的、形态合法但不存在的 id —— 比例闸拦下
+        await apply_outline_structure(conn, pid, [
+            {"block_id": f"n{i:02d}", "level": 1, "title": f"章节{i}"} for i in range(20)
+        ])
+    assert "不存在" in str(exc.value)
+    after = await list_blocks(conn, pid)
+    assert [(r["block_id"], r["title"]) for r in after] == [(r["block_id"], r["title"]) for r in before]
+
+
+async def test_apply_structure_allows_few_new_chapters(db):
+    """正常的"新增一两个章节"不能被误伤。"""
+    conn, pid = db
+    from services.block_store import apply_outline_structure, list_blocks, sync_outline_placeholders
+
+    await sync_outline_placeholders(conn, pid, [_Sec("s1", 1, "技术方案")])
+    stats = await apply_outline_structure(conn, pid, [
+        {"block_id": "s1", "level": 1, "title": "技术方案"},
+        {"block_id": "n7x", "level": 2, "title": "用户新增的章节"},
+    ])
+    assert stats["created"] == 1 and stats["updated"] == 1
+    rows = await list_blocks(conn, pid)
+    assert [r["block_id"] for r in rows] == ["s1", "n7x"]

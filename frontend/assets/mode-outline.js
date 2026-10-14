@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v114';
+import { api } from './api.js?v=20261016-v116';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v114';
+       } from './workspace.js?v=20261016-v116';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v114';
+       } from './workspace-model.mjs?v=20261016-v116';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v114';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v116';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2521,6 +2521,7 @@ let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当�
 // ② 目录确认与调整：选中的章节行（选中才显示该行操作）+ 步骤（1 目录 / 2 规范书）
 let selectedStructId = null;
 let confirmStep = 1;
+let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 // 「已确认」的确认项默认展示**结果**；点「修改」才展开控件（否则确认完信息就消失了 ——
 // 用户反馈："确认进入对应目录后需要能够查到确认的结果情况"）
 let confirmEditOpen = {};
@@ -2671,6 +2672,15 @@ async function saveStructureFromPanel(next, { afterSave = null } = {}) {
     await loadExistingBlocks({ silent: true });
     await openSplitReport({ stage: '2' });
     return;
+  }
+  // 保存结果交给用户看：**增删数量必须可见** —— 曾经"200 + 静默统计"掩盖过一次
+  // 目录被整体重建（created:121 / removed:116）。
+  if (res && (res.created != null || res.updated != null)) {
+    const bits = [];
+    if (res.updated) bits.push(`改名/调整 ${res.updated}`);
+    if (res.created) bits.push(`新增 ${res.created}`);
+    if (res.removed) bits.push(`删除 ${res.removed}`);
+    structSaveNote = bits.length ? `已保存：${bits.join(' · ')}` : '已保存';
   }
   if (Array.isArray(res?.nodes) && res.nodes.length) {
     applyStructureToModel(res.nodes.map((n, i) => ({
@@ -3587,6 +3597,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 20))}</span>` : ''}
       ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
       ${reqs ? `<span class="sr-struct-meta">规范书 ${reqs} 条</span>` : ''}
+      <span class="sr-erow-acts">
+        <button class="sr-mini" data-act="struct" data-op="rename" data-block="${escapeHtml(String(b.block_id || b.id))}">改名</button>
+        <button class="sr-mini" data-act="struct" data-op="up" data-block="${escapeHtml(String(b.block_id || b.id))}">上移</button>
+        <button class="sr-mini" data-act="struct" data-op="down" data-block="${escapeHtml(String(b.block_id || b.id))}">下移</button>
+        <button class="sr-mini" data-act="struct" data-op="indent" data-block="${escapeHtml(String(b.block_id || b.id))}">缩进</button>
+        <button class="sr-mini" data-act="struct" data-op="outdent" data-block="${escapeHtml(String(b.block_id || b.id))}">减少缩进</button>
+        <button class="sr-mini danger" data-act="struct" data-op="delete" data-block="${escapeHtml(String(b.block_id || b.id))}">删除</button>
+      </span>
 
     </div>`;
   }).join('');
@@ -3621,8 +3639,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="sr-struct sr-struct-edit">${structRows
         || '<div class="sr-dim">还没有派生目录 —— 确认后会按评分点结构生成。</div>'}</div>
       <div class="sr-answer">
-        <button class="mw-btn primary" data-act="edit-structure">调整结构（在下方目录树里改）</button>
-        <span class="sr-dim">改名 / 增删 / 上下移 / 缩进 都在目录树里做，改完回这里确认</span>
+        <button class="mw-btn" data-act="struct-new" data-op="sibling">＋ 新增同级章节</button>
+        <button class="mw-btn" data-act="struct-new" data-op="child">＋ 新增子章节</button>
+        <span class="sr-dim">${structSaveNote || '点一行 → 该行出现操作；改动即时保存'}</span>
       </div>
       ${structureBlockNote()}`;
 
@@ -4241,10 +4260,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     el.querySelectorAll('.sr-erow').forEach((x) =>
       x.classList.toggle('on', x.dataset.struct === selectedStructId));
   }));
-  // ⚠️ 面板内的结构**写**入口先不接线：这条写入路径曾因 id 用错（b.id vs block_id）
-  // 让服务端把 121 个节点当新节点（created:121 / removed:116），破坏了目录结构。
-  // id 已修正，但在废弃项目上验证通过前不再开放写入 —— 只读展示 + 走目录树编辑。
-  // （handleStructAct / handleStructNew 保留，验证通过后再接回来。）
+  // 面板内的结构**写**入口已接回：前端用 block_id（逻辑 id），后端补了两道闸
+  // （纯数字 id → 400；一次提交里大量未知 id → 400），误发不会再毁目录。
+  el.querySelectorAll('[data-act="struct"]').forEach((b) => b.addEventListener('click', () => {
+    handleStructAct(b.dataset.block, b.dataset.op);
+  }));
+  el.querySelectorAll('[data-act="struct-new"]').forEach((b) => b.addEventListener('click', () => {
+    handleStructNew(b.dataset.op);
+  }));
   applyStage(); applySub();
   refreshPanelRunState();
   hydrateStage(panelStage);

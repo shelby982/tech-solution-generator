@@ -1181,11 +1181,32 @@ async def apply_outline_structure(
 
     返回 ``{"created", "updated", "removed", "kept"}``。
     """
+    # 服务层只补**形态闸**（纵深防御），不做完整校验 —— 完整校验含层级归一
+    # （clamp_levels），那是调用方的职责，放这里会改变既有语义（实测会误压层级）。
+    # 但这道闸必须有：这条路径曾因"纯数字 block_id"毁过一次目录。
+    from domain.spec.structure import StructureError
+    _numeric = [str(n.get("block_id")) for n in nodes if str(n.get("block_id") or "").isdigit()]
+    if _numeric:
+        raise StructureError(
+            f"节点 id 是纯数字（{_numeric[:3]}）：这看着像数据库行 id，不是目录 id（如 s1.1）。"
+            "已拒绝本次提交，目录未做任何改动。"
+        )
     nodes = list(nodes)
     ids = {n["block_id"] for n in nodes}
 
     existing = await list_blocks(db, project_id, run_thread_id)
     existing_ids = {b.get("block_id") for b in existing}
+
+    # 比例闸：正常编辑只会**少量**新增章节（用户点「新增」），绝大多数 id 都该已存在。
+    # 若一次提交里大量 id 在库中找不到，几乎一定是 id 体系用错（实测：121/121 未知 →
+    # 目录被整体重建）。宁可直接拒，也不让一次误发毁掉一份目录。
+    unknown = [n["block_id"] for n in nodes if n["block_id"] not in existing_ids]
+    if len(unknown) > max(5, int(0.2 * len(nodes))):
+        from domain.spec.structure import StructureError
+        raise StructureError(
+            f"提交的目录里有 {len(unknown)} 个节点在当前目录中不存在（如 {unknown[:3]}）——"
+            "已拒绝本次提交以免误删/重建目录；如确实要新增章节，请逐个添加。"
+        )
 
     stale = [
         b for b in existing
