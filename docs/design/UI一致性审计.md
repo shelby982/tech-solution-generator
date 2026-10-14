@@ -348,3 +348,69 @@ UI：④编写 → 按需素材 → 「本章暂无相关素材：按需检索�
 而库里两行仍写着 `parse_status='done'`。所以按需检索在本项目"没有东西可搜"（行为正确、
 提示诚实），但也说明：**素材缺失时界面没有"文件已丢失，请重新上传"这类状态**。
 建议后续给素材加"文件存在性校验"（列表里标红 + 一键重传）。
+
+---
+
+## 十三、修复：界面下方为什么还展示目录（用户提问）
+
+### 核实结论
+下方那份列表是**旧的章节目录树**（`#blocks-list`，`.block-card`），由 `loadExistingBlocks()` 渲染。
+旧代码在"目录已生成"分支里**既把树亮起来、又打开面板**：
+
+```js
+} else if (totalBlocks) {
+  blocksList.hidden = false;   // ← 旧目录树
+  ... openSplitReport();       // ← 面板（产物阶段里已经有目录）
+```
+
+于是同一份目录在**面板内外各出现一次**（用户反馈："界面下方为什么还展示目录"）。
+
+### 改法
+- 目录已由面板「产物」阶段承载 → **面板存在时一律收起下方旧目录树与空态**
+  （`hideLaneTreeWhenPanelShows()`，在 `loadExistingBlocks` 的已生成分支 + `openSplitReport` 入口都调用，幂等）。
+- 面板移除后会重新拉取（`openSplitReport` 路径），不会出现"树也不见了、面板也没有"的空档。
+
+### 实测
+```
+treeVisible=false（.block-card 仍在 DOM 但已隐藏）✅  面板「产物」阶段正常展示目录 ✅  __bootErrors=[]
+```
+
+---
+
+## 十四、顺手抓到的两个**真 bug**（评审链路）
+
+### 14.1 合规评审从未跑起来（严重）
+```
+本次运行失败：BaoZhengAgent.review() got an unexpected keyword argument 'chain_by_block'
+```
+- `orchestrator.nodes._run_review` 对**技术/合规两个 agent 传同一套参数**（含 `chain_by_block`），
+  但只有 `WangAnshiAgent.review` 收了它 → 包拯直接 `TypeError` → **整个评审节点失败**、
+  运行被标 failed、`reviews` 表始终 0 行 → **评审页永远显示"未评审"**。
+- **为什么单测没抓到**：`tests/orchestrator/test_nodes.py` 里的 `_RecordingReviewer` **桩**自带
+  `chain_by_block`，把契约漂移掩盖了。
+
+修法：`BaoZhengAgent.review` 接收 `chain_by_block` 并**真正使用**（评分口径 + 规范要求进 prompt，
+与技术评审同源）；`build_compliance_review_user` 增加 `criterion` / `spec_requirements` 参数。
+新增 2 条**用真实 agent 类**的契约测试（不再用桩）。
+
+**实测（真实调用）**：
+```
+修复前：workspace-action(review) → 运行 failed，reviews=0
+修复后：workspace-action(review) → reviews=2（bao_zheng 94 / wang_anshi 76）
+        verdict：得分预估 5.0/100 · 部分满足 1 · 缺口 5
+        「技术条款差异性 10 分 7 章 部分满足 → 5.0 分」
+```
+
+### 14.2 `failed` / 陈旧运行期 stage 不允许重试
+运行失败后 `workspace_action` 一律 409（"请先完成大纲和素材确认，或等待当前运行结束"）——
+**失败正是最该能重试的状态**。改为 `failed` + 运行期 stage 在"没有 task 在跑"时都按可恢复处理。
+
+### 14.3 闸门态被标成 `done`
+`_sync_stage(graph_done=True)` 会把停在闸门的运行写成 `done`（实测 `report_review` → `done`），
+于是界面显示"完成"而其实在等用户确认。改为：`paused / points_review / outline_review /
+materials_review / report_review` 都保持原值。
+
+### 如实说明一个未解项
+checkpoint 的 `errors` 是**累加**语义（reducer），patch 传 `[]` 清不掉 → 重试成功后 `/state.errors`
+里仍留着上一次的报错。前端只在 `stage === 'failed'` 时渲染失败横幅，所以**不会误导用户**；
+但状态数据本身不干净（要彻底清需要另设一次性重置键）。

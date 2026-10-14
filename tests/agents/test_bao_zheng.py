@@ -275,3 +275,57 @@ def test_parse_finding_reads_material_fields():
     # 缺省字段必须退化为"非补料问题"，否则会把格式类问题误转成检索请求
     assert finding.issues[1].needs_material is False
     assert finding.issues[1].material_query == ""
+
+
+# ─────────────────────────────────────────────
+# 契约：评审 agent 必须收 _run_review 传的那套参数
+# ─────────────────────────────────────────────
+
+async def test_review_accepts_chain_by_block_like_the_tech_reviewer():
+    """`_run_review` 对**技术/合规两个 agent 传同一套参数**，少一个形参就是整节点失败。
+
+    为什么必须有这条：`tests/orchestrator/test_nodes.py` 里的 `_RecordingReviewer` 桩
+    自带 `chain_by_block`，把契约漂移掩盖了 —— 实测包拯少了这个形参，合规评审直接
+    `TypeError`，运行被标 failed，评审页永远没有结论（reviews 表 0 行）。
+
+    这里用**真实 agent 类**调用：即使不配 LLM（走"未配置 LLM"分支）也足以证明形参对得上。
+    """
+    agent = BaoZhengAgent(configs_provider=_no_configs)
+    blocks = {"s1": BlockOutput(block_id="s1", kind="tech", content="正文")}
+    matrix = {"s1": OutlineMatrixRow(block_id="s1", title="章节", requirement="要求")}
+    chain = {"s1": {"criterion_text": "评分口径原文", "spec_requirements": ["规范要求一"]}}
+
+    findings = await agent.review(
+        blocks=blocks, outline_matrix=matrix, emitter=None, chain_by_block=chain)
+
+    assert set(findings) == {"s1"}
+
+
+async def test_review_prompt_includes_criterion_and_spec_requirements(monkeypatch):
+    """评分口径/规范要求要**真的进 prompt**（不是收了参数就丢掉）。"""
+    from agents import bao_zheng as bz
+
+    seen = {}
+    real = bz.build_compliance_review_user
+
+    def spy(block, matrix_row, **kw):
+        seen.update(kw)
+        return real(block, matrix_row, **kw)
+
+    monkeypatch.setattr(bz, "build_compliance_review_user", spy)
+    # 必须走 mock LLM 通路：无配置时会在组 prompt **之前**早退（那样就测不到 prompt 内容）
+    monkeypatch.setenv("LLM_MODE", "mock")
+    agent = BaoZhengAgent(configs_provider=_fake_configs)
+    await agent.review(
+        blocks={"s1": BlockOutput(block_id="s1", kind="tech", content="正文")},
+        outline_matrix={"s1": OutlineMatrixRow(block_id="s1", title="章节", requirement="要求")},
+        emitter=None,
+        chain_by_block={"s1": {"criterion_text": "口径", "spec_requirements": ["R1"]}},
+    )
+
+    assert seen.get("criterion") == "口径"
+    assert seen.get("spec_requirements") == ["R1"]
+
+    rendered = real({"title": "章节", "content": "正文"}, {"requirement": "要求"},
+                    criterion="口径X", spec_requirements=["R1"])
+    assert "评分口径" in rendered and "口径X" in rendered and "R1" in rendered

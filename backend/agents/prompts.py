@@ -726,8 +726,14 @@ COMPLIANCE_REVIEW_SYSTEM = (
 )
 
 
-def build_compliance_review_user(block: dict, matrix_row: dict) -> str:
-    """构造包拯合规评审 user prompt。"""
+def build_compliance_review_user(block: dict, matrix_row: dict, *,
+                                 criterion: str = "",
+                                 spec_requirements: list | None = None) -> str:
+    """构造包拯合规评审 user prompt。
+
+    criterion / spec_requirements 与 `build_tech_review_user` 同源（来自链条
+    chain_by_block）：合规评审同样要按**评分口径**判定，而不是只看"响应了没"。
+    """
     title = block.get("title") or ""
     content = (block.get("content") or "")[:8000]
     requirement = matrix_row.get("requirement") or ""
@@ -736,9 +742,21 @@ def build_compliance_review_user(block: dict, matrix_row: dict) -> str:
     evidence_required = matrix_row.get("evidence_required") or ""
     indicators = matrix_row.get("indicators") or ""
 
+    chain_parts = ""
+    if criterion:
+        chain_parts += (
+            "【本章的评分口径 —— 判断是否满足要求的依据】\n"
+            f"{criterion[:3000]}\n\n"
+        )
+    if spec_requirements:
+        joined = "\n".join(f"- {r}" for r in spec_requirements if r)[:3000]
+        if joined:
+            chain_parts += f"【本章对应的技术规范要求 —— 必须逐条响应】\n{joined}\n\n"
+
     return (
         f"以下是投标方案中「{title}」章节的内容：\n\n"
         f"---\n{content}\n---\n\n"
+        f"{chain_parts}"
         f"对照应标要求：\n"
         f"【应标要求】\n{requirement}\n\n"
         f"【否决项（必须全部响应）】\n{veto_items}\n\n"

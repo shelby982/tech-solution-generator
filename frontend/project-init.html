@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v69" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v71" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -889,7 +889,7 @@ body[data-view="matching"] .match-detail { display: block; }
   background: #eff6ff;
 }
     </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v69" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v71" />
   </head>
   <body data-view="outline">
   <script>
@@ -1097,14 +1097,14 @@ body[data-view="matching"] .match-detail { display: block; }
     </div>
 
     <script type="module">
-import { api } from './assets/api.js?v=20261016-v69';
+import { api } from './assets/api.js?v=20261016-v71';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './assets/workspace.js?v=20261016-v69';
+       } from './assets/workspace.js?v=20261016-v71';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -1118,7 +1118,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './assets/workspace-model.mjs?v=20261016-v69';
+       } from './assets/workspace-model.mjs?v=20261016-v71';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('projectId');
@@ -4957,6 +4957,6 @@ bindMatchDetailActions();
   });
 })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v69"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v71"></script>
   </body>
 </html>

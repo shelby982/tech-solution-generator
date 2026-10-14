@@ -1113,12 +1113,23 @@ async def test_sync_stage_keeps_paused_when_graph_ended_for_pause(runner_env):
     await runner._sync_stage(tid, graph_done=True)
     assert await _db_stage(db_path, tid) == "paused"
 
-    # 正常跑完（stage 不是 paused）仍然收尾为 done
+    # **闸门态也不等于跑完**：report_review 表示"在等用户确认报告"，
+    # 标成 done 会让页面显示完成（实测出现过：表里 done，检查点停在报告闸门）。
     async with runner._checkpointer_provider() as saver:
         graph = runner._build(saver, None, thread_id=tid)
         await graph.aupdate_state(
             {"configurable": {"thread_id": tid}},
             {"stage": "report_review"},
+        )
+    await runner._sync_stage(tid, graph_done=True)
+    assert await _db_stage(db_path, tid) == "report_review"
+
+    # 正常跑完（既不是暂停、也不是闸门）仍然收尾为 done
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        await graph.aupdate_state(
+            {"configurable": {"thread_id": tid}},
+            {"stage": "reviewing"},
         )
     await runner._sync_stage(tid, graph_done=True)
     assert await _db_stage(db_path, tid) == "done"

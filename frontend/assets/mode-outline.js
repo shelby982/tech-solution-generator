@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v69';
+import { api } from './api.js?v=20261016-v71';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v69';
+       } from './workspace.js?v=20261016-v71';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v69';
+       } from './workspace-model.mjs?v=20261016-v71';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v69';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v71';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2872,7 +2872,17 @@ async function renderReviewPane() {
          style="color:var(--accent)">质量检查页</a>。</div>`;
 }
 
+/** 面板存在时，主区下方的旧目录树/空态一律收起：目录由面板「产物」承载，
+ *  两处各画一份是重复（用户反馈"下方为什么还展示目录"）。 */
+function hideLaneTreeWhenPanelShows() {
+  const list = document.getElementById('blocks-list');
+  if (list) { list.hidden = true; list.style.display = 'none'; }
+  const empty = document.getElementById('blocks-empty');
+  if (empty) { empty.hidden = true; empty.innerHTML = ''; }
+}
+
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
+  hideLaneTreeWhenPanelShows();
   // 拆分进行中：报告此时是空的（旧数据已被清），画出来只会得到空标包下拉 +
   // "暂未拆分"这类矛盾文案。保持加载态，等 onDone 再画。
   if (splitInProgress) { showSplitPanelLoading('正在拆分评分点…'); return; }
@@ -3993,9 +4003,12 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
     splitPanelAutoOpenedFor = 0;
     openSplitReport();
   } else if (totalBlocks) {
-    // 已生成目录 → 也直接展示面板（产物在面板里看；用户要求不要"展开/收起"操作）
-    blocksList.hidden = false;
-    blocksList.style.display = '';
+    // 已生成目录 → 直接展示面板（产物在面板里看；用户要求不要"展开/收起"操作）
+    // ⚠️ 同时**必须收起下面的旧目录树**：目录已经由面板的「产物」阶段承载，
+    //    两处各画一份会让用户问"界面下方为什么还有目录"（用户反馈）。这里是
+    //    旧实现遗留的显示路径 —— 以前它把树亮起来又开面板，于是同一份目录出现两次。
+    blocksList.hidden = true;
+    blocksList.style.display = 'none';
     // 清掉主区占位：派生阶段写过「正在…梳理应答目录…」，完成后会残留在下方
     const ee = document.getElementById('blocks-empty');
     if (ee) { ee.hidden = true; ee.innerHTML = ''; }

@@ -100,7 +100,11 @@ def recorded_requirement_filenames(spec: dict) -> set[str]:
 # 这份映射是**唯一**的运行期 stage 来源（前端 boot / 状态行 / 阶段导航都读它）。
 # 少一个节点就会表现为"库里停在上一版 stage"（实测 workspace_action 生成期间如此）。
 # 运行期（非终态）stage：只在"有 task 在跑"时才算数；重启后它们可能残留在 checkpoint 里
-_RUNNING_STAGES = {"parsing", "extracting", "matching", "generating", "reviewing"}
+# 这些 stage 在**没有 task 在跑**时都算"陈旧状态"，允许从确定入口重入：
+# - 运行期 stage：后端重启会留下（实测 generating → 永久 409）
+# - failed：运行失败后用户最该能重试（实测评审节点因签名 bug 失败 → 之后一直拒绝操作）
+_STALE_RESUMABLE_STAGES = {"parsing", "extracting", "matching", "generating", "reviewing",
+                           "failed"}
 
 _NEXT_PHASE_STAGE = {
     "zhang_heng_parse": "parsing",
@@ -330,11 +334,11 @@ class WorkflowRunner:
                 # （实测：重启后 stage=generating → workspace-action 一直 409，
                 #  这个 thread 就再也操作不了了）。上面已确认没有 task 在跑，
                 # 这种"陈旧运行期 stage"可以安全地从确定入口（GATE_MATERIALS/NODE_GENERATE）重入。
-                if state.get("stage") not in _RUNNING_STAGES:
+                if state.get("stage") not in _STALE_RESUMABLE_STAGES:
                     raise ValueError("请先完成大纲和素材确认，或等待当前运行结束")
                 logger.info(
-                    "workspace_action: checkpoint 停在运行期 stage=%s 但没有 task 在跑"
-                    "（后端重启过？），按可恢复处理", state.get("stage"))
+                    "workspace_action: checkpoint 停在 stage=%s 但没有 task 在跑"
+                    "（重启过 / 上次失败），按可恢复处理", state.get("stage"))
             if action not in {"review", "revise"}:
                 raise ValueError("不支持的章节操作")
             ids = list(dict.fromkeys(block_ids))
@@ -375,6 +379,8 @@ class WorkflowRunner:
             run.cancel_flag = False
             patch = {
                 "stage": "reviewing" if action == "review" else "generating",
+                # 上一次失败留下的错误清单要清掉：不然重试成功了，状态行还挂着旧报错
+                "errors": [],
                 "user_choice": "review_only" if action == "review" else "regen_blocks",
                 "proposal": {"blocks": blocks, "updated_blocks": ids, "revision_scope": ids,
                              "regenerate_targets": ids if action == "revise" else [],
@@ -1115,9 +1121,12 @@ class WorkflowRunner:
         """
         state = await self.state(thread_id)
         stage = state.get("stage", "idle")
-        # 主动暂停（paused）与"只拆评分点"（points_review）都不是"跑完"：
-        # 前者还有章节没提炼，后者目录还没生成 —— 都强制 done 会让页面显示完成。
-        if graph_done and stage not in ("paused", "points_review"):
+        # **停在闸门 ≠ 跑完**：这些 stage 表示"在等用户决定"，强制 done 会让页面显示完成
+        # （实测 report_review 被写成 done）。paused 还有章节没提炼；
+        # points_review 目录还没生成。
+        _WAITING = ("paused", "points_review", "outline_review", "materials_review",
+                    "report_review")
+        if graph_done and stage not in _WAITING:
             stage = "done"
         async with get_db() as db:
             await WorkflowRunRepository(db).update_stage(thread_id, stage)

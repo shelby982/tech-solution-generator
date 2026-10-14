@@ -66,9 +66,16 @@ class BaoZhengAgent:
         blocks: dict[str, BlockOutput],
         outline_matrix: dict[str, OutlineMatrixRow],
         emitter: Optional[EventCallback] = None,
+        chain_by_block: Optional[dict[str, dict]] = None,
     ) -> dict[str, Finding]:
         """
         对 blocks 中每个 block 做合规评审，返回 {block_id: Finding}。
+
+        ``chain_by_block``：链条数据 ``{block_id: {"criterion_text": …, "spec_requirements": [...]}}``。
+        **必须收**：`orchestrator.nodes._run_review` 对技术/合规两个 agent 传同一套参数，
+        少了这个形参就是 TypeError → 整个评审节点失败 → 评审页永远没有结论
+        （实测：界面显示"本次运行失败：BaoZhengAgent.review() got an unexpected keyword
+        argument 'chain_by_block'"，reviews 表 0 行）。
 
         遍历顺序：blocks 的字典插入顺序。
         单 block 全 API 失败：Finding(score=0, issues=[], strengths=[], error="...")。
@@ -94,7 +101,13 @@ class BaoZhengAgent:
             matrix_dict = self._row_to_dict(row)
             # build_compliance_review_user 用 block["title"]，title 由 outline_matrix 提供
             block_dict["title"] = matrix_dict.get("title", "")
-            user_prompt = self._build_user_prompt(block_dict, matrix_dict)
+            # 评分口径与规范要求：与技术评审同源，让合规评审也按"得分条件"判，而不是泛泛而谈
+            chain = (chain_by_block or {}).get(block_id) or {}
+            criterion = str(chain.get("criterion_text")
+                            or matrix_dict.get("criterion_text") or "")
+            spec_reqs = list(chain.get("spec_requirements") or [])
+            user_prompt = self._build_user_prompt(
+                block_dict, matrix_dict, criterion=criterion, spec_requirements=spec_reqs)
 
             await _emit(emitter, "review_block_start", {
                 "block_id": block_id,
@@ -214,8 +227,10 @@ class BaoZhengAgent:
     # ── 辅助：dataclass → dict ─────────────────
 
     @staticmethod
-    def _build_user_prompt(block_dict: dict, matrix_dict: dict) -> str:
-        return build_compliance_review_user(block_dict, matrix_dict)
+    def _build_user_prompt(block_dict: dict, matrix_dict: dict, *,
+                           criterion: str = "", spec_requirements: list | None = None) -> str:
+        return build_compliance_review_user(
+            block_dict, matrix_dict, criterion=criterion, spec_requirements=spec_requirements)
 
     @staticmethod
     def _block_to_dict(block_id: str, output: BlockOutput) -> dict[str, Any]:
