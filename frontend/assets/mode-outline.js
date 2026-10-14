@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v138';
+import { api } from './api.js?v=20261016-v141';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v138';
+       } from './workspace.js?v=20261016-v141';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -29,7 +29,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v138';
+       } from './workspace-model.mjs?v=20261016-v141';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -115,7 +115,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v138';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v141';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2527,6 +2527,7 @@ let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当�
 let selectedStructId = null;
 let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
+let topicSaveNote = '';    // 归属保存结果 —— 保存后**面板会重绘**，所以用模块变量而不是就地写 DOM
 const batchIds = new Set();   // 批量操作选中的章节（跨渲染保留，方便连着挪几格）
 const removedByUser = new Set();   // 用户**明确删掉**的章节 id（区别于"本地列表少了"）
 // 撤销栈：只存"操作之前的完整结构"快照（最多 20 步）。纯逻辑用模型层的 pushHistory。
@@ -2918,6 +2919,19 @@ async function handleBatchStruct(action) {
   });
 }
 
+/** 归属选择**即时保存**：复用既有「保存归属」按钮的 click 路径（收集 →
+ * 校验 → 落库 → 提示都在那一处），这里只加 500ms 防抖 —— 连点几个主题时
+ * 合并成一次请求，也避免提示刷屏。
+ */
+let topicSaveTimer = null;
+function saveTopicPlacementSoon() {
+  window.clearTimeout(topicSaveTimer);
+  topicSaveTimer = window.setTimeout(() => {
+    const btn = document.querySelector('#split-panel-inline [data-save="topic_placement"]');
+    if (btn && !btn.disabled) btn.click();
+  }, 500);
+}
+
 /** 归属章节选择器：点开 = **完整目录列表**（按层级缩进 + 层级徽标）+ 搜索，点一章即选中。
  *
  * 为什么不用 <select>：用户要求"展示所有的目录列表，然后再去选择对应的哪一级目录"。
@@ -2963,8 +2977,8 @@ function openTopicPicker(topic, btn) {
     const pill = row.querySelector('.ui-pill');
     if (pill) { pill.textContent = v ? '已指定' : '默认'; pill.className = `ui-pill ${v ? 'is-ok' : 'is-none'}`; }
     pop.remove();
-    splitPanelFlash = v ? `「${topic}」→ ${v}（记得点「保存归属」）` : `「${topic}」保持默认（记得点「保存归属」）`;
-    inlineFlash(row.querySelector('.sr-mount-cell') || row, splitPanelFlash, 'ok');
+    // **即时保存**：不再要求用户手动点「保存归属」
+    saveTopicPlacementSoon();
   }));
   search?.addEventListener('input', () => render(search.value));
   search?.focus();
@@ -3936,10 +3950,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
             cur ? (extra.length ? '已指定（不在目录）' : '已指定') : '默认'}</span></td></tr>`;
       }).join('')}</tbody></table>
       <div class="sr-answer">
-        <button class="mw-btn primary" data-save="topic_placement">保存归属</button>
+        <span class="sr-dim">选择即保存（500ms 合并）</span>
+        <button class="mw-btn" data-save="topic_placement">立即保存</button>
         <button class="mw-btn" data-save="skip" data-key="topic_placement">全部保持默认</button>
-      </div>
-      <div class="sr-dim" data-flash-for="topic_placement"></div>`;
+        <!-- 提示槽必须放在 .sr-answer **里面**：保存处理器用 host=closest('.sr-answer')
+             再找 [data-flash-for] —— 放外面会写不进去（实测提示不显示） -->
+        <span class="sr-dim" data-flash-for="topic_placement"></span>
+      </div>`;
   })();
 
   const pane1 = `
@@ -3980,7 +3997,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <div class="sr-two-main">
           <div class="sr2-pane on" data-sub2="1">
             <div class="sr2-head"><span class="t">技术规范书确认</span>
-              <span class="sr-dim">基于当前目录结构，为<b>全部 ${(data.topic_options || []).length} 个主题</b>指定挂载章节；不指定就进「技术规范书要求应答」</span></div>
+              <span class="sr-dim">基于当前目录结构，为<b>全部 ${(data.topic_options || []).length} 个主题</b>指定挂载章节；不指定就进「技术规范书要求应答」</span>
+              ${topicSaveNote ? `<span class="sr-dim" style="margin-left:auto;color:var(--success)">${escapeHtml(topicSaveNote)}</span>` : ''}</div>
             <div class="sr2-body">${topicRows}</div>
           </div>
           <div class="sr2-pane" data-sub2="2">
@@ -4834,6 +4852,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       }
       value = map;
       splitPanelFlash = `已保存 ${n} 个主题的归属；其余保持默认。下次「拆分评分点」按它挂载。`;
+      topicSaveNote = `已保存 ${n} 个主题的归属`;
     } else if (kind === 'structure') {
       value = { confirmed: true };
       splitPanelFlash = '结构已确认。';
