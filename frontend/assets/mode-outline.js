@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v118';
+import { api } from './api.js?v=20261016-v119';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,10 +10,11 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v118';
+       } from './workspace.js?v=20261016-v119';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
+         moveOutlineNodeTo, moveOutlineNodesTo,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
          CONSTRAINT_LEVELS, constraintLevelLabel,
          isExtractDone as isDoneBlock, extractBadgeState as badgeStatusOf,
@@ -25,7 +26,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v118';
+       } from './workspace-model.mjs?v=20261016-v119';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -111,7 +112,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v118';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v119';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -2725,6 +2726,73 @@ function renameStructInPanel(blockId) {
   input.addEventListener('blur', () => finish(true));
 }
 
+/** 拖动排序（上下拖动）：按住行首 ⠿ 拖动，松手即保存。
+ *
+ * 规则在模型层（moveOutlineNodeTo / moveOutlineNodesTo，有 node --test）：
+ * 连带子树、落点层级=插入点后一个节点的层级、不能拖进自己的子树、原位不动不写库。
+ * 勾选多行时拖任意一行 = **整组一起拖**（与批量按钮共用同一份选择）。
+ */
+function startRowDrag(ev) {
+  const grip = ev.currentTarget;
+  const id = grip.dataset.grip;
+  const list = document.querySelector('.sr-struct-edit');
+  if (!id || !list) return;
+  const rows = [...list.querySelectorAll('.sr-erow')];
+  if (rows.length < 2) return;
+  const ids = (batchIds.has(id) && batchIds.size) ? [...batchIds].filter(
+    (x) => rows.some((r) => r.dataset.struct === x)) : [id];
+  const selected = new Set(ids);
+
+  const line = document.createElement('div');
+  line.className = 'sr-drop-line';
+  list.appendChild(line);
+  rows.forEach((r) => { if (selected.has(r.dataset.struct)) r.classList.add('is-drag-src'); });
+  list.classList.add('is-dragging');
+
+  let at = null;
+  const computeAt = (clientY) => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return rows.length;
+  };
+  const showLine = (i) => {
+    const r = rows[i] || rows[rows.length - 1];
+    if (!r) return;
+    line.style.top = `${i < rows.length ? r.offsetTop : r.offsetTop + r.offsetHeight}px`;
+  };
+  const onMove = (e) => {
+    at = computeAt(e.clientY);
+    showLine(at);
+    e.preventDefault();
+  };
+  const cleanup = () => {
+    line.remove();
+    rows.forEach((r) => r.classList.remove('is-drag-src'));
+    list.classList.remove('is-dragging');
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { at = null; cleanup(); } };
+  const onUp = async () => {
+    const target = at;
+    cleanup();
+    if (target == null) return;
+    const nodes = structureNodesFromModel();
+    const next = ids.length > 1
+      ? moveOutlineNodesTo(nodes, ids, target)
+      : moveOutlineNodeTo(nodes, ids[0], target);
+    if (!next) return;                       // 原位 / 拖进自己的子树 → 不写库
+    await saveStructureFromPanel(next, { label: `拖动 ${ids.length} 项` });
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('keydown', onKey);
+  ev.preventDefault();
+}
+
 /** 批量操作（目录调整）：整批上移/下移/缩进/减少缩进。
  *
  * 语义在模型层（workspace-model.mjs，有 node --test）：整批按"头"决定一起升降，
@@ -3632,6 +3700,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     const reqs = parseIds(b.spec_requirement_ids).length;
     return `<div class="sr-erow l${Math.min(Number(b.level) || 1, 3)}${
         selectedStructId === String(b.block_id || b.id) ? ' on' : ''}" data-struct="${escapeHtml(String(b.block_id || b.id))}" data-i="${i}">
+      <span class="sr-grip" data-grip="${escapeHtml(String(b.block_id || b.id))}"
+        title="按住上下拖动排序（勾选多行可整组拖）">⠿</span>
       <input type="checkbox" class="sr-pick" data-pick="${escapeHtml(String(b.block_id || b.id))}"
         ${batchIds.has(String(b.block_id || b.id)) ? 'checked' : ''}
         title="选中后可批量操作" />
@@ -4057,6 +4127,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-erow.l2{padding-left:26px}
   .sr-erow.l3{padding-left:42px;color:var(--muted)}
   .sr-erow-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-struct-edit{position:relative}
+  .sr-grip{flex:none;cursor:grab;color:var(--muted2,#9aa5b1);font-size:12px;padding:0 2px;
+    user-select:none;touch-action:none}
+  .sr-grip:active{cursor:grabbing}
+  .sr-erow.is-drag-src{opacity:.45}
+  .sr-drop-line{position:absolute;left:6px;right:6px;height:2px;background:var(--accent);
+    border-radius:2px;pointer-events:none}
+  .sr-struct-edit.is-dragging{user-select:none}
   .sr-batch{display:flex;align-items:center;gap:6px;padding:5px 8px;margin:6px 0;
     border:1px solid var(--line);border-radius:8px;background:var(--panel-soft,#f8fafc)}
   .sr-batch.is-empty{display:none}
@@ -4343,6 +4421,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   el.querySelectorAll('[data-batch]').forEach((btn) => btn.addEventListener('click', () => {
     handleBatchStruct(btn.dataset.batch);
   }));
+  el.querySelectorAll('.sr-grip').forEach((g) => g.addEventListener('pointerdown', startRowDrag));
   applyStage(); applySub();
   refreshPanelRunState();
   hydrateStage(panelStage);

@@ -27,7 +27,10 @@ function definedNames() {
   for (const m of src.matchAll(/\((?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g)) {
     names.add(m[1]);
   }
-  for (const m of src.matchAll(/^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=/gm)) {
+  // 允许行首缩进：函数内部定义的小helper（const showLine = () => …）也是合法定义 ——
+  // 实测误报过一次（拖动排序里的 showLine）。守卫的目的是调了却没有定义，
+  // 嵌套定义同样满足这个条件。
+  for (const m of src.matchAll(/^[ \t]*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=/gm)) {
     names.add(m[1]);
   }
   // import { a, b as c } from '…'

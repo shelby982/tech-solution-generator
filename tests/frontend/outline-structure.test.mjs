@@ -14,6 +14,8 @@ import {
   removeOutlineSubtree,
   insertSiblingAfter,
   insertChildOf,
+  moveOutlineNodeTo,
+  moveOutlineNodesTo,
   moveManyOutlineNodes,
   indentManyOutlineNodes,
   outdentManyOutlineNodes,
@@ -231,4 +233,65 @@ test('批量操作：空选择不改变任何东西', () => {
   const r = moveManyOutlineNodes(nodes, [], -1);
   assert.deepEqual(ids(r.nodes), ['s1', 's2']);
   assert.equal(r.moved, 0);
+});
+
+// ── 拖动排序（上下拖动）──
+// 规则：拖到谁旁边就成为它的同级（落点层级 = 插入点后一个节点的层级）；连带整棵子树。
+test('拖动：把一节拖到另一节之前（成为它的同级）', () => {
+  const nodes = flat(['s1', 's2', 's3']);
+  const r = moveOutlineNodeTo(nodes, 's3', 0);
+  assert.deepEqual(ids(r), ['s3', 's1', 's2']);
+});
+
+test('拖动：连带子树一起走', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's2', level: 1, title: 'B' },
+  ];
+  const r = moveOutlineNodeTo(nodes, 's1', 3);      // 拖到最后
+  assert.deepEqual(ids(r), ['s2', 's1', 's1.1']);
+});
+
+test('拖动：落点层级跟随后面的节点（拖到二级章节前 → 也变二级）', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's1.2', level: 2, title: 'A-2' },
+    { id: 's2', level: 1, title: 'B' },
+  ];
+  const r = moveOutlineNodeTo(nodes, 's2', 1);      // 插到 s1.1 之前 → 同级 2
+  assert.deepEqual(ids(r), ['s1', 's2', 's1.1', 's1.2']);
+  assert.equal(r[1].level, 2);
+});
+
+test('拖动：不能把自己塞进自己的子树（返回 null）', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's1.1', level: 2, title: 'A-1' },
+    { id: 's2', level: 1, title: 'B' },
+  ];
+  assert.equal(moveOutlineNodeTo(nodes, 's1', 2), null);   // 2 落在 s1 子树内
+});
+
+test('拖动：原位不动返回 null（不写库）', () => {
+  const nodes = flat(['s1', 's2']);
+  assert.equal(moveOutlineNodeTo(nodes, 's1', 0), null);
+});
+
+test('拖动（整组）：一批节点作为一块移动，组内顺序不变', () => {
+  const nodes = flat(['s1', 's2', 's3', 's4']);
+  const r = moveOutlineNodesTo(nodes, ['s2', 's3'], 4);   // 拖到末尾
+  assert.deepEqual(ids(r), ['s1', 's4', 's2', 's3']);
+});
+
+test('拖动（整组）：组内含父子也不重复搬（各子树只搬一次）', () => {
+  const nodes = [
+    { id: 's1', level: 1, title: 'A' },
+    { id: 's2', level: 1, title: 'B' },
+    { id: 's2.1', level: 2, title: 'B-1' },
+    { id: 's3', level: 1, title: 'C' },
+  ];
+  const r = moveOutlineNodesTo(nodes, ['s2', 's2.1'], 0);   // 父子都选中
+  assert.deepEqual(ids(r), ['s2', 's2.1', 's1', 's3']);
 });

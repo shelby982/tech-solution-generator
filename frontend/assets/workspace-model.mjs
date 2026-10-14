@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v118';
+} from './material-roles.mjs?v=20261016-v119';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -240,6 +240,77 @@ export function moveManyOutlineNodes(nodes, ids, dir) {
     if (next) { list = next; moved++; } else skipped++;
   }
   return { nodes: list, moved, skipped };
+}
+
+/** 拖动排序：把 id（**连带整棵子树**）移动到「第 targetIndex 个节点之前」。
+ *
+ * 层级规则（只做上下拖动，不做左右拖动，所以规则要简单可预期）：
+ * 落点的层级 = 插入点**后面那个节点**的层级（插到末尾就跟最后一个节点同级，插到最顶 = 1 级）。
+ * 也就是"拖到谁旁边，就成为它的同级"。
+ *
+ * 拒绝两种情况（返回 null，界面按"没动"处理，不写库）：
+ *   · targetIndex 落在自己的子树里（不能把自己塞进自己内部）
+ *   · 位置没有实际变化
+ */
+export function moveOutlineNodeTo(nodes, id, targetIndex) {
+  const [start, end] = outlineSubtreeRange(nodes, id);
+  if (start < 0) return null;
+  if (targetIndex > start && targetIndex < end) return null;
+  const subtree = nodes.slice(start, end);
+  const rest = [...nodes.slice(0, start), ...nodes.slice(end)];
+  const at = Math.max(0, Math.min(
+    rest.length,
+    targetIndex > start ? targetIndex - (end - start) : targetIndex,
+  ));
+  if (at === start) return null;                       // 原地不动
+  const anchor = rest[at] || rest[rest.length - 1] || null;
+  const level = anchor ? Math.max(1, Math.min(4, Number(anchor.level) || 1)) : 1;
+  const delta = level - (Number(nodes[start].level) || 1);
+  const moved = delta === 0 ? subtree : _shiftLevels(subtree, 0, subtree.length, delta);
+  return [...rest.slice(0, at), ...moved, ...rest.slice(at)];
+}
+
+/** 拖动排序（整组）：把一组选中节点（各自连带子树）作为一块移到 targetIndex 之前。
+ *
+ * 组内保持原有相对顺序；整块用同一个层级（落点后一个节点的层级，插到末尾跟最后一个同级）。
+ * 先把各范围摘出来再插回，所以"选中项互为父子"也不会算错。
+ */
+export function moveOutlineNodesTo(nodes, ids, targetIndex) {
+  const sel = new Set((ids || []).map(String));
+  const ranges = [];
+  for (const n of nodes) {
+    if (!sel.has(String(n.id))) continue;
+    const r = outlineSubtreeRange(nodes, n.id);
+    if (r[0] < 0) continue;
+    if (ranges.some(([rs, re]) => r[0] >= rs && r[1] <= re)) continue;   // 已被包含
+    ranges.push(r);
+  }
+  if (!ranges.length) return null;
+  const [firstStart, firstEnd] = ranges[0];
+  if (targetIndex > firstStart && targetIndex < firstEnd) return null;   // 拖进自己的子树
+
+  const keep = [];
+  const block = [];
+  nodes.forEach((n, i) => {
+    if (ranges.some(([rs, re]) => i >= rs && i < re)) block.push(n);
+    else keep.push(n);
+  });
+  // 被摘走的节点里，有多少原本在插入点之前 → 插入点要相应前移
+  const removedBefore = ranges.reduce(
+    (acc, [rs, re]) => acc + Math.max(0, Math.min(re, targetIndex) - Math.min(rs, targetIndex)), 0);
+  const at = Math.max(0, Math.min(keep.length, targetIndex - removedBefore));
+
+  const anchor = keep[at] || keep[keep.length - 1] || null;
+  const level = anchor ? Math.max(1, Math.min(4, Number(anchor.level) || 1)) : 1;
+  const delta = level - (Number(block[0].level) || 1);
+  const moved = delta === 0 ? block : block.map((n) => ({
+    ...n, level: Math.max(1, Math.min(4, (Number(n.level) || 1) + delta)),
+  }));
+  const result = [...keep.slice(0, at), ...moved, ...keep.slice(at)];
+  // 位置与层级都没变 → 当作没动（不写库）
+  const same = result.length === nodes.length
+    && result.every((n, i) => n.id === nodes[i].id && Number(n.level) === Number(nodes[i].level));
+  return same ? null : result;
 }
 
 /** 批量缩进 / 减少缩进：**以这一批的"头"决定，整批一起升降**。
