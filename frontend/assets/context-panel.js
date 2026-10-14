@@ -43,7 +43,7 @@ export function initContextPanel() {
         const mid = btn.dataset.materialId;
         const cidx = btn.dataset.chunkIndex;
         const name = materials?.[mid] ?? `素材 #${mid}`;
-        alert(`原文位置：${name}，第 ${cidx} 段`);
+        (window.__ui?.alert ?? window.alert)(`原文位置：${name}，第 ${cidx} 段`);
       });
     });
   }

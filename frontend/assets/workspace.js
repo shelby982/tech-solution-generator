@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v63';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v65';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v63';
+} from './material-roles.mjs?v=20261016-v65';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -179,6 +179,36 @@ export async function refreshWorkspace() {
     timer = setTimeout(refreshWorkspace, workspace.busy ? 4000 : 10000);
   }
 }
+/** 统一提示：替代原生 alert（不打断样式体系，Esc / 点遮罩可关）。 */
+export function uiAlert(message, { title = '提示' } = {}) {
+  const dialog = openDialog(title,
+    `<p>${esc(message)}</p><footer><button type="button" data-ok class="ui-btn ui-btn--primary">知道了</button></footer>`);
+  const ok = dialog.querySelector('[data-ok]');
+  ok.onclick = () => dialog.close();
+  ok.focus();
+  return dialog;
+}
+
+/** 统一确认：替代原生 confirm。返回 Promise<boolean>（Esc / 点遮罩 = 取消）。 */
+export function uiConfirm(message, { title = '请确认', confirmText = '确认',
+                                    cancelText = '取消', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const dialog = openDialog(title, `<p>${esc(message)}</p><footer>
+      <button type="button" data-cancel class="ui-btn">${esc(cancelText)}</button>
+      <button type="button" data-ok class="ui-btn ${danger ? 'ui-btn--danger' : 'ui-btn--primary'}">${esc(confirmText)}</button>
+    </footer>`);
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; resolve(v); dialog.close(); };
+    dialog.querySelector('[data-ok]').onclick = () => finish(true);
+    dialog.querySelector('[data-cancel]').onclick = () => finish(false);
+    dialog.addEventListener('close', () => finish(false));   // Esc / 点遮罩
+    dialog.querySelector('[data-ok]').focus();
+  });
+}
+
+// 非模块脚本（历史内联脚本 / 别处的 window 调用）也能用同一套
+window.__ui = { alert: uiAlert, confirm: uiConfirm };
+
 export function openDialog(title, html) {
   const dialog = document.createElement('dialog'); dialog.className = 'ws-dialog';
   dialog.innerHTML = `<header><h2>${esc(title)}</h2><button type="button" aria-label="关闭">×</button></header><div class="ws-dialog-body">${html}</div>`;

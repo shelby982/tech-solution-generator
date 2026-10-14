@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 材料撰写</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v63" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v65" />
     <style>
       /* Outline pane */
       .workspace-shell .outline-pane {
@@ -2055,7 +2055,7 @@
     </style>
     <!-- Markdown 渲染（用于预览模式） -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v63" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v65" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -2488,18 +2488,18 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/workbench.js?v=20261016-v63"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v65"></script>
     <script type="module">
-      import { GenerateSession } from './assets/generate-session.js?v=20261016-v63';
-      import { initContextPanel } from './assets/context-panel.js?v=20261016-v63';
-      import { api } from './assets/api.js?v=20261016-v63';
-      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20261016-v63';
+      import { GenerateSession } from './assets/generate-session.js?v=20261016-v65';
+      import { initContextPanel } from './assets/context-panel.js?v=20261016-v65';
+      import { api } from './assets/api.js?v=20261016-v65';
+      import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './assets/workspace.js?v=20261016-v65';
       // 提炼字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
       // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
       // "每行显示 #undefined"）。
       import { CONSTRAINT_LEVELS, constraintLevelLabel,
                evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-               chapterStage, CHAPTER_STAGE_LABELS } from './assets/workspace-model.mjs?v=20261016-v63';
+               chapterStage, CHAPTER_STAGE_LABELS } from './assets/workspace-model.mjs?v=20261016-v65';
       initContextPanel();
 
       // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -5563,6 +5563,6 @@
       })();
     })();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v63"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v65"></script>
   </body>
 </html>

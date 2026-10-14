@@ -176,3 +176,48 @@
 组件最小集（评分点 4 套 → 1 套、素材 5 套 → 2 套）· 尺度收敛（radius 3 档 / 字号 5 档）·
 消灭原生 alert/confirm · 合并两套"确认"语义 · 旧页 `/project-init` `/workbench` 下线 ·
 状态单一来源（`workflow_runs.stage` 与检查点不同步）。
+
+---
+
+## 八、整改进展（P1 已落地）
+
+### 8.1 组件最小集：`frontend/assets/ui.css`（一份定义 + 历史类名映射）
+在三个在线页面（three-mode / review / projects）**最后加载**，因此能统一覆盖各页内联样式里
+的历史定义，不必逐页重写模板。
+
+| 组件 | 规范类名 | 映射的历史类名（示例） |
+|---|---|---|
+| Button（4 变体） | `.ui-btn` / `--primary` / `--danger` / `--sm` | `ws-button` `mw-btn` `chap-btn` `ced-footer-btn` `btn-status-*` `sr-btn` `btn-extract` `ws-primary` `btn-new-project` `btn-distill` … |
+| Card | `.ui-card` | `sr-box` `mw-card` `matched-card` `ref-card` `pc` |
+| Table | `.ui-table` | `sr-table` `v-chapters` |
+| Pill / Chip | `.ui-pill` + `is-ok/is-warn/is-bad/is-none` | `sr-vpill` `v-pill` `band` `ws-count` `ws-chapter-status` `sr-wev` |
+| EmptyState | `.ui-empty` | `mw-empty` `matched-empty` `blocks-empty` |
+| ProgressBar | `.ui-progress` | `status-progress-*` `gen-status-bar*` `outline-progress-*` `ced-gen-progress*` |
+| Modal | `.ui-modal` | `ws-dialog` |
+| Drawer | `.ui-drawer` | `mat-drawer-wb` `context-pane` |
+
+统计：**ui.css 定义 24 个规范类，映射 73 个历史类名** → 同一套视觉，两种写法并存但不再分叉。
+
+### 8.2 尺度收敛（token 化）
+`:root` 新增并强制组件层使用：`--r-1/2/3`（6/10/14）· `--fs-1..5`（11/12/13/14/16）·
+`--sp-1..5`（4/8/12/16/24）。组件层已全部引用 token；**散落在旧页面里的硬编码值仍在（P2 清理）**。
+
+### 8.3 消灭原生弹窗
+新增 `uiAlert()` / `uiConfirm()`（基于 `openDialog`，非模块脚本可用 `window.__ui`）：
+- `mode-outline.js` 4 处 `window.confirm` → `await uiConfirm(...)`
+- `mode-editor.js` 6 处 `alert` → `uiAlert`；1 处同步 `confirm` → `uiConfirm` + 抽出 `switchBlockDiscarding`
+- `workbench.js` / `context-panel.js` → `window.__ui?.alert ?? alert`
+
+复查：**原生 `alert(` 0 处、原生 `confirm(` 0 处**（在线资产）。
+
+### 8.4 效果复核（CDP 实测）
+```
+three-mode 面板：sr-box 圆角 10px(=--r-2) ✅ 主按钮 rgb(37,99,235) ✅ __bootErrors=[] ✅
+review 页：verdict 8 行 + KPI 正常；「已写正文 5/121」✅
+projects 页：#btn-new-project 计算值 rgb(37,99,235) ✅（原为黑）
+后端 751 passed / 前端 102 passed
+```
+
+### 8.5 仍待做（P2）
+合并两套"确认"语义 · 旧页 `/project-init` `/workbench` 下线 · 状态单一来源 ·
+清理旧页面里散落的硬编码字号/圆角 · 素材从"全量预匹配"改成"编写时按需"（产品侧 P2）。

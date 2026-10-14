@@ -2,12 +2,13 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v63';
+import { GenerateSession } from './generate-session.js?v=20261016-v65';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v63';
-import { initContextPanel } from './context-panel.js?v=20261016-v63';
-import { api } from './api.js?v=20261016-v63';
-import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction } from './workspace.js?v=20261016-v63';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v65';
+import { initContextPanel } from './context-panel.js?v=20261016-v65';
+import { api } from './api.js?v=20261016-v65';
+import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction ,
+         uiAlert, uiConfirm} from './workspace.js?v=20261016-v65';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -20,7 +21,7 @@ let responseItemsByBlock = {};
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v63';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v65';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -806,7 +807,18 @@ const blockContentCache = new Map();
 
 // 暴露 selectBlock 到全局供 workbench.js 调用
 window.__onBlockSelected = function(b) {
-  if (editorDirty && !confirm('当前章节未保存，是否放弃修改并切换章节？')) return false;
+  // 原来是同步的原生 confirm；改成统一的 uiConfirm（异步）。
+  // 返回 false 让调用方知道"这次切换没发生"，语义保持不变。
+  if (editorDirty) {
+    uiConfirm('当前章节未保存，是否放弃修改并切换章节？',
+              { title: '未保存的修改', confirmText: '放弃修改并切换', danger: true })
+      .then((ok) => { if (ok) switchBlockDiscarding(b); });
+    return false;
+  }
+  switchBlockDiscarding(b);
+};
+
+function switchBlockDiscarding(b) {
   editorDirty = false;
   currentBlock = b;
   window.__currentEditorBlock = b;
@@ -1215,7 +1227,7 @@ function renderRefCards(b) {
       } catch (err) {
         console.error('强制等级保存失败', err);
         sel.value = currentBlock.constraint_level || 'recommended';
-        alert('强制等级保存失败');
+        uiAlert('强制等级保存失败');
       } finally {
         sel.disabled = false;
       }
@@ -1291,7 +1303,7 @@ function openRefEditModal(refType, title, content) {
       renderRefCards(currentBlock);
     } catch (err) {
       console.error('提炼内容保存失败', err);
-      alert('保存失败');
+      uiAlert('保存失败');
       saveBtn.disabled = false;
       saveBtn.textContent = '保存';
     }
@@ -1643,7 +1655,7 @@ const TONE_DESCRIPTIONS = {
 
 function openPromptPreview() {
   if (threadId && currentBlock?.block_id) {
-    if (editorDirty) { alert('请先保存正文，再发起修订。'); return; }
+    if (editorDirty) { uiAlert('请先保存正文，再发起修订。'); return; }
     confirmChapterAction([currentBlock.block_id], 'revise');
     return;
   }
@@ -2019,7 +2031,7 @@ function openEditModal(source, card) {
 
   overlay.querySelector('.edit-modal-btn.save').addEventListener('click', async () => {
     const newContent = body.innerText.trim();
-    if (!newContent) { alert('内容不能为空'); return; }
+    if (!newContent) { uiAlert('内容不能为空'); return; }
     const saveBtn = overlay.querySelector('.edit-modal-btn.save');
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
@@ -2038,7 +2050,7 @@ function openEditModal(source, card) {
       renderMatchedSources(sources);
     } catch (err) {
       console.error('chunk 保存失败', err);
-      alert('保存失败');
+      uiAlert('保存失败');
       saveBtn.disabled = false;
       saveBtn.textContent = '保存';
     }
@@ -2313,7 +2325,7 @@ if (btnBatchCancel) {
 if (btnBatchGen) {
   btnBatchGen.addEventListener('click', () => {
     if (workspace.threadId) {
-      if (editorDirty) { alert('请先保存正文。'); return; }
+      if (editorDirty) { uiAlert('请先保存正文。'); return; }
       const ids = workspace.chapters.filter(b => !b.content.trim()).map(b => b.block_id);
       if (!ids.length) { location.href = '/review?projectId=' + projectId + '&threadId=' + encodeURIComponent(workspace.threadId); return; }
       confirmChapterAction(ids, 'revise'); return;

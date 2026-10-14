@@ -2,14 +2,15 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v63';
+import { api } from './api.js?v=20261016-v65';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在提炼中/提炼完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
 import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
-       } from './workspace.js?v=20261016-v63';
+         uiAlert, uiConfirm,
+       } from './workspace.js?v=20261016-v65';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -23,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v63';
+       } from './workspace-model.mjs?v=20261016-v65';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -109,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v63';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v65';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -5020,7 +5021,7 @@ async function continueExtraction() {
   const tid = currentThreadId || params.get('threadId') || getThread(projectId);
   if (!tid) {
     // 没有可复用的 run（比如换了浏览器/清过会话）：只能从头，先说清楚代价
-    const go = window.confirm(
+    const go = await uiConfirm(
       '找不到这次运行的记录，只能重新跑一遍：\n' +
       '重新解析要求文件 → 重新派生目录 → 重新逐节提炼（每章一次模型调用）。\n\n' +
       '确定继续？');
@@ -5100,7 +5101,7 @@ function setPartialOutlineBar({ note = '' } = {}) {
 async function confirmReextract() {
   const n = Number(doneBlocks) || 0;
   const total = Number(totalBlocks) || 0;
-  const go = window.confirm(
+  const go = await uiConfirm(
     '「重新提炼」会从头跑一遍：\n' +
     `① 清空已提炼的 ${n}${total ? `/${total}` : ''} 个章节内容；\n` +
     '② 重新解析要求文件；\n' +
@@ -5133,7 +5134,7 @@ async function confirmOutlineGate() {
     // 避免用户在"以为按新要求拆了"的前提下接着提炼要点。
     const ta = instructionInput();
     if (ta && instructionDirty(ta.value, appliedInstruction)) {
-      const go = window.confirm(
+      const go = await uiConfirm(
         '提炼要求已修改，但当前目录仍是按上一版要求生成的。\n' +
         '继续确认（按当前目录提炼要点）？\n\n' +
         '要按新要求重拆，请先取消，再点「重新拆分目录」。');
@@ -5311,7 +5312,7 @@ async function redraftOutline() {
   // 已经提炼过一部分时先讲清代价：重出目录 = 换一版 block_id，已提炼的内容不再对应
   // （等于要重新提炼）。想改标题/顺序/层级应该用每行的「编辑」，想接着提炼用「继续提炼」。
   if (Number(doneBlocks) > 0) {
-    const go = window.confirm(
+    const go = await uiConfirm(
       `当前已提炼 ${doneBlocks}/${totalBlocks} 个章节。\n` +
       '重新拆分目录会用当前的提炼要求重新派生一版目录，已提炼的内容不再对应新目录' +
       '（需要重新提炼）。\n\n' +
