@@ -832,3 +832,25 @@ indentManyOutlineNodes / outdentManyOutlineNodes` 返回的是 **`{nodes, …}` 
 还原（原始目录 POST）→ created:1 / updated:120 → 121 行 / 5 章正文 ✅
 后端 768 passed / 前端 124 passed
 ```
+
+---
+
+## 二十七、左导航连接线穿进圆圈（用户反馈）
+
+### 根因
+连接线写的是死值 `top:30px`，但**圆点在行内垂直居中**、行高随副标题行数变化：
+一行标签时行高 ≈44px（圆点 12–32），两行时 ≈60px（圆点 20–40）——
+于是 `top:30px` 就落进圆圈里，看起来"线从圆点中间穿出来"。
+
+### 改法：相对中线定位（不依赖行高）
+```css
+.sr-rail-item:not(:last-of-type)::after,.sr-sub2-item:not(:last-of-type)::after{
+  top:calc(50% + 12px); bottom:-14px; }   /* 圆点 20px → 中线 +10 是下沿，再留 2px 间距 */
+```
+
+### 实测（CDP 量 dot.bottom 与线顶的距离）
+```
+顶层 5 项：gapBelowDot = 2,2,2,2（最后一项无连接线）
+嵌套 2 项：gapBelowDot = 2（最后一项无连接线）
+线宽 1.5px ✅ —— 线与圆点不再相交
+```

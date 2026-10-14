@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v125';
+import { api } from './api.js?v=20261016-v126';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v125';
+       } from './workspace.js?v=20261016-v126';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -27,7 +27,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v125';
+       } from './workspace-model.mjs?v=20261016-v126';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -113,7 +113,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v125';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v126';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4280,8 +4280,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     color:var(--muted);font-size:11.5px;display:flex;align-items:center;justify-content:center;font-weight:600}
   .sr-lab{font-size:13px}
   .sr-sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+  /* 连接线：从**圆点下沿**开始（圆点在行内垂直居中，行高随副标题行数变化 ——
+     写死 top 会在两行标签时穿进圆圈里，实测过）。用 calc(50% + 12px)：圆点 20px 高，
+     中线 + 10px 是下沿，再留 2px 间距。 */
   .sr-rail-item:not(:last-of-type)::after,.sr-sub2-item:not(:last-of-type)::after{content:"";
-    position:absolute;left:23px;top:30px;bottom:-12px;width:1.5px;background:var(--line)}
+    position:absolute;left:23px;top:calc(50% + 12px);bottom:-14px;width:1.5px;background:var(--line)}
   .sr-rail-item.done .sr-dot,.sr-sub2-item.done .sr-dot{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
   .sr-rail-item.done:not(:last-of-type)::after{background:#a7f3d0}
   .sr-rail-item.on,.sr-sub2-item.on{background:#eff6ff}
