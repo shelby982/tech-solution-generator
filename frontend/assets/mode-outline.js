@@ -2,7 +2,7 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v79';
+import { api } from './api.js?v=20261016-v81';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,7 +10,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v79';
+       } from './workspace.js?v=20261016-v81';
 import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
@@ -24,7 +24,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v79';
+       } from './workspace-model.mjs?v=20261016-v81';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -110,7 +110,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v79';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v81';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3428,15 +3428,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   el.hidden = false;
   el.innerHTML = `
     <div class="sr-box">
-      <div class="sr-head">
-        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
-        <span class="sr-run" id="sr-run-state"></span>
-        <!-- 右侧按钮已按用户要求整组删除。
-             ⚠️ 注意：这组按钮曾承载「继续准备（resume-extract）」——那是**唯一**能接着跑完
-             被暂停的准备的入口（编辑器里的「继续生成」是生成阶段的事，不是准备）。
-             要恢复的话，把它作为**唯一**的上下文主按钮放回这里即可（只在真有暂停/闸门时出现）。 -->
-        <span class="sr-head-actions"></span>
-      </div>
+      <!-- 头行已按用户要求删除（阶段说明与左竖条重复）。
+           原来的运行状态（"正在准备…"）挪到筛选行右侧，空着时不占位。 -->
       <div class="sr-filter">
         <span class="sr-filter-k">筛选</span>
         <label class="sr-filter-item">标包
@@ -3454,6 +3447,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           </select>
         </label>
         <span class="sr-dim">选好标包后，到「待确认」确认类别再生成</span>
+        <span class="sr-run" id="sr-run-state"></span>
       </div>
       ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
       <div class="sr-body">
@@ -3523,7 +3517,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-head b{font-size:14px}
   .sr-step{font-size:11.5px;color:var(--muted);padding:1px 8px;border-radius:999px;border:1px solid var(--line)}
   .sr-step.on{background:#e0edff;border-color:#bfdbfe;color:#1d4ed8;font-weight:600}
-  .sr-step-arrow{color:var(--muted);font-size:11.5px}
   /* 内联展开时用视口高度的一半多，一屏内看完大部分表格；超出则面板内部滚动 */
   .sr-panes{overflow:hidden;display:flex;max-height:58vh}
   .sr-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
@@ -3632,7 +3625,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:230px}
   .sr-redo-menu .mw-btn{justify-content:flex-start;text-align:left;white-space:nowrap}
   .sr-head-actions .mw-btn{font-size:12px}
-  .sr-run{font-size:11.5px;color:var(--muted)}
+  .sr-run{margin-left:auto;font-size:11.5px;color:var(--muted)}
+  .sr-run:empty{display:none}
   .sr-flash.err{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
   .sr-inline-err{color:#b91c1c}
   /* 目录区顶部工具条：只放入口与投标范围（覆盖率模块已按用户要求删除） */
@@ -4787,8 +4781,7 @@ function showSplitPanelRetry(reason) {
   el.hidden = false;
   el.innerHTML = `
     <div class="sr-box">
-      <div class="sr-head"><b>拆分评分点</b>
-        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
+      <div class="sr-head">
         <span class="sr-head-actions">
           <button class="mw-btn" data-act="redraft">重新拆分评分点</button></span></div>
       <div class="sr-flash err" style="margin:12px 15px;">
@@ -4810,9 +4803,7 @@ function showSplitPanelLoading(text) {
   el.hidden = false;
   el.innerHTML = `
     <div class="sr-box">
-      <div class="sr-head"><b>拆分评分点</b>
-        <span class="sr-step-arrow">左侧选阶段：评分点 → 待确认 → 产物 → 编写 → 评审</span>
-        <span class="sr-head-actions"></span></div>
+
       <div class="sr-loading">
         <span class="sr-spinner"></span>
         <span>${escapeHtml(text)}</span>
