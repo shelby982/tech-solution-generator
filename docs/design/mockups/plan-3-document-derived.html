@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方案 3 · 文件驱动 — 原型</title>
+<style>
+  :root{
+    --bg:#f7f9fc; --panel:#fff; --line:#e2e8f0; --line2:#eef2f7;
+    --text:#0f172a; --muted:#64748b; --accent:#2563eb; --accent-soft:#eff6ff;
+    --ok:#16a34a; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb; --idle:#94a3b8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",Inter,Roboto,sans-serif}
+  .topbar{height:52px;display:flex;align-items:center;gap:14px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line2)}
+  .topbar .title{font-size:16px;font-weight:600}.topbar .sp{flex:1}
+  .topbar .act{color:var(--muted);font-size:12.5px}
+  .pill-model{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px}
+  .planlinks{margin-left:14px;display:flex;gap:6px}
+  .planlinks a{font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--muted)}
+  .planlinks a.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .wrap{padding:12px 20px 40px;max-width:1240px}
+  /* 材料条 */
+  .strip{display:flex;align-items:center;gap:10px;background:#f8fafc;border:1px solid var(--line2);
+    border-radius:12px;padding:9px 13px;margin-bottom:12px;flex-wrap:wrap}
+  .strip .sum{font-size:12.5px;color:var(--muted)}.strip .sum b{color:var(--text)}
+  .btn{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:#fff;cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.ghost{border-style:dashed;color:var(--muted)}
+  /* 文件卡 */
+  .fcard{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden}
+  .fhead{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line2);background:#fff}
+  .ext{font-size:10px;font-weight:700;color:#2563eb;border:1px solid #bfdbfe;background:var(--accent-soft);
+    border-radius:5px;padding:1px 6px}
+  .ext.doc{color:#0891b2;border-color:#a5f3fc;background:#ecfeff}
+  .fname{font-size:12.5px;font-weight:600}
+  .fmeta{font-size:11.5px;color:var(--muted)}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:999px;
+    background:var(--ok-soft);border:1px solid #bbf7d0;color:#15803d}
+  .chip .d{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .sp{flex:1}
+  .linkish{font-size:12px;color:var(--accent);background:none;border:0;cursor:pointer;padding:2px 4px}
+  .fbody{padding:10px 14px 12px;background:#fbfdff}
+  .caption{font-size:11.5px;color:var(--muted);margin-bottom:8px}
+  /* 标包子项 */
+  .pkgrow{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;margin-bottom:8px;cursor:pointer}
+  .pkgrow:hover{border-color:#bfdbfe;background:#fcfdff}
+  .pkgrow.on{border-color:var(--accent);background:var(--accent-soft)}
+  .pkgrow .nm{font-size:12.5px;font-weight:600}
+  .pkgrow .nm small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+  .stats{display:flex;gap:7px;flex-wrap:wrap}
+  .st{font-size:11px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#f8fafc;color:#475569;white-space:nowrap}
+  .st.ok{background:var(--ok-soft);border-color:#bbf7d0;color:#15803d}
+  .st.warn{background:var(--warn-soft);border-color:#fde68a;color:#b45309}
+  .st.run{background:var(--accent-soft);border-color:#bfdbfe;color:#1d4ed8}
+  .st.idle{color:var(--muted)}
+  .go{color:var(--accent);font-size:12px;white-space:nowrap}
+  /* 挂标包 */
+  .attach{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px}
+  .attach .k{font-size:12px;color:var(--muted)}
+  .picklist{display:flex;gap:7px;flex-wrap:wrap}
+  .pick{font:inherit;font-size:11.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--text);cursor:pointer}
+  .pick.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .attachnote{font-size:11.5px;color:var(--muted);margin-top:8px}
+  /* 右侧详情（进入某标包） */
+  .drawer{margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .drawer h3{margin:0 0 8px;font-size:14px}
+  .rail5{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .r5{font-size:11.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .r5.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .kv{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="title">应标文件生成</span>
+    <span style="font-size:12.5px;color:var(--muted)">XX市政交通项目</span>
+    <span class="sp"></span>
+    <span class="act">处理待办</span><span class="act">版本记录</span><span class="act">运行详情</span>
+    <span class="pill-model">● deepseek-v4-pro ⌄</span>
+    <span class="planlinks">
+      <a href="plan-1-package-workspace.html">方案 1</a>
+      <a href="plan-2-intake-matrix.html">方案 2</a>
+      <a class="on" href="#">方案 3</a>
+    </span>
+  </div>
+
+  <div class="wrap">
+    <div class="strip">
+      <span class="sum"><b>材料 2</b> · 2 份文件 · 共 5.6 MB</span>
+      <span class="sp"></span>
+      <button class="btn ghost">＋ 添加文件</button>
+      <button class="btn primary" id="btnParse">解析招标文件</button>
+    </div>
+
+    <!-- 招标文件：就地展开它包含的标包 -->
+    <div class="fcard">
+      <div class="fhead">
+        <span class="ext">PDF</span>
+        <span class="fname">1_2026年南网数字运营软件科技（广东）有限公司…招标文件.pdf</span>
+        <span class="chip"><span class="d"></span>已解析 · 214 段</span>
+        <span class="sp"></span>
+        <button class="linkish">重新解析</button>
+      </div>
+      <div class="fbody">
+        <div class="caption">从这份招标文件里解析出 <b>3 个标包</b>（每条都带原文出处，不猜测）：</div>
+        <div id="pkgs"></div>
+      </div>
+    </div>
+
+    <!-- 技术规范书：挂到标包 -->
+    <div class="fcard">
+      <div class="fhead">
+        <span class="ext doc">DOCX</span>
+        <span class="fname">技术规范书-智慧交通分册.docx</span>
+        <span class="chip"><span class="d"></span>已解析 · 96 段</span>
+        <span class="sp"></span>
+        <button class="linkish">重新解析</button>
+      </div>
+      <div class="fbody">
+        <div class="attach">
+          <span class="k">挂到标包</span>
+          <span class="picklist" id="attaches"></span>
+        </div>
+        <div class="attachnote">一份技术规范书通常只属于一个标包；也可以挂多个。挂上之后，该标包的评分点与目录会结合它来拆。</div>
+      </div>
+    </div>
+
+    <!-- 点标包 → 该标包的五步 -->
+    <div class="drawer" id="drawer"></div>
+  </div>
+
+<script>
+const PKGS = [
+  { id:'p1', name:'标的1 / 标包2', sub:'高可靠技术专题研究与验证标包',
+    stats:[['ok','商务 8 个'],['ok','技术 8 个'],['ok','目录 已生成'],['run','正文 12/38']],
+    detail:'商务评分点 8 · 技术评分点 8 · 目录已生成 · 正文 12/38 章', stages:['评分点','待确认','产物','编写','评审'], at:3 },
+  { id:'p2', name:'标的1 / 标包3', sub:'云资源池及网络架构',
+    stats:[['warn','商务 缺'],['ok','技术 9 个'],['run','目录 待确认']],
+    detail:'只拆出技术评分点，商务评分点缺失 —— 建议先补拆商务再确认目录。', stages:['评分点','待确认','产物','编写','评审'], at:1 },
+  { id:'p3', name:'标的2 / 标包1', sub:'客户档案管理认证',
+    stats:[['idle','待拆评分点']],
+    detail:'还没拆评分点。点右侧「拆评分点 ›」开始。', stages:['评分点','待确认','产物','编写','评审'], at:0 },
+];
+let curPkg = null;
+const attached = new Set(['p1']);
+
+function renderPkgs() {
+  document.getElementById('pkgs').innerHTML = PKGS.map((p) => `
+    <div class="pkgrow${curPkg === p.id ? ' on' : ''}" data-id="${p.id}">
+      <span class="nm">${p.name}<small>${p.sub}</small></span>
+      <span class="sp"></span>
+      <span class="stats">${p.stats.map(([c, t]) => `<span class="st ${c}">${t}</span>`).join('')}</span>
+      <span class="go">${p.at === 0 ? '拆评分点 ›' : '进入 ›'}</span>
+    </div>`).join('');
+  document.querySelectorAll('.pkgrow').forEach((el) => el.addEventListener('click', () => {
+    curPkg = el.dataset.id; renderAll();
+  }));
+}
+function renderAttach() {
+  document.getElementById('attaches').innerHTML = PKGS.map((p) =>
+    `<button class="pick${attached.has(p.id) ? ' on' : ''}" data-id="${p.id}">${p.name}</button>`).join('');
+  document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.id;
+    if (attached.has(id)) attached.delete(id); else attached.add(id);
+    renderAttach();
+  }));
+}
+function renderDrawer() {
+  const p = PKGS.find((x) => x.id === curPkg);
+  const el = document.getElementById('drawer');
+  if (!p) {
+    el.innerHTML = `<h3>点上面任意一个标包</h3>
+      <div class="kv">选中后会在这里显示该标包的五步入口 —— 文件、评分点、目录、正文、评审都只属于它。</div>`;
+    return;
+  }
+  el.innerHTML = `<h3>${p.name} · ${p.sub}</h3>
+    <div class="rail5">${p.stages.map((s, i) =>
+      `<span class="r5${i === p.at ? ' on' : ''}">${i + 1} ${s}</span>`).join('')}</div>
+    <div class="kv">${p.detail}</div>
+    <div class="kv" style="margin-top:6px">已挂技术规范书：${
+      attached.has(p.id) ? '技术规范书-智慧交通分册.docx' : '（无）'}</div>
+    <div style="margin-top:10px"><button class="btn primary">进入「${p.stages[p.at]}」›</button></div>`;
+}
+function renderAll() { renderPkgs(); renderAttach(); renderDrawer(); }
+document.getElementById('btnParse').addEventListener('click', () => {
+  document.querySelector('.caption').innerHTML =
+    '从这份招标文件里解析出 <b>3 个标包</b>（刚重新解析：2 条来自「标包划分」章节，1 条来自评分表表头）';
+});
+renderAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方案 2 · 准备阶段 + 标包矩阵 — 原型</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --panel:#fff; --line:#e2e8f0; --line2:#eef2f7;
+    --text:#0f172a; --muted:#64748b; --accent:#2563eb; --accent-soft:#eff6ff;
+    --ok:#16a34a; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+    --bad:#dc2626; --bad-soft:#fef2f2; --idle:#94a3b8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",Inter,Roboto,sans-serif}
+  .topbar{height:52px;display:flex;align-items:center;gap:14px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line2)}
+  .topbar .title{font-size:16px;font-weight:600}.topbar .sp{flex:1}
+  .topbar .act{color:var(--muted);font-size:12.5px}
+  .pill-model{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px}
+  .planlinks{margin-left:14px;display:flex;gap:6px}
+  .planlinks a{font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--muted)}
+  .planlinks a.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .wrap{padding:16px 20px 40px;max-width:1240px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .card h2{margin:0 0 2px;font-size:15px}
+  .card .sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+  /* 4 步流水线 */
+  .pipe{display:flex;align-items:flex-start;gap:0}
+  .pstep{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;cursor:pointer}
+  .pstep .dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:#fff;color:var(--muted);
+    font-size:12px;display:flex;align-items:center;justify-content:center;z-index:1}
+  .pstep .lab{font-size:12.5px;font-weight:600;text-align:center}
+  .pstep .s{font-size:11px;color:var(--muted);text-align:center}
+  .pstep.done .dot{border-color:var(--ok);background:var(--ok);color:#fff}
+  .pstep.on .dot{border-color:var(--accent);background:#fff;color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+  .pstep::before{content:"";position:absolute;top:13px;left:0;right:0;height:2px;background:var(--line)}
+  .pstep:first-child::before{left:50%}
+  .pstep:last-child::before{right:50%}
+  .pstep.done::before{background:var(--ok)}
+  .foot{margin-top:14px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:10px}
+  .btn{font:inherit;font-size:12.5px;padding:6px 13px;border-radius:9px;border:1px solid var(--line);background:#fff;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  /* 矩阵 */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  th{font-size:11.5px;color:var(--muted);font-weight:600;background:#fafbfd;border-bottom:1px solid var(--line)}
+  tr.row{cursor:pointer}
+  tr.row:hover{background:#f8fafc}
+  tr.row.on{background:var(--accent-soft)}
+  tr.row.on td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  .cell{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:#fff;white-space:nowrap}
+  .cell.ok{background:var(--ok-soft);border-color:#bbf7d0;color:#15803d}
+  .cell.warn{background:var(--warn-soft);border-color:#fde68a;color:#b45309}
+  .cell.run{background:var(--accent-soft);border-color:#bfdbfe;color:#1d4ed8}
+  .cell.idle{color:var(--muted)}
+  .pk{font-weight:600}
+  .pk small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+  .go{color:var(--accent);font-size:12px;white-space:nowrap}
+  .detail{margin-top:8px;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;background:#fbfdff}
+  .detail h4{margin:0 0 6px;font-size:13px}
+  .kv{font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+  .warnbar{background:var(--warn-soft);border:1px solid #fde68a;color:#b45309;border-radius:9px;
+    padding:8px 11px;font-size:12.5px;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="title">应标文件生成</span>
+    <span style="font-size:12.5px;color:var(--muted)">XX市政交通项目</span>
+    <span class="sp"></span>
+    <span class="act">处理待办</span><span class="act">版本记录</span><span class="act">运行详情</span>
+    <span class="pill-model">● deepseek-v4-pro ⌄</span>
+    <span class="planlinks">
+      <a href="plan-1-package-workspace.html">方案 1</a>
+      <a class="on" href="#">方案 2</a>
+      <a href="plan-3-document-derived.html">方案 3</a>
+    </span>
+  </div>
+
+  <div class="wrap">
+    <!-- 准备：4 步 -->
+    <div class="card">
+      <h2>准备</h2>
+      <div class="sub">招标文件的解析要**先拆出标包**，再基于标包拆商务/技术评分点。四步走完才进入五步工作区。</div>
+      <div class="pipe" id="pipe"></div>
+      <div class="foot">
+        <span id="pipeHint"></span>
+        <span style="flex:1"></span>
+        <button class="btn" id="prevStep">← 上一步</button>
+        <button class="btn primary" id="nextStep">下一步 →</button>
+      </div>
+    </div>
+
+    <!-- 标包矩阵 -->
+    <div class="card">
+      <h2>标包进度</h2>
+      <div class="sub">行 = 标包，列 = 阶段。点任意一行进入该标包的五步；缺口会在矩阵里直接显示。</div>
+      <table>
+        <thead><tr>
+          <th style="width:26%">标包</th><th>文件</th><th>商务评分点</th><th>技术评分点</th>
+          <th>应答目录</th><th>正文</th><th>评审</th><th></th>
+        </tr></thead>
+        <tbody id="mrows"></tbody>
+      </table>
+      <div id="detail"></div>
+    </div>
+  </div>
+
+<script>
+const STEPS = [
+  ['上传文件', '招标文件 / 技术规范书'],
+  ['解析招标文件', '拆出标包 / 标段 / 标的'],
+  ['逐标包拆评分点', '商务 + 技术'],
+  ['标包就绪', '进入五步'],
+];
+let pipeAt = 1;   // 当前停在②
+
+const ROWS = [
+  { id:'p1', name:'标的1 / 标包2', sub:'高可靠技术专题研究与验证标包',
+    files:['ok','2 份'], com:['ok','8 个'], tech:['ok','8 个'], toc:['ok','已生成'],
+    body:['run','12/38'], rev:['idle','—'],
+    detail:'这个标包已经准备完成。目录已生成、正文写了 12 章，可以直接进入五步继续编写。' },
+  { id:'p2', name:'标的1 / 标包3', sub:'云资源池及网络架构',
+    files:['ok','1 份'], com:['warn','缺商务评分点'], tech:['ok','9 个'], toc:['run','待确认'],
+    body:['idle','—'], rev:['idle','—'],
+    detail:'该标包只拆出了技术评分点，商务评分点缺失 —— 先补拆商务，再确认目录。',
+    warn:'缺商务评分点：这份招标文件的商务评分表可能没有声明「适用标包」，需要人工指认后重拆。' },
+  { id:'p3', name:'标的2 / 标包1', sub:'客户档案管理认证',
+    files:['run','未解析'], com:['idle','—'], tech:['idle','—'], toc:['idle','—'],
+    body:['idle','—'], rev:['idle','—'],
+    detail:'这个标包的文件还没解析出正文，无法拆评分点。先解析招标文件。' },
+];
+
+function renderPipe() {
+  document.getElementById('pipe').innerHTML = STEPS.map(([lab, s], i) => {
+    const cls = i < pipeAt ? 'done' : (i === pipeAt ? 'on' : '');
+    return `<div class="pstep ${cls}" data-i="${i}"><span class="dot">${i < pipeAt ? '✓' : i + 1}</span>
+      <span class="lab">${lab}</span><span class="s">${s}</span></div>`;
+  }).join('');
+  document.querySelectorAll('.pstep').forEach((el) => el.addEventListener('click', () => {
+    pipeAt = Number(el.dataset.i); renderPipe();
+  }));
+  const hints = [
+    '① 上传：把招标文件与技术规范书放进来（一份招标文件可能含多个标包）。',
+    '② 解析招标文件：从原文里检索「标的 / 标包 / 标段」，只按事实列出，并给出原文出处。',
+    '③ 逐标包拆评分点：对选定的标包，分别拆出商务与技术两套评分点。',
+    '④ 就绪：所有标包都准备完成后，点矩阵任意一行进入五步。',
+  ];
+  document.getElementById('pipeHint').textContent = hints[pipeAt];
+}
+function cell(c) { return `<span class="cell ${c[0]}">${c[1]}</span>`; }
+function renderMatrix(sel) {
+  document.getElementById('mrows').innerHTML = ROWS.map((r) => `
+    <tr class="row${r.id === sel ? ' on' : ''}" data-id="${r.id}">
+      <td><span class="pk">${r.name}<small>${r.sub}</small></span></td>
+      <td>${cell(r.files)}</td><td>${cell(r.com)}</td><td>${cell(r.tech)}</td>
+      <td>${cell(r.toc)}</td><td>${cell(r.body)}</td><td>${cell(r.rev)}</td>
+      <td class="go">进入 ›</td></tr>`).join('');
+  document.querySelectorAll('tr.row').forEach((tr) => tr.addEventListener('click', () => {
+    renderMatrix(tr.dataset.id);
+  }));
+  const r = ROWS.find((x) => x.id === sel);
+  document.getElementById('detail').innerHTML = r ? `
+    <div class="detail">
+      <h4>${r.name} · ${r.sub}</h4>
+      <div class="kv"><span>文件：${r.files[1]}</span><span>商务评分点：${r.com[1]}</span>
+        <span>技术评分点：${r.tech[1]}</span><span>目录：${r.toc[1]}</span><span>正文：${r.body[1]}</span></div>
+      <div style="font-size:12.5px;margin-top:8px">${r.detail}</div>
+      ${r.warn ? `<div class="warnbar">⚠ ${r.warn}</div>` : ''}
+      <div style="margin-top:10px"><button class="btn primary">进入该标包的五步 ›</button></div>
+    </div>` : '';
+}
+document.getElementById('prevStep').addEventListener('click', () => { pipeAt = Math.max(0, pipeAt - 1); renderPipe(); });
+document.getElementById('nextStep').addEventListener('click', () => { pipeAt = Math.min(STEPS.length - 1, pipeAt + 1); renderPipe(); });
+renderPipe(); renderMatrix('p2');
+</script>
+</body>
+</html>
