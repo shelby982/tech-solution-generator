@@ -622,16 +622,55 @@ document.getElementById('mat-more')?.addEventListener('click', () => {
   rows.classList.toggle('expanded');
   refreshMaterialSummary();
 });
+/** 展开/收起「明细」的**唯一入口**。
+ *
+ * 为什么必须收口：卡片上的「查看明细」和类型徽标也要打开它 —— 如果它们各自改 class，
+ * 就会和按钮文案/aria 不同步；更糟的是直接调 `mat-manage.click()` 会**切换**状态，
+ * 明细开着时点徽标反而把它关掉（实测就是这个 bug）。
+ */
+function setDetailsExpanded(open) {
+  const rows = document.getElementById('mat-rows');
+  const btn = document.getElementById('mat-manage');
+  if (!rows) return;
+  rows.classList.toggle('collapsed', !open);
+  rows.classList.toggle('expanded', !!open);
+  if (btn) {
+    btn.textContent = open ? '收起明细 ▴' : '明细 ▾';
+    btn.setAttribute('aria-expanded', String(!!open));
+  }
+  refreshMaterialSummary();
+}
+
+/** 台面（卡片区）收起/展开 —— 设计稿 A 承诺的能力；状态记在 localStorage，刷新后保持。 */
+function setDeskCollapsed(collapsed) {
+  const box = document.getElementById('mat-cards');
+  const foot = document.getElementById('desk-foot');
+  const btn = document.getElementById('mat-desk-toggle');
+  if (box) box.hidden = !!collapsed;
+  if (foot) foot.hidden = !!collapsed;
+  if (btn) {
+    btn.textContent = collapsed ? '展开台面 ▾' : '收起台面 ▴';
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.title = collapsed ? '展开文件台面' : '收起文件台面（状态不会丢）';
+  }
+  try { localStorage.setItem('ge.matDesk.collapsed', collapsed ? '1' : '0'); } catch {}
+}
+
+document.getElementById('mat-desk-toggle')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  const box = document.getElementById('mat-cards');
+  setDeskCollapsed(!(box && box.hidden));   // 当前可见 → 收起
+});
+// 启动即恢复上次的台面折叠状态（刷新后保持）
+try {
+  if (localStorage.getItem('ge.matDesk.collapsed') === '1') setDeskCollapsed(true);
+} catch {}
+
 document.getElementById('mat-manage')?.addEventListener('click', (ev) => {
   ev.preventDefault();
   const rows = document.getElementById('mat-rows');
-  const btn = ev.currentTarget;
   if (!rows) return;
-  const collapsed = rows.classList.toggle('collapsed');
-  rows.classList.toggle('expanded', !collapsed);   // 展开时也放开高度限制（文件多）
-  btn.textContent = collapsed ? '明细 ▾' : '收起 ▴';
-  btn.setAttribute('aria-expanded', String(!collapsed));
-  refreshMaterialSummary();
+  setDetailsExpanded(rows.classList.contains('collapsed'));   // 收起态 → 展开
 });
 
 apiClose.addEventListener('click', closeApiModal);
@@ -2607,22 +2646,25 @@ function bindMaterialCards(box) {
       setMatHint('请重新选择这份文件上传；上传后会在原位替换同名记录');
       return;
     }
-    // 「查看明细」：展开明细并滚到这一行（改类型/删除仍在明细里做）
+    // 「查看明细」：**展开**（不是切换）并滚到这一行（改类型/删除仍在明细里做）
     const rows = document.getElementById('mat-rows');
     if (rows) {
-      rows.classList.remove('collapsed');
-      rows.classList.add('expanded');
+      setDetailsExpanded(true);
       const row = rows.querySelector(`.mat-row [data-id="${id}"], .mat-row[data-mid="${id}"]`)
         || [...rows.querySelectorAll('.mat-row')].find((r) => r.querySelector(`[data-id="${id}"]`));
       (row || rows).scrollIntoView({ behavior: 'smooth', block: 'center' });
       if (row) { row.classList.add('is-flash'); setTimeout(() => row.classList.remove('is-flash'), 1200); }
     }
-    const manage = document.getElementById('mat-manage');
-    if (manage) manage.setAttribute('aria-expanded', 'true');
   }));
   // 改类型：同样走明细（不在这里做第二套编辑入口）
   box.querySelectorAll('[data-card-role]').forEach((b) => b.addEventListener('click', () => {
-    document.getElementById('mat-manage')?.click();
+    setDetailsExpanded(true);      // 之前调 mat-manage.click() 是**切换**：明细开着时反而关掉
+    const id = b.dataset.cardRole;
+    const rows = document.getElementById('mat-rows');
+    const row = rows && [...rows.querySelectorAll('.mat-row')]
+      .find((r) => r.querySelector(`[data-id="${id}"]`));
+    (row || rows)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (row) { row.classList.add('is-flash'); setTimeout(() => row.classList.remove('is-flash'), 1200); }
     setMatHint('在「明细」里改这份文件的类型（招标文件 / 技术规范书 / 我方素材）');
   }));
   box.querySelector('[data-card-add]')?.addEventListener('click', () => {
