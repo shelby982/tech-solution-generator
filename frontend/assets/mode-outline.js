@@ -622,25 +622,6 @@ document.getElementById('mat-more')?.addEventListener('click', () => {
   rows.classList.toggle('expanded');
   refreshMaterialSummary();
 });
-/** 展开/收起「明细」的**唯一入口**。
- *
- * 为什么必须收口：卡片上的「查看明细」和类型徽标也要打开它 —— 如果它们各自改 class，
- * 就会和按钮文案/aria 不同步；更糟的是直接调 `mat-manage.click()` 会**切换**状态，
- * 明细开着时点徽标反而把它关掉（实测就是这个 bug）。
- */
-function setDetailsExpanded(open) {
-  const rows = document.getElementById('mat-rows');
-  const btn = document.getElementById('mat-manage');
-  if (!rows) return;
-  rows.classList.toggle('collapsed', !open);
-  rows.classList.toggle('expanded', !!open);
-  if (btn) {
-    btn.textContent = open ? '收起明细 ▴' : '明细 ▾';
-    btn.setAttribute('aria-expanded', String(!!open));
-  }
-  refreshMaterialSummary();
-}
-
 /** 台面（卡片区）收起/展开 —— 设计稿 A 承诺的能力；状态记在 localStorage，刷新后保持。 */
 function setDeskCollapsed(collapsed) {
   const box = document.getElementById('mat-cards');
@@ -666,12 +647,6 @@ try {
   if (localStorage.getItem('ge.matDesk.collapsed') === '1') setDeskCollapsed(true);
 } catch {}
 
-document.getElementById('mat-manage')?.addEventListener('click', (ev) => {
-  ev.preventDefault();
-  const rows = document.getElementById('mat-rows');
-  if (!rows) return;
-  setDetailsExpanded(rows.classList.contains('collapsed'));   // 收起态 → 展开
-});
 
 apiClose.addEventListener('click', closeApiModal);
 apiCancel.addEventListener('click', async () => {
@@ -2625,13 +2600,81 @@ function renderMaterialCards(mats) {
             title="还没指定标包 —— 点开选择（一份文件可以属于多个标包）">未指定标包</button>`}
       </div>
       <button type="button" class="mact${st.upload ? '' : ' q'}"
-        data-card-act="${m.id}" data-act-upload="${st.upload ? '1' : ''}">${escapeHtml(st.act)} ›</button>
+        data-card-act="${m.id}" data-act-upload="${st.upload ? '1' : ''}">${escapeHtml(st.upload ? st.act : '更多')} ›</button>
     </div>`;
   }).join('');
   box.innerHTML = cards + `<button type="button" class="mcard add" data-card-add="1">
       <span class="plus">＋</span><span class="t">添加文件</span>
       <span class="s">支持多选 · PDF / DOCX / XLSX</span></button>`;
   bindMaterialCards(box);
+}
+
+/** 卡片自带的操作菜单：改类型 / 重新上传 / 删除。
+ *
+ * 用户要求去掉「明细」按钮及其点击逻辑 —— 明细里的改类型与删除必须搬到卡片上，
+ * 否则功能就丢了。所以这里复用同一批接口（PATCH /api/materials/{id}、DELETE）。
+ */
+const CARD_ROLE_OPTIONS = [
+  ['main_rfp', '招标文件'], ['spec', '技术规范书'], ['source', '我方素材'], ['requirement', '其他'],
+];
+
+function openMaterialCardMenu(materialId, btn) {
+  document.querySelectorAll('.mmore-pop').forEach((x) => x.remove());
+  const card = btn.closest('.mcard');
+  if (!card) return;
+  const mat = lastMaterials.find((m) => String(m.id) === String(materialId)) || {};
+  const curRole = String(mat.role || '');
+  const lost = String(matIntegrity[String(materialId)] || '') === 'missing'
+    || String(matIntegrity[String(materialId)] || '') === 'empty';
+
+  const pop = document.createElement('div');
+  pop.className = 'mmore-pop';
+  pop.innerHTML = `
+    <div class="mmore-t">改类型</div>
+    ${CARD_ROLE_OPTIONS.map(([v, l]) => `<button type="button" class="mmore-i${v === curRole ? ' on' : ''}"
+      data-role="${v}">${escapeHtml(l)}${v === curRole ? ' ✓' : ''}</button>`).join('')}
+    <div class="mmore-sep"></div>
+    <button type="button" class="mmore-i" data-reup="1">重新上传</button>
+    <button type="button" class="mmore-i danger" data-del="1">删除这份文件</button>`;
+  card.appendChild(pop);
+
+  pop.querySelectorAll('[data-role]').forEach((b) => b.addEventListener('click', async () => {
+    const role = b.dataset.role;
+    if (role === curRole) { pop.remove(); return; }
+    try {
+      await fetch(`/api/materials/${materialId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      setMatHint(`已把这份文件改为「${b.textContent.replace(' ✓', '')}」`);
+      pop.remove();
+      await loadMaterials();
+    } catch (e) { console.error('[materials] 改类型失败', e); }
+  }));
+  pop.querySelector('[data-reup]')?.addEventListener('click', () => {
+    pop.remove();
+    document.getElementById('btn-add-req')?.click();
+    setMatHint('请重新选择这份文件上传');
+  });
+  pop.querySelector('[data-del]')?.addEventListener('click', async () => {
+    pop.remove();
+    const okDel = await uiConfirm('删除这份文件？', '记录与已解析内容都会被删除，不可撤销。', '删除');
+    if (!okDel) return;
+    await fetch(`/api/materials/${materialId}`, { method: 'DELETE' });
+    setMatHint('已删除');
+    await loadMaterials();
+  });
+  if (lost) pop.querySelector('[data-reup]')?.classList.add('on');
+
+  window.setTimeout(() => {
+    const off = (e) => {
+      if (!pop.contains(e.target) && !card.contains(e.target)) {
+        pop.remove();
+        document.removeEventListener('click', off, true);
+      }
+    };
+    document.addEventListener('click', off, true);
+  }, 0);
 }
 
 function bindMaterialCards(box) {
@@ -2646,26 +2689,13 @@ function bindMaterialCards(box) {
       setMatHint('请重新选择这份文件上传；上传后会在原位替换同名记录');
       return;
     }
-    // 「查看明细」：**展开**（不是切换）并滚到这一行（改类型/删除仍在明细里做）
-    const rows = document.getElementById('mat-rows');
-    if (rows) {
-      setDetailsExpanded(true);
-      const row = rows.querySelector(`.mat-row [data-id="${id}"], .mat-row[data-mid="${id}"]`)
-        || [...rows.querySelectorAll('.mat-row')].find((r) => r.querySelector(`[data-id="${id}"]`));
-      (row || rows).scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (row) { row.classList.add('is-flash'); setTimeout(() => row.classList.remove('is-flash'), 1200); }
-    }
+    // 卡片自带操作菜单（明细入口已按用户要求移除）
+    openMaterialCardMenu(id, b);
   }));
   // 改类型：同样走明细（不在这里做第二套编辑入口）
-  box.querySelectorAll('[data-card-role]').forEach((b) => b.addEventListener('click', () => {
-    setDetailsExpanded(true);      // 之前调 mat-manage.click() 是**切换**：明细开着时反而关掉
-    const id = b.dataset.cardRole;
-    const rows = document.getElementById('mat-rows');
-    const row = rows && [...rows.querySelectorAll('.mat-row')]
-      .find((r) => r.querySelector(`[data-id="${id}"]`));
-    (row || rows)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if (row) { row.classList.add('is-flash'); setTimeout(() => row.classList.remove('is-flash'), 1200); }
-    setMatHint('在「明细」里改这份文件的类型（招标文件 / 技术规范书 / 我方素材）');
+  box.querySelectorAll('[data-card-role]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openMaterialCardMenu(b.dataset.cardRole, b);
   }));
   box.querySelector('[data-card-add]')?.addEventListener('click', () => {
     document.getElementById('btn-add-req')?.click();

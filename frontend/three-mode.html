@@ -341,6 +341,20 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
   background:none; border:0; cursor:pointer; padding:2px 4px;
 }
 .mcard .mact.q{color:var(--muted)}
+.mmore-pop{
+  position:absolute; z-index:30; right:8px; bottom:34px; min-width:150px; padding:5px;
+  background:#fff; border:1px solid var(--line); border-radius:9px;
+  box-shadow:0 8px 24px rgba(16,24,40,.14);
+}
+.mmore-t{font-size:11px; color:var(--muted); padding:3px 8px 2px}
+.mmore-i{
+  display:block; width:100%; text-align:left; font:inherit; font-size:12.5px;
+  padding:5px 8px; border:0; background:none; border-radius:6px; cursor:pointer; color:var(--text);
+}
+.mmore-i:hover{background:#f8fafc}
+.mmore-i.on{color:#2563eb; font-weight:600}
+.mmore-i.danger{color:#dc2626}
+.mmore-sep{height:1px; background:var(--line); margin:4px 2px}
 .mcard.add{
   border-style:dashed; background:#fcfdff; align-items:center; justify-content:center;
   color:#64748b; cursor:pointer; text-align:center;
@@ -3408,7 +3422,6 @@ body[data-view="matching"] .match-detail { display: block; }
           title="支持一次选多个；类型按文件名自动识别，可在明细里逐个修改">＋ 添加文件</button>
         <button class="btn-parse-pkg" id="btn-parse-pkg" type="button"
           title="读取已上传文件的正文，检索「标的 / 标包 / 标段」；只按原文事实列出，不猜测">解析标包</button>
-        <button class="mat-more-btn" id="mat-manage" type="button" aria-expanded="false">明细 ▾</button>
         <button class="mat-more-btn" id="mat-desk-toggle" type="button" aria-expanded="true"
           title="收起文件台面（状态不会丢）">收起台面 ▴</button>
       </span>
@@ -3426,7 +3439,9 @@ body[data-view="matching"] .match-detail { display: block; }
     <div class="desk-foot" id="desk-foot">
       <b>解析标包</b> = 读取已上传文件的正文，检索「标的 / 标包 / 标段」，只按原文事实列出，找不到就说找不到
     </div>
-    <div class="mrow2 collapsed" id="mat-rows">
+    <!-- 明细表格：入口已按用户要求移除（改类型/删除改到卡片上）。节点保留但隐藏 —— 
+         renderMats 等既有代码仍会写入它，删节点会造成空引用。 -->
+    <div class="mrow2 collapsed" id="mat-rows" hidden>
       <div class="mat-section" id="mat-section-req">
         <div class="mat-list" id="req-stack"></div>
         <div id="req-role-warn"></div>
