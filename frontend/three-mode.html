@@ -296,6 +296,60 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 }
 /* 「解析标包」是上传后的确认动作：实线按钮、**不参与 flex 伸缩**、文字不换行。
    之前它复用了 .btn-add-mat（flex:1 + 虚线），把「＋ 添加文件」挤成了两行。 */
+/* ── 方案 A：文档台面 ────────────────────────────────────────────────── */
+.mat-cards{
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(228px, 1fr));
+  gap:10px; padding:10px 14px 0;
+}
+.mat-cards:empty{display:none}
+.mcard{
+  display:flex; flex-direction:column; gap:7px; min-height:132px;
+  background:#fff; border:1px solid var(--line); border-radius:12px; padding:9px 11px 8px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04); position:relative;
+}
+.mcard.is-warn{border-color:#fde68a; background:#fffdf6}
+.mcard.is-bad{border-color:#fecaca; background:#fffdfd}
+.mcard .badge{
+  align-self:flex-start; font-size:11px; padding:2px 8px; border-radius:6px;
+  background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; cursor:pointer;
+}
+.mcard .badge.src{background:#f1f5f9; color:#475569; border-color:var(--line)}
+.mcard .mfname{
+  font-size:12.5px; font-weight:600; line-height:1.35; min-height:34px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.mcard .mchip{
+  display:inline-flex; align-items:center; gap:5px; align-self:flex-start;
+  font-size:11.5px; padding:2px 8px; border-radius:999px;
+  background:#ecfdf5; border:1px solid #bbf7d0; color:#15803d;
+}
+.mcard .mchip .d{width:6px; height:6px; border-radius:50%; background:#16a34a}
+.mcard .mchip.warn{background:#fffbeb; border-color:#fde68a; color:#b45309}
+.mcard .mchip.warn .d{background:#d97706}
+.mcard .mchip.bad{background:#fef2f2; border-color:#fecaca; color:#b91c1c}
+.mcard .mchip.bad .d{background:#dc2626}
+.mcard .mchip.wait{background:#f8fafc; border-color:var(--line); color:var(--muted)}
+.mcard .mchip.wait .d{background:#94a3b8}
+.mcard .mpkgs{display:flex; gap:5px; flex-wrap:wrap}
+.mcard .mpkg{
+  font:inherit; font-size:11px; padding:2px 7px; border-radius:6px;
+  background:#f1f5f9; color:#334155; border:1px solid var(--line); cursor:pointer;
+}
+.mcard .mpkg.none{background:#fff; border-style:dashed; color:var(--muted)}
+.mcard .mact{
+  align-self:flex-end; margin-top:auto; font:inherit; font-size:12px; color:#2563eb;
+  background:none; border:0; cursor:pointer; padding:2px 4px;
+}
+.mcard .mact.q{color:var(--muted)}
+.mcard.add{
+  border-style:dashed; background:#fcfdff; align-items:center; justify-content:center;
+  color:#64748b; cursor:pointer; text-align:center;
+}
+.mcard.add .plus{font-size:22px; color:#94a3b8; line-height:1}
+.mcard.add .t{font-size:12.5px}
+.mcard.add .s{font-size:11px; color:#94a3b8}
+.desk-foot{padding:6px 14px 8px; font-size:11.5px; color:var(--muted)}
+.desk-foot b{color:#334155}
 .btn-parse-pkg {
   flex: none; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px;
   background: #fff; font-size: 13px; color: var(--accent, #2563eb); cursor: pointer;
@@ -3364,6 +3418,11 @@ body[data-view="matching"] .match-detail { display: block; }
         <option value="spec">技术规范书</option>
         <option value="requirement">其他</option>
       </select>
+    </div>
+    <!-- 方案 A「文档台面」：每个文件一张卡，状态与操作跟着文件走（明细保留作详细编辑） -->
+    <div class="mat-cards" id="mat-cards"></div>
+    <div class="desk-foot" id="desk-foot">
+      <b>解析标包</b> = 读取已上传文件的正文，检索「标的 / 标包 / 标段」，只按原文事实列出，找不到就说找不到
     </div>
     <div class="mrow2 collapsed" id="mat-rows">
       <div class="mat-section" id="mat-section-req">

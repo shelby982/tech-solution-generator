@@ -672,16 +672,12 @@ function refreshMaterialSummary() {
   if (t) t.textContent = String(total);
   const gsum = document.getElementById('mat-gsum');
   if (gsum) {
-    const groups = {};
-    chips.forEach((c) => {
-      const sel = c.querySelector('.mat-role-select');
-      const role = sel ? sel.value : 'source';
-      const label = ROLE_LABEL_SHARED[role] || role;
-      groups[label] = (groups[label] || 0) + 1;
-    });
-    const colors = { '招标文件': '#2563eb', '技术规范书': '#0891b2', '其他': '#7c3aed', '我方素材': '#7c3aed' };
-    gsum.innerHTML = Object.entries(groups)
-      .map(([k, v]) => `<span><i style="background:${colors[k] || '#94a3b8'}"></i>${k} ${v}</span>`).join('');
+    // 方案 A 的摘要：份数 + 体积 + **异常计数**（漏项一眼可见，吸收 B 的优点）
+    const mats = lastMaterials;
+    const bytes = mats.reduce((n, m) => n + (Number(m.file_size) || 0), 0);
+    const bad = mats.filter((m) => matIntegrity[String(m.id)]).length;
+    gsum.innerHTML = `${mats.length} 份文件 · 共 ${fmtSize(bytes)}`
+      + (bad ? ` · <b style="color:#dc2626">异常 ${bad}</b>` : '');
   }
   // 第二行超过可视高度 → 显示「展开全部」
   const rows = document.getElementById('mat-rows');
@@ -696,6 +692,8 @@ function refreshMaterialSummary() {
 async function loadMaterials() {
   await loadMaterialIntegrity();
   const list = await api.materials.list(projectId);
+  lastMaterials = list;
+  await loadPackageAnalysis().catch(() => {});   // 卡片要显示标包归属
   // 「解析标包」按**全部材料**判断（只看 req-stack 会在"只传了素材"时误禁用）
   if (btnParsePkg) {
     btnParsePkg.disabled = list.length === 0;
@@ -710,9 +708,9 @@ async function loadMaterials() {
   sourceMaterialCount = srcs.length;   // 匹配详情的空状态：一份素材都没有时说清"先上传"
   renderMatchTreeHead();               // 栏头上的「素材 N 份」跟着变
   renderMats(reqStack, reqs, true);
-  refreshMaterialSummary();          // 数量 + 分组构成 + 是否要"展开全部"
   renderMats(srcStack, srcs, false);
-  refreshMaterialSummary();
+  renderMaterialCards(list);         // 方案 A：台面卡片（状态与操作跟着文件走）
+  refreshMaterialSummary();          // 摘要：份数 + 体积 + 异常计数
   // 左栏已按原型移除：计数改由材料条的摘要（#mat-total / #mat-gsum）承担。
   // 这里对旧节点做空值保护，避免整页脚本因一个 null 崩掉（实测踩过）。
   if (reqCount) reqCount.textContent = `${reqs.length} 项`;
@@ -2551,6 +2549,87 @@ let confirmStep = 1;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 let topicSaveNote = '';    // 归属保存结果 —— 保存后\*\*面板会重绘\*\*，所以用模块变量而不是就地写 DOM
 // 文件↔标包（多对多）：一个人工可改的归属
+/** 方案 A「文档台面」：把每份材料渲染成一张卡 —— 状态与操作**跟着文件走**，
+ * 不用点开「明细」就知道每个文件是什么、读到没有、归哪个标包。
+ * 「明细」保留为详细编辑（改类型/删除），不再承担"看状态"的职责。
+ */
+function cardStateOf(m) {
+  const reason = matIntegrity[String(m.id)];
+  if (reason === 'missing') return { cls: 'is-bad', chip: 'bad', text: '文件已丢失', act: '重新上传', upload: true };
+  if (reason === 'empty') return { cls: 'is-bad', chip: 'bad', text: '文件为空', act: '重新上传', upload: true };
+  if (reason === 'no_path') return { cls: 'is-warn', chip: 'warn', text: '无文件路径', act: '查看明细' };
+  if (reason === 'no_chunks') return { cls: 'is-warn', chip: 'warn', text: '未解析出正文', act: '查看明细' };
+  const st = String(m.parse_status || '');
+  if (st === 'failed') return { cls: 'is-bad', chip: 'bad', text: '解析失败', act: '查看明细' };
+  if (st === 'done') return { cls: '', chip: '', text: '已解析', act: '查看明细' };
+  return { cls: '', chip: 'wait', text: '待解析', act: '查看明细' };
+}
+
+function renderMaterialCards(mats) {
+  const box = document.getElementById('mat-cards');
+  if (!box) return;
+  const cards = (mats || []).map((m) => {
+    const st = cardStateOf(m);
+    const pkgs = materialPackagesOf(m.id);
+    const role = String(m.role || '');
+    const label = ROLE_LABEL_SHARED[role] || role || '其他';
+    const isSrc = !(REQUIREMENT_ROLES || []).includes(role);
+    return `<div class="mcard ${st.cls}">
+      <button type="button" class="badge${isSrc ? ' src' : ''}" data-card-role="${m.id}"
+        title="改类型：展开「明细」后在这一行改">${escapeHtml(label)}</button>
+      <div class="mfname" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename)}</div>
+      <span class="mchip ${st.chip}"><span class="d"></span>${escapeHtml(st.text)}</span>
+      <div class="mpkgs">${pkgs.length
+        ? pkgs.map((x) => `<button type="button" class="mpkg" data-pkg-open="${m.id}"
+            title="这份文件属于哪些标包（可多选）">${escapeHtml(pkgLabelOf(x))}</button>`).join('')
+        : `<button type="button" class="mpkg none" data-pkg-open="${m.id}"
+            title="还没指定标包 —— 点开选择（一份文件可以属于多个标包）">未指定标包</button>`}
+      </div>
+      <button type="button" class="mact${st.upload ? '' : ' q'}"
+        data-card-act="${m.id}" data-act-upload="${st.upload ? '1' : ''}">${escapeHtml(st.act)} ›</button>
+    </div>`;
+  }).join('');
+  box.innerHTML = cards + `<button type="button" class="mcard add" data-card-add="1">
+      <span class="plus">＋</span><span class="t">添加文件</span>
+      <span class="s">支持多选 · PDF / DOCX / XLSX</span></button>`;
+  bindMaterialCards(box);
+}
+
+function bindMaterialCards(box) {
+  box.querySelectorAll('[data-pkg-open]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openMaterialPackagesPicker(b.dataset.pkgOpen, b);
+  }));
+  box.querySelectorAll('[data-card-act]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.cardAct;
+    if (b.dataset.actUpload) {                 // 文件丢了/为空 → 走重新上传
+      document.getElementById('btn-add-req')?.click();
+      setMatHint('请重新选择这份文件上传；上传后会在原位替换同名记录');
+      return;
+    }
+    // 「查看明细」：展开明细并滚到这一行（改类型/删除仍在明细里做）
+    const rows = document.getElementById('mat-rows');
+    if (rows) {
+      rows.classList.remove('collapsed');
+      rows.classList.add('expanded');
+      const row = rows.querySelector(`.mat-row [data-id="${id}"], .mat-row[data-mid="${id}"]`)
+        || [...rows.querySelectorAll('.mat-row')].find((r) => r.querySelector(`[data-id="${id}"]`));
+      (row || rows).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (row) { row.classList.add('is-flash'); setTimeout(() => row.classList.remove('is-flash'), 1200); }
+    }
+    const manage = document.getElementById('mat-manage');
+    if (manage) manage.setAttribute('aria-expanded', 'true');
+  }));
+  // 改类型：同样走明细（不在这里做第二套编辑入口）
+  box.querySelectorAll('[data-card-role]').forEach((b) => b.addEventListener('click', () => {
+    document.getElementById('mat-manage')?.click();
+    setMatHint('在「明细」里改这份文件的类型（招标文件 / 技术规范书 / 我方素材）');
+  }));
+  box.querySelector('[data-card-add]')?.addEventListener('click', () => {
+    document.getElementById('btn-add-req')?.click();
+  });
+}
+
 /** 文件丢失/未解析出正文的标记（比"已解析"更重要：说了完成但素材是空的）。 */
 function matLossBadge(materialId) {
   const reason = matIntegrity[String(materialId)];
@@ -2583,6 +2662,7 @@ function pkgLabelOf(x) {
   const t = x && x.target ? `标的${x.target} ` : '';
   return `${t}标包${(x && x.package_no) || '—'}`;
 }
+let lastMaterials = [];      // 最近一次拉到的材料列表（摘要与"文档台面"卡片都由它驱动）
 let pkgMergeNote = '';      // 模型整理结果说明（只做合并/命名）
 let matIntegrity = {};      // {material_id: reason} —— 文件丢失/未解析出正文（加载时拉取）
 let pkgAnalysis = null;    // 标包分析结果（GET package-analysis；null = 还没取）
