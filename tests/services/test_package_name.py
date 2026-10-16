@@ -68,3 +68,15 @@ async def test_init_db_backfills_bare_label_from_evidence(db):
     assert rows["1"].startswith("2026年南网数字运营软件科技"), "编号标签应被回填成真名"
     assert rows["1"] != "标的 1"
     assert rows["2"] == "某个人工填的名称", "人工填写的名称不能被覆盖"
+
+
+def test_cuts_markdown_table_separator():
+    """名称后面紧跟 Markdown 表格分隔行时不能一起吃进来。
+
+    实测（project 29）：名称被抓成「高可靠技术专题研究与验证标包||||||||---|---|---|」，
+    界面上就显示成这样；且 packages.display_name 与评分表的干净名称不一致，
+    导致前端按包匹配失败（表现为"该标包没有解析到技术评分点"）。
+    """
+    q = "标包2：高可靠技术专题研究与验证标包\n| --- | --- |\n| 1 | 2 |\n"
+    assert name_from_quotes([q]) == "高可靠技术专题研究与验证标包"
+    assert "|" not in name_from_quotes([q])

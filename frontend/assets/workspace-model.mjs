@@ -972,7 +972,20 @@ export function evidenceCautionHtml(e) {
 export function resolvePackageScope(rows, scope) {
   const norm = value => String(value || '').replace(/标的|标包|标段|第|包|段|\s/g, '');
   const target = norm(scope.target), code = norm(scope.package_no);
-  const matches = (rows || []).filter(row => norm(row.target) === target
+  const list = rows || [];
+  const matches = list.filter(row => norm(row.target) === target
     && (!code || norm(row.package_no) === code));
+  if (matches.length === 1) return matches[0];
+  // 回退：两侧"标的"缺一边时，按 package_no 唯一匹配。
+  // 实测 project 29：packages.target_code 为空，而评分表解析出"标的1"，
+  // 严格匹配返回 null → 解析依据页显示「当前标包与评分表的对应关系尚未明确」+
+  // 「该标包没有解析到技术评分点」，而其实 8 条技术评分点都在。
+  // 只有唯一命中才认，避免 标的1-标包1 与 标的2-标包1 这类歧义。
+  // 只在**有一侧根本没识别出"标的"**时才回退；两侧都识别出来但互相冲突，说明确实对不上，
+  // 不能猜（例如 scope 说 标的2 而表是 标的1）。
+  if (code && (!target || list.some(row => !norm(row.target)))) {
+    const byCode = list.filter(row => norm(row.package_no) === code);
+    if (byCode.length === 1) return byCode[0];
+  }
   return matches.length === 1 ? matches[0] : null;
 }

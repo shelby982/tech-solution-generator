@@ -385,6 +385,19 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         except Exception as exc:                  # 加列失败不影响启动
             logger.warning("workflow_runs.%s 迁移跳过：%s", _col, exc)
 
+    # 名称清洗（2026-10-17）：早期名称提取把 Markdown 表格分隔符一起吃进来，
+    # 界面上显示成「高可靠技术专题研究与验证标包||||||||---|---|---|」（实测 project 29）。
+    # 按第一个 "|" 截断；幂等，已在库里的脏名一次修好。
+    for _tbl, _col in (("packages", "display_name"), ("project_packages", "package_name")):
+        try:
+            await conn.execute(
+                f"UPDATE {_tbl} SET {_col} = TRIM(SUBSTR({_col}, 1, INSTR({_col}, '|') - 1)) "
+                f"WHERE {_col} LIKE '%|%'"
+            )
+        except Exception as exc:
+            logger.warning("%s.%s 名称清洗跳过：%s", _tbl, _col, exc)
+    await conn.commit()
+
     # packages.display_name 回填（2026-10-16，用户反馈"标的名称没有展示"）：
     # 抽取阶段刻意留空名称（不编造），确认标包时只写了编号标签（如「标的 1」）；
     # 而名称其实就在 evidence 引文里（「标的1：2026年…采购项目」）。
