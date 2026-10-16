@@ -15709,4 +15709,26 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   }
 })();
 </script>
+
+<script>
+/* 应答编写顶部整合：阶段名 + 真实进度一行；删掉重复的「章节编写」文档头 */
+(function(){
+  var stage=document.querySelector('.sr-stage[data-stage="4"]'); if(!stage) return;
+  var hint=stage.querySelector('.sr-stage-head .hint');
+  var doc=stage.querySelector('.cs-document-head');
+  var wrap=doc?doc.querySelector('details.cs-delivery'):null;      // Word 导出格式
+  /* ① 阶段提示：口号 → 真实进度（并把 165 / 126 统一成一个口径） */
+  if(hint){
+    hint.textContent='126 / 165 章已开写 · 草稿 4 · 完成 0';
+    hint.style.color='#64748b';
+  }
+  /* ② 把「Word 导出格式」搬到阶段头右侧，保留这个真实入口 */
+  if(wrap && hint){
+    wrap.style.marginLeft='auto';
+    hint.parentElement.appendChild(wrap);
+  }
+  /* ③ 删掉「章节编写 …」这一层（信息已并入阶段头） */
+  if(doc) doc.style.display='none';
+})();
+</script>
 </body></html>
