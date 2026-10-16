@@ -15412,4 +15412,48 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   }
 })();
 </script>
+
+<script>
+/* 应答策划的"整体完成"收尾栏：列全必做项 + 唯一最终确认 */
+(function(){
+  var s2=document.querySelector('.sr-stage[data-stage="2"]'); if(!s2) return;
+  var body=s2.querySelector('.sr-stage-body')||s2;
+  var bar=document.createElement('div');
+  bar.id='stepFooter';
+  bar.style.cssText='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#fbfdff';
+  bar.innerHTML=
+    '<b style="font-size:13.5px">完成应答策划</b>'+
+    '<span class="ui-pill is-none" id="stepCount">1 / 2 已完成</span>'+
+    '<span id="fdDir" style="font-size:12.5px;cursor:pointer">✅ 目录已确认 · 165 个节点</span>'+
+    '<span id="fdBudget" style="font-size:12.5px;color:#b45309;cursor:pointer">⏳ 篇幅待确认 · 目标 120 页</span>'+
+    '<span style="flex:1"></span>'+
+    '<span class="sr-dim" id="fdHint">还差：确认篇幅</span>';
+  body.appendChild(bar);
+
+  // 把产品原有的「进入技术应答编写」搬进收尾栏，作为唯一最终确认
+  var write=document.querySelector('button[data-act="response-write"]');
+  if(write){ write.style.marginLeft='0'; bar.appendChild(write); }
+
+  // 点清单项跳回对应位置
+  document.getElementById('fdBudget').addEventListener('click',function(){
+    var r=document.getElementById('budgetRowA'); if(r) r.scrollIntoView({block:'center'});
+  });
+
+  // 状态同步：目录/篇幅的确认结果 → 收尾栏
+  function sync(){
+    var pill=document.getElementById('budgetPillA');
+    var ok = pill && pill.textContent.indexOf('已确认')>=0;
+    document.getElementById('fdBudget').textContent = ok ? '✅ 篇幅已确认 · 120 页 · 已分配到 18 章' : '⏳ 篇幅待确认 · 目标 120 页';
+    document.getElementById('fdBudget').style.color = ok ? '' : '#b45309';
+    document.getElementById('stepCount').textContent = ok ? '2 / 2 已完成' : '1 / 2 已完成';
+    document.getElementById('stepCount').className = 'ui-pill ' + (ok?'is-ok':'is-none');
+    document.getElementById('fdHint').textContent = ok ? '可以进入应答编写' : '还差：确认篇幅';
+    if(write){ write.disabled=!ok; write.style.opacity = ok?'1':'.5'; write.style.cursor = ok?'pointer':'not-allowed'; }
+  }
+  document.getElementById('btnConfirmA').addEventListener('click',function(){ setTimeout(sync,50); });
+  document.getElementById('btnStep1').addEventListener('click',function(){ setTimeout(sync,50); });
+  document.getElementById('btnConfirmB').addEventListener('click',function(){ setTimeout(sync,50); });
+  sync();
+})();
+</script>
 </body></html>
