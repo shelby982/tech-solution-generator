@@ -15481,6 +15481,9 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     budget.innerHTML='<span><b style="color:#1d4ed8">预算 6 页</b> · 已写 2.5 页 · <span style="color:#b45309">差 3.5 页</span></span>'+
       '<span class="ui-pill is-none">待核对</span>';
     head.parentElement.insertBefore(budget, head.nextSibling);
+    // 段数条原本被插在章头容器内部会被裁掉：移到预算行之后（同在章头容器外）
+    var segBar=document.getElementById('segBar');
+    if(segBar) head.parentElement.insertBefore(segBar, budget.nextSibling);
   }
   /* 证据/覆盖并进已有段数条 */
   var seg=document.getElementById('segBar');
