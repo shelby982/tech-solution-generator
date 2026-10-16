@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v206';
-import { api } from './api.js?v=20261016-v206';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v206';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v207';
+import { api } from './api.js?v=20261016-v207';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v207';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v206';
+       } from './workspace.js?v=20261016-v207';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v206';
+       } from './workspace-model.mjs?v=20261016-v207';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v206';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v207';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3639,6 +3639,26 @@ function resolvedStep(directoryConfirmed) {
   return planStep || (directoryConfirmed ? '2' : '1');
 }
 
+/** 应答策划的**当前步操作条** —— 只是一条，随步骤切换。
+ *
+ * 为什么合成一条（2026-10-16 用户 PM 审查）：
+ *   「① 确认目录」与「② 确认篇幅」是一条**连环状态**，两步操作的是**下面同一个目录结构**。
+ *   原来我做成两条并列的条（第 1 步条 + 篇幅条），加上头里的目录状态，看起来是三块东西，
+ *   步骤关系要靠用户自己拼。现在：头里放连环步骤链，中间只有**一条**当前步操作条，
+ *   下面是被两步共用的目录结构（行内操作随步骤切换：①结构动作 / ②页数输入）。
+ */
+function planStepBarHtml() {
+  if (resolvedStep(!!categoriesConfirmed) === '1') {
+    return `<div class="response-confirm-bar" data-plan-step-bar data-step-pane="1">
+        <div><strong>确认目录</strong>
+          <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。确认后进入第 2 步「确认篇幅」。</span></div>
+        <span data-step-slot="1"></span>
+      </div>`;
+  }
+  return pageBudgetBarHtml();     // 第 2 步：篇幅（按已确认 / 待确认分两态）
+}
+
+
 function pageBudgetBarHtml() {
   if (!pageBudgetData) return '';
   const d = pageBudgetData;
@@ -3658,7 +3678,7 @@ function pageBudgetBarHtml() {
   // ── 已确认态 ── 一行摘要 + 两个动作。已完成就不该再像"待办"（原来还把输入框、
   // 分配按钮、确认按钮一起摆着，右列三行、对齐散乱 —— 用户要求重新设计）。
   if (d.confirmed) {
-    return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
+    return `<div class="response-confirm-bar" data-plan-step-bar data-page-budget-bar data-step-pane="2">
       <div><strong>第 2 步 · 篇幅已确认</strong>
         <span>总页数 ${total} 页 · 按分值分配到 ${chapters} 个章节${allocated === total ? ' · 合计与需求一致' : (unallocatedZero ? ' · ⚠ 尚未分配页数，建议点「修改篇幅」重新分配' : ` · 已分配 ${allocated} 页`)}</span></div>
       <span class="sr-budget-ctl">
@@ -4384,13 +4404,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
               <button class="sr-step ${cls(2)}" data-step-go="2" ${categoriesConfirmed ? '' : 'disabled title="先完成第 1 步：确认目录"'}>② 分配篇幅${pageDone ? ' ✓' : ''}</button>`;
           })()}
       </div>` : ''}
-      ${previewReady ? `<div class="response-confirm-bar" data-step-pane="1">
-        <div><strong>第 1 步 · 确认目录</strong>
-          <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。
-            <b>先确认目录（结构），再确认篇幅（页数）—— 篇幅挂在目录上，改目录会让篇幅作废。</b></span></div>
-        <span data-step-slot="1"></span>
-      </div>` : ''}
-      ${pageBudgetBarHtml()}
+      ${previewReady ? planStepBarHtml() : ''}
       ${pane1}
       <details class="response-mapping"><summary>查看章节与原文依据映射</summary>${structBlocks.filter(b=>parseIds(b.review_point_ids).length||parseIds(b.spec_requirement_ids).length).map(b=>`<div class="response-map-row"><strong>${escapeHtml(b.title)}</strong><span>${parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '技术规范要求'}</span><span class="sr-dim">${parseIds(b.spec_requirement_ids).length} 条规范要求</span></div>`).join('')}</details>
       <div class="response-confirm-bar"><div><strong>${categoriesConfirmed ? '目录已确认' : '确认应答目录'}</strong><span>${categoriesConfirmed ? '可直接进入编写，随时查看目录与依据' : '保存目录并校验，成功后直接进入编写'}</span></div><button class="mw-btn primary" data-act="${categoriesConfirmed ? 'response-write' : 'response-confirm'}">${categoriesConfirmed ? `进入${responseLabel}编写` : `确认目录，创建${responseLabel}`}</button></div><div class="response-confirm-feedback" data-confirm-feedback role="status" aria-live="polite" hidden></div>` : ''}
