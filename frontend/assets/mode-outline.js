@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v203';
-import { api } from './api.js?v=20261016-v203';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v203';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v204';
+import { api } from './api.js?v=20261016-v204';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v204';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v203';
+       } from './workspace.js?v=20261016-v204';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v203';
+       } from './workspace-model.mjs?v=20261016-v204';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v203';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v204';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3646,21 +3646,24 @@ function pageBudgetBarHtml() {
 
   const d = pageBudgetData;
   const ok = !!d.ok;
-  const sum = `<span class="sr-dim" id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>`;
   const check = d.confirmed
-    ? '✅ 篇幅已确认'
-    : (ok ? '合计与需求一致' : `⚠ 与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
+    ? '篇幅已确认'
+    : (ok ? `合计 ${Number(d.allocated) || 0} 页 ✓ 与需求一致`
+          : `⚠ 合计 ${Number(d.allocated) || 0} 页，与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
+  // 与「第 1 步 · 确认目录」同形：标题 + 一行说明 + 右侧主操作。
+  // 删掉"来源：招标文件规定""已分配到 N 章"（PM 审查：内容太多）
   return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
       <div>
-        <strong>${d.confirmed ? '篇幅已确认' : '篇幅'} · ${Number(d.total) || 0} 页</strong>
-        <span>总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页 · 来源：${escapeHtml(d.source || '招标文件规定')}</span>
-        <span id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>
-        <span id="sr-page-check" class="${ok ? '' : 'sr-page-warn'}">${check}</span>
-        <span class="mw-inline"><button class="mw-btn" data-act="page-alloc">按总篇幅分配</button>
-          <button class="mw-btn" data-act="page-clear">清除手工调整</button></span>
-        <span class="sr-dim" data-page-feedback role="status" aria-live="polite"></span>
+        <strong>第 2 步 · ${d.confirmed ? '篇幅已确认' : '确认篇幅'}</strong>
+        <span>填一个总页数，系统按各章分值自动分配；父章节显示子树合计，可逐章手工调整。目录一改，篇幅需要重新确认。</span>
       </div>
-      <button class="mw-btn primary" data-act="page-confirm" ${d.confirmed || !ok ? 'disabled' : ''}>确认篇幅</button>
+      <span class="sr-budget-ctl">
+        <label class="sr-budget-total">总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页</label>
+        <button class="mw-btn" data-act="page-alloc">按篇幅分配</button>
+        <span id="sr-page-check" class="${ok || d.confirmed ? '' : 'sr-page-warn'}">${check}</span>
+        <button class="mw-btn" data-act="page-clear" title="把手工改过的页数恢复成自动分配">清除手工调整</button>
+        <button class="mw-btn primary" data-act="page-confirm" ${d.confirmed || !ok ? 'disabled' : ''}>确认篇幅</button>
+      </span>
     </div>`;
 }
 
@@ -4365,7 +4368,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>` : ''}
       ${previewReady ? `<div class="response-confirm-bar" data-step-pane="1">
         <div><strong>第 1 步 · 确认目录</strong>
-          <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。改动只会让"已确认"失效，不会丢内容。</span></div>
+          <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。
+            <b>先确认目录（结构），再确认篇幅（页数）—— 篇幅挂在目录上，改目录会让篇幅作废。</b></span></div>
         <span data-step-slot="1"></span>
       </div>` : ''}
       ${pageBudgetBarHtml()}
@@ -4701,6 +4705,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .response-confirm-bar [data-page-budget-bar] strong{display:flex;align-items:center;gap:8px}
   [data-page-budget-bar] .mw-inline{display:inline-flex;gap:8px;margin-top:6px}
   [data-step-slot]{display:inline-flex;gap:8px}
+  /* 篇幅条右侧控制区：与「第 1 步」条的主按钮同位（统一形态） */
+  .sr-budget-ctl{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .sr-budget-total{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+  .sr-budget-total input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
+  #sr-page-check{font-size:12px;color:#15803d}
+  #sr-page-check.sr-page-warn{color:#b45309}
   [data-page-budget-bar] input{font:inherit;font-size:12px;width:76px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right}
   [data-page-budget-bar] b{font-variant-numeric:tabular-nums}
   [data-page-budget-bar] .sr-page-warn{color:var(--warn)}
@@ -5022,6 +5032,22 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       const ready = !!categoriesConfirmed && !!(pageBudgetData && pageBudgetData.confirmed);
       writeBtn.hidden = !ready;
       if (ready) foot.appendChild(writeBtn);
+    }
+  })();
+  (function prioritizeBudgetStep() {
+    // PM 审查（2026-10-16）：②步时篇幅条原本排在第 6 位（要滚过类型卡/编制依据/覆盖检查才看到），
+    // 所以②步把篇幅条提到面板最上方，并把只属于①步的卡片收起。
+    const step = resolvedStep(!!categoriesConfirmed);
+    const bar = el.querySelector('[data-page-budget-bar]');
+    if (!bar) return;
+    if (step === '2') {
+      const body = el.querySelector('.sr-stage-body') || el;
+      const head = body.querySelector('.sr-dir-head');
+      if (head && head.nextElementSibling !== bar) body.insertBefore(bar, head ? head.nextElementSibling : body.firstChild);
+      ['.response-type-options', '.response-basis-card', '.response-coverage'].forEach((sel) => {
+        el.querySelectorAll(sel).forEach((n) => { n.hidden = true; n.style.display = 'none'; });
+      });
+      bar.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     }
   })();
   (function applyStep() {
