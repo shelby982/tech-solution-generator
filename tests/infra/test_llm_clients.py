@@ -19,6 +19,20 @@ class _Obj:
         self.__dict__.update(kw)
 
 
+async def test_fast_chapter_draft_can_disable_deepseek_thinking_without_changing_default(monkeypatch):
+    monkeypatch.delenv('LLM_MODE', raising=False)
+    calls=[]
+    class Completions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return _Obj(choices=[_Obj(finish_reason='stop',message=_Obj(content='正文'))],usage=None)
+    monkeypatch.setattr('openai.AsyncOpenAI',lambda **kw:_Obj(chat=_Obj(completions=Completions())))
+    await clients.generate_oneshot_openai(_cfg(),'sys','data',thinking=False)
+    await clients.generate_oneshot_openai(_cfg(),'sys','data')
+    assert calls[0]['extra_body']=={'thinking':{'type':'disabled'}}
+    assert 'extra_body' not in calls[1]
+
+
 def _cfg() -> LLMConfig:
     return LLMConfig(
         provider="deepseek",

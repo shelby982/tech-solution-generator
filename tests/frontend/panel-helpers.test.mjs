@@ -48,7 +48,8 @@ const UI_HELPER_PREFIX = /^(bind|render|toggle|maybe|open|show|refresh|mark)[A-Z
 test('模块内调用的 UI 辅助函数都有定义（防止整段替换误删函数）', () => {
   const defined = definedNames();
   const called = new Set();
-  for (const m of src.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+  // 成员调用（如 dialog.showModal）不属于模块内自由函数。
+  for (const m of src.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
     const name = m[1];
     if (UI_HELPER_PREFIX.test(name)) called.add(name);
   }

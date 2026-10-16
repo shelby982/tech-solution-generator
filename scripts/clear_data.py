@@ -19,18 +19,39 @@ DB_PATH = os.path.join(ROOT, "backend", "data", "ge_solution.db")
 UPLOADS_DIR = os.path.join(ROOT, "backend", "data", "uploads")
 
 TABLES = [
-    "material_chunks",
+    # 子表在前、父表在后；即使未来打开 SQLite foreign_keys 也能安全执行。
+    "reviews",
     "block_revisions",
-    "project_snapshots",
     "blocks",
+    "review_points",
+    "spec_requirements",
+    "split_answers",
+    "material_packages",
+    "material_chunks",
     "materials",
+    "project_snapshots",
+    "workflow_runs",
+    "packages",
+    "project_packages",
+    "llm_usage",
+    # LangGraph checkpointer 表（不同版本不一定全部存在）。
+    "checkpoint_writes",
+    "checkpoint_blobs",
+    "checkpoints",
     "projects",
 ]
 
 
+def existing_tables(conn: sqlite3.Connection) -> list[str]:
+    names = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    )}
+    return [table for table in TABLES if table in names]
+
+
 def count_summary(conn: sqlite3.Connection) -> str:
     lines = []
-    for table in reversed(TABLES):  # 从顶层表开始展示
+    for table in reversed(existing_tables(conn)):  # 从顶层表开始展示
         cur = conn.execute(f"SELECT COUNT(*) FROM {table}")
         n = cur.fetchone()[0]
         lines.append(f"  {table:<22} {n:>5} 行")
@@ -50,7 +71,7 @@ def upload_summary() -> str:
 
 
 def clear_db(conn: sqlite3.Connection) -> None:
-    for table in TABLES:
+    for table in existing_tables(conn):
         conn.execute(f"DELETE FROM {table}")
     # 重置自增序列
     conn.execute("DELETE FROM sqlite_sequence")

@@ -9,6 +9,7 @@
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
@@ -100,6 +101,37 @@ async def test_every_allowed_role_accepted(upload_env):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["main_rfp", "spec"])
+async def test_tender_documents_are_parsed_and_chunked(upload_env, monkeypatch, role):
+    """标包识别依赖招标正文；主招标文件和规范书上传后必须真实产出切片。"""
+    client, _, pid = upload_env
+    parsed = SimpleNamespace(sections=[
+        SimpleNamespace(title="第一标包", raw_content="采购设备 A，包号 01", page=7),
+    ])
+    monkeypatch.setattr(materials_routes, "parse_document", lambda *args, **kwargs: parsed)
+
+    response = await _upload(client, pid, f"{role}.pdf", role=role)
+    assert response.status_code == 200
+    material_id = response.json()["id"]
+    tasks = list(materials_routes._PARSE_TASKS)
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    async with get_db() as db:
+        material = await (await db.execute(
+            "SELECT parse_status FROM materials WHERE id = ?", (material_id,),
+        )).fetchone()
+        chunks = await (await db.execute(
+            "SELECT content, page FROM material_chunks WHERE material_id = ?", (material_id,),
+        )).fetchall()
+
+    assert material["parse_status"] == "done"
+    assert [(row["content"], row["page"]) for row in chunks] == [
+        ("第一标包\n采购设备 A，包号 01", 7),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_traversal_filename_cannot_escape_upload_root(upload_env):
     """`../../evil.pdf` 只能落在项目上传目录内（basename 净化）。"""
     client, upload_root, pid = upload_env
@@ -170,6 +202,16 @@ async def test_delete_material_removes_row_and_file(upload_env):
     async with get_db() as db:
         cur = await db.execute("SELECT id, file_path FROM materials")
         row = await cur.fetchone()
+        await db.execute(
+            "INSERT INTO material_chunks (material_id, chunk_index, content) VALUES (?, 0, '正文')",
+            (row["id"],),
+        )
+        await db.execute(
+            "INSERT INTO material_packages (material_id, project_id, target, package_no) "
+            "VALUES (?, ?, '标的 A', '01')",
+            (row["id"], pid),
+        )
+        await db.commit()
     stored = upload_root / str(pid) / row["file_path"].split("/")[-1]
     assert stored.is_file()
 
@@ -180,6 +222,12 @@ async def test_delete_material_removes_row_and_file(upload_env):
     from services.block_store import list_materials
     async with get_db() as db:
         assert [m["id"] for m in await list_materials(db, pid)] == []
+        assert (await (await db.execute(
+            "SELECT COUNT(*) AS n FROM material_chunks WHERE material_id = ?", (row["id"],),
+        )).fetchone())["n"] == 0
+        assert (await (await db.execute(
+            "SELECT COUNT(*) AS n FROM material_packages WHERE material_id = ?", (row["id"],),
+        )).fetchone())["n"] == 0
     assert not stored.exists()
 
 

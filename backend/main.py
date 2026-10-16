@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -25,6 +25,9 @@ from routes.workflow import router as workflow_router, set_runner as set_workflo
 from routes.review import router as review_router
 from routes.blocks import router as blocks_router
 from routes.revisions import router as revisions_router
+from routes.packages import router as packages_router
+from routes.chapter_studio import router as studio_router
+from routes.chapter_writing import router as writing_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -153,6 +156,8 @@ async def lifespan(app: FastAPI):
     async with get_db() as conn:
         await init_db(conn)
     logger.info("SQLite 数据库已初始化")
+    from routes.chapter_studio import recover_exports
+    await recover_exports()
 
     # 装配 LLM 用量记账（llm_usage 表）。必须在 verify_all 之前：
     # 之后所有真实调用都会落一条账，供「token 花在哪」按调用点/模型汇总。
@@ -173,6 +178,8 @@ async def lifespan(app: FastAPI):
     # 构造 WorkflowRunner 并注入到 routes.workflow
     runner = WorkflowRunner(deps_factory=_build_deps)
     set_workflow_runner(runner)
+    from services.chapter_writing import recover_jobs
+    await recover_jobs()
     logger.info("WorkflowRunner 已注入")
 
     yield
@@ -218,6 +225,9 @@ app.include_router(blocks_router,    prefix="/api")
 app.include_router(revisions_router, prefix="/api")
 app.include_router(workflow_router,  prefix="/api")
 app.include_router(review_router,    prefix="/api")
+app.include_router(packages_router,  prefix="/api")
+app.include_router(studio_router,    prefix="/api")
+app.include_router(writing_router,   prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -226,8 +236,7 @@ frontend_dir = os.path.join(_this_dir, "..", "frontend")
 frontend_dir = os.path.normpath(frontend_dir)
 _index_path        = os.path.join(frontend_dir, "index.html")
 _projects_path     = os.path.join(frontend_dir, "projects.html")
-_workbench_path    = os.path.join(frontend_dir, "workbench.html")
-_project_init_path = os.path.join(frontend_dir, "project-init.html")
+_project_intake_path = os.path.join(frontend_dir, "project-intake.html")
 # 三模式页（把 project-init 的要求与大纲 / 素材库 与 workbench 的方案编辑合到一页）。
 # 原两页在合并验证期内保持可用，便于对照与回退。
 _three_mode_path   = os.path.join(frontend_dir, "three-mode.html")
@@ -281,10 +290,11 @@ async def serve_projects():
 
 
 @app.get("/workbench", include_in_schema=False)
-async def serve_workbench():
-    if os.path.isfile(_workbench_path):
-        return FileResponse(_workbench_path, headers=_HTML_NO_CACHE)
-    return JSONResponse(status_code=404, content={"detail": "workbench.html 不存在"})
+async def serve_workbench(request: Request):
+    """旧工作台入口下线：回项目准备页重新选择稳定标包。"""
+    project_id = request.query_params.get("projectId", "")
+    target = f"/project-intake?projectId={project_id}" if project_id.isdigit() else "/projects"
+    return RedirectResponse(target, status_code=307)
 
 
 @app.get("/diff-review", include_in_schema=False)
@@ -295,10 +305,18 @@ async def serve_diff_review():
 
 
 @app.get("/project-init", include_in_schema=False)
-async def serve_project_init():
-    if os.path.isfile(_project_init_path):
-        return FileResponse(_project_init_path, headers=_HTML_NO_CACHE)
-    return JSONResponse(status_code=404, content={"detail": "project-init.html 不存在"})
+async def serve_project_init(request: Request):
+    """旧项目初始化入口下线：项目准备成为唯一前置入口。"""
+    project_id = request.query_params.get("projectId", "")
+    target = f"/project-intake?projectId={project_id}" if project_id.isdigit() else "/projects"
+    return RedirectResponse(target, status_code=307)
+
+
+@app.get("/project-intake", include_in_schema=False)
+async def serve_project_intake():
+    if os.path.isfile(_project_intake_path):
+        return FileResponse(_project_intake_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "project-intake.html 不存在"})
 
 
 @app.get("/review", include_in_schema=False)

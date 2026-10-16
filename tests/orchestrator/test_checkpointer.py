@@ -85,11 +85,6 @@ async def test_checkpointer_from_default_uses_db_path(monkeypatch, tmp_path):
     import db as db_module
 
     monkeypatch.setattr(db_module, "DB_PATH", db_path)
-    # 同时刷新 orchestrator.checkpointer 内已绑定的 DB_PATH 引用
-    import orchestrator.checkpointer as ckpt_module
-
-    monkeypatch.setattr(ckpt_module, "DB_PATH", db_path)
-
     thread_id = "tid-default"
     config = {"configurable": {"thread_id": thread_id}}
 

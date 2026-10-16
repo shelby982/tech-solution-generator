@@ -141,6 +141,90 @@ async def _wait_task(run, timeout=2.0):
             pass
 
 
+async def test_response_plans_reuse_parse_and_preserve_other_runs(runner_env):
+    from services.split_answers import get_answers
+    from services.block_store import list_blocks
+    from db import get_db
+    runner, pid, _ = runner_env
+    source = await runner.start(pid, {})
+    await _wait_task(runner._runs[source])
+    before = await runner.state(source)
+    async with get_db() as db:
+        original_blocks = await list_blocks(db, pid, source)
+    commerce = await runner.create_response_plan(source, 'commerce')
+    await _wait_task(runner._runs[commerce])
+    tech = await runner.create_response_plan(commerce, 'tech')
+    await _wait_task(runner._runs[tech])
+    assert len({source, commerce, tech}) == 3
+    assert await runner.create_response_plan(tech, 'commerce') == commerce
+    assert (await runner.state(source))['spec'] == before['spec']
+    async with get_db() as db:
+        assert await list_blocks(db, pid, source) == original_blocks
+        for tid, kind in [(commerce, 'commerce'), (tech, 'tech')]:
+            answers = await get_answers(db, pid, tid)
+            assert answers['categories']['categories'] == [kind]
+            assert answers['response_plan'] == {'type': kind, 'source_thread_id': source, 'confirmed': False}
+            assert await list_blocks(db, pid, tid)
+
+
+async def test_response_plan_rejects_mixed_categories(runner_env):
+    runner, _, _ = runner_env
+    with pytest.raises(ValueError, match='商务或技术'):
+        await runner.create_response_plan('unknown', 'commerce,tech')
+
+
+async def test_point_to_point_source_titles_and_final_position_are_locked(runner_env):
+    runner, pid, _ = runner_env
+    tid = await runner.start(pid, {})
+    await _wait_task(runner._runs[tid])
+    state = await runner.state(tid)
+    toc = state['spec']['toc']
+    toc[0]['chain'] = {'response_part':'point_to_point'}
+    async with runner._checkpointer_provider() as saver:
+        graph = runner._build(saver, None, thread_id=tid)
+        await graph.aupdate_state({'configurable':{'thread_id':tid}}, {'spec':{'toc':toc}})
+    source = dict(block_id=toc[0]['id'],level=toc[0]['level'],title=toc[0]['title'])
+    with pytest.raises(ValueError, match='保持原文'):
+        await runner.update_outline_structure(tid, [{**source,'title':'改写原文'}])
+    with pytest.raises(ValueError, match='固定在最后'):
+        await runner.update_outline_structure(tid, [source,dict(block_id='new',level=1,title='尾部插入评分项')])
+
+
+async def test_response_confirm_and_export_use_explicit_response_run(runner_env, monkeypatch):
+    from routes import workflow as workflow_route
+    from routes.export import export_docx
+    from services.split_answers import get_answers
+    from urllib.parse import unquote
+    from db import get_db
+    from fastapi import HTTPException
+    runner, pid, _ = runner_env
+    monkeypatch.setattr(workflow_route, '_runner', runner)
+    source = await runner.start(pid, {})
+    await _wait_task(runner._runs[source])
+    with pytest.raises(HTTPException, match='') as invalid:
+        await workflow_route.confirm_response_plan(source)
+    assert invalid.value.status_code == 409
+    commerce = await runner.create_response_plan(source, 'commerce')
+    await _wait_task(runner._runs[commerce])
+    assert (await workflow_route.confirm_response_plan(commerce))['confirmed']
+    async with get_db() as db:
+        plan = (await get_answers(db, pid, commerce))['response_plan']
+        assert plan['confirmed']
+        await db.execute('UPDATE blocks SET content=?, status=? WHERE run_thread_id=?', ('商务正文', 'done', commerce))
+        await db.commit()
+    response = await export_docx(pid, package_id=None, thread_id=commerce)
+    assert '商务应答' in unquote(response.headers['content-disposition'])
+    state = await runner.state(commerce)
+    await runner.update_outline_structure(commerce, [
+        {'block_id': s['id'], 'level': s['level'], 'title': s['title'] + '修订'}
+        for s in state['spec']['toc']])
+    async with get_db() as db:
+        assert not (await get_answers(db, pid, commerce))['response_plan']['confirmed']
+    with pytest.raises(HTTPException) as wrong_project:
+        await export_docx(pid + 100, package_id=None, thread_id=commerce)
+    assert wrong_project.value.status_code == 404
+
+
 # ─────────────────────────────────────────────
 # tests
 # ─────────────────────────────────────────────

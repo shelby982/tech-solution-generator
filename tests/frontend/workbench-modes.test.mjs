@@ -34,7 +34,7 @@ test('modeUrl 保留项目/线程/章节上下文', () => {
   assert.equal(q.get('threadId'), 't-1');
   assert.equal(q.get('blockId'), 's2.1');
   assert.equal(q.get('view'), 'editor');
-  assert.ok(url.startsWith('/project-init?'));
+  assert.ok(url.startsWith('/three-mode?'));
 });
 
 test('modeUrl 对非法模式回落到默认，不产出坏链接', () => {

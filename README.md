@@ -36,5 +36,6 @@ LLM_MODE=mock pytest tests/    # 跑测试
 
 - 入口：`backend/main.py`
 - 工作流：`backend/orchestrator/runner.py`
-- 前端：`frontend/{projects,project-init,workbench,review}.html`
+- 前端主路径：`frontend/{projects,project-intake,three-mode,review,diff-review}.html`
+- 旧 `/project-init`、`/workbench` 路径会跳转到项目准备页，避免绕过标包确认门控。
 - 黄金样本：`tests/e2e/test_golden_sample.py`（需 `LLM_MODE=real` + `tests/fixtures/sample_*.docx`）
