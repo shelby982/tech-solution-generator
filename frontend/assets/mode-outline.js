@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v186';
-import { api } from './api.js?v=20261016-v186';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v186';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v189';
+import { api } from './api.js?v=20261016-v189';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v189';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v186';
+       } from './workspace.js?v=20261016-v189';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v186';
+       } from './workspace-model.mjs?v=20261016-v189';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v186';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v189';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3632,7 +3632,17 @@ function pageBudgetCellHtml(b) {
 
 /** 篇幅控制条：总页数 + 两个动作 + 合计校验 + 确认篇幅。 */
 function pageBudgetBarHtml() {
-  if (!pageBudgetData || !pageBudgetData.directory_confirmed) return '';
+  if (!pageBudgetData) return '';
+  // 目录被改动 → 确认失效 → 篇幅必须重新确认（否则目录一改篇幅就乱）。
+  // 此时**不能静默隐藏**整块：用户只会觉得"输入框不见了"，要说明原因。
+  if (!pageBudgetData.directory_confirmed) {
+    return `<h5 class="sr-sec">篇幅</h5>
+      <div class="response-confirm-bar" data-page-budget-gate>
+        <div><strong>篇幅 <span class="ui-pill is-warn">需重新确认</span></strong>
+          <span>目录有改动，需先重新确认目录，再确认篇幅（目录一改，篇幅分配就会失准）。</span></div>
+        <button class="mw-btn primary" disabled>确认篇幅</button>
+      </div>`;
+  }
   const d = pageBudgetData;
   const ok = !!d.ok;
   const sum = `<span class="sr-dim" id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>`;
@@ -4819,7 +4829,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   el.querySelectorAll('.sr-stage.on[data-stage="2"] .sr-stage-body > h5.sr-sec, .sr-stack h5.sr-sec').forEach((h) => {
     if ((h.textContent || '').indexOf('目录草案') === 0) h.hidden = true;   // 已由「目录」段标题替代
   });
-  el.querySelectorAll('.response-basis-card, .response-coverage, .response-landing-warning, .response-chapter-evidence, .response-mapping, .response-confirm-bar').forEach((node) => { node.hidden = true; });
+  // 隐藏"被合并掉的旧块"。注意：因为要保持 UI 一致，我新增的组件也用了 .response-confirm-bar，
+  // 按 class 隐藏会连自己一起藏掉（这个坑踩了三次）。改为**按身份**隐藏：
+  // 只有原「确认目录 / 进入编写」那张卡才藏。
+  el.querySelectorAll('.response-basis-card, .response-coverage, .response-landing-warning, .response-chapter-evidence, .response-mapping').forEach((node) => { node.hidden = true; });
+  el.querySelectorAll('.response-confirm-bar').forEach((node) => {
+    if (node.querySelector('[data-act="response-confirm"], [data-act="response-write"]')) node.hidden = true;
+  });
   el.querySelectorAll('.sr-dim').forEach((span) => {
     if (span.children.length) return;
     const text = span.textContent || '';
