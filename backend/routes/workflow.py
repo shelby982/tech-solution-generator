@@ -220,7 +220,7 @@ async def write_page_budget(thread_id: str, req: PageBudgetReq):
         if req.confirm and not plan.get('confirmed'):
             raise HTTPException(status_code=409, detail='请先确认目录，再确认篇幅')
         if req.clear_manual:
-            payload = await clear_page_budget(db, state['project_id'], thread_id)
+            payload = await clear_page_budget(db, state['project_id'], thread_id, total=req.total)
         else:
             payload = await save_page_budget(
                 db,

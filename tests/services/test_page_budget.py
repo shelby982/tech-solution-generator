@@ -181,3 +181,11 @@ def test_allocate_uses_subtree_scores_when_parent_has_none():
     assert sum(pages.values()) == 120
     assert pages["s1.2"] > pages["s1.1"], "24 分的子树应比 4 分的子树分到更多页"
     assert pages["s1"] > 0
+
+
+async def test_clear_manual_can_set_new_total(db):
+    """清除手工调整时可以同时改总额（否则会按旧总额重算回去）。"""
+    await _seed(db)
+    await save_page_budget(db, 1, "t1", total=120, allocate=True)
+    cleared = await clear_page_budget(db, 1, "t1", total=0)
+    assert cleared["total"] == 0 and cleared["allocated"] == 0
