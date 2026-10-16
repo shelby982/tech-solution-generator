@@ -123,3 +123,39 @@ async def test_runs_are_attributed_to_a_package(runs_db):
     # 原标包只剩原来那两条，最新仍是 t-pkg2b（归属没串）
     assert (await repo.latest_for_scope(1, "标的1", "2"))["thread_id"] == "t-pkg2b"
     assert await repo.latest_for_scope(1, "标的1", "1") is None
+
+
+def test_needs_outline_recovery_predicate():
+    """图在 outline_draft 之后直接收尾 + 应答目录未派生 + 有解析结果 → 需要补跑派生。
+
+    实测数据（2026-10-16，thread fda5d747）：
+      snap.next=() · outline_revision 无值 · source_toc=367 · toc=367（还是原文占位）
+    对照正常线程（1602b0ca）：outline_revision 有值 · toc=165 · next=('zhang_heng_extract',)
+    """
+    from orchestrator.runner import needs_outline_recovery
+
+    assert needs_outline_recovery(next_nodes=(), outline_revision=None, source_toc=["1", "2"]) is True
+    assert needs_outline_recovery(next_nodes=(), outline_revision={"x": 1}, source_toc=["1"]) is False, "已派生就不该补跑"
+    assert needs_outline_recovery(next_nodes=(), outline_revision=None, source_toc=[]) is False, "没有解析结果，无从派生"
+    assert needs_outline_recovery(next_nodes=("zhang_heng_extract",), outline_revision=None, source_toc=["1"]) is False, "图还有下一步，不该插手"
+
+
+def test_resume_auto_has_outline_recovery_branch():
+    """resume_auto 必须接上"图已收尾但目录没派生"这条恢复路径。"""
+    import inspect
+    from orchestrator.runner import WorkflowRunner
+
+    src = inspect.getsource(WorkflowRunner.resume_auto)
+    assert "needs_outline_recovery" in src
+    assert "resume_outline_draft" in src
+
+
+def test_resume_outline_draft_mirrors_resume_extract():
+    """补跑派生要照抄 resume_extract 的手法：借闸门身份 + user_choice=approve。"""
+    import inspect
+    from orchestrator.runner import WorkflowRunner
+
+    src = inspect.getsource(WorkflowRunner.resume_outline_draft)
+    assert "GATE_OUTLINE" in src and "as_node=" in src
+    assert '"user_choice": "approve"' in src
+    assert "_resume_until_pause" in src

@@ -158,6 +158,21 @@ def next_phase_stage(next_nodes) -> str | None:
 
 
 
+def needs_outline_recovery(*, next_nodes, outline_revision, source_toc) -> bool:
+    """图是否"已经收尾、但应答目录从未派生"（需要补跑派生）。
+
+    实测（2026-10-16，thread fda5d747）：进程死在 zhang_heng_outline_draft 与 gate_outline
+    之间，快照的 next=()（图已到 END），outline_revision 无值、toc 仍是原文占位 367 条。
+    而"派生目录"这件事是 gate_outline 以 user_choice=approve 跑过之后才发生的
+    （对照正常线程：outline_revision 有值、toc=165）。
+    """
+    if tuple(next_nodes or ()):
+        return False                       # 图还有下一步：不该插手
+    if outline_revision:
+        return False                       # 已派生：不用补
+    return bool(source_toc)                # 有解析结果才谈得上派生
+
+
 class WorkflowRunner:
     """工作流外观。
 
@@ -510,7 +525,48 @@ class WorkflowRunner:
         if stage == "reviewing":
             await self.skip_to_review(thread_id)
             return "reviewing"
+        # 图已收尾（next=()）但应答目录从未派生：进程死在中途留下的状态。
+        # 判据只用数据（next / outline_revision / source_toc），不猜阶段。
+        spec = (state.get("spec") or {})
+        if needs_outline_recovery(
+            next_nodes=getattr(snap, "next", ()),
+            outline_revision=spec.get("outline_revision"),
+            source_toc=spec.get("source_toc"),
+        ):
+            await self.resume_outline_draft(thread_id)
+            return "outline_recovery"
         return "nothing_to_do"
+
+    async def resume_outline_draft(self, thread_id: str) -> None:
+        """补跑"应答目录派生"：图在 outline_draft 之后直接收尾（进程死在中途）。
+
+        手法与 ``resume_extract`` 完全同构：此时图的 next=()（正常 ainvoke 是空跑），
+        所以**借闸门身份**再跑一次 —— ``as_node=GATE_OUTLINE`` + ``user_choice='approve'``，
+        闸门之后就会派生应答目录（实测正常线程 toc 由 367 原文占位变成 165 条应答目录）。
+        """
+        from orchestrator.graph import GATE_OUTLINE
+
+        self._assert_idle(thread_id)
+        current = await self.state(thread_id)
+        if not current or not current.get("project_id"):
+            raise KeyError(thread_id)
+        run = self._runs.get(thread_id)
+        if run is None:
+            run = _Run(thread_id, EventEmitter())
+            self._runs[thread_id] = run
+        elif run.emitter._closed:
+            run.emitter = EventEmitter()
+        run.cancel_flag = False
+        await self._unfreeze_run_stage(thread_id, "outline_review")
+        run.task = asyncio.create_task(
+            self._resume_until_pause(
+                run,
+                {"cancel_requested": False, "user_choice": "approve",
+                 "stage": "outline_review"},
+                as_node=GATE_OUTLINE,
+            ),
+            name=f"wf-{thread_id}-resume-outline",
+        )
 
     async def rerun_match(self, thread_id: str, *, full: bool = False) -> None:
         """触发素材匹配：把 thread 状态指针拨回 NODE_EXTRACT 节点，再 ainvoke 让 graph
