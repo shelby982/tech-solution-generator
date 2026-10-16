@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能应标 · 项目列表</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v143" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v176" />
     <style>
       /* ── 页头 ── */
       .app-header {
@@ -613,7 +613,7 @@
       .btn-api-save:disabled { opacity: 0.45; cursor: default; }
       .btn-api-save:not(:disabled):hover { opacity: 0.88; }
     </style>
-    <link rel="stylesheet" href="./assets/ui.css?v=20261016-v143" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+    <link rel="stylesheet" href="./assets/ui.css?v=20261016-v176" />   <!-- 组件最小集：最后加载以统一历史类名 -->
 </head>
   <body>
     <!-- 页头 -->
@@ -745,7 +745,7 @@
     </div>
 
     <script type="module">
-      import { api } from './assets/api.js?v=20261016-v143';
+      import { api } from './assets/api.js?v=20261016-v176';
 
       // ── 状态 ──
       const reqFiles = []; // {file, name, size, ext}
@@ -799,6 +799,7 @@
             <div class="project-item-meta">
               <span>创建 ${created || '—'}</span>
               ${p.deadline ? `<span class="project-deadline">截止 ${escHtml(p.deadline)}</span>` : ''}
+              <span>${Number(p.confirmed_package_count || 0)} 个已确认标包 / ${Number(p.package_count || 0)} 个标包</span>
             </div>
             <div class="project-item-foot">
               <span>ID ${p.id}</span>
@@ -812,62 +813,7 @@
       }
 
       async function navigateToProject(projectId) {
-        // 根据该项目最新 workflow_run 的 stage 决定跳到哪个页面
-        let thread = null;
-        try {
-          const runs = await fetch(`/api/projects/${projectId}/workflow-runs`).then(r => r.ok ? r.json() : []);
-          thread = Array.isArray(runs) && runs.length ? runs[0] : null;
-        } catch {}
-
-        if (!thread || !thread.thread_id) {
-          location.href = `/three-mode?projectId=${projectId}&view=outline`;
-          return;
-        }
-        const tid = thread.thread_id;
-        const stage = thread.stage;
-        const enc = encodeURIComponent(tid);
-
-        // 跳转前把 backend stage 持久化到 sessionStorage，让目标页面初次 renderStageBar
-        // 时能立即点亮"项目当前所处阶段"为蓝色 active，与 backend 真实 stage 对齐。
-        // 否则目标页面要等异步 state API / workflow-runs 返回才能校准颜色。
-        try {
-          if (stage) sessionStorage.setItem(`furthestStage:${projectId}`, stage);
-          sessionStorage.setItem(`workflow:${projectId}`, tid);
-        } catch {}
-
-        const backendQ = stage ? `&backend=${encodeURIComponent(stage)}` : '';
-        // **统一进三模式工作台**（要求与大纲 / 素材库 / 方案编辑）：
-        // 以前按 stage 分流到 /project-init 等旧页，那些页面还留着已废弃的「提炼要求」面板 ——
-        // 用户从项目列表点进来看到的就是旧界面（实测反馈）。质量检查仍是独立页。
-        const threeMode = (view) =>
-          `/three-mode?projectId=${projectId}&threadId=${enc}${backendQ}&view=${view}`;
-        switch (stage) {
-          case 'idle':
-          case 'parsing':
-          case 'outline_review':
-          // extracting：闸门 1 放行后的逐节提炼，仍在「要求与大纲」阶段。
-          case 'extracting':
-            location.href = threeMode('outline');
-            break;
-          case 'matching':
-          case 'materials_review':
-            location.href = threeMode('matching');
-            break;
-          case 'generating':
-            location.href = threeMode('editor');
-            break;
-          case 'reviewing':
-          case 'report_review':
-          case 'done':
-            // **不要再直接跳质量检查页**（用户反馈：从项目列表点进来看到的是评审页，
-            // 没走到五步流程）。评审就是第⑤步，统一进三模式面板；面板自己会按运行阶段
-            // 定位到⑤评审（syncPanelStageFromRunOnce）。质量检查页仍可从「处理待办」进。
-            location.href = threeMode('outline');
-            break;
-          case 'aborted':
-          default:
-            location.href = `/three-mode?projectId=${projectId}&view=outline`;
-        }
+        location.href = `/project-intake?projectId=${projectId}`;
       }
 
       async function loadProjects() {
@@ -1230,8 +1176,7 @@
           const project = await api.projects.create({ name });
           if (!project?.id) throw new Error('创建项目失败');
           createdProjectId = project.id;
-          // 直接进工作台：下一步在那里上传招标文件/技术规范书并「拆解评分点」
-          location.href = `/three-mode?projectId=${project.id}`;
+          location.href = `/project-intake?projectId=${project.id}`;
         } catch (err) {
           console.error(err);
           btnDistill.disabled = false;

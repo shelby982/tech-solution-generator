@@ -5,7 +5,7 @@ export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v143';
+} from './material-roles.mjs?v=20261016-v176';
 
 export const statusLabels = {
   empty: '待撰写', material: '待补料', revise: '待修订', stale: '待复审',
@@ -967,4 +967,12 @@ export function evidenceCautionHtml(e) {
     marks.push(`<span class="be-caution tender" title="文件名像是招标方给的文件，却被当作「我方素材」上传 —— 它不适合作为我方技术依据">疑似招标文件</span>`);
   }
   return marks.join('');
+}
+// 标包实体编号与招标原文地图的标签归一；仅在唯一匹配时接受标的级范围。
+export function resolvePackageScope(rows, scope) {
+  const norm = value => String(value || '').replace(/标的|标包|标段|第|包|段|\s/g, '');
+  const target = norm(scope.target), code = norm(scope.package_no);
+  const matches = (rows || []).filter(row => norm(row.target) === target
+    && (!code || norm(row.package_no) === code));
+  return matches.length === 1 ? matches[0] : null;
 }

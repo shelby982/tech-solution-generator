@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v143" />
+    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v176" />
+    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v176" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v176" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -122,6 +124,8 @@
 }
 .app-title { font-size: 13px; font-weight: 700; }
 .project-name-sm { font-size: 11.5px; color: var(--muted); }
+.package-context{font-size:12px;color:#2949b6;background:#eef2ff;border:1px solid #d7ddff;
+  border-radius:999px;padding:4px 10px;text-decoration:none;white-space:nowrap}
 .materials-project-name {
   padding: 12px 14px 8px;
   font-size: 13px;
@@ -3346,14 +3350,16 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v143" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v143" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v176" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v176" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
           <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
+          <a class="package-context" id="package-context" href="#">标包加载中…</a>
+          <a id="switch-package" class="package-context" href="#">切换标包</a>
           <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <div class="header-tools">
@@ -3415,12 +3421,12 @@ body[data-view="matching"] .match-detail { display: block; }
   <!-- 材料条（原左侧整列搬到顶部，释放宽度给内容） -->
   <section class="init-materials-panel" id="materials-panel">
     <div class="mrow1">
-      <span class="mat-k">材料 <b id="mat-total">0</b></span>
+      <span class="mat-k">当前标包依据 <b id="mat-total">0</b></span>
       <span class="gsum" id="mat-gsum"></span>
       <span class="mat-actions">
-        <button class="btn-add-mat" id="btn-add-req" type="button"
+        <button hidden class="btn-add-mat" id="btn-add-req" type="button"
           title="支持一次选多个；类型按文件名自动识别，可在明细里逐个修改">＋ 添加文件</button>
-        <button class="btn-parse-pkg" id="btn-parse-pkg" type="button"
+        <button hidden class="btn-parse-pkg" id="btn-parse-pkg" type="button"
           title="读取已上传文件的正文，检索「标的 / 标包 / 标段」；只按原文事实列出，不猜测">解析标包</button>
         <button class="mat-more-btn" id="mat-desk-toggle" type="button" aria-expanded="true"
           title="收起文件台面（状态不会丢）">收起台面 ▴</button>
@@ -4047,16 +4053,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v143"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v143"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v176"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v176"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v143',
-                        './assets/mode-editor.js?v=20261016-v143']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v176',
+                        './assets/mode-editor.js?v=20261016-v176']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v143"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v176"></script>
   </body>
 </html>

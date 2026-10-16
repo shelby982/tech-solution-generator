@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>项目准备 · 智能应标</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=20261016-v176">
+  <style>
+    body{margin:0;background:#f7f8fa;color:#17202a;font-family:Inter,"PingFang SC",sans-serif}
+    .shell{max-width:1120px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+    .crumb{font-size:13px;color:#667085}.top h1{margin:5px 0 0;font-size:26px}.back{color:#344054;text-decoration:none}
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}.step{padding:13px 15px;border:1px solid #dfe3e8;border-radius:12px;background:white;font-size:13px}.step.on{border-color:#4568dc;color:#2746b5;background:#f4f6ff}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:18px}.card{background:#fff;border:1px solid #e2e6eb;border-radius:16px;padding:20px;box-shadow:0 8px 25px rgba(15,23,42,.04)}
+    h2{font-size:16px;margin:0 0 8px}.hint{font-size:13px;color:#667085;line-height:1.6;margin:0 0 15px}.upload{border:1px dashed #98a2b3;border-radius:12px;padding:16px;background:#fafbfc}.upload label{display:block;font-size:12px;margin:10px 0 5px;color:#475467}.upload input,.upload select{width:100%;box-sizing:border-box}
+    button{border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer}.primary{background:#3156d3;color:white}.secondary{background:#eef2ff;color:#2949b6}.primary:disabled{opacity:.45;cursor:not-allowed}.full{width:100%;margin-top:12px}
+    .file,.pkg{border:1px solid #e4e7ec;border-radius:11px;padding:12px;margin-top:9px}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.meta{font-size:12px;color:#667085;margin-top:4px}.status{font-size:11px;padding:3px 7px;border-radius:999px;background:#f2f4f7}.status.confirmed{background:#ecfdf3;color:#067647}.evidence{font-size:12px;color:#475467;margin-top:9px;padding-top:8px;border-top:1px solid #eee}.empty{padding:40px 10px;text-align:center;color:#667085}.alert{display:none;margin-bottom:14px;padding:10px 12px;border-radius:9px;background:#fff4ed;color:#b54708;font-size:13px}.alert.show{display:block}@media(max-width:800px){.grid{grid-template-columns:1fr}.steps{grid-template-columns:1fr}}
+  </style>
+  <style>
+    .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}.actions button,.actions a{font-size:12px;background:#eef2ff;color:#2949b6;padding:7px 10px;border-radius:7px;text-decoration:none}.actions .primary{background:#3156d3;color:white}button:disabled{opacity:.45;cursor:not-allowed}.file strong{overflow-wrap:anywhere}.status.needs_review{background:#fff4ed;color:#b54708}dialog{border:1px solid #e4e7ec;border-radius:16px;width:min(440px,90vw);padding:24px}dialog::backdrop{background:#17202a66}dialog label{display:block;margin:12px 0}dialog input:not([type=checkbox]),dialog select{display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cdd3dc;border-radius:7px;margin-top:5px}.evidence p{line-height:1.7}.row{flex-wrap:wrap}
+  </style>
+</head>
+<body><main class="shell">
+  <header class="top"><div><div class="crumb">项目 / 项目准备</div><h1 id="title">项目准备</h1></div><a class="back" href="/projects">返回项目列表</a></header>
+  <div class="steps"><div class="step on">1 上传并解析招标文件</div><div class="step on">2 识别与确认标包</div><div class="step">3 进入标包工作空间</div></div>
+  <div id="alert" class="alert"></div>
+  <section class="grid">
+    <div class="card"><h2>招标文件</h2><p class="hint">系统先解析主招标文件或技术规范书，识别标的、标包或标段。后续五步只在已确认标包内运行。</p>
+      <div class="upload"><input id="file" type="file" accept=".pdf,.doc,.docx"><label for="role">文件类型</label><select id="role"><option value="main_rfp">主招标文件</option><option value="spec">技术规范书</option><option value="scoring">评分表</option><option value="evaluation">评审要素</option></select><button id="upload" class="secondary full">上传文件</button></div>
+      <div id="files"></div>
+    </div>
+    <div class="card"><div class="row"><div><h2>标包清单</h2><p class="hint">核对原文证据并确认。确认后才可进入工作空间。</p></div><div><button id="manual" class="secondary">手动添加</button> <button id="identify" class="secondary">重新识别</button></div></div><div id="packages" class="empty">上传并解析招标文件后识别标包</div></div>
+  </section>
+</main>
+<dialog id="package-editor"><form id="package-form"><h2>编辑投标对象</h2><p class="hint">仅在识别有误时修改；名称可留空。</p><input id="edit-id" type="hidden"><label>对象类型<select id="edit-kind"><option value="package">标包</option><option value="section">标段</option><option value="target">独立标的</option></select></label><label>所属标的编号<input id="edit-target"></label><label>标包 / 标段编号<input id="edit-code"></label><label>完整名称<input id="edit-name" maxlength="300"></label><div class="actions"><button type="button" id="cancel-edit">取消</button><button class="primary" type="submit">保存</button></div></form></dialog>
+<dialog id="merge-dialog"><form id="merge-form"><h2>合并重复候选</h2><p class="hint">将当前候选的证据合并到以下保留项。已有运行成果的候选不能合并，保留项需要重新核验。</p><input id="merge-source" type="hidden"><label>保留的投标对象<select id="merge-destination"></select></label><div class="actions"><button type="button" id="cancel-merge">取消</button><button type="submit" class="primary">确认合并</button></div></form></dialog>
+<script type="module" src="/assets/intake.js?v=20261016-v176"></script></body></html>

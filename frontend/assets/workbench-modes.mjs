@@ -55,13 +55,14 @@ export function parseMode(search) {
  * 合并的收益之一：切模式只是改 view 参数，**不整页跳转**，
  * 因此 selectedBlockId 与滚动位置都不会丢。
  */
-export function modeUrl(mode, { projectId, threadId, blockId } = {}) {
+export function modeUrl(mode, { projectId, packageId, threadId, blockId } = {}) {
   const q = new URLSearchParams();
   if (projectId) q.set('projectId', String(projectId));
+  if (packageId) q.set('packageId', String(packageId));
   if (threadId) q.set('threadId', String(threadId));
   if (blockId) q.set('blockId', String(blockId));
   q.set('view', MODE_SET.has(mode) ? mode : DEFAULT_MODE);
-  return '/project-init?' + q.toString();
+  return '/three-mode?' + q.toString();
 }
 
 /**

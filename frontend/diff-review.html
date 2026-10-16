@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Diff Review</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v143" />
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v143" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v176" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v176" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -98,13 +98,15 @@
     </div>
 
     <script type="module">
-      import { api } from './assets/api.js?v=20261016-v143';
+      import { api } from './assets/api.js?v=20261016-v176';
 
       const params    = new URLSearchParams(location.search);
       const projectId = params.get('projectId');
+      const packageId = params.get('packageId');
       if (!projectId) { location.href = '/projects'; }
+      if (!packageId) { location.href = `/project-intake?projectId=${encodeURIComponent(projectId)}`; }
 
-      document.getElementById('tab-workbench').href = `/workbench?projectId=${projectId}`;
+      document.getElementById('tab-workbench').href = `/three-mode?projectId=${projectId}&packageId=${packageId}&view=editor`;
 
       fetch(`/api/projects/${projectId}`).then(r => r.json()).then(p => {
         if (p?.name) document.getElementById('header-project-name').textContent = p.name;
@@ -116,7 +118,7 @@
       let diffData = null;
 
       async function loadDiff() {
-        diffData = await api.export.diff(projectId);
+        diffData = await api.export.diff(projectId, packageId);
         const changed = diffData.changed || [];
         const added   = diffData.added   || [];
         const removed = diffData.removed || [];
@@ -131,12 +133,12 @@
         if (!diffData) return;
         btnAccept.disabled = true;
         const accept = [...(diffData.changed?.map(c => c.block_id) || []), ...(diffData.added?.map(a => a.block_id) || [])];
-        await api.export.applyDiff(projectId, { accept, reject: [] });
+        await api.export.applyDiff(projectId, { accept, reject: [] }, packageId);
         btnAccept.textContent = '已接受';
       });
 
       btnExport?.addEventListener('click', () => {
-        api.export.word(projectId);
+        api.export.word(projectId, packageId, params.get('threadId'));
       });
 
       loadDiff();
@@ -300,7 +302,7 @@
 
       async function loadRevisions() {
         try {
-          const res = await api.revisions.listByProject(projectId);
+          const res = await api.revisions.listByProject(projectId, packageId);
           revisionData = res.revisions || [];
         } catch { revisionData = []; }
 
@@ -324,6 +326,6 @@
 
       loadRevisions();
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v143"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v176"></script>
   </body>
 </html>

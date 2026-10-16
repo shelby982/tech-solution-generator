@@ -2,7 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { api } from './api.js?v=20261016-v143';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v176';
+import { api } from './api.js?v=20261016-v176';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v176';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -10,8 +12,8 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v143';
-import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
+       } from './workspace.js?v=20261016-v176';
+import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
          moveOutlineNodeTo, moveOutlineNodesTo,
@@ -29,7 +31,7 @@ import { buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOut
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v143';
+       } from './workspace-model.mjs?v=20261016-v176';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -38,11 +40,16 @@ const params = new URLSearchParams(location.search);
 const _rawProjectId = params.get('projectId') || '';
 const _pidMatch = _rawProjectId.match(/\d+/);
 const projectId = _pidMatch ? _pidMatch[0] : '';
+const packageId = Number(params.get('packageId') || 0);
+const packageCacheKey = (name) => `${name}:${projectId}:package:${packageId || 'legacy'}`;
 if (_rawProjectId && String(_rawProjectId) !== String(projectId)) {
   console.warn('[outline] projectId 参数含非数字内容，已取数字部分：',
     JSON.stringify(_rawProjectId), '→', projectId);
 }
 if (!projectId) { location.href = '/projects'; }
+if (projectId && !packageId) {
+  location.href = `/project-intake?projectId=${encodeURIComponent(projectId)}`;
+}
 // URL 显式指定的视图模式（顶部进度条点击会带上）；空 / 非法值视为不覆盖
 const _viewParam = params.get('view');
 // URL 显式指定的 backend stage（跨视图跳转 click handler 会带）：作为 sessionStorage
@@ -51,7 +58,7 @@ const _backendParam = params.get('backend');
 if (_backendParam && projectId) {
   try {
     // 只升不降（单调推进）
-    const k = `furthestStage:${projectId}`;
+    const k = packageCacheKey('furthestStage');
     const prev = sessionStorage.getItem(k);
     const STAGE_ORDER_LITERAL = ['parsing', 'matching', 'generating', 'reviewing'];
     const STAGE_MAP_LITERAL = {
@@ -88,6 +95,52 @@ const modelLabel    = document.getElementById('model-selector-label');
 const modelDropdown = document.getElementById('model-dropdown');
 const modelListEl   = document.getElementById('model-list');
 const statusBar  = document.getElementById('status-bar');
+const packageContext = document.getElementById('package-context');
+const switchPackageLink = document.getElementById('switch-package');
+if (switchPackageLink) {
+  switchPackageLink.href = `/project-intake?projectId=${encodeURIComponent(projectId)}`;
+  switchPackageLink.addEventListener('click', async event => {
+    event.preventDefault();
+    try {
+      const intake = await api.projects.intake(projectId);
+      const choices = intake.packages.filter(p => p.status === 'confirmed');
+      const dialog = document.createElement('dialog');
+      dialog.style.cssText = 'max-width:520px;width:90%;border:1px solid #ddd;border-radius:14px;padding:24px';
+      dialog.innerHTML = `<h3>切换标包工作空间</h3><p>切换前请保存当前编辑。切换不会重新拆分或覆盖成果。</p>
+        <div>${choices.map(p => `<button type="button" data-switch="${p.package_id}" style="display:block;margin:8px 0;padding:10px;width:100%" ${p.package_id === packageId ? 'disabled' : ''}>${escapeHtml(p.display_name || `标的 ${p.target_code || '—'} / 标包 ${p.package_code || '—'}`)}${p.package_id === packageId ? '（当前）' : ''}</button>`).join('') || '尚无已确认标包'}</div>
+        <p><a href="/project-intake?projectId=${projectId}">管理投标范围与文件依据</a></p><button data-close type="button">取消</button>`;
+      document.body.append(dialog);
+      dialog.addEventListener('close', () => dialog.remove());
+      dialog.querySelector('[data-close]').onclick = () => dialog.close();
+      dialog.querySelectorAll('[data-switch]').forEach(button => button.onclick = async () => {
+        try {
+          button.disabled = true;
+          const next = await api.projects.packageWorkspace(projectId, button.dataset.switch);
+          const q = new URLSearchParams({projectId, packageId: button.dataset.switch, view: 'outline'});
+          if (next.latest_run?.thread_id) q.set('threadId', next.latest_run.thread_id);
+          location.href = `/three-mode?${q}`;
+        } catch (err) { button.disabled = false; uiAlert(err.message); }
+      });
+      dialog.showModal();
+    } catch (err) { uiAlert(err.message); }
+  });
+}
+let activePackage = null;
+const activePackageReady = packageId ? api.projects.packageWorkspace(projectId, packageId).then(result => {
+  activePackage = result.package;
+  return result;
+}) : Promise.resolve(null);
+activePackageReady.catch(() => {});
+if (packageContext && packageId) {
+  packageContext.href = `/project-intake?projectId=${encodeURIComponent(projectId)}`;
+  activePackageReady.then(({ package: pkg }) => {
+    packageContext.textContent = pkg.display_name
+      || `标的 ${pkg.target_code || '—'} / 标包 ${pkg.package_code || '—'}`;
+  }).catch((err) => {
+    packageContext.textContent = '标包不可用';
+    packageContext.title = err?.message || '';
+  });
+}
 const statusLabel = document.getElementById('status-label');
 const progressTrack = document.getElementById('progress-track');
 const progressBar   = document.getElementById('progress-bar');
@@ -121,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v143';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v176';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -156,7 +209,7 @@ let outlineError = '';
 let currentStage = (() => {
   if (_backendParam && _backendParam.trim()) return _backendParam;
   try {
-    const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+    const cached = sessionStorage.getItem(packageCacheKey('furthestStage'));
     if (cached) return cached;
   } catch {}
   return null;
@@ -238,7 +291,8 @@ function switchView(view, statusLabel) {
   }
 }
 
-const THREAD_KEY = (pid) => `workflow:${pid}`;
+// 同一项目的不同标包不能复用 session thread；否则切换标包会恢复到另一个标包的运行。
+const THREAD_KEY = (pid) => `workflow:${pid}:package:${packageId || 'legacy'}`;
 function getThread(pid) { try { return sessionStorage.getItem(THREAD_KEY(pid)); } catch { return null; } }
 function setThread(pid, tid) { try { sessionStorage.setItem(THREAD_KEY(pid), tid); } catch {} }
 function clearThread(pid) { try { sessionStorage.removeItem(THREAD_KEY(pid)); } catch {} }
@@ -294,7 +348,7 @@ function setStage(stage) {
     const mappedNew = STAGE_MAP[stage];
     if (mappedNew) {
       const newIdx = STAGE_ORDER.indexOf(mappedNew);
-      const k = `furthestStage:${projectId}`;
+      const k = packageCacheKey('furthestStage');
       const prev = sessionStorage.getItem(k);
       const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
       if (newIdx > prevIdx) sessionStorage.setItem(k, stage);
@@ -322,7 +376,7 @@ function renderStageBar() {
   let backend = currentStage;
   if (!backend) {
     try {
-      const cached = sessionStorage.getItem(`furthestStage:${projectId}`);
+      const cached = sessionStorage.getItem(packageCacheKey('furthestStage'));
       if (cached) backend = cached;
     } catch {}
   }
@@ -403,17 +457,17 @@ document.getElementById('stage-progress')?.addEventListener('click', (e) => {
   const stage = step.dataset.stage;
   // tid 优先级：当前内存 > sessionStorage > URL（页面初次加载时三者都可能）
   let tid = currentThreadId
-    || sessionStorage.getItem(`workflow:${projectId}`)
+    || getThread(projectId)
     || params.get('threadId');
   // 跳转前把 backend stage 写 sessionStorage（跨页面继承）+ URL（同步可靠源）。
   // sessionStorage 写入 + 读取在某些场景下可能与跳转时机错位，URL 是最稳的兜底。
   let backendForUrl = currentStage;
   if (!backendForUrl || !STAGE_MAP[backendForUrl]) {
-    backendForUrl = sessionStorage.getItem(`furthestStage:${projectId}`) || '';
+    backendForUrl = sessionStorage.getItem(packageCacheKey('furthestStage')) || '';
   }
   try {
     if (backendForUrl && STAGE_MAP[backendForUrl]) {
-      const k = `furthestStage:${projectId}`;
+      const k = packageCacheKey('furthestStage');
       const prev = sessionStorage.getItem(k);
       const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
       const newIdx = STAGE_ORDER.indexOf(STAGE_MAP[backendForUrl]);
@@ -423,12 +477,13 @@ document.getElementById('stage-progress')?.addEventListener('click', (e) => {
   const enc = tid ? encodeURIComponent(tid) : '';
   const tidQuery = tid ? `&threadId=${enc}` : '';
   const backendQuery = backendForUrl ? `&backend=${encodeURIComponent(backendForUrl)}` : '';
+  const packageQuery = `&packageId=${encodeURIComponent(packageId)}`;
   const routes = {
-    parsing: `/three-mode?projectId=${projectId}${tidQuery}&view=outline${backendQuery}`,
-    matching: `/three-mode?projectId=${projectId}${tidQuery}&view=matching${backendQuery}`,
-    generating: tid ? `/three-mode?projectId=${projectId}${tidQuery}&view=editor${backendQuery}` : null,
-    reviewing: tid ? `/review?threadId=${enc}${backendQuery}` : null,
-    report_review: tid ? `/review?threadId=${enc}${backendQuery}` : null,
+    parsing: `/three-mode?projectId=${projectId}${packageQuery}${tidQuery}&view=outline${backendQuery}`,
+    matching: `/three-mode?projectId=${projectId}${packageQuery}${tidQuery}&view=matching${backendQuery}`,
+    generating: tid ? `/three-mode?projectId=${projectId}${packageQuery}${tidQuery}&view=editor${backendQuery}` : null,
+    reviewing: tid ? `/review?projectId=${projectId}${packageQuery}&threadId=${enc}${backendQuery}` : null,
+    report_review: tid ? `/review?projectId=${projectId}${packageQuery}&threadId=${enc}${backendQuery}` : null,
   };
   if (routes[stage]) location.href = routes[stage];
 });
@@ -644,7 +699,7 @@ document.getElementById('mat-desk-toggle')?.addEventListener('click', (ev) => {
 });
 // 启动即恢复上次的台面折叠状态（刷新后保持）
 try {
-  if (localStorage.getItem('ge.matDesk.collapsed') === '1') setDeskCollapsed(true);
+  if (localStorage.getItem('ge.matDesk.collapsed') !== '0') setDeskCollapsed(true);
 } catch {}
 
 
@@ -681,7 +736,7 @@ const ROLE_LABEL = { ...ROLE_LABEL_SHARED };
  *  文件多时第一行先给构成，第二行只显示前两行内的 chip，其余折叠。 */
 function refreshMaterialSummary() {
   const chips = [...document.querySelectorAll('#req-stack .mat-row, #src-stack .mat-row')];
-  const total = chips.length;
+  const total = packageId ? lastMaterials.length : chips.length;
   const t = document.getElementById('mat-total');
   if (t) t.textContent = String(total);
   const gsum = document.getElementById('mat-gsum');
@@ -704,9 +759,9 @@ function refreshMaterialSummary() {
 }
 
 async function loadMaterials() {
+  await activePackageReady;
   await loadMaterialIntegrity();
   const list = await api.materials.list(projectId);
-  lastMaterials = list;
   await loadPackageAnalysis().catch(() => {});   // 卡片要显示标包归属
   // 「解析标包」按**全部材料**判断（只看 req-stack 会在"只传了素材"时误禁用）
   if (btnParsePkg) {
@@ -716,15 +771,22 @@ async function loadMaterials() {
       : '先上传文件，再解析标包';
   }
   const reqRoles = ['spec', 'main_rfp', 'requirement', 'scoring', 'evaluation'];
-  const reqs = list.filter(m => reqRoles.includes(m.role));
+  const reqs = list.filter(m => reqRoles.includes(m.role) && (!activePackage ||
+    (m.role === 'spec' && activePackage.spec_material_ids !== undefined
+      ? activePackage.spec_material_ids.map(String).includes(String(m.id)) :
+    (activePackage.source_material_ids || []).map(String).includes(String(m.id)) ||
+    materialPackagesOf(m.id).some(p => String(p.target || '') === String(activePackage.target_code || '')
+      && String(p.package_no || '') === String(activePackage.package_code || '')))));
   const srcs = list.filter(m => m.role === 'source');
+  lastMaterials = reqs;
   lastSrcMaterials = srcs;    // 依据刷新时只重画用量徽标，不重拉列表
   sourceMaterialCount = srcs.length;   // 匹配详情的空状态：一份素材都没有时说清"先上传"
   renderMatchTreeHead();               // 栏头上的「素材 N 份」跟着变
   renderMats(reqStack, reqs, true);
   renderMats(srcStack, srcs, false);
-  renderMaterialCards(list);         // 方案 A：台面卡片（状态与操作跟着文件走）
+  renderMaterialCards(reqs);
   refreshMaterialSummary();          // 摘要：份数 + 体积 + 异常计数
+  setMatHint('已按当前标包归属展示 · 文件变更请到项目准备页');
   // 左栏已按原型移除：计数改由材料条的摘要（#mat-total / #mat-gsum）承担。
   // 这里对旧节点做空值保护，避免整页脚本因一个 null 崩掉（实测踩过）。
   if (reqCount) reqCount.textContent = `${reqs.length} 项`;
@@ -2039,7 +2101,7 @@ function updateBlockCard(blockId, data) {
 // （它可能正停在某个闸门等着），没有可用的才清空、让用户新建一次。
 async function switchToLatestUsableRun() {
   try {
-    const runs = await fetch(`/api/projects/${projectId}/workflow-runs`)
+    const runs = await fetch(`/api/projects/${projectId}/workflow-runs?packageId=${encodeURIComponent(packageId)}`)
       .then(r => (r.ok ? r.json() : []));
     const usable = (runs || []).find(
       r => r.thread_id && r.stage && !['aborted', 'done'].includes(r.stage));
@@ -2490,6 +2552,8 @@ document.addEventListener('keydown', (e) => {
  */
 async function resolvePanelThreadId(tid) {
   if (tid) return tid;
+  const selected = params.get('threadId') || currentThreadId || workspace?.threadId || getThread(projectId);
+  if (selected) return selected;
   try { return await api.workflow.latestRunThreadId(projectId); } catch (e) { return null; }
 }
 
@@ -2559,7 +2623,8 @@ let lastCoverageScope = null;
 let panelViewPkg = null;      // {target, package_no} | null（null = 跟随当前目录）
 // ② 目录确认与调整：选中的章节行（选中才显示该行操作）+ 步骤（1 目录 / 2 规范书）
 let selectedStructId = null;
-let confirmStep = 1;
+let responsePlanChoice = '';
+let responsePlanPoll = null;
 let structSaveNote = '';   // 结构保存结果（新增/更新/删除）—— 保存后显示，必须可见
 let topicSaveNote = '';    // 归属保存结果 —— 保存后\*\*面板会重绘\*\*，所以用模块变量而不是就地写 DOM
 // 文件↔标包（多对多）：一个人工可改的归属
@@ -2582,6 +2647,14 @@ function cardStateOf(m) {
 function renderMaterialCards(mats) {
   const box = document.getElementById('mat-cards');
   if (!box) return;
+  if (packageId) {
+    box.innerHTML = (mats || []).map(m => `<div class="mcard"><span class="badge">${escapeHtml(ROLE_LABEL_SHARED[m.role] || m.role)}</span>
+      <div class="mfname" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename)}</div>
+      <span class="mchip">${escapeHtml(cardStateOf(m).text)}</span>
+      <a class="mact" href="/api/materials/${m.id}/file" target="_blank" rel="noopener">查看原文 ›</a></div>`).join('')
+      || '<p class="hint">当前标包尚无已关联的招标依据，请返回项目准备核对文件归属。</p>';
+    return;
+  }
   const cards = (mats || []).map((m) => {
     const st = cardStateOf(m);
     const pkgs = materialPackagesOf(m.id);
@@ -2768,13 +2841,11 @@ function rememberConfirmedPkg(x) {
 }
 let panelViewCats = null;     // 筛选的类别（null = 跟随当前目录）
 // 面板当前所在阶段（'1' 评分点 / '2' 待确认 / '3' 产物）与其内的子页签
-let panelStage = '1';
+let panelStage = params.get('planning') === '1' ? '2' : '1';
 // ④编写 / ⑤评审 面板的数据（**必须声明在模块顶部**：面板可能在初始化早期就渲染，
 // 声明放函数区会踩 TDZ —— 本会话已经因此踩过一次坑）。
-let writeBlocks = [];
-let writeActiveId = '';
 let writeStats = { written: 0, total: 0 };
-let writeHydratedKey = '';
+let chapterStudio = null;
 let reviewHydratedKey = '';
 let reviewSummary = {};
 let verdictCache = { key: '', data: null };
@@ -2945,24 +3016,6 @@ function renderPointsAlignment(alignment) {
   return `<div class="sr-align warn">⚠ 解析到 <b>${a.expected}</b> 条（${escapeHtml(cats)}），
     已落库 <b>${a.persisted}</b> 条${miss ? `，缺 ${miss} 条` : ''}
     <button class="sr-mini" data-act="sync-points" style="margin-left:8px">一键对齐（不花模型）</button></div>`;
-}
-
-/** ② 待确认的两步切换（本地切换 class，不重绘面板 —— 保留滚动位置） */
-function switchConfirmStep(n) {
-  confirmStep = Math.max(1, Math.min(2, Number(n) || 1));
-  const root = document.querySelector('.sr-two');
-  if (!root) return;
-  root.querySelectorAll('.sr-sub2-item').forEach((x) =>
-    x.classList.toggle('on', Number(x.dataset.sub2) === confirmStep));
-  root.querySelectorAll('.sr2-pane').forEach((x) =>
-    x.classList.toggle('on', Number(x.dataset.sub2) === confirmStep));
-  const foot = document.querySelector('.sr-two-foot');
-  const prevBtn = foot?.querySelector('[data-step-nav="prev"]');
-  if (prevBtn) prevBtn.disabled = confirmStep === 1;
-  const nextBtn = foot?.querySelector('[data-step-nav="next"]');
-  if (nextBtn) nextBtn.hidden = confirmStep === 2;
-  const finalBtn = foot?.querySelector('[data-act="confirm-generate"]');
-  if (finalBtn) finalBtn.hidden = confirmStep !== 2;
 }
 
 /** ② 目录确认与调整 的说明行（结构完整 = 每个评分点都有承载章节） */
@@ -3422,13 +3475,14 @@ function refreshPanelRunState() {
   const done = Number(doneBlocks) || 0;
   let text = '';
   if (st === 'failed') text = '上次运行失败 · 原因见「运行详情」';
+  else if (st === 'parsing' && workspace?.state?.config?.response_type) text = '正在整合评分依据，生成应答目录草案…';
   else if (splitInProgress || st === 'parsing') text = '正在解析要求文件…';
   else if (outlineDrafting) text = '正在梳理应答目录…';
   else if (st === 'extracting' && total) text = `已准备 ${done}/${total} 章节`;
   else if (st === 'matching') text = '正在匹配素材…';
   else if (st === 'generating' && total) text = `正在生成正文 ${done}/${total} 章节`;
   else if (st === 'reviewing') text = '正在评审…';
-  else if (writeStats.total) text = `已写 ${writeStats.written}/${writeStats.total} 章`;
+  else if (writeStats.total) text = `草稿 ${writeStats.written}/${writeStats.total} 个编写单元`;
   // 停在半途（准备了一部分、没在跑）：状态栏模块已去掉，这里给一句进度，
   // 否则"还剩多少没准备"在界面上完全看不到。
   else if (total && done > 0 && done < total) text = `已准备 ${done}/${total} 章节（未跑完）`;
@@ -3454,7 +3508,7 @@ function refreshStageHint() {
 function stageHintText(st) {
   if (st === '4') {
     return writeStats.total
-      ? `已写 ${writeStats.written} / ${writeStats.total} 章 · 章头常驻评分点与举证`
+      ? '按章编制 · 图文表统一导出'
       : '等目录生成后再撰写';
   }
   if (st === '5') {
@@ -3465,207 +3519,15 @@ function stageHintText(st) {
   return '';
 }
 
-function paintWriteList(keyword = '') {
-  const list = document.getElementById('sr-wlist');
-  if (!list) return;
-  const kw = keyword.trim().toLowerCase();
-  list.innerHTML = writeBlocks
-    .filter((b) => !kw || String(b.title || '').toLowerCase().includes(kw))
-    .slice(0, 400)
-    .map((b) => {
-      const lvl = Math.max(1, Number(b.level) || 1);
-      return `<div class="sr-wnode${lvl >= 3 ? ' is-deep' : ''}${String(b.block_id) === writeActiveId ? ' on' : ''}"
-      style="padding-left:${8 + (lvl - 1) * 16}px" data-bid="${escapeHtml(String(b.block_id))}">
-        <span class="sr-wname">${escapeHtml(b.title || '')}</span>
-        <span class="sr-wtag">${(b.content || '').trim() ? '已写' : '待写'}</span></div>`;
-    }).join('')
-    || '<div class="sr-note">没有匹配的章节。</div>';
-}
-
 async function renderWritePane() {
   const body = document.getElementById('sr-write-body');
   if (!body) return;
-  const key = `${projectId}|${currentThreadId || ''}`;
-  if (writeHydratedKey === key && writeBlocks.length) return;
-  body.innerHTML = '<div class="sr-note">正在加载章节…</div>';
-  let blocks = [];
   try {
-    blocks = await api.blocks.list(projectId, currentThreadId) || [];
-  } catch (e) {
-    body.innerHTML = `<div class="sr-flash err">章节加载失败：${escapeHtml(e.message)}</div>`;
-    return;
-  }
-  // 只要"应答章节"（规范书要求行不进写作列表）
-  writeBlocks = blocks.filter((b) => b && b.title && b.kind !== 'spec');
-  writeStats = { total: writeBlocks.length,
-                 written: writeBlocks.filter((b) => (b.content || '').trim()).length };
-  writeHydratedKey = key;
-  if (!writeBlocks.length) {
-    body.innerHTML = '<div class="sr-note">暂无章节。请先完成 ①拆分评分点 → ②待确认 → ③产物。</div>';
-    return;
-  }
-  body.innerHTML = `
-    <div class="sr-write">
-      <div class="sr-wtree">
-        <input class="sr-wsearch" id="sr-wsearch" type="search" placeholder="搜索章节" aria-label="搜索章节" />
-        <div class="sr-wlist" id="sr-wlist"></div>
-      </div>
-      <div class="sr-wmain">
-        <div class="sr-whead" id="sr-whead"></div>
-        <div class="sr-wedit" id="sr-wedit" contenteditable="true" role="textbox" aria-multiline="true"
-             data-placeholder="在此撰写本节正文，或点下方「生成本章」…"></div>
-        <div class="sr-wfoot">
-          <button class="sr-btn-primary" id="sr-wsave" type="button">保存</button>
-          <button class="sr-btn" id="sr-wgen" type="button">生成本章</button>
-          <span class="sr-wstate" id="sr-wstat"></span>
-          <span class="sr-wright"><button class="sr-btn" id="sr-wmat" type="button">按需素材 ▾</button></span>
-        </div>
-        <div class="sr-wmatlist" id="sr-wmatlist" hidden></div>
-      </div>
-    </div>`;
-  paintWriteList();
-  document.getElementById('sr-wsearch')?.addEventListener('input', (e) => paintWriteList(e.target.value));
-  document.getElementById('sr-wlist')?.addEventListener('click', (e) => {
-    const node = e.target.closest('.sr-wnode');
-    if (node) selectWriteBlock(node.dataset.bid);
-  });
-  document.getElementById('sr-wsave')?.addEventListener('click', saveWriteBlock);
-  document.getElementById('sr-wgen')?.addEventListener('click', genWriteBlock);
-  document.getElementById('sr-wmat')?.addEventListener('click', toggleWriteMaterials);
-  // 默认落在第一个"待写"章节（打开就能干活）
-  const first = writeBlocks.find((b) => !(b.content || '').trim()) || writeBlocks[0];
-  selectWriteBlock(String(first.block_id));
-}
-
-async function selectWriteBlock(bid) {
-  const b = writeBlocks.find((x) => String(x.block_id) === String(bid));
-  if (!b) return;
-  writeActiveId = String(bid);
-  document.querySelectorAll('.sr-wnode').forEach((n) =>
-    n.classList.toggle('on', n.dataset.bid === String(bid)));
-  const head = document.getElementById('sr-whead');
-  const verdict = await loadVerdict();
-  const meta = new Map(((verdict && verdict.points) || []).map((p) => [String(p.point_id), p]));
-  let ids = [];
-  try {
-    ids = (Array.isArray(b.review_point_ids) ? b.review_point_ids
-                                            : JSON.parse(b.review_point_ids || '[]') || []).map(String);
-  } catch { ids = []; }
-  const criterion = String(b.criterion_text || '').trim();
-  const evidence = String(b.evidence_required || '').trim();
-  if (head) {
-    head.innerHTML = `
-      <div class="sr-wrow">
-        <span class="sr-dim">本章回应</span>
-        ${ids.length
-          ? ids.map((id) => { const m = meta.get(id) || {};
-              return `<span class="sr-wpoint">${escapeHtml(m.item || m.factor || id)}${
-                m.points != null ? `<em>${m.points} 分</em>` : ''}</span>`; }).join('')
-          : '<span class="sr-dim">骨架章节（未挂评分点）</span>'}
-        <span class="sr-wev${evidence ? '' : ' none'}">${
-          evidence ? '需举证：' + escapeHtml(evidence) : '本章无需强制举证'}</span>
-      </div>
-      ${criterion ? `<div class="sr-wcrit"><b>得分口径</b>${escapeHtml(criterion)}</div>` : ''}`;
-  }
-  const edit = document.getElementById('sr-wedit');
-  if (edit) edit.textContent = b.content || '';
-  const stat = document.getElementById('sr-wstat');
-  if (stat) stat.textContent = '';
-  const mat = document.getElementById('sr-wmatlist');
-  if (mat) mat.hidden = true;
-}
-
-async function saveWriteBlock() {
-  const b = writeBlocks.find((x) => String(x.block_id) === writeActiveId);
-  const stat = document.getElementById('sr-wstat');
-  if (!b || !stat) return;
-  const content = document.getElementById('sr-wedit')?.innerText ?? '';
-  stat.textContent = '保存中…';
-  try {
-    await api.blocks.update(b.id ?? b.block_id, content);
-    b.content = content;
-    writeStats = { total: writeBlocks.length,
-                   written: writeBlocks.filter((x) => (x.content || '').trim()).length };
-    paintWriteList(document.getElementById('sr-wsearch')?.value || '');
-    refreshStageHint();
-    stat.textContent = '已保存';
-  } catch (e) {
-    stat.textContent = `保存失败：${e.message}`;
-  }
-}
-
-async function genWriteBlock() {
-  const stat = document.getElementById('sr-wstat');
-  if (!stat) return;
-  if (!currentThreadId) { stat.textContent = '还没有运行记录，请先在①拆分评分点'; return; }
-  stat.textContent = '已提交生成请求…';
-  // 两条通道（实测出来的差别）：
-  //   ① 运行**正在跑**（extracting/matching/generating/reviewing）→ /regen：把目标写进
-  //      state，由图接着跑；
-  //   ② 运行**已停住**（paused/done/materials_review/report_review…）→ /regen 从检查点继续
-  //      会走回原来的节点，**静默不生成**（实测：什么都不发生）。这种时候要用
-  //      workspace-action(action=revise)：它从确定的入口（GATE_MATERIALS / NODE_GENERATE）
-  //      重入，只针对选中的章节生成。
-  try {
-    const st = (await api.workflow.state(currentThreadId).catch(() => null))?.stage || '';
-    const RUNNING = ['parsing', 'extracting', 'matching', 'generating', 'reviewing'];
-    const settled = !RUNNING.includes(st);
-    const r = settled
-      ? await fetch(`/api/workflow/${currentThreadId}/workspace-action`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'revise', block_ids: [writeActiveId] }),
-        })
-      : await fetch(`/api/workflow/${currentThreadId}/regen`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ block_ids: [writeActiveId] }),
-        });
-    stat.textContent = r.ok
-      ? '已提交生成；完成后重新点该章节即可看到正文'
-      : `提交失败（HTTP ${r.status}）${settled ? '' : '：若运行已停在闸门，请先在面板上方继续运行'}`;
-  } catch (e) {
-    stat.textContent = `提交失败：${e.message}`;
-  }
-}
-
-async function toggleWriteMaterials() {
-  const box = document.getElementById('sr-wmatlist');
-  const b = writeBlocks.find((x) => String(x.block_id) === writeActiveId);
-  if (!box || !b) return;
-  if (!box.hidden) { box.hidden = true; return; }
-  box.hidden = false;
-  const evidence = String(b.evidence_required || '').trim();   // 降级提示要用
-  box.innerHTML = '<div class="sr-note">正在检索本章相关素材…</div>';
-  // 两条通道，如实标注用的是哪条：
-  //  ① material-search —— **按需检索**（用本章的举证要求/要点即时找，不写库）
-  //  ② matched-sources —— 预匹配阶段已存下的依据（人工挂载的也在这里）
-  const card = (x) => `
-    <div class="sr-wmat">
-      <div class="sr-wmatsrc">${escapeHtml(x.filename || x.source_file || '素材')}${
-        x.page ? ` · 第 ${x.page} 页` : ''}</div>
-      <div class="sr-wmattxt">${escapeHtml(String(x.content || x.snippet || '').slice(0, 200))}</div>
-    </div>`;
-  try {
-    const sr = await fetch(`/api/blocks/${b.id}/material-search`);
-    const sd = sr.ok ? await sr.json() : null;
-    const hits = sd?.results || [];
-    if (hits.length) {
-      const why = { evidence_required: '按本章举证要求检索', key_points: '按本章应标重点检索',
-                    title: '按章节标题检索' }[sd.query_source] || '按需检索';
-      box.innerHTML = `<div class="sr-note">${why} · 命中 ${hits.length} 段（关键词：${
-        (sd.terms || []).slice(0, 5).map(escapeHtml).join('、')}）</div>`
-        + hits.map(card).join('')
-        + '<div class="sr-note">按需检索不写库；要挂成本章依据请用下方「已匹配依据」里的引用动作。</div>';
-      return;
-    }
-    const r = await fetch(`/api/blocks/${b.id}/matched-sources`);
-    const data = r.ok ? await r.json() : null;
-    const list = Array.isArray(data) ? data : (data?.matched_sources || data?.sources || []);
-    box.innerHTML = list.length
-      ? `<div class="sr-note">已匹配依据（预匹配阶段存下的）</div>` + list.slice(0, 8).map(card).join('')
-      : '<div class="sr-note">本章暂无相关素材：按需检索没命中，也没有预匹配依据。'
-        + (evidence ? '本章有举证要求，可在素材库补充。' : '本章无需强制举证。') + '</div>';
-  } catch (e) {
-    box.innerHTML = `<div class="sr-flash err">素材加载失败：${escapeHtml(e.message)}</div>`;
+    const tid = await resolvePanelThreadId();
+    chapterStudio = await mountChapterStudio(body, {projectId, threadId:tid, getModel:()=>selectedModel,
+      onStats: stats => { writeStats = stats; refreshStageHint(); }});
+  } catch(error) {
+    body.innerHTML = `<div class="sr-flash err">编制工作台加载失败：${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -3721,7 +3583,7 @@ async function renderReviewPane() {
       </details>`; }).join('') || '<div class="sr-note">暂无评分点。</div>'}</div>
     <div class="sr-note" style="padding:8px 15px">
       这里是按评分点把关；章节级的正文与评审意见仍在
-      <a href="/review?projectId=${projectId}${currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}"
+      <a href="/review?projectId=${projectId}&packageId=${encodeURIComponent(packageId)}${currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : ''}"
          style="color:var(--accent)">质量检查页</a>。</div>`;
 }
 
@@ -3736,8 +3598,14 @@ function hideLaneTreeWhenPanelShows() {
 
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
-  await loadPackageAnalysis().catch(() => {});   // 标包卡片要用；失败不阻断面板
-  if (!confirmedPkg) confirmedPkg = readConfirmedPkg();   // 刷新后仍记得确认过哪个标包
+  try { await activePackageReady; } catch (err) {
+    showSplitPanelRetry(err.message || '当前标包不可用，请返回项目准备核验');
+    return;
+  }
+  if (activePackage) {
+    confirmedPkg = {target: activePackage.target_code || '', package_no: activePackage.package_code || ''};
+    panelViewPkg = {...confirmedPkg};
+  }
   // 面板头那行运行进度：只在真在跑 / 有进度时显示（原来在状态栏，已随该模块去掉）
   setTimeout(refreshPanelRunState, 0);
   // 拆分进行中：报告此时是空的（旧数据已被清），画出来只会得到空标包下拉 +
@@ -3747,9 +3615,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   // 兼容旧的 tab 写法（'commerce'/'confirm'/'directory'…）→ 映射到阶段 + 子页签
   if (tab && !wantStage) {
     if (tab === 'confirm') wantStage = '2';
-    else if (tab === 'directory' || tab === 'map') { wantStage = '3'; sub = tab; }
+    else if (tab === 'directory' || tab === 'map') { wantStage = '4'; sub = tab; }
     else { wantStage = '1'; sub = tab; }
   }
+  if (wantStage === '3') { wantStage = '4'; sub = sub || 'directory'; }
   if (wantStage) panelStage = wantStage;
   if (sub) panelSub = sub;
   // 非"切范围"引起的重开（首次展开/自动展开/收起后再开）→ 查看范围跟随当前目录
@@ -3794,11 +3663,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const pointsConfirmed = rpCurrent;      // 同一判定，避免两处口径不一致
   const stage = pointsConfirmed ? 'structure' : 'points';
 
-  const curScope = data.project_scope || {};
+  const curScope = activePackage ? {target: activePackage.target_code || '', package_no: activePackage.package_code || ''} : (data.project_scope || {});
   // 每个标包各自的评分点（后端 package_points）：用户反馈"我拆分了 3 个标包，
   // 但后面的评分点又好像对应不上"—— 之前明细页只有当前标包的数据。
   // ── 查看范围：标包下拉决定"下面所有内容看哪个标包" ──
-  const viewPkg = panelViewPkg || {
+  const viewPkg = (activePackage ? curScope : panelViewPkg) || {
     target: curScope.target || '', package_no: curScope.package_no || '',
   };
   const isRunScope = String(viewPkg.package_no || '') === String(curScope.package_no || '')
@@ -3826,12 +3695,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const pkgLabel = (p) => `${p.target || '—'} / 标包${p.package_no || '—'}`;
   const curPkgLabel = pkgLabel(curScope);
   // 筛选出来的"查看范围"对应的数据行（指标、依据页、生成动作都用它）
-  const viewPkgStat = pkgs.find((p) =>
-    String(p.package_no || '') === String(viewPkg.package_no || '')
-    && String(p.target || '') === String(viewPkg.target || '')) || null;
-  const viewMatrixRow = (data.package_matrix || []).find((r) =>
-    String(r.package_no || '') === String(viewPkg.package_no || '')
-    && String(r.target || '') === String(viewPkg.target || '')) || null;
+  const viewPkgStat = resolvePackageScope(pkgs, viewPkg);
+  const viewMatrixRow = resolvePackageScope(data.package_matrix || [], viewPkg);
   // 类别筛选：默认 = 当前目录真实用的类别（若筛的就是当前范围）；
   // 筛到别的标包 → 默认勾该标包分值最高的那一类，方便直接生成。
   const viewCatsAvail = (viewMatrixRow?.cells || []).map(c => c.category);
@@ -3867,10 +3732,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     priceStat ? { id: 'price', label: '报价评分点', badge: `${priceStat.count}` } : null,
   ].filter(Boolean);
   // "三块都拆完" = 该标包的各类评分点都在 + 技术规范书要求有内容
-  const analyzedAll = pointTabs.length > 0 && specCount > 0;
+  const analyzedAll = pointTabs.length > 0;
   // "已确认" = 运行级作答里已经有 categories（要生成哪些类别）
   const confirmedCats = ((data.answers || {}).categories || {}).categories || [];
-  const categoriesConfirmed = confirmedCats.length > 0;
+  const responsePlan = (data.answers || {}).response_plan || {};
+  const responseType = responsePlanChoice || responsePlan.type || 'tech';
+  const responseLabel = responseType === 'commerce' ? '商务应答' : '技术应答';
+  const categoriesConfirmed = responsePlan.type ? responsePlan.confirmed === true : confirmedCats.length > 0;
   // "已生成" = 目录已派生（outline_pending 为假且有章节）
   const generated = !outlinePending && (totalBlocks || 0) > 0;
 
@@ -3990,10 +3858,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       sub: techStat ? `合计 ${techStat.score} 分` : '该标包无技术评分点',
       cls: techStat ? 'ok' : 'pending' },
     { label: '技术规范书要求', value: specCount ? `${specCount} 条` : '—',
-      sub: specCount ? `${tm.topic_count || 0} 个主题` : '还没拆出要求',
+      sub: specCount ? '按原文目录展开' : '还没拆出要求',
       cls: specCount ? 'ok' : 'pending' },
-    { label: '待确认', value: analyzedAll ? `${pending.length} 项` : '未就绪',
-      sub: analyzedAll ? (pending.length ? '需要你确认' : '已确认') : '等三块拆分完成',
+    { label: '应答策划', value: analyzedAll ? `${pending.length} 项` : '未就绪',
+      sub: analyzedAll ? '选择类型并检查目录' : '等评分点拆分完成',
       cls: analyzedAll ? (pending.length ? 'warn' : 'ok') : 'pending' },
     { label: '产物 · 目录', value: generated ? `${su.unit_count || 0} 个` : '—',
       sub: generated ? `${su.sub_item_count || 0} 详细项`
@@ -4065,31 +3933,31 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     required: ['应响应', 'is-none'],
     informational: ['参考', 'is-none'],
   };
-  const specRows = (tm.topics || []).map((t) => {
-    const head = `<tr class="sr-group"><td colspan="3">
-        <b>${escapeHtml(t.topic)}</b>
-        <span class="sr-dim">${t.count} 条${
-          (t.source_files || []).length ? ` · ${(t.source_files || []).map(escapeHtml).join('、')}` : ''}</span>
-      </td></tr>`;
+  const specSectionHtml = (t) => {
+    const requiredCount = (t.requirements || []).filter(r => r.mandatory_level === 'mandatory').length;
+    const head = `<details class="spec-topic" open><summary class="spec-topic-head">
+        <span class="spec-topic-title">${escapeHtml(t.display_title || t.topic)}${(t.requirements || []).some(r=>r.attention?.flags?.includes('veto')) ? ' <span class="spec-risk veto">含否决风险</span>' : ''}</span>
+        <span class="spec-topic-count">${t.count ? `${t.count} 条要求` : '原文说明'}${requiredCount ? ` · 必须响应 ${requiredCount}` : ''}</span>
+      </summary><div class="spec-topic-body">`;
     const rows = (t.requirements || []).map((r, i) => {
       const [label, cls] = REQ_LEVEL[String(r.mandatory_level || '').toLowerCase()]
         || [String(r.mandatory_level || '—'), 'is-none'];
-      return `<tr class="sr-req">
-        <td class="sr-num sr-req-no">${i + 1}</td>
-        <td class="sr-req-text">${escapeHtml(r.text || '')}${
-          r.title ? `<div class="sr-dim">${escapeHtml(r.title)}</div>` : ''}</td>
-        <td class="sr-req-level"><span class="ui-pill ${cls}">${escapeHtml(label)}</span></td>
-      </tr>`;
+      const flags = r.attention?.flags || [];
+      const labels = {veto:'否决风险',substantive:'实质性要求',marked:'原文标记',check:'待核对',proof:'须提供证明'};
+      return `<article class="spec-clause ${flags.includes('veto') ? 'spec-veto' : ''}" data-attention="${escapeHtml(flags.join(' '))}">
+        <span class="spec-clause-no">${String(i + 1).padStart(2, '0')}</span>
+        <div class="spec-clause-main">${flags.length ? `<div class="spec-attention-tags">${flags.map(f=>`<span class="spec-risk ${f}">${escapeHtml(labels[f] || f)}</span>`).join('')}${escapeHtml((r.attention?.markers || []).join(' '))}${r.attention?.inherited ? ' · 章节标记' : ''}</div>` : ''}${r.attention?.note ? `<p class="spec-risk-note">${escapeHtml(r.attention.note)}</p>` : ''}${r.attention?.evidence?.length ? `<details class="spec-clause-origin"><summary>判定依据</summary>${r.attention.evidence.map(e=>`<p>${escapeHtml(e.basis)}：${escapeHtml(e.text)}</p>`).join('')}</details>` : ''}<div class="spec-clause-text">${specContentHtml(r.text || '')}</div>${
+          r.title ? `<details class="spec-clause-origin"><summary>原文位置</summary><p>${escapeHtml(r.title)}</p>${
+            (t.source_files || []).map(f => `<p>${escapeHtml(f)}</p>`).join('')}</details>` : ''}</div>
+        <span class="ui-pill spec-clause-level ${cls}">${escapeHtml(label)}</span>
+      </article>`;
     }).join('');
-    return head + rows;
-  }).join('');
+    const context = !rows && t.original_content ? `<div class="spec-context spec-clause" data-attention=""><div class="spec-clause-text">${specContentHtml(t.original_content)}</div></div>` : '';
+    const children = (t.children || []).map(specSectionHtml).join('');
+    return head + rows + context + (children ? `<div class="spec-children">${children}</div>` : '') + '</div></details>';
+  };
+  const specRows = (tm.structure || tm.topics || []).map(specSectionHtml).join('');
 
-  const mapRows = (mp.point_to_requirement || []).map(m => `
-    <tr><td>${escapeHtml(m.factor)}<div class="sr-dim">${escapeHtml(m.item)}</div></td>
-        <td class="sr-num">${m.points != null ? m.points : '—'}</td>
-        <td class="sr-num">${m.chapter_count}</td>
-        <td class="sr-num">${m.requirement_count}</td>
-        <td class="sr-crit">${(m.requirement_topics || []).map(escapeHtml).join('、') || '<span class="sr-dim">未挂到要求</span>'}</td></tr>`).join('');
 
   const scopeRows = (smap.entries || []).map(e => {
     const sel = e.table_no === smap.selected_table_no;
@@ -4169,9 +4037,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       return `<div class="sr-empty">该标包没有解析到${catLabel}评分点。</div>`;
     }
     return `
-      <div class="sr-note">来自<b>招标文件</b>的${catLabel}评分表：
-        <b>${stat.count} 个评分点 · 合计 ${stat.score} 分</b>。
-        评分口径已按"得分条件"逐条展开，分值单列。</div>
+      <div class="sr-points-meta"><span>来源：招标文件</span>
+        <span class="sr-points-total">合计 <b>${stat.score}</b> 分</span></div>
       ${(stat.items || []).map(critCard).join('')}`;
   };
 
@@ -4181,34 +4048,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     </div>`;
 
   // ② 待确认：唯一需要用户决定的界面；确认后才会出现产物
-  // ── ② 待确认 = 两步（用户定稿原型：docs/design/mockups/confirm-two-step.html）──
-  //   ① 目录确认与调整：自检摘要 + 已确认回显 + **面板内可编辑的目录结构**（看与改是同一个列表）
-  //   ② 技术规范书确认：每个主题挂到哪一章
-  //   最后一步才有「确认目录，生成产物」。
-  // 结构编辑不再依赖下方目录树（它被面板挡住）：面板里独立渲染一份，
-  // 纯变换复用 workspace-model.mjs（有 node --test），保存复用 queueStructureSave 串行队列。
-  const SELF_CHECK_KEYS = new Set(['score_sum', 'starred']);
-  const ECHO_KEYS = new Set(['scope', 'category', 'scope_excluded', 'review_points']);
-  const selfChecks = allConfs.filter((c) => SELF_CHECK_KEYS.has(c.key));
-  const echoes = allConfs.filter((c) => ECHO_KEYS.has(c.key));
-  const decisions = allConfs.filter((c) =>
-    !SELF_CHECK_KEYS.has(c.key) && !ECHO_KEYS.has(c.key));
-
-  const checkLine = selfChecks.length ? `
-      <div class="sr-checks">${selfChecks.map((c) => {
-        const bad = !!c.needs_confirm;
-        const label = (c.detected || c.question || '').toString().replace(/是否.*$/, '').trim();
-        return `<span class="sr-check ${bad ? 'warn' : 'ok'}" title="${escapeHtml(c.detail || '')}">
-          ${bad ? '⚠' : '✅'} ${escapeHtml(String(label).slice(0, 34))}</span>`;
-      }).join('')}</div>` : '';
-
-  const echoLine = echoes.length ? `
-      <div class="sr-echo">
-        ${echoes.map((c) => `<span class="sr-echo-item"><b>${escapeHtml(
-          (c.question || '').replace(/[?？]/g, '').replace(/(按哪个|是否正确|是否)/g, '').slice(0, 12))}</b>
-          ${escapeHtml(String(c.detected || (c.answered ? '已确认' : '')).slice(0, 40))}</span>`).join('')}
-      </div>` : '';
-
+  // 应答策划：选择类型、预览独立草案、确认产物。
   // 面板内的可编辑结构：一行一章（缩进表现层级），选中行显示该行操作
   const pointMeta = new Map(((rp && rp.items) || []).map((x) => [String(x.point_id), x]));
   const reqNameOf = (pid) => {
@@ -4221,11 +4061,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const structBlocks = [...blocksById.values()]
     .filter((b) => b && b.level)
     .sort((a, b2) => (Number(a.order_idx) || 0) - (Number(b2.order_idx) || 0));
+  const chapterSources = new Map((workspace?.state?.spec?.toc || []).map(s => [s.id, s.chain || {}]));
   const structRows = structBlocks.map((b, i) => {
+    const source = chapterSources.get(String(b.block_id || b.id)) || {};
+    const locked = source.response_part === 'point_to_point';
     const pts = parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean);
     const reqs = parseIds(b.spec_requirement_ids).length;
     const lvl = Math.max(1, Number(b.level) || 1);
-    return `<div class="sr-erow${lvl >= 3 ? ' is-deep' : ''}${
+    return `<div class="sr-erow${locked ? ' is-source' : ''}${lvl >= 3 ? ' is-deep' : ''}${
         selectedStructId === String(b.block_id || b.id) ? ' on' : ''}"
       style="padding-left:${10 + (lvl - 1) * 16}px"
       data-struct="${escapeHtml(String(b.block_id || b.id))}" data-level="${lvl}" data-i="${i}">
@@ -4233,8 +4076,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         title="按住上下拖动排序（勾选多行可整组拖）">⠿</span>
       <input type="checkbox" class="sr-pick" data-pick="${escapeHtml(String(b.block_id || b.id))}"
         ${batchIds.has(String(b.block_id || b.id)) ? 'checked' : ''}
-        title="选中后可批量操作" />
-      <span class="sr-erow-title">${escapeHtml(b.title || '')}</span>
+        title="选中后可批量操作" ${locked ? 'disabled' : ''} />
+      <span class="sr-erow-title">${escapeHtml(b.title || '')}</span>${source.response_part ? `<span class="sr-struct-meta">${({scoring:'评分项',priority:'重点要求',point_to_point:'原文目录'})[source.response_part] || ''}</span>` : ''}
       ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 20))}</span>` : ''}
       ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
       ${reqs ? `<span class="sr-struct-meta">规范书 ${reqs} 条</span>` : ''}
@@ -4250,78 +4093,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     </div>`;
   }).join('');
 
-  const topicRows = (() => {
-    const topics = data.topic_options || [];
-    const chapters = data.chapter_options || [];
-    const picked = (data.answers || {}).topic_placement || {};
-    if (!topics.length) return '<div class="sr-dim">这份材料里没有需要归属的技术规范书主题。</div>';
-    return `<table class="sr-table"><thead><tr><th>技术规范书主题</th>
-        <th class="sr-num">条数</th><th>归属章节</th><th>状态</th></tr></thead><tbody>${
-      topics.map((t) => {
-        const cur = picked[t.topic] || '';
-        // 保存的章节可能**不在当前候选列表**里（章节被改名/删除/换了一版目录）——
-        // 那样 <select> 会回落到第一项，于是"状态列写已指定、下拉却是默认"自相矛盾（实测）。
-        // 这里把当前值补成一个选项，界面与实际保存值始终一致。
-        const extra = cur && !chapters.some((ch) => ch.title === cur)
-          ? [{ title: cur, level: 99 }] : [];
-        // 归属章节：**不用下拉**（用户要求"展示所有目录列表再选哪一级"）。
-        // 按钮点开 = 完整目录（按层级缩进 + 层级徽标）+ 搜索；值放在隐藏 input 里，
-        // 这样既有的「保存归属」逻辑（读 [data-topic].value）不用改。
-        const label = cur ? `${cur}${extra.length ? '（已不在当前目录）' : ''}` : '默认：技术规范书要求应答';
-        return `<tr data-topic-row="${escapeHtml(t.topic)}">
-          <td>${escapeHtml(t.topic)}</td><td class="sr-num">${t.count}</td>
-          <td class="sr-mount-cell">
-            <button type="button" class="sr-mount" data-topic-open="${escapeHtml(t.topic)}"
-              title="点开完整目录，选择挂到哪一章">${escapeHtml(label)}</button>
-            <input type="hidden" data-topic="${escapeHtml(t.topic)}" value="${escapeHtml(cur)}" />
-          </td>
-          <td><span class="ui-pill ${cur ? 'is-ok' : 'is-none'}">${
-            cur ? (extra.length ? '已指定（不在目录）' : '已指定') : '默认'}</span></td></tr>`;
-      }).join('')}</tbody></table>
-      <div class="sr-answer">
-        <span class="sr-dim">选择即保存（500ms 合并）</span>
-        <button class="mw-btn" data-save="topic_placement">立即保存</button>
-        <button class="mw-btn" data-save="skip" data-key="topic_placement">全部保持默认</button>
-        <!-- 提示槽必须放在 .sr-answer **里面**：保存处理器用 host=closest('.sr-answer')
-             再找 [data-flash-for] —— 放外面会写不进去（实测提示不显示） -->
-        <span class="sr-dim" data-flash-for="topic_placement"></span>
-      </div>`;
-  })();
-
-  // 「要生成哪些类别」：**确认生成时必填**（生成处理器读 [data-confirm-cat]:checked）。
-  // 改版时这块被我删掉了 —— 结果用户点确认只看到「请至少勾选一个类别。」却无处可勾（实测 bug）。
-  // 归属放在「目录确认与调整」这一步：类别决定这份应答目录由哪几块合成。
-  // 类别区块（用户口径的"生成应答目录时选择商务或技术"）：
-  // 每类**显示实际评分点数**，让选择有依据；0 个的类别明确提示，避免勾了却没内容。
-  const alignByCat = (data.points_alignment || {}).by_category || {};
-  const catCount = (id) => {
-    const v = alignByCat[id];
-    if (!v) return null;
-    return (v.persisted != null && v.persisted > 0) ? v.persisted : v.expected;
-  };
-  const catPick = (pointTabs || []).length ? `
-      <h5 class="sr-sec">① 要生成哪些类别</h5>
-      <div class="sr-answer">
-        ${(pointTabs || []).map((t) => {
-          const n = catCount(t.id);
-          const zero = n === 0;
-          return `<label class="sr-cat${zero ? ' is-empty' : ''}" title="${
-            zero ? '该类别没有已落库的评分点，生成后可能没有内容' : ''}"><input type="checkbox" data-confirm-cat="${escapeHtml(t.id)}"
-            ${((confirmedCats.length ? confirmedCats : (pointTabs || []).map((x) => x.id)).includes(t.id)) ? 'checked' : ''}>
-            ${escapeHtml(String(t.label).replace('评分点', ''))}${
-            n == null ? '' : `<span class="sr-dim">（${n} 个评分点）</span>`}</label>`;
-        }).join('')}
-        <span class="sr-dim">勾选的类别会合成这一份应答目录；只勾技术就是纯技术应答目录</span>
-      </div>
-      ${Object.entries(alignByCat).some(([, v]) => !v.persisted)
-        ? `<div class="sr-align warn">有类别还没落库（解析到了、库里没有）——
-            先回第①步点「一键对齐」，再生成目录，否则产物会缺内容。</div>` : ''}` : '';
-
   const pane1 = `
-      ${checkLine}
-      ${echoLine}
-      ${catPick}
-      <h5 class="sr-sec">② 目录结构（${structBlocks.length} 章）· 点一行即可改</h5>
+      <h5 class="sr-sec">目录草案（${structBlocks.length} 个目录节点）· ${data.outline_checks?.response_outline_version === 2 ? '评分与重点章节可调整，原文目录固定' : '点一行即可改'}</h5>
       <div class="sr-batch${batchIds.size ? '' : ' is-empty'}" id="sr-batch">
         <span class="sr-dim">已选 <b id="sr-batch-n">${batchIds.size}</b> 项</span>
         <button class="sr-mini" data-batch="up">批量上移</button>
@@ -4333,6 +4106,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>
       <div class="sr-struct sr-struct-edit">${structRows
         || '<div class="sr-dim">还没有派生目录 —— 确认后会按评分点结构生成。</div>'}</div>
+      <div class="response-chapter-evidence" id="response-chapter-evidence">选择章节，查看对应评分点和技术规范书原文依据。</div>
       <div class="sr-answer">
         <button class="mw-btn" data-act="struct-new" data-op="sibling">＋ 新增同级章节</button>
         <button class="mw-btn" data-act="struct-new" data-op="child">＋ 新增子章节</button>
@@ -4342,69 +4116,77 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>
       ${structureBlockNote()}`;
 
-  const confirmPane = !analyzedAll ? `
-      <div class="sr-empty">还没拆分完成。先回到①「评分点」把三块内容拆出来（评分点 / 类别 / 技术规范书要求）。</div>` : `
-      <div class="sr-note">产物的定义（用户口径）：<b>(a) 对应的目录</b>、
-        <b>(b) 最终的技术与评分点映射矩阵</b>。它们只在确认完成后出现。</div>
-      <div class="sr-two">
-        <nav class="sr-sub2">
-          <div class="sr-sub2-item on" data-sub2="1"><span class="sr-dot">1</span>
-            <span><span class="sr-lab">技术规范书确认</span><span class="sr-sub">要求挂到哪一章</span></span></div>
-          <div class="sr-sub2-item" data-sub2="2"><span class="sr-dot">2</span>
-            <span><span class="sr-lab">目录确认与调整</span><span class="sr-sub">挂载后做最后调整</span></span></div>
-        </nav>
-        <div class="sr-two-main">
-          <div class="sr2-pane on" data-sub2="1">
-            <div class="sr2-head"><span class="t">技术规范书确认</span>
-              <span class="sr-dim">基于当前目录结构，为<b>全部 ${(data.topic_options || []).length} 个主题</b>指定挂载章节；不指定就进「技术规范书要求应答」</span>
-              ${topicSaveNote ? `<span class="sr-dim" style="margin-left:auto;color:var(--success)">${escapeHtml(topicSaveNote)}</span>` : ''}</div>
-            <div class="sr2-body">${topicRows}</div>
-          </div>
-          <div class="sr2-pane" data-sub2="2">
-            <div class="sr2-head"><span class="t">目录确认与调整</span>
-              <span class="sr-dim">规范书要求已经挂进来了；在这里做最后调整（点一行 → 出现该行操作）</span></div>
-            <div class="sr2-body">${pane1}</div>
-          </div>
-        </div>
+  const currentPlanMatches = responsePlan.type === responseType;
+  const previewReady = currentPlanMatches && generated;
+  window.clearTimeout(responsePlanPoll);
+  if (responsePlan.type && !generated && workspace?.state?.stage !== 'failed') {
+    responsePlanPoll = window.setTimeout(async function pollResponseDraft() {
+      if (params.get('threadId') !== tid) return;
+      try {
+        const state = await api.workflow.state(tid);
+        if (['failed', 'aborted', 'outline_review'].includes(state.stage)) { location.reload(); return; }
+      } catch (err) { console.warn('读取应答草案进度失败', err); }
+      responsePlanPoll = window.setTimeout(pollResponseDraft, 3000);
+    }, 3000);
+  }
+  const expectedPoints = responseType === 'commerce' ? commerceStat?.count || 0 : techStat?.count || 0;
+  const landedPoints = new Set(structBlocks.flatMap(b => parseIds(b.review_point_ids)));
+  const landedRequirements = new Set(structBlocks.flatMap(b => parseIds(b.spec_requirement_ids)));
+  const expectedRequirements = (tm.topics || []).flatMap(t => t.requirements || []);
+  const missingRequirements = expectedRequirements.filter(r => !landedRequirements.has(r.requirement_id));
+  const responseChecks = data.outline_checks || {};
+  const responseWarningsHtml = responseChecks.warnings?.length ? `<details class="response-landing-warning"><summary>建议前部突出 ${responseChecks.warnings.length} 条重点要求 · 不影响确认</summary><p>以下要求已在点对点应答中安排，可结合评分章节补充说明，无需恢复原来的独立章节。</p><ul>${responseChecks.warnings.map(r=>`<li>${escapeHtml(r.title)}${r.critical ? '（明确风险要求）' : ''}</li>`).join('')}</ul></details>` : '';
+  const confirmPane = !analyzedAll ? '<div class="sr-empty">请先完成当前标包的评分点拆分。</div>' : `
+    <div class="response-type-options" role="group" aria-label="选择应答类型">
+      ${[['commerce','商务应答','以商务评分点为主，核对商务格式与证明材料'],['tech','技术应答','整合技术评分点、技术规范书及项目基础内容']].map(([id,label,desc])=>`
+        <button type="button" class="response-type ${responseType===id ? 'on' : ''}" data-response-type="${id}" aria-pressed="${responseType===id}"><strong>${label}</strong><span>${desc}</span></button>`).join('')}
+    </div>
+    <div class="response-basis-card">
+      <div class="response-basis-top"><div class="response-basis-main"><strong>编制依据</strong>
+        <div class="response-basis-metrics"><span>${responseType==='commerce' ? '商务' : '技术'}评分点 <b>${expectedPoints}</b> 项</span>${responseType==='tech' ? `<span>技术规范要求 <b>${specCount}</b> 条</span>` : ''}</div>
+        <p>${responseType==='commerce' ? '围绕商务评审项组织应答，核对格式与证明材料。' : '整合项目背景、范围、实施与交付要求，保留重点条款依据。'}</p></div>
       </div>
-      <div class="sr-two-foot">
-        <span class="sr-dim">技术规范书归属与目录调整都完成后，第 2 步确认会把两者<b>一起</b>生成产物。</span>
-        <span class="sr-two-nav">
-          <button class="mw-btn" data-step-nav="prev">← 上一步</button>
-          <button class="mw-btn primary" data-step-nav="next">下一步 →</button>
-          <button class="mw-btn primary" data-act="confirm-generate" hidden>确认目录，生成产物</button>
-        </span>
-      </div>
-      <div class="sr-dim" data-flash-for="generate"></div>`;
+      <details class="response-basis-details"><summary>来源与编制规则</summary><div class="response-basis-detail-body">${responseType==='tech' ? (tm.source_files || []).map(f=>`<div class="response-source-file"><span>技术规范书</span><p>${escapeHtml(f)}</p></div>`).join('') : '<p>来源：当前标包招标文件中的商务评分表及商务文件格式要求。</p>'}
+        <p>优先遵循招标文件规定的组成与格式；格式和证明材料要求需核对原文。</p></div></details>
+      <div class="response-basis-footer"><button class="mw-btn primary response-basis-action" data-act="response-preview">${previewReady ? '查看目录草案' : '生成目录草案'}</button></div>
+    </div>
+    ${currentPlanMatches && !generated ? '<div class="sr-answer"><span class="sr-dim">草案尚未完成，可在运行详情查看进度。</span><button class="mw-btn" data-act="redraft-outline">重试生成</button></div>' : ''}
+    ${previewReady && responseType === 'tech' && data.outline_checks?.response_outline_version !== 2 ? '<div class="sr-answer"><span class="sr-dim">目录编排规则已更新：评分点 → 重点要求 → 原文点对点应答。</span><button class="mw-btn" data-act="redraft-outline">按新规则重新生成</button></div>' : ''}
+    ${previewReady ? `<div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 ${landedPoints.size} / ${expectedPoints}</span>${responseType==='tech' ? `<span>规范要求 ${expectedRequirements.length-missingRequirements.length} / ${expectedRequirements.length}</span>` : ''}<span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
+      ${responseType==='tech' && missingRequirements.length ? `<details class="response-missing"><summary>未挂载规范要求 ${missingRequirements.length} 条</summary>${missingRequirements.map(r=>`<p>${escapeHtml(r.title)}：${escapeHtml(r.text)}</p>`).join('')}</details>` : ''}
+      ${pane1}
+      <details class="response-mapping"><summary>查看章节与原文依据映射</summary>${structBlocks.filter(b=>parseIds(b.review_point_ids).length||parseIds(b.spec_requirement_ids).length).map(b=>`<div class="response-map-row"><strong>${escapeHtml(b.title)}</strong><span>${parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '技术规范要求'}</span><span class="sr-dim">${parseIds(b.spec_requirement_ids).length} 条规范要求</span></div>`).join('')}</details>
+      <div class="response-confirm-bar"><div><strong>${categoriesConfirmed ? '目录已确认' : '确认应答目录'}</strong><span>${categoriesConfirmed ? '可直接进入编写，随时查看目录与依据' : '保存目录并校验，成功后直接进入编写'}</span></div><button class="mw-btn primary" data-act="${categoriesConfirmed ? 'response-write' : 'response-confirm'}">${categoriesConfirmed ? `进入${responseLabel}编写` : `确认目录，创建${responseLabel}`}</button></div><div class="response-confirm-feedback" data-confirm-feedback role="status" aria-live="polite" hidden></div>` : ''}
+    ${previewReady && data.outline_checks?.response_outline_version === 2 ? `<div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}</span><span>明确风险要求已安排 ${responseChecks.risk_requirements_landed} / ${responseChecks.risk_requirements_total}</span><span>原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total}</span><span>${data.outline_checks.original_structure_matches ? '标题、层级与顺序一致' : '原文结构待核对'}</span><span>要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total}</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div>${responseWarningsHtml}` : ''}
+    <div class="sr-dim" data-flash-for="generate"></div>`;
 
   // ③ 产物
   const productsGate = !categoriesConfirmed ? `
-      <div class="sr-empty">产物还没到出现的时候。
+      <div class="sr-empty">请先确认应答目录。
         <div class="sr-dim" style="margin-top:5px">
-          先在「待确认」里确认范围与类别，产物（目录 / 映射矩阵）才会生成。</div>
+          在「应答策划」中完成目录校验后，即可按章编写。</div>
       </div>` : (!generated ? `
       <div class="sr-empty">正在生成 / 还没生成目录。
         <div class="sr-dim" style="margin-top:5px">
           已确认：${escapeHtml(viewLabel)} · ${(confirmedCats || []).join('、')}。
-          可在「待确认」里重新确认，或点左下「拆分评分点」重跑。</div>
+          请返回「应答策划」生成目录草案。</div>
       </div>` : '');
 
   // ── 阶段内的子页签内容 ──
   // 评分点 = 商务 / 技术 /（报价）/ 技术规范书要求；产物 = 目录 / 映射矩阵
   const reviewSubs = [
-    commerceStat ? { id: 'commerce', label: '商务评分点', n: commerceStat.count } : null,
-    techStat ? { id: 'tech', label: '技术评分点', n: techStat.count } : null,
+    { id: 'commerce', label: '商务评分点', n: commerceStat?.count ?? '待核对' },
+    { id: 'tech', label: '技术评分点', n: techStat?.count ?? '待核对' },
     priceStat ? { id: 'price', label: '报价评分点', n: priceStat.count } : null,
     { id: 'spec', label: '技术规范书要求', n: specCount },
   ].filter(Boolean);
   const specHtml = (specCount || tm.topics?.length) ? `
-      <div class="sr-note">来自<b>技术规范书</b>，按标包/标的归属：
-        <b>${specCount} 条要求 / ${tm.topic_count || 0} 个主题</b>${
-        (tm.source_files || []).length
-          ? `　来源：${(tm.source_files || []).map(escapeHtml).join('、')}` : ''}。</div>
-      <table class="sr-table sr-req-table">
-        <thead><tr><th class="sr-num">#</th><th>要求（原文）</th><th>响应要求</th></tr></thead>
-        <tbody>${specRows}</tbody></table>` : notAnalyzedHint('技术规范书要求');
+      <div class="spec-attention-filter"><button type="button" data-attention-filter="all" aria-pressed="true">全部要求 ${specCount}</button>${Object.entries({veto:'否决风险',substantive:'实质性要求',marked:'原文标记',check:'待核对',proof:'须提供证明'}).map(([key,label])=>`<button type="button" data-attention-filter="${key}" aria-pressed="false">${label} ${(tm.topics || []).reduce((n,t)=>n+(t.requirements || []).filter(r=>r.attention?.flags?.includes(key)).length,0)}</button>`).join('')}</div>
+      <div class="spec-symbol-guide" id="spec-symbol-guide" hidden></div>
+      <div class="spec-overview"><span>原文目录 · ${specCount} 条完整要求</span>
+        <details class="spec-sources"><summary>来源文件 · ${(tm.source_files || []).length} 份</summary>${
+          (tm.source_files || []).map(f => `<p>${escapeHtml(f)}</p>`).join('')}</details></div>
+      <div class="spec-topics">${specRows}</div>` : notAnalyzedHint('技术规范书要求');
   const reviewPanes = {
     commerce: catTable(commerceStat, '商务'),
     tech: catTable(techStat, '技术'),
@@ -4414,41 +4196,31 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   // 产物子页签的角标：**没生成就不显示数字**。截图里"目录 134 / 映射 8"和
   // "产物还没到出现的时候"并列，数字来自上一次运行，会让人以为已经生成好了。
   const prodSubs = [
-    { id: 'directory', label: '目录', n: generated ? (su.unit_count || 0) : '—' },
-    { id: 'map', label: '技术与评分点映射矩阵',
+    { id: 'writing', label: '正文编写', n: '' },
+    { id: 'directory', label: '目录总览', n: generated ? structBlocks.length : '—' },
+    { id: 'map', label: '按评分点查找',
       n: generated ? (mp.point_to_requirement || []).length : '—' },
   ];
   const prodPanes = {
+    writing: productsGate || '<div id="sr-write-body"><div class="sr-note">正在加载章节…</div></div>',
     directory: productsGate || `
-      <div class="sr-note">这是按确认的范围与类别派生出的应答目录骨架
-        （评分因素 → 详细评审项 → 细项）：${su.unit_count || 0} 单元 /
-        ${su.sub_item_count || 0} 详细项 / ${su.check_item_count || 0} 子项。
-        目录树在面板下方的目录区。</div>
-      <table class="sr-table"><thead><tr><th>评分单元 / 详细评审项</th><th class="sr-num">分值</th>
-        <th class="sr-num">子项数</th><th>子检查项</th></tr></thead>
-        <tbody>${unitRows}</tbody></table>`,
-    map: productsGate || `
-      <table class="sr-table"><thead><tr><th>评分点</th><th class="sr-num">分值</th>
-        <th class="sr-num">章节数</th><th class="sr-num">关联要求数</th><th>要求主题</th></tr></thead>
-        <tbody>${mapRows}</tbody></table>
-      <div class="sr-note">未落点要求 ${(mp.unmapped_requirements || []).length} 条；
-        未关联评分点的要求 ${(mp.requirements_without_point || []).length} 条。</div>`,
+      <div class="sr-answer"><strong>${responsePlan.type === 'commerce' ? '商务应答' : '技术应答'}目录 · ${structBlocks.length} 个目录节点</strong><span class="sr-dim">点击章节进入编写</span></div>
+      ${responseWarningsHtml}<div class="sr-struct">${structBlocks.map(b=>`<div class="response-map-row" style="padding-left:${10+(Math.max(1,Number(b.level)||1)-1)*16}px"><button class="mw-btn" data-write-chapter="${escapeHtml(String(b.block_id || b.id))}">${escapeHtml(b.title)}</button></div>`).join('')}</div>`,
+    map: productsGate || `<table class="sr-table"><thead><tr><th>评分点</th><th>分值</th><th>承接章节 · 点击编写</th></tr></thead><tbody>${(mp.point_to_requirement || []).map(p=>`<tr><td>${escapeHtml(p.item || p.factor)}</td><td>${p.points ?? '—'}</td><td>${structBlocks.filter(b=>parseIds(b.review_point_ids).map(String).includes(String(p.point_id))).map(b=>`<button class="mw-btn" data-write-chapter="${escapeHtml(String(b.block_id || b.id))}">${escapeHtml(b.title)}</button>`).join(' ') || '待补充'}</td></tr>`).join('')}</tbody></table>`,
   };
   // 阶段状态（默认 ① 评分点）：点左侧竖条切换，子页签在阶段内切换
   const STAGES = [
-    { id: '1', label: '评分点', sub: '拆商务/技术/规范书' },
-    { id: '2', label: '待确认', sub: '确认后进入产物' },
-    { id: '3', label: '产物', sub: '目录 · 映射矩阵' },
+    { id: '1', label: '解析依据', sub: '评分点 · 技术规范' },
+    { id: '2', label: '应答策划', sub: '选类型 · 检查目录' },
     // ④⑤ **也在这个面板里**（用户强调的布局约定：左侧五步，点每一步在右侧展示对应内容，
     // 不做整页跳转）。编写面板＝章节列表 + 章头(本章回应) + 正文 + 按需素材；
     // 评审面板＝评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻。
-    { id: '4', label: '编写', sub: '按章 · 按需举证' },
-    { id: '5', label: '评审', sub: '按评分点把关' },
+    { id: '4', label: '应答编写', sub: '正文 · 目录 · 依据' },
+    { id: '5', label: '评审与交付', sub: '检查缺口 · 导出应答' },
   ];
   const stageState = (st) => {
-    if (st === '4') return writeStats.written ? 'done' : (totalBlocks ? '' : 'gated');
+    if (st === '4') return !categoriesConfirmed ? 'gated' : (writeStats.total && writeStats.complete === writeStats.total ? 'done' : '');
     if (st === '5') return reviewSummary.points_total && !reviewSummary.unreviewed ? 'done' : '';
-    if (st === '3') return categoriesConfirmed ? (generated ? 'done' : '') : 'gated';
     if (st === '2') return analyzedAll ? (categoriesConfirmed ? 'done' : '') : 'gated';
     return 'done';
   };
@@ -4464,18 +4236,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       return parts.length ? parts.join(' · ') : '还没有拆分结果';
     }
     if (st === '2') {
-      if (!analyzedAll) return '等三块拆分完成';
+      if (!analyzedAll) return '请先完成评分点拆分';
       // 0 项时别写"待确认 0 项"（绕口）：直接说可以往下走了
-      return pending.length ? `待确认 ${pending.length} 项` : '已全部确认，可生成产物';
-    }
-    if (st === '3') {
-      if (!categoriesConfirmed) return '还没确认，确认后展示';
-      return generated
-        ? `目录 ${su.unit_count || 0} 章 · 映射 ${(mp.point_to_requirement || []).length} 条`
-        : '确认完成，生成中 / 未生成';
+      return responsePlan.type ? `${responsePlan.type === 'commerce' ? '商务应答' : '技术应答'} · ${categoriesConfirmed ? '已确认' : '检查目录草案'}` : '选择应答类型，生成目录草案';
     }
     if (st === '4') {
-      return totalBlocks ? `已写 ${writeStats.written} / ${writeStats.total} 章` : '等目录生成后再撰写';
+      return totalBlocks ? `${structBlocks.length} 个目录节点 · 按章编写` : '等目录生成后再撰写';
     }
     return reviewSummary.points_total
       ? `得分预估 ${reviewSummary.score_estimated ?? 0} / ${reviewSummary.score_max ?? 0} · 缺口 ${reviewSummary.gaps ?? 0} 项`
@@ -4495,80 +4261,50 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <!-- 头行已按用户要求删除（阶段说明与左竖条重复）。
            原来的运行状态（"正在准备…"）挪到筛选行右侧，空着时不占位。 -->
       <div class="sr-filter">
-        <span class="sr-filter-k">筛选</span>
-        <label class="sr-filter-item">标包
-          <select id="sr-view-pkg">
-            ${matrixRows.map(r => {
-              const v = `${r.target}|${r.package_no}`;
-              const sel = String(r.target) === String(viewPkg.target)
-                && String(r.package_no) === String(viewPkg.package_no);
-              const comp = (r.cells || []).map(c => `${c.label}${c.count}`).join('·');
-              return `<option value="${escapeHtml(v)}" ${sel ? 'selected' : ''}>${
-                escapeHtml(r.target)} / 标包${escapeHtml(r.package_no)} · ${
-                escapeHtml((r.package_name || '').slice(0, 16))}${
-                comp ? `（${escapeHtml(comp)}）` : ''}</option>`;
-            }).join('')}
-          </select>
-        </label>
-        <button class="sr-btn-primary" id="sr-confirm-pkg" type="button">确认标包</button>
-        <span class="sr-dim" id="sr-pkg-state">${
-          confirmedPkg
-            ? `已确认：${escapeHtml(confirmedPkg.target || '—')} / 标包${escapeHtml(confirmedPkg.package_no || '—')}`
-            : '选好标包后点「确认标包」，五个步骤会针对该标包展开'
-        }</span>
+        <div class="sr-scope-summary"><span class="sr-scope-label">当前标包</span>
+          <span class="sr-scope-name" title="${escapeHtml(activePackage?.display_name || viewLabel)}">${escapeHtml(activePackage?.display_name || viewLabel)}</span></div>
+        <a class="sr-scope-manage" href="/project-intake?projectId=${projectId}">范围与依据 <span aria-hidden="true">↗</span></a>
         <span class="sr-run" id="sr-run-state"></span>
       </div>
       ${flashNow ? `<div class="sr-flash ${flashKind === 'err' ? 'err' : ''}">${escapeHtml(flashNow)}</div>` : ''}
       ${confirmedPkg ? `<div class="sr-body">
         <nav class="sr-rail">
-          ${STAGES.map(x => `
+          ${STAGES.map((x, index) => `
             <div class="sr-rail-item ${stageState(x.id)}" data-stage="${x.id}"
               ${x.href ? 'data-nav="1" title="切到该视图"' : ''}>
-              <span class="sr-dot">${x.id}</span>
+              <span class="sr-dot">${index + 1}</span>
               <span><span class="sr-lab">${x.label}</span><span class="sr-sub">${x.sub}</span></span>
             </div>`).join('')}
         </nav>
         <section class="sr-stack">
           <div class="sr-stage" data-stage="1">
             <div class="sr-stage-head"><span class="t">评分点</span>
-              <span class="hint">${stageHint('1')}</span></div>
+              <span class="hint">当前标包的评分标准与技术要求</span></div>
             <div class="sr-stage-body">
-              <h5 class="sr-sec">标包（来自招标文件原文）</h5>
-              ${renderPackageCards()}
-              ${renderPointsAlignment(data.points_alignment)}
-              <div class="sr-subtabs">${reviewSubs.map(x => `
+              ${!viewPkgStat ? '<div class="sr-note">当前标包与评分表的对应关系尚未明确，请核对投标范围。</div>' : ''}
+              <div class="sr-subtabs sr-points-tabs">${reviewSubs.map(x => `
                 <span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
               ${reviewSubs.map(x => `
                 <div class="sr-subpane" data-sub="${x.id}">${reviewPanes[x.id] || ''}</div>`).join('')}
             </div>
           </div>
           <div class="sr-stage" data-stage="2">
-            <div class="sr-stage-head"><span class="t">待确认</span>
+            <div class="sr-stage-head"><span class="t">应答策划</span>
               <span class="hint">${stageHint('2')}</span></div>
             <div class="sr-stage-body">${confirmPane}</div>
           </div>
-          <div class="sr-stage" data-stage="3">
-            <div class="sr-stage-head"><span class="t">产物</span>
-              <span class="hint">${stageHint('3')}</span></div>
-            <div class="sr-stage-body">
-              <div class="sr-subtabs">${prodSubs.map(x => `
-                <span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
-              ${prodSubs.map(x => `
-                <div class="sr-subpane" data-sub="${x.id}">${prodPanes[x.id] || ''}</div>`).join('')}
-            </div>
-          </div>
-          <!-- ④ 编写：章节列表 + 章头（本章回应）+ 正文 + 按需素材 -->
           <div class="sr-stage" data-stage="4">
-            <div class="sr-stage-head"><span class="t">编写</span>
-              <span class="hint">${stageHint('4')}</span></div>
-            <div class="sr-stage-body" id="sr-write-body">
-              <div class="sr-note">正在加载章节…</div>
+            <div class="sr-stage-head"><span class="t">应答编写</span><span class="hint">${stageHint('4')}</span></div>
+            <div class="sr-stage-body">
+              <div class="sr-subtabs">${prodSubs.map(x => `<span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
+              ${prodSubs.map(x => `<div class="sr-subpane" data-sub="${x.id}">${prodPanes[x.id] || ''}</div>`).join('')}
             </div>
           </div>
           <!-- ⑤ 评审：评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻 -->
           <div class="sr-stage" data-stage="5">
-            <div class="sr-stage-head"><span class="t">评审</span>
+            <div class="sr-stage-head"><span class="t">评审与交付</span>
               <span class="hint">${stageHint('5')}</span></div>
+            <div class="sr-stage-body"><div class="sr-answer"><strong>导出当前应答</strong><button class="mw-btn" data-response-download>导出 Word 草稿</button><span class="sr-dim">仅导出已保存正文；未编写章节仍为空</span></div><div data-document-export-status role="status"></div></div>
             <div class="sr-stage-body" id="sr-review-body">
               <div class="sr-note">正在加载评审结论…</div>
             </div>
@@ -4576,7 +4312,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         </section>
       </div>` : `<div class="sr-gate">
         <b>先确认标包</b>
-        <div class="sr-dim">在上方选好标包并点「确认标包」，五个步骤（评分点 → 待确认 → 产物 → 编写 → 评审）
+        <div class="sr-dim">在上方选好标包并点「确认标包」，四个步骤（解析依据 → 应答策划 → 应答编写 → 评审与交付）
           会针对该标包展开；每个标包的目录、正文与评审各自独立。</div>
       </div>`}
     </div>`;
@@ -4632,165 +4368,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-flash{margin:8px 15px;padding:7px 11px;border-radius:7px;font-size:12.5px;
     background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
   /* ── ④编写 / ⑤评审：沿用同一套面板容器与 token ── */
-  .sr-write{display:flex; align-items:stretch; min-height:420px}
-  .sr-wtree{flex:0 0 216px;border-right:1px solid var(--line);background:var(--panel-soft,#fafbfc);
-    display:flex;flex-direction:column;min-width:0}
-  .sr-wsearch{margin:8px 10px;padding:5px 8px;font:inherit;font-size:12.5px;
-    border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff)}
-  .sr-wlist{flex:1;overflow:auto;padding-bottom:8px}
-  .sr-wnode{display:flex;align-items:center;gap:6px;padding:5px 10px;font-size:12.5px;cursor:pointer;
-    border-left:2px solid transparent}
-  .sr-wnode:hover{background:var(--panel,#fff)}
-  .sr-wnode.on{background:var(--panel,#fff);border-left-color:var(--accent);color:var(--accent);font-weight:600}
-  .sr-wnode.l2{padding-left:20px}
-  .sr-wnode.l3{padding-left:30px;color:var(--muted)}
-  .sr-wnode .sr-wname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sr-wnode .sr-wtag{font-size:10.5px;color:var(--muted);white-space:nowrap}
-  .sr-wmain{flex:1;min-width:0;display:flex;flex-direction:column}
-  .sr-whead{padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel,#fff)}
-  .sr-wrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .sr-wrow .sr-dim{font-size:11.5px}
-  .sr-wpoint{font-size:12.5px;font-weight:600}
-  .sr-wpoint em{font-style:normal;color:var(--success);margin-left:5px}
-  .sr-wev{font-size:12px;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);
-    border-radius:999px;padding:1px 8px}
-  .sr-wev.none{color:var(--muted);background:var(--panel,#fff);border-color:var(--line)}
-  .sr-wcrit{margin-top:5px;font-size:12px;color:var(--ink-2);line-height:1.6}
-  .sr-wcrit b{color:var(--muted);margin-right:5px}
-  .sr-wedit{flex:1;min-height:240px;padding:12px 14px;font-size:13px;line-height:1.75;background:var(--panel,#fff);
-    outline:none;overflow:auto;white-space:pre-wrap}
-  .sr-wedit:empty::before{content:attr(data-placeholder);color:var(--muted-2,#8a97a8)}
-  .sr-wfoot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--line);
-    background:var(--panel,#fff)}
-  .sr-wfoot .sr-wstate{font-size:11.5px;color:var(--muted)}
-  .sr-wfoot .sr-wright{margin-left:auto}
-  .sr-wmatlist{border-top:1px solid var(--line);background:var(--panel-soft,#fafbfc);padding:8px 14px;max-height:230px;overflow:auto}
-  .sr-wmat{border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff);padding:7px 9px;margin:6px 0}
-  .sr-wmatsrc{font-size:11px;color:var(--accent)}
-  .sr-wmattxt{font-size:12px;color:var(--muted);margin-top:2px}
-  .sr-btn,.sr-btn-primary{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:8px;cursor:pointer}
-  .sr-btn{background:var(--panel,#fff);border:1px solid var(--line);color:var(--text)}
-  .sr-btn-primary{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
-  /* 材料行里的标包归属（多选） */
-  .mat-bad{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--danger-soft,#fef2f2);
-    color:var(--danger,#dc2626);border:1px solid #fecaca;white-space:nowrap}
-  .mat-pkg{font:inherit;font-size:11px;padding:1px 7px;border:1px solid var(--line);border-radius:999px;
-    background:#fff;color:var(--accent);cursor:pointer;white-space:nowrap;max-width:190px;
-    overflow:hidden;text-overflow:ellipsis}
-  .mat-pkg.is-none{color:var(--muted)}
-  .sr-pkg-pop{position:absolute;z-index:30;margin-top:4px;background:#fff;border:1px solid var(--line);
-    border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:6px;min-width:200px}
-  .sr-pkg-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 6px;border-radius:6px;
-    cursor:pointer}
-  .sr-pkg-opt:hover{background:var(--panel-soft,#f8fafc)}
-  /* 标包卡片（第①步顶部）：事实 + 出处 */
-  .sr-pkg-cards{display:flex;flex-direction:column;gap:6px;margin:6px 0}
-  .sr-pkg-card{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff}
-  .sr-pkg-head{display:flex;align-items:center;gap:8px}
-  .sr-pkg-head b{font-size:12.5px}
-  .sr-pkg-head .sr-mini{margin-left:auto}
-  .sr-pkg-ev{margin-top:3px;font-size:12px;color:var(--text);background:var(--panel-soft,#f8fafc);
-    border-left:2px solid var(--line);padding:4px 8px;border-radius:4px}
-  .sr-align{margin:6px 0;padding:6px 10px;border-radius:8px;font-size:12.5px}
-  .sr-align.ok{background:var(--success-soft);color:var(--success)}
-  .sr-cat.is-empty{opacity:.6}
-  .sr-cat.is-empty .sr-dim{color:var(--warn)}
-  .sr-align.warn{background:var(--warn-soft);color:var(--warn)}
-  /* ② 两步：左两步 + 右内容 */
-  /* 归属章节：点开的完整目录选择器（带层级徽标 + 搜索） */
-  .sr-mount-cell{position:relative}
-  .sr-mount{font:inherit;font-size:12.5px;text-align:left;padding:4px 9px;border:1px solid var(--line);
-    border-radius:7px;background:#fff;color:var(--text);cursor:pointer;max-width:280px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sr-mount:hover{border-color:var(--accent);color:var(--accent)}
-  .sr-pick-pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:340px;background:#fff;
-    border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:6px}
-  .sr-pick-search{width:100%;font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
-    border-radius:6px;margin-bottom:6px}
-  .sr-pick-list{max-height:240px;overflow:auto}
-  .sr-pick-item{display:flex;align-items:center;gap:6px;width:100%;font:inherit;font-size:12.5px;
-    padding:3px 8px;border:0;background:none;color:var(--text);cursor:pointer;border-radius:6px;text-align:left}
-  .sr-pick-item:hover{background:var(--panel-soft,#f8fafc)}
-  .sr-pick-item.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
-  .sr-pick-lv{flex:none;font-size:10.5px;color:var(--muted);border:1px solid var(--line);
-    border-radius:4px;padding:0 4px}
-  .sr-pick-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sr-two{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;
-    overflow:hidden;background:#fff;margin-top:8px}
-  .sr-sub2{flex:0 0 168px;border-right:1px solid var(--line);background:#fafbfc;padding:6px 0}
-  /* 嵌套两步导航：**与顶层五阶段共用同一套几何与规范**（都是 .sr-dot/.sr-lab/.sr-sub），
-     这里只加外层容器的边框。之前我自己另写了一套（gap 8 / padding 8px 12px / 连接线 20px），
-     与顶层（9 / 10px 14px / 23px）差一点点 —— 界面上就是"没对齐"。 */
-  .sr-two-main{flex:1;min-width:0}
-  .sr2-pane{display:none}
-  .sr2-pane.on{display:block}
-  .sr2-head{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line2);background:#fff}
-  .sr2-head .t{font-weight:600;font-size:12.5px}
-  .sr2-body{padding:10px 12px 12px}
-  .sr-two-foot{display:flex;align-items:center;gap:10px;padding:9px 12px;margin-top:8px;
-    border:1px solid var(--line);border-radius:8px;background:#fff}
-  .sr-two-nav{margin-left:auto;display:flex;gap:8px}
-  .sr-struct-edit{max-height:52vh}
-  .sr-erow{display:flex;align-items:center;gap:8px;padding:3px 10px;font-size:12.5px;cursor:pointer;border-radius:6px}
-  .sr-erow:hover{background:var(--panel-soft,#fafbfc)}
-  .sr-erow.is-deep{color:var(--muted)}
-  .sr-erow.on{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
-  .sr-erow.l2{padding-left:26px}
-  .sr-erow.l3{padding-left:42px;color:var(--muted)}
-  .sr-erow-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sr-struct-edit{position:relative}
-  .sr-grip{flex:none;cursor:grab;color:var(--muted2,#9aa5b1);font-size:12px;padding:0 2px;
-    user-select:none;touch-action:none}
-  .sr-grip:active{cursor:grabbing}
-  .sr-erow.is-drag-src{opacity:.45}
-  .sr-drop-line{position:absolute;left:10px;right:6px;height:2px;background:var(--accent);
-    border-radius:2px;pointer-events:none}
-  /* Notion 式：拖动时提示「会成为子级/同级/上级」，跟随指针显示 */
-  .sr-drop-tag{position:absolute;z-index:3;font-size:10.5px;line-height:16px;color:#fff;
-    background:var(--accent);padding:0 6px;border-radius:999px;white-space:nowrap;
-    pointer-events:none}
-  .sr-struct-edit.is-dragging{user-select:none}
-  .sr-batch{display:flex;align-items:center;gap:6px;padding:5px 8px;margin:6px 0;
-    border:1px solid var(--line);border-radius:8px;background:var(--panel-soft,#f8fafc)}
-  .sr-batch.is-empty{display:none}
-  .sr-pick{flex:none;margin:0 2px 0 0;cursor:pointer}
-  .sr-erow-input{flex:1;min-width:0;font:inherit;font-size:12.5px;padding:1px 6px;
-    border:1px solid var(--accent);border-radius:5px}
-  .sr-erow-acts{display:none;gap:4px;flex:none}
-  .sr-erow.on .sr-erow-acts{display:flex}
-  .sr-mini{font:inherit;font-size:11.5px;padding:1px 7px;border:1px solid var(--line);
-    border-radius:6px;background:#fff;color:var(--text);cursor:pointer}
-  .sr-mini:hover{border-color:var(--accent);color:var(--accent)}
-  .sr-mini.danger:hover{border-color:var(--danger);color:var(--danger)}
-  /* ② 目录确认：自检摘要（一行）+ 已确认回显 + 目录结构 */
-  .sr-checks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:12.5px}
-  .sr-check{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);
-    border-radius:999px;padding:2px 10px;background:var(--panel,#fff)}
-  .sr-check.ok{color:var(--success);border-color:var(--success-soft);background:var(--success-soft)}
-  .sr-check.warn{color:var(--warn);border-color:var(--warn-soft);background:var(--warn-soft)}
-  .sr-check .sr-dim{color:inherit;opacity:.75;font-size:11px}
-  .sr-echo{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);
-    padding:6px 0 2px}
-  .sr-echo-item b{color:var(--text);font-weight:600;margin-right:4px}
-  .sr-struct{border:1px solid var(--line);border-radius:8px;background:var(--panel,#fff);
-    max-height:46vh;overflow:auto;padding:4px 0;margin:6px 0}
-  .sr-struct-row{display:flex;align-items:center;gap:8px;padding:3px 10px;font-size:12.5px}
-  .sr-struct-row:hover{background:var(--panel-soft,#fafbfc)}
-  .sr-struct-row.l2{padding-left:24px}
-  .sr-struct-row.l3{padding-left:38px;color:var(--muted)}
-  .sr-struct-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sr-struct-meta{font-size:11px;color:var(--muted);white-space:nowrap}
-  .sr-struct-score{font-size:11.5px;color:var(--success);white-space:nowrap}
-  .sr-conf-result-wrap{margin:6px 0}
-  .sr-conf-result{margin:0}
-  .sr-conf-result th,.sr-conf-result td{padding:4px 8px}
-  .sr-req-table .sr-group td{background:var(--panel-soft,#f8fafc);border-top:1px solid var(--line);
-    font-size:12.5px;padding:6px 10px}
-  .sr-req-table .sr-group .sr-dim{margin-left:6px}
-  .sr-req-table .sr-req-no{color:var(--muted);vertical-align:top}
-  .sr-req-table .sr-req-text{line-height:1.65;white-space:pre-wrap}
-  .sr-req-table .sr-req-text .sr-dim{font-size:11px;margin-top:2px}
-  .sr-req-table .sr-req-level{white-space:nowrap;vertical-align:top}
   .sr-kpis{display:flex;gap:8px;flex-wrap:wrap;padding:10px 15px 4px}
   .sr-kpi{flex:1 1 140px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;background:var(--panel,#fff);
     display:flex;flex-direction:column;gap:1px}
@@ -4877,14 +4454,36 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     background:#fff;color:var(--muted);cursor:pointer}
   .sr-subtab.on{background:#eff6ff;border-color:#bfdbfe;color:#2563eb;font-weight:600}
   .sr-subtab .n{color:var(--muted);font-weight:400;margin-left:4px}
+  .sr-points-tabs{gap:20px;margin:0 0 16px;border-bottom:1px solid var(--line);padding:0 2px}
+  .sr-points-tabs .sr-subtab{display:inline-flex;align-items:center;gap:7px;padding:10px 0;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--muted);white-space:nowrap}
+  .sr-points-tabs .sr-subtab.on{background:transparent;border-color:var(--accent,#2563eb);color:var(--accent,#2563eb)}
+  .sr-points-tabs .sr-subtab .n{font-size:11px;line-height:18px;min-width:20px;text-align:center;padding:0 5px;margin:0;border-radius:5px;background:#edf0f4;font-variant-numeric:tabular-nums}
+  .sr-points-tabs .sr-subtab.on .n{background:#e8f0ff;color:#2563eb}
+  .sr-points-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;font-size:12px;color:var(--muted)}
+  .sr-points-total{font-size:12px;color:var(--text);font-variant-numeric:tabular-nums}
+  .sr-points-total b{font-size:15px;font-weight:600;margin:0 3px}
   .sr-subpane{display:none}
   .sr-subpane.on{display:block}
+  .sr-erow.is-source .sr-erow-acts button{display:none}.sr-erow.is-source .sr-grip{visibility:hidden;pointer-events:none}.sr-erow.is-source{background:#fafbfc}
+  .response-chapter-evidence{padding:12px;margin-top:10px;border:1px solid var(--line);border-radius:6px;font-size:12px;line-height:1.7}.response-evidence-item{padding:10px 0;border-top:1px solid var(--line)}.response-evidence-item small{display:block;color:var(--muted);margin-bottom:5px}
+  .response-landing-warning{font-size:12px;line-height:1.7;padding:10px 12px;margin:8px 0;border:1px solid #fde68a;border-radius:6px;background:#fffbeb;color:#92400e}.response-landing-warning summary{cursor:pointer}.response-landing-warning ul{max-height:180px;overflow:auto;padding-left:20px}.response-landing-warning p{margin:6px 0}
+  .response-confirm-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-top:12px}.response-confirm-bar strong{display:block;font-size:13px}.response-confirm-bar span{display:block;font-size:12px;color:var(--muted);margin-top:5px}.response-confirm-bar>button.primary{background:#2563eb!important;color:#fff!important;border-color:#2563eb!important;padding:10px 16px!important;white-space:nowrap}.response-confirm-bar>button:disabled{opacity:.65;cursor:wait}.response-confirm-feedback{padding:12px 16px;margin-top:8px;border-radius:6px;background:#eff6ff;color:#1e40af;font-size:12px;line-height:1.7}.response-confirm-feedback[hidden]{display:none}.response-confirm-feedback.is-error{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.response-confirm-feedback p{margin:5px 0 8px}.response-confirm-feedback ul{max-height:180px;overflow:auto;margin:6px 0 12px;padding-left:20px}.response-confirm-feedback summary{cursor:pointer}@media(max-width:600px){.response-confirm-bar{align-items:stretch;flex-direction:column}.response-confirm-bar>button{width:100%}}
+  .response-basis-card{position:relative;border:1px solid var(--line);border-radius:8px;background:#fff;margin:0 0 16px;overflow:hidden}.response-basis-top{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 190px 16px 16px}.response-basis-main{min-width:0}.response-basis-main>strong{display:block;font-size:12px;color:var(--muted);margin-bottom:8px}.response-basis-metrics{display:flex;gap:8px 20px;flex-wrap:wrap;font-size:13px}.response-basis-metrics b{font-size:17px;font-variant-numeric:tabular-nums;margin:0 3px}.response-basis-main>p{font-size:12px;color:var(--muted);line-height:1.6;margin:8px 0 0}.response-basis-action{flex:none;white-space:nowrap!important;padding:9px 14px!important}.response-basis-details{border-top:0;font-size:12px;color:var(--muted)}.response-basis-details>summary{position:absolute;right:16px;top:30px;padding:8px 0;cursor:pointer;background:transparent}.response-basis-footer{padding:10px 16px;border-top:1px solid var(--line);background:#fafbfc}.response-basis-details[open] .response-basis-detail-body{border-top:1px solid var(--line)}.response-basis-detail-body{padding:0 16px 12px;line-height:1.7}.response-basis-detail-body p{margin:10px 0 0}.response-source-file{display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.response-source-file>span{flex:none;font-size:11px}.response-source-file>p{margin:0;overflow-wrap:anywhere;min-width:0}@media(max-width:600px){.response-basis-top{align-items:flex-start;flex-direction:column;padding:12px}.response-basis-details>summary{position:static;padding:0 12px 10px}.response-basis-action{align-self:flex-start}.response-basis-metrics{gap:6px 12px}}
+  .response-type-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px}.response-type{font:inherit;text-align:left;padding:14px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;color:var(--text)}.response-type.on{border-color:#2563eb;background:#eff6ff;box-shadow:inset 0 0 0 1px #2563eb}.response-type strong{display:block;font-size:14px;margin-bottom:6px}.response-type span{display:block;font-size:12px;color:var(--muted);line-height:1.6}.response-mapping summary,.response-missing summary{cursor:pointer}.response-coverage{display:flex;gap:10px 18px;flex-wrap:wrap;font-size:12px;padding:12px;background:#f8fafc;border:1px solid var(--line);border-radius:6px;margin:12px 0}.response-mapping,.response-missing{font-size:12px;padding:12px 0;line-height:1.7}.response-map-row{display:grid;grid-template-columns:minmax(140px,1fr) 2fr auto;gap:12px;padding:8px;border-bottom:1px solid var(--line)}
+  @media(max-width:900px){.sr-body{flex-direction:column}.sr-rail{flex:0 0 auto;display:flex;border-right:0;border-bottom:1px solid var(--line);padding:6px;overflow-x:auto;position:static}.sr-rail-item{flex:1;min-width:max-content;padding:8px}.sr-rail-item+.sr-rail-item{margin-top:0}.sr-rail-item:after{display:none}.sr-rail .sr-desc{display:none}.sr-stage-body{padding:10px}.spec-children{padding-left:8px;margin-left:6px}}
   .sr-gate{padding:28px 20px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
   .sr-gate b{font-size:13.5px}
   .sr-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:11px 18px;border-bottom:1px solid var(--line);background:#f8fafc}
   .sr-filter-k{font-weight:600;font-size:12.5px;color:var(--muted)}
   .sr-filter-item{font-size:12.5px;display:flex;align-items:center;gap:6px}
+  .sr-scope-summary{display:flex;align-items:center;gap:10px;flex:1 1 240px;min-width:0}
+  .sr-scope-label{flex:none;font-size:11px;color:var(--muted);padding:3px 7px;border:1px solid var(--line);border-radius:5px;background:#fff}
+  .sr-scope-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text);min-width:0}
+  .sr-scope-manage{display:inline-flex;align-items:center;gap:6px;flex:none;font-size:12px;font-weight:400;color:var(--muted);text-decoration:none;padding:6px 9px;border:1px solid transparent;border-radius:6px;transition:background .15s,color .15s}
+  .sr-scope-manage:hover{color:var(--accent,#2563eb);background:#eff6ff;border-color:#dbeafe}
+  .sr-scope-manage:focus-visible{outline:2px solid var(--accent,#2563eb);outline-offset:2px}
+  .sr-run:empty{display:none}
   .sr-filter select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
     border-radius:7px;background:#fff;max-width:330px}
   .sr-cat{display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;
@@ -4924,6 +4523,23 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   if (scroller) scroller.scrollTop = 0;
 
   // ── 左侧竖条切换阶段 + 阶段内子页签（用户要求：点导航直接切换，不做展开/收起）──
+  el.querySelectorAll('[data-attention-filter]').forEach(button=>button.onclick=()=>{
+    const key=button.dataset.attentionFilter;
+    const guide=el.querySelector('#spec-symbol-guide');
+    if(guide){
+      const symbols=[...new Set((tm.topics || []).flatMap(t=>(t.requirements || []).flatMap(r=>r.attention?.markers || [])))];
+      const meanings={'★':'常见为实质性要求','*':'重要条款或脚注','＊':'重要条款或脚注','▲':'常见为重要参数、重点评分项'};
+      guide.hidden=key!=='marked' || !symbols.length;
+      guide.innerHTML=symbols.map(symbol=>`<span><b>${escapeHtml(symbol)}</b> ${escapeHtml(meanings[symbol] || '含义待核对')}</span>`).join('')
+        + '<span class="spec-symbol-caution">具体含义及否决、扣分后果，以本文件说明为准</span>';
+    }
+    el.querySelectorAll('[data-attention-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+    el.querySelectorAll('.spec-topic').forEach(topic=>{
+      let visible=0;
+      topic.querySelectorAll('.spec-clause').forEach(row=>{row.hidden=key!=='all'&&!row.dataset.attention.split(' ').includes(key);if(!row.hidden)visible++;});
+      topic.hidden=key!=='all'&&!visible;if(visible&&key!=='all')topic.open=true;
+    });
+  });
   const applyStage = () => {
     el.querySelectorAll('.sr-stage').forEach(p =>
       p.classList.toggle('on', p.dataset.stage === String(panelStage)));
@@ -5004,20 +4620,110 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     panelSub = t.dataset.sub;
     applySub();
   }));
-  // ② 待确认的两步：**按元素直接绑**，不走面板级事件委托。
-  // 实测：`.sr-stage-body` 这条路径上的点击到不了面板的委托处理器（左竖条有自己的
-  // 直接监听所以一直正常），表现就是"点一行没反应、按钮点了没请求"。
-  el.querySelectorAll('.sr-sub2-item').forEach((x) => x.addEventListener('click', () => {
-    switchConfirmStep(Number(x.dataset.sub2) || 1);
+  el.querySelector('[data-act="response-write"]')?.addEventListener('click', () => openSplitReport({stage:'4', sub:'writing'}));
+  el.querySelectorAll('[data-write-chapter]').forEach(button => button.addEventListener('click', async () => {
+    panelStage = '4'; panelSub = 'writing';
+    applyStage(); applySub();
+    await renderWritePane();
+    await chapterStudio?.select(button.dataset.writeChapter);
   }));
-  el.querySelectorAll('[data-step-nav]').forEach((b) => b.addEventListener('click', () => {
-    switchConfirmStep(b.dataset.stepNav === 'prev' ? confirmStep - 1 : confirmStep + 1);
+  el.querySelectorAll('[data-response-type]').forEach(button => button.addEventListener('click', async () => {
+    responsePlanChoice = button.dataset.responseType;
+    await openSplitReport({stage: '2'});
   }));
+  el.querySelector('[data-act="response-preview"]')?.addEventListener('click', async (event) => {
+    if (previewReady) { el.querySelector('.sr-struct-edit')?.scrollIntoView({behavior:'smooth', block:'start'}); return; }
+    const button = event.currentTarget;
+    const slot = el.querySelector('[data-flash-for="generate"]');
+    button.disabled = true;
+    slot.textContent = '正在打开独立的应答草案…';
+    try {
+      const result = await fetch(`/api/workflow/${encodeURIComponent(tid)}/response-plan`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({response_type: responseType}),
+      });
+      const body = await result.json();
+      if (!result.ok) throw new Error(body.detail || '目录草案创建失败');
+      const url = new URL(location.href);
+      url.searchParams.set('threadId', body.thread_id);
+      url.searchParams.set('planning', '1');
+      location.assign(url.href);
+    } catch (err) { button.disabled = false; slot.textContent = err.message; }
+  });
+  el.querySelector('[data-response-download]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const slot = el.querySelector('[data-document-export-status]');
+    try {
+      if (chapterStudio && !await chapterStudio.save()) return;
+      const response = await fetch(`/api/projects/${projectId}/studio/document?threadId=${encodeURIComponent(tid)}`);
+      const settings = await response.json();
+      if (!response.ok) throw new Error(settings.detail || '读取模板失败');
+      await exportDocument({projectId, threadId:tid, template:settings.template, slot});
+    } catch(error) { slot.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  el.querySelectorAll('[data-act="redraft-outline"]').forEach(button => button.addEventListener('click', async event => {
+    event.stopPropagation();
+    button.disabled = true;
+    try { await redraftOutline(); } finally { button.disabled = false; }
+  }));
+  el.querySelector('[data-act="response-confirm"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget;
+    const slot = el.querySelector('[data-confirm-feedback]');
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.setAttribute('aria-busy','true');
+    button.textContent = '正在保存目录…';
+    slot.hidden = false;
+    slot.className = 'response-confirm-feedback';
+    slot.textContent = '正在等待目录调整保存完成…';
+    try {
+      let saveTimer;
+      try { await Promise.race([structureSaveChain,new Promise((_,reject)=>{saveTimer=setTimeout(()=>reject(new Error('目录仍在保存中，请稍后重试。')),10000);})]); }
+      finally { clearTimeout(saveTimer); }
+      button.textContent = '正在校验并创建…';
+      slot.textContent = '正在检查重点章节、原文章节结构与要求归属…';
+      const result = await fetch(`/api/workflow/${encodeURIComponent(tid)}/response-plan/confirm`, {method:'POST',signal:AbortSignal.timeout(20000)});
+      const body = await result.json();
+      if (!result.ok) {
+        const detail = body.detail;
+        const error = new Error(typeof detail === 'string' ? detail : detail?.message || '确认失败，请重试');
+        error.validation = typeof detail === 'object' ? detail : null;
+        throw error;
+      }
+      button.textContent = '已确认，正在打开编写…';
+      splitPanelFlash = `已创建${responseLabel}，现在可以按章编写，目录和依据可随时查看。`;
+      await openSplitReport({stage:'4', sub:'writing'});
+      document.querySelector('.sr-stage.on')?.scrollIntoView({behavior:'smooth',block:'start'});
+    } catch (err) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.textContent = originalLabel;
+      slot.className = 'response-confirm-feedback is-error';
+      const missing = err.validation?.missing_sections || [];
+      slot.innerHTML = `<strong>暂不能创建${escapeHtml(responseLabel)}</strong><p>${escapeHtml(err.name==='TimeoutError' ? '请求超时，请重试。目录调整已保留。' : err.message)}</p>${missing.length ? `<details open><summary>未承接的明确风险要求 ${missing.length} 条</summary><ul>${missing.map(s=>`<li>${escapeHtml(s.title || (s.source_path || []).join(' > '))}</li>`).join('')}</ul></details>` : ''}<button class="mw-btn" type="button" data-confirm-checks>查看目录检查</button>${err.validation ? ' <button class="mw-btn" type="button" data-confirm-rebuild>重新生成完整目录</button>' : ''}`;
+      slot.querySelector('[data-confirm-checks]').onclick = () => el.querySelectorAll('.response-coverage')[1]?.scrollIntoView({behavior:'smooth',block:'center'});
+      slot.querySelector('[data-confirm-rebuild]')?.addEventListener('click', async () => {
+        if (await uiConfirm('重新生成将替换当前目录的手动调整，并补齐全部重点章节。是否继续？')) await redraftOutline();
+      });
+      slot.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+  });
   el.querySelectorAll('.sr-erow').forEach((row) => row.addEventListener('click', (ev) => {
     if (ev.target.closest?.('button')) return;          // 点操作按钮不算选行
     selectedStructId = row.dataset.struct;
     el.querySelectorAll('.sr-erow').forEach((x) =>
       x.classList.toggle('on', x.dataset.struct === selectedStructId));
+    const block = structBlocks.find(b => String(b.block_id || b.id) === selectedStructId);
+    const originalLocked = chapterSources.get(selectedStructId)?.response_part === 'point_to_point';
+    el.querySelectorAll('[data-act="struct-new"]').forEach(button => { button.disabled = originalLocked; });
+    const detail = el.querySelector('#response-chapter-evidence');
+    if (detail && block) {
+      const requirements = expectedRequirements.filter(r => parseIds(block.spec_requirement_ids).includes(r.requirement_id));
+      detail.innerHTML = `<strong>${escapeHtml(block.title)}</strong><p>评分依据：${parseIds(block.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '未直接关联评分点'}</p>${requirements.length ? `<details open><summary>技术规范要求 ${requirements.length} 条</summary>${requirements.map(r=>`<div class="response-evidence-item"><small>${escapeHtml(r.title)}</small><div>${specContentHtml(r.text)}</div></div>`).join('')}</details>` : ''}`;
+    }
   }));
   // 面板内的结构**写**入口已接回：前端用 block_id（逻辑 id），后端补了两道闸
   // （纯数字 id → 400；一次提交里大量未知 id → 400），误发不会再毁目录。
@@ -5153,45 +4859,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       return;
     }
 
-    // 「确认，生成目录与映射矩阵」：确认即生成（用户确认的方案）
-    //   ① 写回投标范围 ② 存"要生成哪些类别" ③ 触发派生 → 产物页签随确认出现
-    if (e.target.closest?.('[data-act="confirm-generate"]')) {
-      const btnC = e.target.closest('[data-act="confirm-generate"]');
-      const slot = document.querySelector('[data-flash-for="generate"]');
-      const cats = [...document.querySelectorAll('#split-panel-inline [data-confirm-cat]:checked')]
-        .map(x => x.dataset.confirmCat);
-      if (!cats.length) {
-        if (slot) { slot.textContent = '请至少勾选一个类别。'; slot.className = 'sr-dim sr-inline-err'; }
-        return;
-      }
-      btnC.disabled = true;
-      if (slot) { slot.textContent = '正在确认并生成…'; slot.className = 'sr-dim'; }
-      try {
-        await api.workflow.setScope(projectId, {
-          target: viewPkg.target || '', package_no: viewPkg.package_no || '',
-          package_name: viewPkgStat?.package_name || '',
-        });
-        const tidC = await resolvePanelThreadId(null);
-        await api.workflow.answerSplit(projectId, {
-          key: 'categories', value: { categories: cats }, threadId: tidC,
-        });
-        const labels = cats.map(c => ({ tech: '技术', commerce: '商务', price: '报价' }[c] || c)).join('、');
-        splitPanelFlash = `已确认：${viewLabel} · ${labels}。正在生成目录与映射矩阵…`;
-        // 这次点击已代表用户批准目录 → 派生完成后自动放行闸门，不再弹第二次确认
-        autoConfirmOutlineAt = Date.now();
-        await openSplitReport({ tab: 'directory' });   // 产物页签此时已出现
-        await redraftOutline();
-      } catch (err) {
-        btnC.disabled = false;
-        if (slot) {
-          slot.textContent = '生成失败：' + String(err?.message || err).slice(0, 120);
-          slot.className = 'sr-dim sr-inline-err';
-        }
-      }
-      return;
-    }
-
-
     // 「跳过（暂不指定）」：可选项标记为已处理，不影响后续确认
     if (e.target.closest?.('[data-save="skip"]')) {
       const key = e.target.closest('[data-save="skip"]').dataset.key;
@@ -5304,6 +4971,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
 }
 
 async function warnIfOutlineNotDerived(tid) {
+  if (params.get('planning') === '1') { document.getElementById('raw-toc-warn')?.remove(); return; }
   if (!blocksList) return;
   tid = await resolvePanelThreadId(tid);
   if (!tid) return;
@@ -5394,6 +5062,14 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
     if (ee) ee.hidden = false;
     resetWorkflowUi();
     if (!silent) setStatusBar('idle', '', 0, 0, 0);
+    if (ee && packageId) {
+      ee.hidden = false;
+      ee.innerHTML = `<div style="padding:32px;text-align:center"><h3>当前标包尚未拆分</h3>
+        <p>根据已确认的招标依据，拆分当前标包的评分点和响应要求。</p>
+        <button type="button" class="mw-btn primary" id="start-package-extraction">开始拆分评分点</button>
+        <p><a href="/project-intake?projectId=${projectId}">核对标包与文件依据</a></p></div>`;
+      ee.querySelector('#start-package-extraction').onclick = () => startExtraction();
+    }
     return;
   }
   const emptyEl = document.getElementById('blocks-empty');
@@ -5458,6 +5134,15 @@ async function loadExistingBlocks({ silent = false, keepSelection = false } = {}
   } else {
     blocksList.hidden = false;
     blocksList.style.display = '';
+    const empty = document.getElementById('blocks-empty');
+    if (empty && packageId) {
+      empty.hidden = false;
+      empty.innerHTML = `<div style="padding:32px;text-align:center"><h3>当前标包尚未拆分</h3>
+        <p>根据已确认的招标文件与技术规范书，拆分当前标包的评分点和响应要求。</p>
+        <button type="button" class="mw-btn primary" id="start-package-extraction">开始拆分评分点</button>
+        <p><a href="/project-intake?projectId=${projectId}">核对标包与文件依据</a></p></div>`;
+      empty.querySelector('#start-package-extraction').onclick = () => startExtraction();
+    }
   }
   applyPageView();             // 先定视图：下面的总览/筛选/详情都按当前视图渲染
   renderMatchSummary();
@@ -6249,18 +5934,24 @@ async function restartExtraction() {
   // 清完之后又冒出残行（清了等于没清）。
   if (currentThreadId) {
     try { await api.workflow.abort(currentThreadId); }
-    catch (e) { console.warn('[workflow] 取消旧任务失败（继续重跑）', e); }
+    catch (err) {
+      console.error('[workflow] 取消旧任务失败，停止重跑', err);
+      setStatusBar('error', err?.message || '取消旧任务失败，请重试', 0, 0, 0);
+      showSplitPanelRetry(err?.message || '取消旧任务失败，请重试');
+      if (btn) btn.disabled = false;
+      restartInFlight = false;
+      return;
+    }
   }
   try {
-    const res = await api.projects.resetAnalysis(projectId);
+    const res = await api.projects.resetAnalysis(projectId, packageId);
     const n = res?.deleted?.blocks ?? 0;
     console.info('[workflow] 已清空上次的拆分结果', res?.deleted);
     // 页面级的旧状态也要清：否则刷新或跳转回来又会按旧 thread/旧确认版本恢复视图
     try {
-      sessionStorage.removeItem(`workflow:${projectId}`);
-      sessionStorage.removeItem(`furthestStage:${projectId}`);
-      sessionStorage.removeItem(`outlineInstruction:${projectId}`);
-      sessionStorage.removeItem(`confirmedRevision:${projectId}`);
+      sessionStorage.removeItem(THREAD_KEY(projectId));
+      sessionStorage.removeItem(packageCacheKey('furthestStage'));
+      sessionStorage.removeItem(packageCacheKey('outlineInstruction'));
     } catch {}
     currentThreadId = null;
     // 注意：不要再给"确认版本"另设缓存变量 —— 上面已经清掉 sessionStorage 里的键，
@@ -6268,7 +5959,12 @@ async function restartExtraction() {
     splitPanelAutoOpenedFor = 0;
     if (n) console.info(`[workflow] 清掉旧章节 ${n} 节`);
   } catch (err) {
-    console.warn('[workflow] 清空旧拆分结果失败，仍继续重跑', err);
+    console.error('[workflow] 清空旧拆分结果失败，停止重跑', err);
+    setStatusBar('error', err?.message || '清空旧拆分结果失败，请重试', 0, 0, 0);
+    showSplitPanelRetry(err?.message || '清空旧拆分结果失败，请重试');
+    if (btn) btn.disabled = false;
+    restartInFlight = false;
+    return;
   }
   if (btn) btn.disabled = false;
   try {
@@ -6305,11 +6001,6 @@ async function startExtraction(forceRestart = false) {
       clearThread(projectId);
       currentThreadId = null;
     }
-    if (forceRestart) {
-      // 重新拆分评分点：清空已落库的 blocks，避免 extract 节点把旧 outline_done 当已完成跳过
-      try { await api.blocks.clear(projectId); } catch (e) { console.warn('clear blocks failed', e); }
-    }
-
     let threadId = forceRestart ? null : getThread(projectId);
     if (threadId) {
       try {
@@ -6321,7 +6012,7 @@ async function startExtraction(forceRestart = false) {
       }
     }
     if (!threadId) {
-      const resp = await api.workflow.start(projectId, {
+      const resp = await api.projects.startPackageRun(projectId, packageId, {
         model: selectedModel,
         outline_instruction: readOutlineInstruction(),
         // 第①步「拆分评分点」：只把评分点拆出来（落库 + 出矩阵），**不生成目录**。
@@ -6386,8 +6077,8 @@ async function forceRestartRun() {
     if (tid) { try { await api.workflow.abort(tid); } catch {} }
     clearThread(projectId);
     currentThreadId = null;
-    try { await api.blocks.clear(projectId); } catch (e) { console.warn('clear blocks failed', e); }
-    const resp = await api.workflow.start(projectId, {
+    await api.projects.resetAnalysis(projectId, packageId);
+    const resp = await api.projects.startPackageRun(projectId, packageId, {
       model: selectedModel,
       outline_instruction: readOutlineInstruction(),
     });
@@ -6735,7 +6426,7 @@ async function confirmOutlineGate() {
 }
 
 // ── 拆分要求输入（左侧面板底部，闸门 1 可反复改） ──
-const OUTLINE_INSTRUCTION_KEY = (pid) => `outlineInstruction:${pid}`;
+const OUTLINE_INSTRUCTION_KEY = () => packageCacheKey('outlineInstruction');
 
 function instructionInput() {
   return document.getElementById('outline-instruction');
@@ -7218,7 +6909,7 @@ bindMatchDetailActions();
   // 也能立即按"matching 已可达"渲染，避免 step 被错误 disabled。
   try {
     if (_viewParam === 'matching') {
-      const k = `furthestStage:${projectId}`;
+      const k = packageCacheKey('furthestStage');
       const prev = sessionStorage.getItem(k);
       const prevIdx = prev ? STAGE_ORDER.indexOf(STAGE_MAP[prev] || '') : -1;
       if (prevIdx < 1) sessionStorage.setItem(k, 'materials_review');
@@ -7239,7 +6930,7 @@ bindMatchDetailActions();
 
   // 先用 workflow-runs 表里的 stage 兜底点亮进度条（这是 routes 层 update_stage 持久化的版本，
   // 即使 runner 内存清空 / checkpoint 读失败也能拿到）。然后再 best-effort 用 state API 校准。
-  fetch(`/api/projects/${projectId}/workflow-runs`).then(r => r.ok ? r.json() : []).then(runs => {
+  fetch(`/api/projects/${projectId}/workflow-runs?packageId=${encodeURIComponent(packageId)}`).then(r => r.ok ? r.json() : []).then(runs => {
     const latest = Array.isArray(runs) && runs.length ? runs[0] : null;
     if (!latest) return;
     // thread_id 的恢复**不能**依赖 stage 是否在 STAGE_MAP 里：paused / done / aborted
