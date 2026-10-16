@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v210';
-import { api } from './api.js?v=20261016-v210';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v210';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v211';
+import { api } from './api.js?v=20261016-v211';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v211';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v210';
+       } from './workspace.js?v=20261016-v211';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v210';
+       } from './workspace-model.mjs?v=20261016-v211';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v210';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v211';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3623,7 +3623,7 @@ function pageBudgetCellHtml(b) {
   // 只有"分配落点"可编辑；父章节只读显示子树合计（额度不与子章节重复计算）
   if (!chapter.is_target) {
     if (Number(chapter.pages) > 0) {
-      return `<span class="sr-erow-page is-sum" title="父章节页数 = 子树合计">${Number(chapter.pages)} 页</span>`;
+      return `<span class="sr-erow-page is-sum" title="父章节页数 = 子树合计">子树合计 ${Number(chapter.pages)} 页</span>`;
     }
     return '<span class="sr-erow-page is-muted" title="更深的叶子计入上级章节">—</span>';
   }
@@ -4302,7 +4302,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <input type="checkbox" class="sr-pick" data-pick="${escapeHtml(String(b.block_id || b.id))}"
         ${batchIds.has(String(b.block_id || b.id)) ? 'checked' : ''}
         title="选中后可批量操作" ${locked ? 'disabled' : ''} />
-      <span class="sr-erow-title">${escapeHtml(b.title || '')}</span>${source.response_part ? `<span class="sr-struct-meta">${({scoring:'评分项',priority:'重点要求',point_to_point:'原文目录'})[source.response_part] || ''}</span>` : ''}
+      <span class="sr-lvl" title="目录层级">L${lvl}</span><span class="sr-erow-title">${escapeHtml(b.title || '')}</span>${source.response_part ? `<span class="sr-struct-meta">${({scoring:'评分项',priority:'重点要求',point_to_point:'原文目录'})[source.response_part] || ''}</span>` : ''}
       ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 20))}</span>` : ''}
       ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
       ${reqs ? `<span class="sr-struct-meta">规范书 ${reqs} 条</span>` : ''}
@@ -4763,6 +4763,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-step.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
   .sr-step.is-todo{opacity:.55}
   .sr-step:disabled{cursor:not-allowed}
+  .sr-lvl{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:0 5px;line-height:16px;flex:none}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
   .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
   .sr-erow-page.is-muted{opacity:.5}
