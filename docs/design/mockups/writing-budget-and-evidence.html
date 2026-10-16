@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 · 篇幅预算 + 三级来源 + 本章缺口</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --panel:#fff; --line:#e2e8f0; --line2:#eef2f7;
+    --text:#0f172a; --muted:#64748b; --accent:#2563eb; --accent-soft:#eff6ff;
+    --ok:#16a34a; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+    --bad:#dc2626; --bad-soft:#fef2f2; --l2:#7c3aed; --l2-soft:#f5f3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",Inter,Roboto,sans-serif}
+  .topbar{height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;background:#fff;border-bottom:1px solid var(--line2)}
+  .topbar .title{font-size:16px;font-weight:600}
+  .topbar .sub{font-size:12.5px;color:var(--muted)}
+  .tabs{display:flex;gap:6px;margin-left:14px}
+  .tab{font:inherit;font-size:12.5px;padding:5px 13px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--text);cursor:pointer}
+  .tab.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .sp{flex:1}
+  .wrap{padding:14px 18px 40px;max-width:1320px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .card h2{margin:0 0 3px;font-size:14.5px}
+  .card .hint{font-size:12px;color:var(--muted);margin-bottom:12px}
+  .btn{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:#fff;cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.sm{font-size:11.5px;padding:3px 9px;border-radius:7px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line2)}
+  th{font-size:11.5px;color:var(--muted);background:#fafbfd;border-bottom:1px solid var(--line);font-weight:600}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  tr.ch{cursor:pointer}tr.ch:hover{background:#f8fafc}
+  .ind{padding-left:22px}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .pill.ok{background:var(--ok-soft);border-color:#bbf7d0;color:#15803d}
+  .pill.warn{background:var(--warn-soft);border-color:#fde68a;color:#b45309}
+  .pill.bad{background:var(--bad-soft);border-color:#fecaca;color:#b91c1c}
+  .pill.l2{background:var(--l2-soft);border-color:#ddd6fe;color:#6d28d9}
+  .pill.idle{color:var(--muted)}
+  input[type=number],input[type=text]{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+    border-radius:7px;width:74px;text-align:right}
+  input.txt{text-align:left;width:auto}
+  .totline{display:flex;align-items:center;gap:14px;margin-top:10px;font-size:12.5px;flex-wrap:wrap}
+  .banner{border-radius:10px;padding:9px 12px;font-size:12.5px;margin-top:10px}
+  .banner.warn{background:var(--warn-soft);border:1px solid #fde68a;color:#b45309}
+  .banner.ok{background:var(--ok-soft);border:1px solid #bbf7d0;color:#15803d}
+  /* 章节层 */
+  .chap{display:grid;grid-template-columns:196px 1fr 300px;gap:12px}
+  .dir{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 8px;align-self:start}
+  .dir .k{font-size:11.5px;color:var(--muted);padding:0 6px 6px}
+  .dir .item{font-size:12.5px;padding:5px 8px;border-radius:7px;cursor:pointer;display:flex;gap:6px;align-items:center}
+  .dir .item:hover{background:#f8fafc}
+  .dir .item.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .budgetbar{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid var(--line);
+    border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}
+  .budgetbar b{font-variant-numeric:tabular-nums}
+  .bar{height:6px;width:150px;background:#eef2f7;border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .body{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .para{border-left:3px solid var(--line);padding:8px 0 8px 12px;margin-bottom:10px}
+  .para .role{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;margin-right:6px}
+  .role.plan{background:var(--accent-soft);color:#1d4ed8}
+  .role.act{background:#ecfeff;color:#0e7490}
+  .role.ev{background:var(--ok-soft);color:#15803d}
+  .role.pr{background:#fff7ed;color:#c2410c}
+  .src{font-size:11px;color:var(--muted);margin-left:8px}
+  .aside{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;align-self:start}
+  .aside h4{margin:0 0 8px;font-size:13px}
+  .aside .grp{margin-bottom:12px}
+  .gap{border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:8px;padding:8px 10px;margin-bottom:7px}
+  .gap.warn{border-left-color:var(--warn)}
+  .gap .t{font-size:12.5px;font-weight:600}
+  .gap .m{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .gap .a{margin-top:6px;display:flex;gap:6px}
+  .sugg{border:1px dashed #bfdbfe;background:#f8fbff;border-radius:8px;padding:8px 10px;margin-bottom:7px;font-size:12px}
+  /* 回检 */
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .kpi{flex:1;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .kpi .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+  .kpi .k{font-size:11.5px;color:var(--muted)}
+  .hidden{display:none}
+  .note{font-size:11.5px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="title">XX市政交通项目</span>
+    <span class="sub">· 技术应答</span>
+    <span class="tabs">
+      <button class="tab on" data-view="plan">① 应答策划（全书）</button>
+      <button class="tab" data-view="chap">② 章节编写</button>
+      <button class="tab" data-view="check">③ 全书回检</button>
+    </span>
+    <span class="sp"></span>
+    <span class="sub">来源口径：企业信息只认 L1 ｜ 第三方不引</span>
+  </div>
+
+  <div class="wrap">
+    <!-- ══════════ ① 应答策划 ══════════ -->
+    <section id="v-plan">
+      <div class="card">
+        <h2>篇幅预算</h2>
+        <div class="hint">总页数由**你填**；系统只按「评分点分值 × 章节类型」给出**可改的建议**。合计与总数不一致时会提示差额。</div>
+        <div class="totline">
+          <span>技术部分 <input type="number" id="pgTech" value="120" /> 页</span>
+          <span>商务部分 <input type="number" id="pgBiz" value="30" /> 页</span>
+          <span>总页数需求 <b id="pgTotal">150</b> 页</span>
+          <span class="sp"></span>
+          <span id="sumLine">—</span>
+        </div>
+        <div id="sumBanner" class="banner ok">合计与需求一致</div>
+      </div>
+
+      <div class="card">
+        <h2>章节预算表</h2>
+        <div class="hint">点任意一行进入该章的编写视图。</div>
+        <table>
+          <thead><tr>
+            <th style="width:34%">章节</th><th class="num">分值</th><th class="num">建议页</th>
+            <th class="num">你填页</th><th class="num">已写</th><th class="num">差额</th><th>状态</th>
+          </tr></thead>
+          <tbody id="budgetRows"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>证据覆盖（章节 × 证据类型）</h2>
+        <div class="hint">✅ 有凭证级来源 ｜ ⚠ 只有线索级（官网/公众号，需补凭证）｜ ❌ 缺 ｜ — 不需要</div>
+        <table>
+          <thead><tr><th style="width:34%">章节</th><th>业绩</th><th>资质</th><th>人员</th><th>实测参数</th><th>公开背景</th></tr></thead>
+          <tbody id="evRows"></tbody>
+        </table>
+        <div class="totline">
+          <button class="btn primary" id="btnGapTasks">生成待补任务</button>
+          <span class="note" id="gapNote"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ ② 章节编写 ══════════ -->
+    <section id="v-chap" class="hidden">
+      <div class="chap">
+        <aside class="dir">
+          <div class="k">应答目录 165</div>
+          <div id="dirList"></div>
+        </aside>
+
+        <main>
+          <div class="budgetbar">
+            <b>项目背景</b>
+            <span>预算 <b>6</b> 页（约 1,500 字）</span>
+            <span>已写 <b>2.5</b> 页 / 1,240 字</span>
+            <div class="bar"><i style="width:42%"></i></div>
+            <span class="pill warn">差 3.5 页</span>
+            <span>证据 <b>3/5</b></span>
+            <span>覆盖 <b>2/3</b> 评分点</span>
+            <span class="sp"></span>
+            <button class="btn sm">保存</button>
+            <button class="btn sm">预览</button>
+          </div>
+
+          <div class="body">
+            <h3 style="margin:0 0 10px;font-size:14px">项目背景正文</h3>
+            <div class="para"><span class="role plan">方案</span>拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。
+              <span class="src">来源：L1 本章原文内容 · 技术规范书 3.2</span></div>
+            <div class="para"><span class="role ev">证据</span>平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。
+              <span class="src">来源：L1 凭证级 · 实测参数（已核验）</span></div>
+            <div class="para"><span class="role act">措施</span>随着系统运行年限增长和营销业务规模扩大，现有平台进入系统性、体系化架构升级阶段，亟需重点强化以下五方面能力……
+              <span class="src">来源：L1 本章原文内容 · 技术规范书 3.2</span></div>
+            <div class="para" style="border-left-color:#fde68a"><span class="role ev">证据</span>公司在智慧交通领域具有行业领先的标杆案例经验。
+              <span class="src" style="color:#b45309">⚠ 来源：L1 线索级 · 本企业公众号（无凭证）→ 不得进正文</span></div>
+            <div class="para"><span class="role pr">承诺</span>［待补］近三年同类项目业绩 3 项
+              <span class="src">来源：❌ 缺 · 应从「政府采购中标公示」查（✅已接入）</span></div>
+          </div>
+        </main>
+
+        <aside class="aside">
+          <div class="grp">
+            <h4>本章编制依据</h4>
+            <div style="font-size:12px">▸ 项目需求理解完整性 · 4 分</div>
+            <div style="font-size:12px">▸ 本章原文内容（技术规范书 3.2）</div>
+          </div>
+          <div class="grp">
+            <h4>本章缺口（影响 2 个评分点）</h4>
+            <div class="gap">
+              <div class="t">❌ 企业业绩 3 项</div>
+              <div class="m">应从 <b>政府采购中标公示</b> 查（✅已接入）｜凭证级</div>
+              <div class="a"><button class="btn sm" data-act="query">去查询</button></div>
+            </div>
+            <div class="gap">
+              <div class="t">❌ 项目经理证书</div>
+              <div class="m">应从 <b>人事花名册</b> 查（⚠未接入）｜凭证级</div>
+              <div class="a"><button class="btn sm" data-act="upload">上传凭证</button></div>
+            </div>
+            <div class="gap warn">
+              <div class="t">⚠ 标杆案例（只有线索）</div>
+              <div class="m">来源仅 <b>本企业公众号</b>（线索级）→ 必须补合同/验收单</div>
+              <div class="a"><button class="btn sm" data-act="upload">补凭证</button></div>
+            </div>
+            <div class="gap warn">
+              <div class="t">⚠ 并发实测参数</div>
+              <div class="m">L1 无来源；<b>禁止用第三方</b></div>
+              <div class="a"><button class="btn sm" data-act="manual">人工填写</button></div>
+            </div>
+          </div>
+          <div class="grp">
+            <h4>补写建议（差 260 字）</h4>
+            <div class="sugg">1. 「建设内容」只写 3 项，评分点要求逐项响应 → 展开到 6 项 <b>+180 字</b></div>
+            <div class="sugg">2. 「重难点及对策」缺"对策"半段 → 补 2 条对策 <b>+120 字</b></div>
+            <div class="sugg">3. 结尾承诺段与上章重复 → 建议删除 <b>−40 字</b></div>
+            <div class="a"><button class="btn primary sm" id="btnDraft">生成补写草稿</button>
+              <button class="btn sm">忽略</button></div>
+            <div class="note" id="draftNote"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ══════════ ③ 全书回检 ══════════ -->
+    <section id="v-check" class="hidden">
+      <div class="kpis">
+        <div class="kpi"><div class="v">118<span style="font-size:14px;color:#64748b">/126</span></div><div class="k">字数达标章节</div></div>
+        <div class="kpi"><div class="v" style="color:#16a34a">89%</div><div class="k">证据完备率（凭证级）</div></div>
+        <div class="kpi"><div class="v" style="color:#16a34a">100%</div><div class="k">评分点覆盖</div></div>
+        <div class="kpi"><div class="v" style="color:#d97706">7 处</div><div class="k">检出重复论述</div></div>
+        <div class="kpi"><div class="v" style="color:#dc2626">4 处</div><div class="k">红线拦截</div></div>
+      </div>
+      <div class="card">
+        <h2>红线拦截（必须处理才能导出）</h2>
+        <table>
+          <thead><tr><th style="width:26%">章节</th><th>类型</th><th>内容</th><th>处理</th></tr></thead>
+          <tbody>
+            <tr><td>项目背景</td><td><span class="pill bad">线索级当凭证</span></td>
+              <td>「行业领先的标杆案例」只有公众号来源</td><td><button class="btn sm">补凭证</button></td></tr>
+            <tr><td>技术方案</td><td><span class="pill bad">无依据承诺</span></td>
+              <td>「承诺 7×24 驻场」无 L1 来源</td><td><button class="btn sm">改表述 / 删</button></td></tr>
+            <tr><td>项目管理</td><td><span class="pill bad">宣传口径</span></td>
+              <td>「国内首创」属宣传措辞</td><td><button class="btn sm">改可核验表述</button></td></tr>
+            <tr><td>服务承诺</td><td><span class="pill bad">L2 越界</span></td>
+              <td>公开统计口径被用作我方承诺</td><td><button class="btn sm">移到背景段</button></td></tr>
+          </tbody>
+        </table>
+        <div class="totline"><button class="btn primary">导出前重新回检</button>
+          <span class="note">回检不通过不阻止保存，但导出时会带出「未通过项清单」</span></div>
+      </div>
+      <div class="card">
+        <h2>字数不达标章节（8 章）</h2>
+        <table>
+          <thead><tr><th style="width:26%">章节</th><th class="num">预算</th><th class="num">已写</th><th class="num">差额</th><th>建议</th></tr></thead>
+          <tbody id="shortRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script>
+// ── 数据 ─────────────────────────────────────────────
+const P = (role,cls,text,src,warn)=> ({role,cls,text,src,warn});
+const CH = [
+  { id:'c1', name:'项目背景', lvl:1, score:4, sug:6, mine:6, done:2.5, ev:'3/5', cov:'2/3', gaps:4, need:260,
+    paras:[
+      P('方案','plan','拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。','L1 本章原文内容 · 技术规范书 3.2'),
+      P('证据','ev','平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。','L1 凭证级 · 实测参数（已核验）'),
+      P('措施','act','随着系统运行年限增长和营销业务规模扩大，现有平台进入系统性、体系化架构升级阶段，亟需重点强化以下五方面能力……','L1 本章原文内容 · 技术规范书 3.2'),
+      P('证据','ev','公司在智慧交通领域具有行业领先的标杆案例经验。','⚠ L1 线索级 · 本企业公众号（无凭证）→ 不得进正文', true),
+      P('承诺','pr','［待补］近三年同类项目业绩 3 项','❌ 缺 · 应从「政府采购中标公示」查（✅已接入）'),
+    ]},
+  { id:'c2', name:'项目目标', lvl:1, score:3, sug:4, mine:4, done:0, ev:'0/2', cov:'0/2', gaps:2, need:600, paras:[] },
+  { id:'c3', name:'项目建设范围', lvl:1, score:5, sug:8, mine:8, done:0, ev:'2/5', cov:'1/3', gaps:3, need:1200, paras:[] },
+  { id:'c4', name:'技术方案', lvl:1, score:30, sug:42, mine:45, done:18, ev:'2/5', cov:'5/8', gaps:6, need:4050,
+    paras:[
+      P('方案','plan','总体架构采用"云原生 + 微服务"分层设计，按接入层、服务层、数据层、基础设施层四层组织。','L1 本章原文内容 · 技术规范书 4.1'),
+      P('证据','ev','关键组件已在同类项目中经受日均 8 亿次调用验证。','L1 凭证级 · 实测参数（已核验）'),
+      P('措施','act','针对高可靠容灾要求，提出同城双活 + 异地灾备的三级容灾体系。','L1 线索级 · 公司官网（需补凭证）', true),
+      P('承诺','pr','［待补］项目经理及核心团队人员证书','❌ 缺 · 应从「人事花名册」查（⚠未接入）'),
+      P('证据','ev','［待补］近三年同类项目业绩 5 项（本项分值 30，是全书权重最高章节）','❌ 缺 · 应从「政府采购中标公示」查（✅已接入）'),
+    ]},
+  { id:'c5', name:'系统架构设计', lvl:2, score:12, sug:16, mine:16, done:6, ev:'1/4', cov:'2/5', gaps:3, need:2550, paras:[] },
+  { id:'c6', name:'关键技术实现', lvl:2, score:18, sug:26, mine:29, done:12, ev:'2/4', cov:'3/6', gaps:4, need:2550, paras:[] },
+  { id:'c7', name:'项目管理方案', lvl:1, score:8, sug:10, mine:10, done:4, ev:'1/3', cov:'2/4', gaps:2, need:360, paras:[] },
+  { id:'c8', name:'服务承诺', lvl:1, score:6, sug:8, mine:8, done:3, ev:'0/3', cov:'1/3', gaps:3, need:750, paras:[] },
+  { id:'c9', name:'商务应答', lvl:1, score:20, sug:14, mine:14, done:9, ev:'1/2', cov:'3/4', gaps:2, need:300, paras:[] },
+];
+const EV = [ // ✅凭证级 ⚠线索级 ❌缺 —不需要
+  { id:'c1', ev:['—','—','—','✅','✅'] },
+  { id:'c2', ev:['—','—','—','—','✅'] },
+  { id:'c3', ev:['⚠','—','—','✅','✅'] },
+  { id:'c4', ev:['⚠','✅','❌','❌','✅'] },
+  { id:'c5', ev:['—','—','—','❌','✅'] },
+  { id:'c6', ev:['❌','—','❌','✅','—'] },
+  { id:'c7', ev:['—','—','❌','—','—'] },
+  { id:'c8', ev:['❌','—','❌','—','—'] },
+  { id:'c9', ev:['—','✅','—','—','—'] },
+];
+const SHORT = [
+  ['技术方案',45,18,'建议按评分点逐项展开，优先补「重难点及对策」'],
+  ['关键技术实现',29,12,'建议补 2 张架构图与 1 张流程图（命中"图文并茂"评审偏好）'],
+  ['项目管理方案',10,4,'建议补进度计划表 + 质量保证措施'],
+  ['服务承诺',8,3,'建议补响应时限表与升级机制（需 L1 来源）'],
+];
+
+// ── ① 应答策划 ───────────────────────────────────────
+const pill = (cls,txt)=>`<span class="pill ${cls}">${txt}</span>`;
+function renderBudget(){
+  document.getElementById('budgetRows').innerHTML = CH.map(c=>{
+    const diff = c.mine - c.done;
+    const st = c.done === 0 ? pill('idle','未开始')
+      : (diff <= 0.1 ? pill('ok','已达标') : pill('warn',`差 ${diff.toFixed(1)} 页`));
+    return `<tr class="ch" data-id="${c.id}">
+      <td class="${c.lvl===2?'ind':''}">${c.name}</td>
+      <td class="num">${c.score}</td><td class="num" style="color:#64748b">${c.sug}</td>
+      <td class="num"><input type="number" value="${c.mine}" data-mine="${c.id}" /></td>
+      <td class="num">${c.done}</td><td class="num">${(c.mine-c.done).toFixed(1)}</td>
+      <td>${st}</td></tr>`;
+  }).join('');
+  document.querySelectorAll('[data-mine]').forEach(inp=>{
+    inp.addEventListener('click',e=>e.stopPropagation());
+    inp.addEventListener('change',()=>{
+      const c = CH.find(x=>x.id===inp.dataset.mine); c.mine = Number(inp.value)||0; renderBudget(); renderSum(); renderChapter('c1');
+    });
+  });
+  document.querySelectorAll('tr.ch').forEach(tr=>tr.addEventListener('click',()=>{
+    show('chap');
+    document.querySelectorAll('#dirList .item').forEach(x=>x.classList.toggle('on', x.dataset.id===tr.dataset.id));
+    renderChapter(tr.dataset.id);
+  }));
+  document.getElementById('evRows').innerHTML = EV.map(e=>{
+    const c = CH.find(x=>x.id===e.id);
+    const cell = v => v==='✅'?pill('ok','✅ 有凭证') : v==='⚠'?pill('warn','⚠ 仅线索') : v==='❌'?pill('bad','❌ 缺') : pill('idle','—');
+    return `<tr><td class="${c.lvl===2?'ind':''}">${c.name}</td>${e.ev.map(cell).map(x=>`<td>${x}</td>`).join('')}</tr>`;
+  }).join('');
+}
+function renderSum(){
+  const need = Number(document.getElementById('pgTech').value||0) + Number(document.getElementById('pgBiz').value||0);
+  const mine = CH.reduce((n,c)=>n+c.mine,0);
+  document.getElementById('pgTotal').textContent = need;
+  document.getElementById('sumLine').innerHTML = `章节合计 <b>${mine}</b> 页`;
+  const b = document.getElementById('sumBanner');
+  if (mine === need){ b.className='banner ok'; b.textContent='合计与需求一致 ✅'; }
+  else { b.className='banner warn';
+    b.textContent = `⚠ 章节合计 ${mine} 页，与需求 ${need} 页相差 ${mine-need>0?'+':''}${mine-need} 页 —— 请调整某几章或改需求总页数`; }
+}
+['pgTech','pgBiz'].forEach(id=>document.getElementById(id).addEventListener('input',renderSum));
+document.getElementById('btnGapTasks').addEventListener('click',()=>{
+  document.getElementById('gapNote').textContent =
+    '已生成 12 条待补任务：9 条指派到「政府采购中标公示（已接入）」自动查询，3 条需要人工上传凭证（人事花名册/审计报告未接入）';
+});
+
+// ── ② 章节编写 ───────────────────────────────────────
+document.getElementById('dirList').innerHTML = CH.map((c,i)=>
+  `<div class="item${i===0?' on':''}" data-id="${c.id}">${c.lvl===2?'<span style="color:#94a3b8">└</span>':''}${c.name}</div>`).join('');
+document.querySelectorAll('#dirList .item').forEach(it=>it.addEventListener('click',()=>{
+  document.querySelectorAll('#dirList .item').forEach(x=>x.classList.remove('on')); it.classList.add('on');
+  renderChapter(it.dataset.id);
+}));
+function renderChapter(id){
+  const c = CH.find(x=>x.id===id) || CH[0];
+  const ratio = Math.min(100, Math.round(c.done / Math.max(c.mine,1) * 100));
+  const diff = (c.mine - c.done);
+  document.querySelector('.budgetbar').innerHTML = `
+    <b>${c.name}</b>
+    <span>预算 <b>${c.mine}</b> 页（约 ${(c.mine*250).toLocaleString()} 字）</span>
+    <span>已写 <b>${c.done}</b> 页 / ${(c.done*250).toLocaleString()} 字</span>
+    <div class="bar"><i style="width:${ratio}%"></i></div>
+    ${diff<=0.1?pill('ok','已达标'):pill('warn',`差 ${diff.toFixed(1)} 页`)}
+    <span>证据 <b>${c.ev}</b></span><span>覆盖 <b>${c.cov}</b> 评分点</span>
+    <span class="sp"></span><button class="btn sm">保存</button><button class="btn sm">预览</button>`;
+  document.querySelector('.body h3').textContent = c.name + '正文';
+  const body = document.querySelector('.body');
+  body.querySelectorAll('.para').forEach(x=>x.remove());
+  if (!c.paras.length){
+    const d = document.createElement('div');
+    d.style.cssText = 'font-size:12.5px;color:#64748b;padding:8px 0';
+    d.textContent = '（原型演示：本章正文略。演示内容见「项目背景」与「技术方案」两章。）';
+    body.appendChild(d);
+  } else {
+    c.paras.forEach(p=>{
+      const d = document.createElement('div');
+      d.className = 'para'; if (p.warn) d.style.borderLeftColor = '#fde68a';
+      d.innerHTML = `<span class="role ${p.cls}">${p.role}</span>${p.text}
+        <span class="src"${p.warn?' style="color:#b45309"':''}>来源：${p.src === undefined ? '' : p.src}</span>`;
+      body.appendChild(d);
+    });
+  }
+  const gapTitle = document.querySelector('.aside .grp:nth-child(2) h4');
+  if (gapTitle) gapTitle.textContent = `本章缺口（${c.gaps} 项 · 影响若干评分点）`;
+  const sug = document.querySelector('.aside .grp:nth-child(3) h4');
+  if (sug) sug.textContent = c.need ? `补写建议（差约 ${c.need} 字）` : '补写建议（已达标）';
+}
+document.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>{
+  const map={query:'已发起「政府采购中标公示」查询（L1 · 凭证级），结果会带公示链接与快照',
+    upload:'请上传原件扫描件；上传后自动核验并升级为凭证级',
+    manual:'人工填写入口：仅接受 L1 可核验的事实，禁止引用第三方'};
+  alert(map[b.dataset.act]);
+}));
+document.getElementById('btnDraft').addEventListener('click',()=>{
+  document.getElementById('draftNote').innerHTML =
+    '已生成 2 段补写草稿（共 300 字）→ <b>待你确认后合并</b>；不会直接覆盖正文，人工修改的段落不会被后台替换。';
+});
+
+// ── ③ 回检 ──────────────────────────────────────────
+document.getElementById('shortRows').innerHTML = SHORT.map(([n,budget,done,tip])=>
+  `<tr><td>${n}</td><td class="num">${budget}</td><td class="num">${done}</td>
+   <td class="num">−${budget-done}</td><td>${tip}</td></tr>`).join('');
+
+// ── 视图切换 ─────────────────────────────────────────
+function show(v){
+  ['plan','chap','check'].forEach(k=>document.getElementById('v-'+k).classList.toggle('hidden', k!==v));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on', t.dataset.view===v));
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>show(t.dataset.view)));
+renderBudget(); renderSum(); renderChapter('c1');
+</script>
+</body>
+</html>
