@@ -150,12 +150,17 @@ def test_resume_auto_has_outline_recovery_branch():
     assert "resume_outline_draft" in src
 
 
-def test_resume_outline_draft_mirrors_resume_extract():
-    """补跑派生要照抄 resume_extract 的手法：借闸门身份 + user_choice=approve。"""
+def test_resume_outline_draft_delegates_to_redraft_outline():
+    """补跑派生必须走应用自己的 redraft_outline，而不是"借闸门身份 approve"。
+
+    实测（thread fda5d747）：借闸门 approve 之后 outline_revision 仍为空、toc 仍是 367 原文占位
+    —— 派生目录由 outline_draft 产出，redraft_outline 才是那条路径
+    （aupdate_state(as_node=NODE_PARSE) → next=outline_draft），且自带守卫。
+    """
     import inspect
     from orchestrator.runner import WorkflowRunner
 
     src = inspect.getsource(WorkflowRunner.resume_outline_draft)
-    assert "GATE_OUTLINE" in src and "as_node=" in src
-    assert '"user_choice": "approve"' in src
-    assert "_resume_until_pause" in src
+    assert "redraft_outline" in src, "应委托应用已有的派生路径"
+    assert "user_choice" not in src, "不要再走'借闸门 approve'那条不派生的路"
+    assert 'as_node=GATE_OUTLINE' not in src

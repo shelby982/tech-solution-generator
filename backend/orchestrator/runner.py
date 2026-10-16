@@ -538,35 +538,20 @@ class WorkflowRunner:
         return "nothing_to_do"
 
     async def resume_outline_draft(self, thread_id: str) -> None:
-        """补跑"应答目录派生"：图在 outline_draft 之后直接收尾（进程死在中途）。
+        """图已收尾但应答目录从未派生 → 用**应用自己的派生路径**补跑。
 
-        手法与 ``resume_extract`` 完全同构：此时图的 next=()（正常 ainvoke 是空跑），
-        所以**借闸门身份**再跑一次 —— ``as_node=GATE_OUTLINE`` + ``user_choice='approve'``，
-        闸门之后就会派生应答目录（实测正常线程 toc 由 367 原文占位变成 165 条应答目录）。
+        实测教训（thread fda5d747）：借闸门身份 approve **并不会派生目录** ——
+        图推进到 outline_review 之后 outline_revision 仍为空、toc 仍是原文占位 367 条。
+        目录由 ``zhang_heng_outline_draft`` 产出，而 ``redraft_outline`` 正是
+        "aupdate_state(as_node=NODE_PARSE) → next=outline_draft"（跳过 parse 重跑派生），
+        并且自带三重守卫（已作废 / 要求文件变过 / 正在跑）—— 所以这里直接复用，不另起一套。
+
+        instruction 传空串 = **沿用当前提炼要求**，不换要求（与路由默认一致）。
         """
-        from orchestrator.graph import GATE_OUTLINE
-
-        self._assert_idle(thread_id)
-        current = await self.state(thread_id)
-        if not current or not current.get("project_id"):
+        state = await self.state(thread_id)
+        if not state or not state.get("project_id"):
             raise KeyError(thread_id)
-        run = self._runs.get(thread_id)
-        if run is None:
-            run = _Run(thread_id, EventEmitter())
-            self._runs[thread_id] = run
-        elif run.emitter._closed:
-            run.emitter = EventEmitter()
-        run.cancel_flag = False
-        await self._unfreeze_run_stage(thread_id, "outline_review")
-        run.task = asyncio.create_task(
-            self._resume_until_pause(
-                run,
-                {"cancel_requested": False, "user_choice": "approve",
-                 "stage": "outline_review"},
-                as_node=GATE_OUTLINE,
-            ),
-            name=f"wf-{thread_id}-resume-outline",
-        )
+        await self.redraft_outline(thread_id, "")
 
     async def rerun_match(self, thread_id: str, *, full: bool = False) -> None:
         """触发素材匹配：把 thread 状态指针拨回 NODE_EXTRACT 节点，再 ainvoke 让 graph
