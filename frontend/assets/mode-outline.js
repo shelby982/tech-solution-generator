@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v197';
-import { api } from './api.js?v=20261016-v197';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v197';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v199';
+import { api } from './api.js?v=20261016-v199';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v199';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v197';
+       } from './workspace.js?v=20261016-v199';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v197';
+       } from './workspace-model.mjs?v=20261016-v199';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v197';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v199';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3665,6 +3665,75 @@ function pageBudgetBarHtml() {
 }
 
 
+/** 「应答目录未派生」时：让位 + 给出可点的出口。
+ *
+ * 为什么不能写在面板渲染里：应用自己的警示（#raw-toc-warn）是**异步**插入的，
+ * 渲染那一刻它还不存在 —— 实测因此永远不触发（用户看到的就是"空面板 + 指不到的提示"）。
+ * 因此这里常驻监听，等警示出现再补，且幂等。
+ */
+async function ensureRawTocExit() {
+  const pane = document.querySelector('.sr-stage.on[data-stage="2"] .sr-stage-body')
+    || document.querySelector('.sr-stage[data-stage="2"] .sr-stage-body');
+  if (!pane || pane.querySelector('[data-raw-toc-action]')) return;
+  // 应用自己插了警示就直接用；没插（实测有的入口不插）就用**同一个后端预检**判断，
+  // 而不是靠 DOM 标记 —— 这是上一轮没修好的原因。
+  let need = !!document.getElementById('raw-toc-warn');
+  if (!need) {
+    try {
+      const tid = new URLSearchParams(location.search).get('threadId');
+      if (!tid) return;
+      const chk = await api.workflow.redraftCheck(tid);
+      need = !!chk && chk.has_outline === false && Number(chk.source_sections) > 0;
+    } catch (err) { return; }
+  }
+  if (!need) return;
+  pane.querySelectorAll('[data-empty-state], [data-step-pane="1"], .sr-dir-chain').forEach((node) => {
+    node.hidden = true;
+    node.style.display = 'none';   // 自带 display，hidden 会被自家 CSS 覆盖
+  });
+  if (pane.querySelector('[data-raw-toc-action]')) return;
+  const bar = document.createElement('div');
+  bar.className = 'response-confirm-bar';
+  bar.setAttribute('data-raw-toc-action', '1');
+  bar.innerHTML = `<div><strong>应答目录尚未派生</strong>
+    <span>当前显示的是招标文件原始目录（占位），还不是应答目录。需先按已解析内容派生应答目录，之后才会出现「① 确认目录 → ② 分配篇幅」两步。</span></div>`;
+  const btn = document.createElement('button');
+  btn.className = 'mw-btn primary';
+  btn.textContent = '重新拆分目录';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = '正在派生目录…';
+    try {
+      const real = document.getElementById('btn-redraft-outline');
+      if (real && !real.disabled) real.click();
+      else await redraftOutline();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = '重新拆分目录';
+      const slot = pane.querySelector('[data-flash-for="generate"]');
+      if (slot) slot.textContent = err.message || '派生失败，请重试';
+    }
+  });
+  bar.appendChild(btn);
+  const slot = pane.querySelector('[data-flash-for="generate"]');
+  if (slot) pane.insertBefore(bar, slot); else pane.appendChild(bar);
+}
+
+/** 启动常驻检查（只装一次）。 */
+function watchRawTocWarning() {
+  if (window.__rawTocWatcher) return;
+  window.__rawTocWatcher = true;
+  ensureRawTocExit();
+  if (typeof MutationObserver === 'undefined') {
+    setInterval(ensureRawTocExit, 1500);
+    return;
+  }
+  let timer = null;
+  const schedule = () => {
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; ensureRawTocExit(); }, 600);   // 防抖：观察者触发很频繁
+  };
+  new MutationObserver(schedule).observe(document.body, {childList: true, subtree: true});
+}
+
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
   try { await activePackageReady; } catch (err) {
@@ -4912,41 +4981,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       writeBtn.hidden = !ready;
       if (ready) foot.appendChild(writeBtn);
     }
-  })();
-  (function yieldToRawTocWarning() {
-    // 运行在解析阶段中断时，页面显示的是**招标文件原始目录**（占位），不是应答目录。
-    // 此时应用自己会插入 #raw-toc-warn 并指导去「重做 ▾ → 重新拆分目录」。
-    // 我的两步（确认目录 / 分配篇幅）与空态块必须**让位**，否则会劝用户确认一个错误目录。
-    if (!document.getElementById('raw-toc-warn')) return;
-    // 注意：这些元素自带 display（inline-flex 等），只设 hidden 会被自己的 CSS 覆盖，
-    // 必须直接置 display:none（实测 hidden 无效）
-    el.querySelectorAll('[data-empty-state], [data-step-pane="1"], .sr-dir-chain').forEach((node) => { node.hidden = true; node.style.display = 'none'; });
-    // 但不能只藏不留出口：应用提示里的「重新拆分目录」在面板头「重做 ▾」里，
-    // 面板头没渲染时用户就无路可走 —— 这里补一个直接可点的入口。
-    if (el.querySelector('[data-raw-toc-action]')) return;
-    const bar = document.createElement('div');
-    bar.className = 'response-confirm-bar';
-    bar.setAttribute('data-raw-toc-action', '1');
-    bar.innerHTML = `<div><strong>应答目录尚未派生</strong>
-      <span>当前显示的是招标文件原始目录（占位），还不是应答目录。需先按已解析内容派生应答目录，之后才会出现「① 确认目录 → ② 分配篇幅」两步。</span></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'mw-btn primary';
-    btn.textContent = '重新拆分目录';
-    btn.addEventListener('click', async () => {
-      btn.disabled = true; btn.textContent = '正在派生目录…';
-      try {
-        const real = document.getElementById('btn-redraft-outline');
-        if (real && !real.disabled) real.click();
-        else await redraftOutline();
-      } catch (err) {
-        btn.disabled = false; btn.textContent = '重新拆分目录';
-        const slot = el.querySelector('[data-flash-for="generate"]');
-        if (slot) slot.textContent = err.message || '派生失败，请重试';
-      }
-    });
-    bar.appendChild(btn);
-    const body = el.querySelector('.sr-stage-body') || el;
-    body.insertBefore(bar, body.querySelector('[data-flash-for="generate"]'));
   })();
   (function applyStep() {
     // 两步**操作同一个目录**：第 1 步行内是结构操作，第 2 步行内是页数输入
@@ -7373,3 +7407,8 @@ window.__ovPanels = {
   setRevision: (n) => { draftRevision = Number(n) || 0; },
   confirmedRevision: () => getConfirmedRevision(),
 };
+
+// 启动「应答目录未派生」的常驻检查（警示由应用异步插入，不能只在渲染时查）
+if (typeof document !== 'undefined') {
+  watchRawTocWarning();
+}
