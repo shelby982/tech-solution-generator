@@ -9264,17 +9264,46 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       
       
       
-      <div id="budgetBar" style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin:10px 0 12px;background:#fbfdff">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <b style="font-size:13px">篇幅</b>
-          <span class="sr-dim">按总篇幅分配到各章目录</span>
+      <div id="dirCard" style="border:1px solid #e2e8f0;border-radius:10px;margin:10px 0 12px;background:#fbfdff">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #eef2f7">
+          <b style="font-size:13.5px">目录</b>
+          <span class="sr-dim">这份应答的结构、依据与篇幅</span>
           <span style="flex:1"></span>
-          <span>总页数 <input type="number" id="totalPg" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
-          <span class="sr-dim">来源：技术部分规定</span>
-          <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
-          <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
-          <span class="sr-dim" id="sumLine"></span>
-          <span class="sr-dim" id="sumBanner">合计与需求一致</span>
+          <button class="mw-btn primary" data-act="response-preview">查看目录草案</button>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px 12px;border-bottom:1px solid #eef2f7">
+          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">依据</span>
+          <span style="flex:1;font-size:12.5px">技术评分点 <b>13</b> 项 · 技术规范要求 <b>411</b> 条
+            <span class="sr-dim">　整合项目背景、范围、实施与交付要求，保留重点条款依据。</span></span>
+          <details class="response-basis-details" style="flex:none"><summary style="font-size:12px;color:#64748b;cursor:pointer">来源与编制规则</summary>
+            <p class="sr-dim" style="font-size:11.5px;margin:6px 0 0">优先遵循招标文件规定的组成与格式；格式和证明材料要求需核对原文。</p></details>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px 12px;border-bottom:1px solid #eef2f7">
+          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">覆盖</span>
+          <span style="flex:1;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px">
+            <span>已关联评分点 <b>13 / 13</b></span><span>规范要求 <b>411 / 411</b></span>
+            <span>原文章节 <b>68 / 68</b></span><span>要求归属 <b>411 / 411</b></span>
+            <span>重点要求前部承接 <b>6 / 19</b></span><span>明确风险要求已安排 <b>0 / 0</b></span>
+            <span class="sr-dim">标题、层级与顺序一致</span>
+            <span class="sr-dim">证明材料与原文格式仍需人工复核</span>
+            <details style="flex-basis:100%"><summary style="font-size:12px;color:#b45309;cursor:pointer">建议前部突出 13 条重点要求 · 不影响确认</summary>
+              <p class="sr-dim" style="font-size:11.5px;margin:6px 0 0">以下要求已在点对点应答中安排，可结合评分章节补充说明。</p></details>
+          </span>
+          <span class="ui-pill is-ok" style="flex:none">目录已确认</span>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px 12px;align-items:center;flex-wrap:wrap">
+          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">篇幅</span>
+          <span style="flex:1;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12.5px">
+            <span>总页数 <input type="number" id="totalPg" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
+            <span class="sr-dim">来源：技术部分规定</span>
+            <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
+            <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
+            <span class="sr-dim" id="sumLine"></span>
+            <span class="sr-dim" id="sumBanner" style="color:#15803d">合计与需求一致</span>
+            <span style="flex:1"></span>
+            <button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>
+            <span class="sr-dim" id="budgetDone" style="display:none;color:#15803d">✅ 篇幅已确认</span>
+          </span>
         </div>
       </div>
 <h5 class="sr-sec">目录草案（165 个目录节点）· 评分与重点章节可调整，原文目录固定</h5>
@@ -15179,40 +15208,23 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   document.querySelectorAll('.sr-rail-item').forEach(function(el){
     el.addEventListener('click', function(){ activate(el.getAttribute('data-stage')); }); });
 
-  /* ── 状态摘要整合：把"重点与点对点检查"与"建议前部突出"并入覆盖检查一行 ── */
-  function mergeSummary(){
-    var cov = document.querySelector('.response-coverage');
-    var box = document.querySelector('.sr-stage[data-stage="2"]');
-    if(!cov || !box) return;
-    var labels=['重点与点对点检查','建议前部突出'];
-    var facts='';
-    labels.forEach(function(lab){
-      // 找"自己文本以该标签开头、且内部没有同样开头元素"的最外层块
-      var best=null;
-      box.querySelectorAll('div,section,p').forEach(function(el){
-        var t=(el.textContent||'').replace(/\s+/g,'');
-        if(t.indexOf(lab)<0 || t.indexOf(lab)>3) return;   // 容错：可能带 ▶ 之类前缀
-        var nested=false;
-        el.querySelectorAll('div,section,p').forEach(function(c){
-          var ct=(c.textContent||'').replace(/\s+/g,''); if(ct.indexOf(lab)>=0 && ct.indexOf(lab)<=3) nested=true;
-        });
-        if(!nested && !best) best=el;
-      });
-      if(!best) return;
-      var raw=(best.textContent||'').replace(/\s+/g,' ').trim();
-      if(lab==='重点与点对点检查'){
-        facts = raw.replace(lab,'').replace(/仅检查承接位置.*$/,'').trim();
-        // 指标之间补分隔符，避免"6/19明确风险…"糊成一串
-        facts = facts.replace(/(\d)\s*\/\s*(\d)(?=[一-龥])/g, '$1/$2 · ');
-      }
-      best.style.display='none';
-      best.setAttribute('data-merged','1');
-    });
-    if(facts) cov.insertAdjacentHTML('beforeend','<span class="sr-dim">'+facts+'</span>');
-    cov.insertAdjacentHTML('beforeend','<span class="sr-dim">目录 ✅ 已确认</span>');
-  }
+  var stage2=document.querySelector('.sr-stage[data-stage="2"]');
 
-  /* ── 篇幅：目录行内一列 + 状态驱动的主操作 ── */
+  /* ══ ① 隐藏被合并的三块（用产品真实 class / 文本定位）══ */
+  function hideMerged(){
+    var sel=['.response-basis-card','.response-coverage'];
+    sel.forEach(function(s){ document.querySelectorAll(s).forEach(function(el){ el.style.display='none'; }); });
+    var box=document.querySelector('.sr-stage[data-stage="2"]');
+    if(!box) return;
+    box.querySelectorAll('div').forEach(function(el){
+      var t=(el.textContent||'').replace(/\s+/g,'');
+      if(t.indexOf('重点与点对点检查')===0 && el.children.length>=4) el.style.display='none';
+    });
+    var det=[].slice.call(box.querySelectorAll('details')).filter(function(d){
+      var s=(d.querySelector('summary')||{}).textContent||''; return s.indexOf('建议前部突出')>=0; });
+    det.forEach(function(d){ d.style.display='none'; });
+  }
+  /* ══ ② 篇幅：目录行内一列 + 状态驱动主操作 ══ */
   var KIND={'技术评分项应答':1.2,'项目理解':0.7,'项目进度计划':1.0,'项目团队人员':0.9,'项目业绩':1.0,
     '开发要求':1.2,'技术实现方案':1.4,'重点及必须响应要求':1.1,'技术规范书点对点应答':1.3,
     '1.总则':0.6,'2.项目描述':0.8,'3.项目服务内容及要求':1.0,'4.项目实施':1.0};
@@ -15222,14 +15234,13 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     document.querySelectorAll('.sr-stage[data-stage="2"] .sr-erow').forEach(function(el,idx){
       var t=(el.querySelector('.sr-erow-title')||{}).textContent||''; t=t.trim();
       var lvl=Number(el.getAttribute('data-level')||1);
-      var cell=document.createElement('span');
-      cell.className='sr-erow-pages';
+      var cell=document.createElement('span'); cell.className='sr-erow-pages';
       cell.style.cssText='font-size:11.5px;color:#475569;padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums';
       var acts=el.querySelector('.sr-erow-acts'); if(acts) el.insertBefore(cell,acts); else el.appendChild(cell);
       rows.push({el:el,cell:cell,name:t,level:lvl,idx:idx,score:lvl<=2?(4+((rows.length*7)%22)):0,alloc:lvl<=2,mine:0,pinned:false});
     });
   }
-  var listAlloc=function(){ return rows.filter(function(r){return r.alloc && r.name;}); };
+  var listAlloc=function(){ return rows.filter(function(r){return r.alloc&&r.name;}); };
   var kindOf=function(r){ return KIND[r.name]||1.0; };
   function allocate(reset){
     var list=listAlloc(); if(reset) list.forEach(function(r){ r.pinned=false; });
@@ -15258,28 +15269,20 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     var b=$('sumBanner');
     b.textContent = sum===total?'合计与需求一致':('⚠ 相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
     b.style.color = sum===total?'#15803d':'#b45309';
-    var ok = sum===total;
-    $('btnConfirmBudget').style.display = (confirmed||!ok)?'none':'inline-block';
+    $('btnConfirmBudget').style.display = (confirmed||sum!==total)?'none':'inline-block';
     $('budgetDone').style.display = confirmed?'inline':'none';
-    var writeBtn=document.querySelector('[data-act="response-write"]');
-    if(writeBtn){ writeBtn.style.display = confirmed?'inline-block':'none'; }
+    var w=document.querySelector('[data-act="response-write"]');
+    if(w) w.style.display = confirmed?'inline-block':'none';
   }
-  /* 唯一主操作：确认篇幅（放在篇幅控制条内） */
-  var bar=$('budgetBar');
-  bar.insertAdjacentHTML('beforeend','<div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
-    '<button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>'+
-    '<span class="sr-dim" id="budgetDone" style="display:none;color:#15803d">✅ 篇幅已确认；可进入技术应答编写</span>'+
-    '<span class="sr-dim" id="budgetNote">确认后与目录一并保存</span></div>');
+  hideMerged();
   $('totalPg').addEventListener('input',function(){ allocate(false); });
   $('btnAlloc').addEventListener('click',function(){ allocate(false); });
   $('btnResetAlloc').addEventListener('click',function(){ allocate(true); });
-  $('btnConfirmBudget').addEventListener('click',function(){
-    confirmed=true; $('budgetNote').textContent=''; render();
-    var w=document.querySelector('[data-act="response-write"]'); if(w) w.scrollIntoView({block:'center'});
-  });
-  collect(); allocate(true); mergeSummary();
+  $('btnConfirmBudget').addEventListener('click',function(){ confirmed=true; render();
+    var w=document.querySelector('[data-act="response-write"]'); if(w) w.scrollIntoView({block:'center'}); });
+  collect(); allocate(true);
 
-  /* ── 编写阶段：块级正文 / 计划预览 / 完成检查 ── */
+  /* ══ ③ 编写阶段增量 ══ */
   var BLOCKS=[
     {role:'方案',color:'#1d4ed8',text:'拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。',src:'L1 本章原文内容 · 技术规范书 3.2',by:'ai'},
     {role:'证据',color:'#15803d',text:'平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。',src:'L1 凭证级 · 实测参数（已核验）',by:'ai'},
@@ -15290,7 +15293,7 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     {role:'承诺',color:'#c2410c',text:'［待补］近三年同类项目业绩 3 项',src:'❌ 缺 · 应从「政府采购中标公示」查（已接入）',by:'todo'}
   ];
   function pill(t,bg,fg){ return '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:'+bg+';color:'+fg+';font-weight:600">'+t+'</span>'; }
-  (function renderBlocks(){
+  (function(){
     var box=$('blockView'); if(!box) return;
     $('segCount').textContent=BLOCKS.length;
     $('nAi').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='ai';}).length;
