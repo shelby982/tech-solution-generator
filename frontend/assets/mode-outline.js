@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v204';
-import { api } from './api.js?v=20261016-v204';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v204';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v205';
+import { api } from './api.js?v=20261016-v205';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v205';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v204';
+       } from './workspace.js?v=20261016-v205';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v204';
+       } from './workspace-model.mjs?v=20261016-v205';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v204';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v205';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3641,28 +3641,38 @@ function resolvedStep(directoryConfirmed) {
 
 function pageBudgetBarHtml() {
   if (!pageBudgetData) return '';
-  // 目录被改动 → 确认失效 → 篇幅必须重新确认（否则目录一改篇幅就乱）。
-  // 此时**不能静默隐藏**整块：用户只会觉得"输入框不见了"，要说明原因。
-
   const d = pageBudgetData;
   const ok = !!d.ok;
-  const check = d.confirmed
-    ? '篇幅已确认'
-    : (ok ? `合计 ${Number(d.allocated) || 0} 页 ✓ 与需求一致`
-          : `⚠ 合计 ${Number(d.allocated) || 0} 页，与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
-  // 与「第 1 步 · 确认目录」同形：标题 + 一行说明 + 右侧主操作。
-  // 删掉"来源：招标文件规定""已分配到 N 章"（PM 审查：内容太多）
-  return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
-      <div>
-        <strong>第 2 步 · ${d.confirmed ? '篇幅已确认' : '确认篇幅'}</strong>
-        <span>填一个总页数，系统按各章分值自动分配；父章节显示子树合计，可逐章手工调整。目录一改，篇幅需要重新确认。</span>
-      </div>
+  const total = Number(d.total) || 0;
+  const allocated = Number(d.allocated) || 0;
+  const chapters = Number(d.chapter_count) || 0;
+  const hasPinned = Array.isArray(d.chapters) && d.chapters.some((c) => c && c.pinned);
+
+  // ── 已确认态 ── 一行摘要 + 两个动作。已完成就不该再像"待办"（原来还把输入框、
+  // 分配按钮、确认按钮一起摆着，右列三行、对齐散乱 —— 用户要求重新设计）。
+  if (d.confirmed) {
+    return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
+      <div><strong>第 2 步 · 篇幅已确认</strong>
+        <span>总页数 ${total} 页 · 按分值分配到 ${chapters} 个章节${allocated === total ? ' · 合计与需求一致' : ` · 已分配 ${allocated} 页`}</span></div>
       <span class="sr-budget-ctl">
-        <label class="sr-budget-total">总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页</label>
+        <button class="mw-btn" data-act="page-edit">修改篇幅</button>
+        <button class="mw-btn primary" data-act="page-goto-write">进入编写</button>
+      </span>
+    </div>`;
+  }
+
+  // ── 待确认态 ── 编辑区一行：总页数 + 分配 + 状态，右侧一个主操作
+  const check = ok ? `合计 ${allocated} 页 ✓ 与需求一致`
+                   : `⚠ 合计 ${allocated} 页，与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`;
+  return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
+      <div><strong>第 2 步 · 确认篇幅</strong>
+        <span>填总页数，系统按各章分值自动分配（父章节显示子树合计）；可逐章手工调整。目录一改需重新确认。</span></div>
+      <span class="sr-budget-ctl">
+        <label class="sr-budget-total">总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${total}" aria-label="总页数" /> 页</label>
         <button class="mw-btn" data-act="page-alloc">按篇幅分配</button>
-        <span id="sr-page-check" class="${ok || d.confirmed ? '' : 'sr-page-warn'}">${check}</span>
-        <button class="mw-btn" data-act="page-clear" title="把手工改过的页数恢复成自动分配">清除手工调整</button>
-        <button class="mw-btn primary" data-act="page-confirm" ${d.confirmed || !ok ? 'disabled' : ''}>确认篇幅</button>
+        <span id="sr-page-check" class="${ok ? '' : 'sr-page-warn'}">${check}</span>
+        ${hasPinned ? '<button class="mw-btn" data-act="page-clear" title="把手工改过的页数恢复成自动分配">清除手工调整</button>' : ''}
+        <button class="mw-btn primary" data-act="page-confirm" ${ok ? '' : 'disabled'}>确认篇幅</button>
       </span>
     </div>`;
 }
@@ -4954,6 +4964,18 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     planStep = btn.getAttribute('data-step-go');
     await openSplitReport({stage: '2'});
   }));
+  el.querySelector('[data-act="page-edit"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await postPageBudget({total: pageTotal(), confirm: false}); }
+    catch (err) { pageFeedback(err.message); button.disabled = false; }
+  });
+  el.querySelector('[data-act="page-goto-write"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    await openSplitReport({stage: '4', sub: 'writing'});
+    document.querySelector('.sr-stage.on')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
   el.querySelector('[data-act="page-alloc"]')?.addEventListener('click', async (event) => {
     event.stopPropagation();
     try { await postPageBudget({total: pageTotal(), allocate: true}); }
