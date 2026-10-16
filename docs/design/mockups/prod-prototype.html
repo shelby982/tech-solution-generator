@@ -15349,7 +15349,7 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     $('nHuman').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='human';}).length;
     $('nTodo').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='todo';}).length;
     $('nTable').textContent=BLOCKS.filter(function(b){return b.table;}).length;
-    var html='<div class="sr-note" style="margin-bottom:10px">正文按块渲染：段落带角色与来源，表格按真表格呈现（原型演示内容）。</div>';
+    var html='';
     BLOCKS.forEach(function(b){
       if(b.table){ html+='<div style="font-size:12px;color:#334155;font-weight:600;margin:10px 0 2px">'+b.title+'</div><table class="sr-table"><thead><tr>'+b.head.map(function(x){return '<th>'+x+'</th>';}).join('')+'</tr></thead><tbody>'+b.rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; return; }
       var by=b.by==='ai'?pill('AI 生成','#ecfdf5','#15803d'):b.by==='human'?pill('人工修改 ✎','#fffbeb','#b45309'):pill('未编制','#fef2f2','#b91c1c');
@@ -15478,12 +15478,15 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     var budget=document.createElement('div');
     budget.id='chapterBudget';
     budget.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:12.5px';
-    budget.innerHTML='<span><b style="color:#1d4ed8">预算 6 页</b> · 已写 2.5 页 · <span style="color:#b45309">差 3.5 页</span></span>'+
-      '<span class="ui-pill is-none">待核对</span>';
+    budget.innerHTML='<span style="flex:none;width:32px;color:#94a3b8">进度</span>'+
+      '<span>已写 <b>2.5</b> / 6 页 · <b>625</b> / 1,500 字 · <span style="color:#b45309">差 875 字</span></span>'+
+      '<button class="mw-btn" id="btnSugg" style="font-size:12px">查看补写建议</button>'+
+      '<details style="font-size:11.5px"><summary style="display:inline;cursor:pointer;color:#64748b">▸ 本章构成</summary>'+
+      '<span class="sr-dim" style="margin-left:6px">6 块：AI 已编 2 · 人工改 2 · 未编 1 · 表格 1 · 证据 3/5 · 覆盖 2/3 评分点</span></details>';
     head.parentElement.insertBefore(budget, head.nextSibling);
     // 段数条原本被插在章头容器内部会被裁掉：移到预算行之后（同在章头容器外）
     var segBar=document.getElementById('segBar');
-    if(segBar) head.parentElement.insertBefore(segBar, budget.nextSibling);
+    if(segBar) segBar.style.display='none';   // 构成已折进"进度"行，避免同屏三处重复
   }
   /* 证据/覆盖并进已有段数条 */
   var seg=document.getElementById('segBar');
@@ -15493,7 +15496,8 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   /* ② 字数缺口条 + 补写建议（合计=差额，人工确认后合并）*/
   document.querySelectorAll('.cs-history').forEach(function(el){ el.style.display='none'; });   // 原型：避免与块级正文重叠
   var view=document.getElementById('blockView');
-  if(view && !document.getElementById('gapBox')){
+  var gapDisabled=true;   // 缺口条已并入进度行，不再单独渲染
+  if(view && !gapDisabled && !document.getElementById('gapBox')){
     var g=document.createElement('div');
     g.id='gapBox';
     g.style.cssText='margin:8px 14px 0';
@@ -15522,9 +15526,16 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       var sp=document.createElement('span');
       sp.className='cs-pages sr-dim';
       sp.style.cssText='font-size:11px;margin-left:6px;white-space:nowrap';
-      sp.textContent = i%4===0 ? '已达标' : ('差 '+diff+' 页');
+      sp.textContent = '';   // 差页信息只在章头出现，左树只做导航
       node.appendChild(sp);
     });
+  }
+  var tb=document.querySelector('.cs-toolbar');
+  if(tb){
+    var segEl=tb.querySelector('.seg');
+    var moreEl=null; tb.querySelectorAll('button,summary').forEach(function(x){ if((x.textContent||'').indexOf('更多')>=0) moreEl=x; });
+    if(segEl) segEl.style.marginLeft='auto';
+    else if(moreEl) moreEl.style.marginLeft='auto';
   }
   /* ④ 章节收尾栏：完成本章的客观检查 + 唯一主操作 */
   var body=document.getElementById('sr-write-body')||document.querySelector('.cs-main');
