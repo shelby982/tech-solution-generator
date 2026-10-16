@@ -185,14 +185,14 @@
           <div class="types" id="typeOpts"></div>
         </div>
         <div class="card">
-          <h2>本类型篇幅要求</h2>
+          <h2>篇幅要求</h2>
           <div class="hint">总页数由你填写；建议页数按评分点分值与章节类型估算，可修改。</div>
           <div class="rowline">
             <span>总页数 <input type="number" id="totalPg" value="120" /> 页</span>
             <span>来源 <select id="pgSource"><option>招标文件技术部分规定</option><option>公司标书模板经验值</option></select></span>
             <span class="sp"></span><span id="sumLine" class="sr-dim"></span>
           </div>
-          <div id="sumBanner" class="banner ok">本类型合计与需求一致</div>
+          <div id="sumBanner" class="banner ok">合计与需求一致</div>
         </div>
         <div class="card">
           <h2 id="planTitle">技术应答 · 目录与篇幅</h2>
@@ -304,10 +304,10 @@
 const WPP = 250;
 // ── 左四阶段（与产品 STAGES 一致）──────────────────────────────
 const STAGES = [
-  { id:'1', label:'解析依据', sub:'评分点 · 技术规范', hint:'解析事实（只读）' },
-  { id:'2', label:'应答策划', sub:'选类型 · 检查目录', hint:'决策：类型 · 结构 · 篇幅 · 证据' },
-  { id:'4', label:'应答编写', sub:'正文 · 目录 · 依据', hint:'执行与回检' },
-  { id:'5', label:'评审与交付', sub:'检查缺口 · 导出应答', hint:'导出与红线拦截' },
+  { id:'1', label:'解析依据', sub:'评分点 · 技术规范', hint:'商务评分点 8 · 技术评分点 8 · 技术规范书要求 153' },
+  { id:'2', label:'应答策划', sub:'选类型 · 检查目录', hint:'技术应答 · 检查目录与篇幅' },
+  { id:'4', label:'应答编写', sub:'正文 · 目录 · 依据', hint:'126 个目录节点 · 按章编写' },
+  { id:'5', label:'评审与交付', sub:'检查缺口 · 导出应答', hint:'得分预估 82 / 100 · 缺口 4 项' },
 ];
 const STATE = { 1:'done', 2:'gated', 4:'gated', 5:'' };
 let stage='2';
@@ -392,7 +392,7 @@ function renderTypes(){
     document.getElementById('checkType').textContent=plan().label;
     document.getElementById('totalPg').value=plan().total;
     document.getElementById('pgSource').value=plan().source;
-    document.getElementById('flash').textContent='已切换：'+plan().label;
+    document.getElementById('flash').textContent='当前应答：'+plan().label;
     renderAll();
   }));
 }
@@ -420,10 +420,10 @@ function renderPlanTable(){
 function renderSum(){
   const total=Number(document.getElementById('totalPg').value||0);
   const mine=plan().chapters.reduce((n,c)=>n+(c.mine||0),0);
-  document.getElementById('sumLine').innerHTML=`本类型章节合计 <b>${mine}</b> 页`;
+  document.getElementById('sumLine').innerHTML=`章节合计 <b>${mine}</b> 页`;
   const b=document.getElementById('sumBanner');
-  if(mine===total){b.className='banner ok';b.textContent='本类型合计与需求一致';}
-  else{b.className='banner warn';b.textContent=`⚠ 本类型章节合计 ${mine} 页，与需求 ${total} 页相差 ${mine-total>0?'+':''}${mine-total} 页`;}
+  if(mine===total){b.className='banner ok';b.textContent='合计与需求一致';}
+  else{b.className='banner warn';b.textContent=`⚠ 章节合计 ${mine} 页，与需求 ${total} 页相差 ${mine-total>0?'+':''}${mine-total} 页`;}
 }
 document.getElementById('totalPg').addEventListener('input',()=>{plan().total=Number(document.getElementById('totalPg').value||0);renderSum();});
 document.getElementById('pgSource').addEventListener('change',e=>{plan().source=e.target.value;});
@@ -431,10 +431,10 @@ document.getElementById('btnConfirm').addEventListener('click',()=>{
   const total=Number(document.getElementById('totalPg').value||0);
   const mine=plan().chapters.reduce((n,c)=>n+(c.mine||0),0);
   const note=document.getElementById('confirmNote');
-  if(mine!==total){note.innerHTML='<span style="color:#b45309">⚠ 本类型合计与需求不一致，请先调整再确认</span>';return;}
-  note.innerHTML=`<span style="color:#15803d">✅ 已确认并冻结：${plan().label} 目录 + 篇幅（${total} 页）+ 证据需求</span>`;
+  if(mine!==total){note.innerHTML='<span style="color:#b45309">⚠ 章节合计与需求不一致，请先调整再确认</span>';return;}
+  note.innerHTML=`<span style="color:#15803d">✅ 已确认：${plan().label} · 目录、篇幅（${total} 页）与证据需求</span>`;
   STATE[2]='done'; STATE[4]=''; renderRail();
-  document.getElementById('flash').textContent=`已确认：${plan().label} 的目录与篇幅`;
+  document.getElementById('flash').textContent=`已确认：${plan().label} · 目录与篇幅`;
 });
 
 // ── ④ 应答编写 ──────────────────────────────────────────────
