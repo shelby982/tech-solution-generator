@@ -15356,4 +15356,60 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   activate('2');
 })();
 </script>
+
+<script>
+/* 目录区底部整理：三处说明合一、确认卡取消、主操作与工具栏同行 */
+(function(){
+  var s2=document.querySelector('.sr-stage[data-stage="2"]'); if(!s2) return;
+  // ① 删「选择章节，查看对应评分点和技术规范书原文依据。」
+  var ev=document.querySelector('.response-chapter-evidence'); if(ev) ev.style.display='none';
+  // ② 删「结构完整 = …」说明行（并入「? 说明」）
+  s2.querySelectorAll('.sr-dim').forEach(function(el){
+    if(el.children.length===0 && (el.textContent||'').indexOf('结构完整 =')===0) el.style.display='none';
+  });
+  // ③ 工具栏：去掉「点一行 → …」说明，并把「进入技术应答编写」搬进来
+  var addBtn=null;
+  s2.querySelectorAll('button').forEach(function(b){
+    if(!addBtn && (b.textContent||'').indexOf('新增同级章节')>=0) addBtn=b;
+  });
+  var toolbar=addBtn?addBtn.closest('div'):null;
+  if(toolbar){
+    toolbar.style.flexWrap='wrap';
+    toolbar.querySelectorAll('span.sr-dim, span').forEach(function(sp){
+      if((sp.textContent||'').indexOf('点一行')>=0 && sp.children.length===0) sp.style.display='none';
+    });
+    var bar=document.querySelector('.response-confirm-bar');
+    var writeBtn=bar?bar.querySelector('button[data-act="response-write"]'):null;
+    if(writeBtn){
+      writeBtn.style.marginLeft='auto';
+      toolbar.appendChild(writeBtn);      // 主操作与列表级操作同行，不再沉底
+    }
+    if(bar) bar.style.display='none';     // 状态已在标题胶囊，卡片取消
+    // ④ 说明与映射合并成一个可展开项
+    var mapping=document.querySelector('.response-mapping');
+    var tip=document.createElement('details');
+    tip.style.cssText='flex-basis:100%;margin-top:4px;font-size:11.5px';
+    tip.innerHTML='<summary style="cursor:pointer;color:#64748b">? 操作说明与原文依据映射</summary>'+
+      '<div class="sr-dim" style="margin-top:4px">'+
+      '选择章节，查看对应评分点和技术规范书原文依据；点一行 → 该行出现操作，改动即时保存。<br>'+
+      '结构完整 = 每个评分点都有承载章节；缺的会在上方自检里以 ⚠ 提示。</div>';
+    toolbar.appendChild(tip);
+    if(mapping){
+      var host=tip.querySelector('div');
+      var det=document.createElement('details'); det.style.marginTop='4px';
+      var sum=mapping.querySelector('summary'); 
+      det.appendChild(sum?sum.cloneNode(true):document.createTextNode('查看章节与原文依据映射'));
+      var lis=mapping.querySelectorAll('li');
+      if(lis.length){
+        var ul=document.createElement('ul'); ul.style.cssText='margin:4px 0 0;padding-left:18px;color:#64748b';
+        for(var i=0;i<Math.min(lis.length,6);i++){ var li=document.createElement('li'); li.textContent=lis[i].textContent; ul.appendChild(li); }
+        if(lis.length>6){ var li2=document.createElement('li'); li2.textContent='…（共 '+lis.length+' 条）'; ul.appendChild(li2); }
+        det.appendChild(ul);
+      }
+      host.appendChild(det);
+      mapping.style.display='none';
+    }
+  }
+})();
+</script>
 </body></html>
