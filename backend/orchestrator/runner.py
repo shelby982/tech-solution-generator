@@ -551,6 +551,16 @@ class WorkflowRunner:
         state = await self.state(thread_id)
         if not state or not state.get("project_id"):
             raise KeyError(thread_id)
+        # 开始补跑即视为"不再卡住"：清掉当前中断标记（interrupted_node 保留为历史，
+        # 供界面说明"上次为什么卡住"）。
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE workflow_runs SET interrupted_at = NULL WHERE thread_id = ? AND interrupted_at IS NOT NULL",
+                    (thread_id,))
+                await db.commit()
+        except Exception as exc:
+            logger.warning("清理中断标记失败：%s", exc)
         await self.redraft_outline(thread_id, "")
 
     async def rerun_match(self, thread_id: str, *, full: bool = False) -> None:
