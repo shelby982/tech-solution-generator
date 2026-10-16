@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8" />
+<title>应答策划：目录与篇幅（连环两步）效果图</title>
+<style>
+  :root{ --line:#e5e7eb; --muted:#64748b; --text:#0f172a; --bg:#f1f5f9; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font:13px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);padding:22px}
+  h1{font-size:15px;margin:0 0 4px}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:1fr;gap:18px;max-width:1180px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card>h2{margin:0;font-size:12.5px;padding:8px 14px;background:#f8fafc;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600}
+  .card>h2 b{color:var(--text)}
+  .pane{padding:12px 14px 16px}
+  /* 与生产一致：目录头 */
+  .sr-dir-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:4px 0 8px}
+  .sr-dir-head .ttl{font-size:12.5px;font-weight:600}
+  .ui-pill{font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);background:#f8fafc;color:var(--muted)}
+  .ui-pill.is-ok{background:#ecfdf5;border-color:#bbf7d0;color:#15803d}
+  .ui-pill.is-warn{background:#fffbeb;border-color:#fde68a;color:#b45309}
+  .sr-dim{font-size:11.5px;color:var(--muted)}
+  .link{font-size:11.5px;color:#1d4ed8}
+  /* 与生产一致：连环步骤链 */
+  .sr-dir-chain{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+  .sr-dir-chain i{font-style:normal;color:#cbd5e1}
+  .sr-step{font:inherit;font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:#f8fafc;color:var(--muted);cursor:pointer}
+  .sr-step.is-now{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;font-weight:600}
+  .sr-step.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
+  .sr-step.is-todo{opacity:.55}
+  .sr-step:disabled{cursor:not-allowed}
+  .mw-btn{font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);cursor:pointer}
+  .mw-btn.primary{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+  .mw-btn:disabled{opacity:.65;cursor:not-allowed}
+  /* 与生产一致：本步操作条（只有一条） */
+  .response-confirm-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-top:12px}
+  .response-confirm-bar strong{display:block;font-size:13px}
+  .response-confirm-bar span{display:block;font-size:12px;color:var(--muted);margin-top:5px}
+  .response-confirm-bar>button.primary{background:#2563eb!important;border-color:#2563eb!important;color:#fff!important;padding:10px 16px!important;white-space:nowrap;font-weight:600}
+  .response-confirm-bar .sr-budget-ctl{display:inline-flex!important;align-items:center;gap:8px;flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;margin-top:0}
+  .sr-budget-total{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+  .sr-budget-total input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
+  #sr-page-check{font-size:12px;color:#15803d}
+  .sr-page-warn{color:#b45309!important}
+  /* 目录结构（两步共用） */
+  .rows{margin-top:14px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .sr-erow{display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid #f1f5f9;font-size:12.5px}
+  .sr-erow:first-child{border-top:0}
+  .sr-erow .grp{color:#cbd5e1}
+  .sr-erow .nm{flex:1}
+  .sr-erow .lvl{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:0 5px}
+  .sr-erow-acts{display:inline-flex;gap:6px}
+  .sr-erow-acts button{font:inherit;font-size:11.5px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);cursor:pointer}
+  .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
+  .sr-erow-page.is-sum{color:var(--text);font-variant-numeric:tabular-nums}
+  .sr-erow-page.is-muted{opacity:.5}
+  .note{font-size:11.5px;color:var(--muted);margin-top:10px}
+  .foot{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 12px;border:1px dashed var(--line);border-radius:8px;background:#fcfdff}
+</style></head><body>
+<h1>应答策划：目录与篇幅 —— 一条连环状态，两步操作同一个目录结构</h1>
+<div class="sub">效果图（照抄生产样式值：.response-confirm-bar / .sr-step / .ui-pill / .sr-erow / .sr-budget-ctl）· 2026-10-16 · 对应实现 v207</div>
+<div class="grid">
+
+  <!-- ===== 状态 1：① 确认目录（当前步） ===== -->
+  <div class="card"><h2>状态 1 · <b>第 1 步「确认目录」</b>（篇幅未解锁）</h2><div class="pane">
+    <div class="sr-dir-head">
+      <span class="ttl">目录</span>
+      <span class="ui-pill is-warn">待确认 · 177 个目录节点</span>
+      <span class="sr-dim">▸ 校验明细</span>
+      <span class="sr-dir-chain">
+        <button class="sr-step is-now">① 确认目录</button><i>→</i>
+        <button class="sr-step is-todo" disabled>② 分配篇幅</button>
+      </span>
+      <span class="link">查看目录草案</span>
+    </div>
+    <div class="response-confirm-bar">
+      <div><strong>确认目录</strong>
+        <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。确认后进入第 2 步「确认篇幅」。</span></div>
+      <button class="mw-btn primary">确认目录，创建技术应答</button>
+    </div>
+    <div class="rows">
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L1</span><span class="nm">技术评分项应答</span>
+        <span class="sr-erow-acts"><button>改名</button><button>上移</button><button>缩进</button><button>删除</button></span></div>
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L2</span><span class="nm">项目理解</span>
+        <span class="sr-erow-acts"><button>改名</button><button>上移</button><button>缩进</button><button>删除</button></span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L3</span><span class="nm">项目需求理解完整性</span>
+        <span class="sr-erow-acts"><button>改名</button><button>上移</button><button>缩进</button><button>删除</button></span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L4</span><span class="nm">项目背景</span><span class="sr-dim">原文点对点 · 固定</span></div>
+    </div>
+    <div class="note">第 1 步：行内是**结构**操作（改名 / 增删 / 调层级），没有页数输入。</div>
+  </div></div>
+
+  <!-- ===== 状态 2：② 确认篇幅（待确认） ===== -->
+  <div class="card"><h2>状态 2 · <b>第 2 步「确认篇幅」</b>（待确认 · 已分配）</h2><div class="pane">
+    <div class="sr-dir-head">
+      <span class="ttl">目录</span>
+      <span class="ui-pill is-ok">已确认 · 177 个目录节点</span>
+      <span class="sr-dim">▸ 校验明细</span>
+      <span class="sr-dir-chain">
+        <button class="sr-step is-done">① 确认目录 ✓</button><i>→</i>
+        <button class="sr-step is-now">② 分配篇幅</button>
+      </span>
+      <span class="link">查看目录草案</span>
+    </div>
+    <div class="response-confirm-bar">
+      <div><strong>确认篇幅</strong>
+        <span>填总页数，按各章分值自动分配；父章节显示子树合计，可逐章调整。</span></div>
+      <span class="sr-budget-ctl">
+        <label class="sr-budget-total">总页数 <input value="120" /> 页</label>
+        <button class="mw-btn">按篇幅分配</button>
+        <span id="sr-page-check">合计 120 页 ✓ 一致</span>
+        <button class="mw-btn primary">确认篇幅</button>
+      </span>
+    </div>
+    <div class="rows">
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L1</span><span class="nm">技术评分项应答</span>
+        <span class="sr-erow-page is-sum">子树合计 120 页</span></div>
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L2</span><span class="nm">项目理解</span>
+        <span class="sr-erow-page is-sum">子树合计 40 页</span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L3</span><span class="nm">项目需求理解完整性</span>
+        <span class="sr-erow-page"><input value="18" /> 页</span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L4</span><span class="nm">项目背景</span>
+        <span class="sr-erow-page"><input value="6" /> 页</span></div>
+    </div>
+    <div class="note">第 2 步：行内切换成**页数**输入；父章节只读显示子树合计。目录结构本身不变 —— 两步共用同一个目录。</div>
+  </div></div>
+
+  <!-- ===== 状态 3：② 已确认（收敛态） ===== -->
+  <div class="card"><h2>状态 3 · <b>第 2 步「篇幅已确认」</b>（收敛 · 一行）</h2><div class="pane">
+    <div class="sr-dir-head">
+      <span class="ttl">目录</span>
+      <span class="ui-pill is-ok">已确认 · 177 个目录节点</span>
+      <span class="sr-dim">▸ 校验明细</span>
+      <span class="sr-dir-chain">
+        <button class="sr-step is-done">① 确认目录 ✓</button><i>→</i>
+        <button class="sr-step is-done">② 分配篇幅 ✓</button>
+      </span>
+      <span class="link">查看目录草案</span>
+    </div>
+    <div class="response-confirm-bar">
+      <div><strong>篇幅已确认</strong>
+        <span>总页数 120 页 · 按分值分配到 25 个章节 · 合计与需求一致</span></div>
+      <span class="sr-budget-ctl">
+        <button class="mw-btn">修改篇幅</button>
+        <button class="mw-btn primary">进入编写</button>
+      </span>
+    </div>
+    <div class="rows">
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L1</span><span class="nm">技术评分项应答</span>
+        <span class="sr-erow-page is-sum">120 页</span></div>
+      <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L2</span><span class="nm">项目理解</span>
+        <span class="sr-erow-page is-sum">40 页</span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L3</span><span class="nm">项目需求理解完整性</span>
+        <span class="sr-erow-page is-sum">18 页</span></div>
+      <div class="sr-erow"><span class="grp">·</span><span class="lvl">L4</span><span class="nm">项目背景</span>
+        <span class="sr-erow-page is-sum">6 页</span></div>
+    </div>
+    <div class="foot"><b>完成应答策划</b><span class="sr-dim">目录 ✓ · 篇幅 ✓</span>
+      <span style="margin-left:auto"><button class="mw-btn primary">进入技术应答编写</button></span></div>
+    <div class="note">已完成态收敛为一行：只留摘要 + [修改篇幅] + [进入编写]，不再摆编辑器。</div>
+  </div></div>
+
+</div>
+</body></html>

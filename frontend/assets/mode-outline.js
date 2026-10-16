@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v207';
-import { api } from './api.js?v=20261016-v207';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v207';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v208';
+import { api } from './api.js?v=20261016-v208';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v208';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v207';
+       } from './workspace.js?v=20261016-v208';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v207';
+       } from './workspace-model.mjs?v=20261016-v208';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v207';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v208';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3689,9 +3689,9 @@ function pageBudgetBarHtml() {
   }
 
   // ── 待确认态 ── 编辑区一行：总页数 + 分配 + 状态，右侧一个主操作
-  const check = unallocated ? '⚠ 还没分配，请先点「按篇幅分配」'
-    : (ok ? `合计 ${allocated} 页 ✓ 与需求一致`
-          : `⚠ 合计 ${allocated} 页，与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
+  const check = unallocated ? '⚠ 还没分配'
+    : (ok ? `合计 ${allocated} 页 ✓ 一致`
+          : `⚠ 差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
   return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
       <div><strong>第 2 步 · 确认篇幅</strong>
         <span>填总页数，系统按各章分值自动分配（父章节显示子树合计）；可逐章手工调整。目录一改需重新确认。</span></div>
@@ -4738,7 +4738,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   [data-page-budget-bar] .mw-inline{display:inline-flex;gap:8px;margin-top:6px}
   [data-step-slot]{display:inline-flex;gap:8px}
   /* 篇幅条右侧控制区：与「第 1 步」条的主按钮同位（统一形态） */
-  .sr-budget-ctl{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .response-confirm-bar .sr-budget-ctl{display:inline-flex!important;align-items:center;gap:8px;flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;margin-top:0}
   .sr-budget-total{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
   .sr-budget-total input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
   #sr-page-check{font-size:12px;color:#15803d}
