@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>原型 v4 · 在实际产品外壳里（左四阶段 + 阶段内子页签）</title>
+<title>XX市政交通项目 · 技术应答</title>
 <style>
   /* 与产品一致的设计变量 */
   :root{
@@ -60,7 +60,6 @@
   .hint{font-size:12px;color:var(--muted);margin-bottom:10px}
   .sr-dim{color:var(--muted);font-size:12px}
   .sr-note{background:#f8fafc;border:1px solid var(--line2);border-radius:9px;padding:8px 11px;font-size:12.5px;color:var(--muted)}
-  .newtag{font-size:10px;padding:0 5px;border-radius:4px;background:var(--ok-soft);color:#15803d;border:1px solid #bbf7d0;margin-left:5px;vertical-align:1px}
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
   .pill.ok{background:var(--ok-soft);border-color:#bbf7d0;color:#15803d}
   .pill.warn{background:var(--warn-soft);border-color:#fde68a;color:#b45309}
@@ -181,13 +180,13 @@
       <!-- ② 应答策划（篇幅一体） -->
       <section id="p2" class="hidden">
         <div class="card">
-          <h2>应答类型<span class="newtag">决定整页上下文</span></h2>
-          <div class="hint">商务与技术是<b>两份独立的应答</b>：各自目录、正文、运行与<b>篇幅要求</b>。选了类型，就在那一份里工作。</div>
+          <h2>应答类型</h2>
+          <div class="hint">商务应答与技术应答分别编制，各自管理目录、篇幅与正文。</div>
           <div class="types" id="typeOpts"></div>
         </div>
         <div class="card">
-          <h2>本类型篇幅要求<span class="newtag">新</span></h2>
-          <div class="hint">总页数由<b>你填</b>；系统只给「评分点分值 × 章节类型」的可改建议。<b>只在本类型内校验</b>。</div>
+          <h2>本类型篇幅要求</h2>
+          <div class="hint">总页数由你填写；建议页数按评分点分值与章节类型估算，可修改。</div>
           <div class="rowline">
             <span>总页数 <input type="number" id="totalPg" value="120" /> 页</span>
             <span>来源 <select id="pgSource"><option>招标文件技术部分规定</option><option>公司标书模板经验值</option></select></span>
@@ -196,15 +195,15 @@
           <div id="sumBanner" class="banner ok">本类型合计与需求一致</div>
         </div>
         <div class="card">
-          <h2 id="planTitle">技术应答 · 目录与篇幅<span class="newtag">同一张表</span></h2>
-          <div class="hint">点任意一行进入编写；改目录会撤销确认。</div>
+          <h2 id="planTitle">技术应答 · 目录与篇幅</h2>
+          <div class="hint">点任意一行进入编写；修改目录后需重新确认。</div>
           <table><thead><tr>
             <th style="width:30%">章节</th><th class="num">分值</th><th class="num">建议页</th>
             <th class="num">你填页</th><th>需要证据</th><th>状态</th></tr></thead>
             <tbody id="planRows"></tbody></table>
           <div class="rowline" style="margin-top:12px">
             <button class="btn primary" id="btnConfirm">确认目录与篇幅</button>
-            <span class="sr-dim" id="confirmNote">确认后一起冻结：目录 + 篇幅 + 证据需求</span>
+            <span class="sr-dim" id="confirmNote">确认后目录、篇幅与证据需求一并保存</span>
             <span class="sp"></span><span class="sr-dim">证据缺口 <b id="gapCount">3</b> 项</span>
           </div>
         </div>
@@ -223,7 +222,7 @@
           <div class="cs-main">
             <div class="card cs-document-head">
               <strong>章节编写</strong><span class="sr-dim" id="docProgress">126 个编写单元 · 草稿 4 · 完成 0</span>
-              <span class="pill ok">篇幅达标 118/126<span class="newtag">新</span></span>
+              <span class="pill ok">篇幅达标 118/126</span>
               <details class="cs-delivery"><summary>Word 导出格式</summary></details>
             </div>
             <div class="card">
@@ -239,16 +238,16 @@
                   <span class="pill ok">AI 已编 <b id="nAi">2</b></span>
                   <span class="pill warn">人工改过 <b id="nHuman">2</b></span>
                   <span class="pill idle">未编制 <b id="nTodo">1</b></span>
-                  <span class="pill idle">表格 <b id="nTable">1</b></span><span class="newtag">新</span>
-                  <span class="sp"></span><span>人工修改的段落不会被后台覆盖</span>
+                  <span class="pill idle">表格 <b id="nTable">1</b></span>
+                  <span class="sp"></span><span>人工修改和移除的段落不会被覆盖</span>
                 </div>
               </div>
               <div class="cs-toolbar">
-                <button class="btn primary" id="btnAi">AI 编制本章 · 先看计划</button>
+                <button class="btn primary" id="btnAi">AI 编制本章</button>
                 <button class="btn" disabled>保存</button>
                 <div class="seg"><button aria-pressed="true">编辑</button><button aria-pressed="false">预览</button></div>
                 <button class="btn">添加内容</button>
-                <button class="btn" id="btnDone">完成并检查<span class="newtag">新</span></button>
+                <button class="btn" id="btnDone">确认本章完成</button>
                 <span class="sp"></span><span class="sr-dim">正文预览 · Word 实际分页请查看导出排版预览</span>
               </div>
               <div id="planBox" class="planbox hidden"></div>
@@ -271,7 +270,7 @@
 
         <div id="p4-directory" class="hidden">
           <div class="card"><h2 id="dirTitle">技术应答目录 · 126 个目录节点</h2>
-            <div class="hint">点击章节进入编写；<span class="newtag">新增：每行显示该章预算与达标情况</span></div>
+            <div class="hint">点击章节进入编写</div>
             <div id="dirList"></div></div>
         </div>
 
@@ -288,7 +287,7 @@
         <div class="card"><h2>导出当前应答</h2>
           <div class="hint">仅导出已保存正文；未编写章节仍为空。当前应答：<b id="checkType">技术应答</b></div>
           <div class="rowline"><button class="btn primary">导出 Word 草稿</button>
-            <span class="sr-dim">导出时带出"未通过项清单"</span></div></div>
+            <span class="sr-dim">导出时带出未通过项清单</span></div></div>
         <div class="card"><h2>红线拦截（4 处）</h2>
           <table><thead><tr><th style="width:24%">章节</th><th>类型</th><th>内容</th><th>处理</th></tr></thead>
             <tbody>
@@ -366,7 +365,7 @@ const BODY={
       ['日均调用量','3.2 亿次','8 亿次','L1 实测参数（已核验）'],
       ['并发用户数','6,000','8,000','L1 凭证级 · 性能测试报告'],
       ['档案记录量','1.2 亿条','2 亿条','L1 实测参数（已核验）']]},
-    P('证据','ev','公司在智慧交通领域具有行业领先的标杆案例经验。','⚠ L1 线索级 · 本企业公众号（无凭证）→ 不得进正文','human',true),
+    P('证据','ev','公司在智慧交通领域具有行业领先的标杆案例经验。','⚠ L1 线索级 · 本企业公众号（无凭证）','human',true),
     P('承诺','pr','［待补］近三年同类项目业绩 3 项','❌ 缺 · 应从「政府采购中标公示」查（✅已接入）','todo'),
   ],
   t2:[
@@ -408,7 +407,7 @@ function renderPlanTable(){
       <td>${need.length?need.map(n=>`<span class="pill idle" style="margin-right:4px">${n}</span>`).join(''):'—'}</td>
       <td>${st}</td></tr>`;
   }).join('');
-  document.getElementById('planTitle').innerHTML=`${plan().label} · 目录与篇幅<span class="newtag">同一张表</span>`;
+  document.getElementById('planTitle').innerHTML=`${plan().label} · 目录与篇幅`;
   document.getElementById('gapCount').textContent=plan().chapters.reduce((n,c)=>n+(c.gaps||0),0);
   document.querySelectorAll('[data-mine]').forEach(inp=>{
     inp.addEventListener('click',e=>e.stopPropagation());
@@ -423,7 +422,7 @@ function renderSum(){
   const mine=plan().chapters.reduce((n,c)=>n+(c.mine||0),0);
   document.getElementById('sumLine').innerHTML=`本类型章节合计 <b>${mine}</b> 页`;
   const b=document.getElementById('sumBanner');
-  if(mine===total){b.className='banner ok';b.textContent='本类型合计与需求一致 ✅（只校验本类型，不与其他类型合计）';}
+  if(mine===total){b.className='banner ok';b.textContent='本类型合计与需求一致';}
   else{b.className='banner warn';b.textContent=`⚠ 本类型章节合计 ${mine} 页，与需求 ${total} 页相差 ${mine-total>0?'+':''}${mine-total} 页`;}
 }
 document.getElementById('totalPg').addEventListener('input',()=>{plan().total=Number(document.getElementById('totalPg').value||0);renderSum();});
@@ -476,7 +475,7 @@ function renderEditor(){
   if(c.done>0&&need>0) sb.textContent=`本章 ${Math.round(c.done*WPP).toLocaleString()} / ${(c.mine*WPP).toLocaleString()} 字 · 差 ${need.toLocaleString()} 字`;
   else if(!c.done) sb.textContent='本章尚未开始编写'; else sb.textContent='本章已达标';
   const ed=document.getElementById('editor'); ed.innerHTML='';
-  if(!paras.length){ed.innerHTML='<div class="sr-dim">（原型演示：本章正文略）</div>';return;}
+  if(!paras.length){ed.innerHTML='<div class="sr-dim">本章暂无正文</div>';return;}
   paras.forEach(p=>{
     if(p.table){const t=document.createElement('div');
       t.innerHTML=`<div style="font-size:12px;color:#334155;font-weight:600;margin:8px 0 2px">${p.title}</div>
@@ -495,7 +494,7 @@ function renderAside(panel){
       <details class="bs" open><summary>${c.name} · ${c.score} 分（评分口径）</summary><p>本章响应是否准确、深入、全面。</p></details>
       <details class="bs"><summary>规范要求 3 条 · 查看原文</summary><p>技术规范书 3.2 / 4.1</p></details>
       <details class="bs"><summary>本章原文内容</summary><p>（原文摘录）</p></details></section>
-    <section><h4>本章缺口（${c.gaps||0} 项）<span class="newtag">新</span></h4>
+    <section><h4>本章缺口（${c.gaps||0} 项）</h4>
       ${c.need.filter(n=>n!=='—').map(n=>`<div class="gap${n==='实测参数'?' warn':''}">
         <div class="t">${n==='实测参数'?'⚠':'❌'} ${n}</div>
         <div class="m">权威源 <b>${n==='业绩'?'政府采购中标公示（✅已接入）':n==='人员'?'人事花名册（⚠未接入）':n==='财务'?'财务审计报告（⚠未接入）':n==='资质'?'发证机构官方核验（✅已接入）':'L1 无来源（禁止用第三方）'}</b></div>
@@ -519,7 +518,7 @@ function renderAside(panel){
   const paras=BODY[cur]||[];
   const progress=`<section><h4>编制进度</h4>
       <div style="font-size:12.5px;margin-bottom:8px">本章 ${paras.length} 段：已写 <b>${paras.filter(p=>p.by!=='todo').length}</b> 段
-        （其中人工改过 <b>${paras.filter(p=>p.by==='human').length}</b> 段）<span class="newtag">用户语言</span></div>
+        （人工改过 <b>${paras.filter(p=>p.by==='human').length}</b> 段）</div>
       <div style="height:6px;background:#eef2f7;border-radius:99px;overflow:hidden;margin-bottom:10px">
         <i style="display:block;height:100%;width:${Math.min(100,Math.round(c.done/Math.max(c.mine,1)*100))}%;background:var(--accent)"></i></div>
       <div style="font-size:12px">▸ 主编已排好计划</div><div style="font-size:12px">▸ 正文与图表已交付，2 段人工改过</div>
@@ -528,17 +527,17 @@ function renderAside(panel){
 }
 document.getElementById('btnAi').addEventListener('click',()=>{
   const box=document.getElementById('planBox'); box.classList.toggle('hidden'); const c=ch(cur);
-  box.innerHTML=`<b>编制计划（先看计划，再执行）</b>
+  box.innerHTML=`<b>本章编制计划</b>
     <div>预计 <b>${cur==='t2'?5:3}</b> 个任务：现状分析 / 方案描述 / ${cur==='t2'?'2 张架构表 / 1 张部署图':'1 张表'}</div>
     <div>预计 <b>${(c.mine*WPP).toLocaleString()}</b> 字 ≈ <b>${c.mine}</b> 页 ｜ 需要 <b>${c.need.filter(n=>n!=='—').length}</b> 类证据（缺口 ${c.gaps||0} 项）</div>
-    <div style="margin-top:7px"><button class="btn sm primary">确认后开始编制</button><span class="sr-dim">启动前可否决计划</span></div>`;
+    <div style="margin-top:7px"><button class="btn sm primary">确认后开始编制</button><span class="sr-dim">如不需要可取消</span></div>`;
 });
 document.getElementById('btnDone').addEventListener('click',()=>{
   const box=document.getElementById('doneBox'); box.classList.toggle('hidden'); const c=ch(cur), need=needOf(c);
   const rows=[[c.done>0,'评分点覆盖','2/3 条已响应（“重难点及对策”缺对策半段）'],
     [need===0,'字数达标',`${Math.round(c.done*WPP).toLocaleString()} / ${(c.mine*WPP).toLocaleString()} 字，差 ${need.toLocaleString()} 字`],
     [(c.gaps||0)===0,'证据凭证级',`缺口 ${c.gaps||0} 项`],[false,'无依据承诺','1 处：「7×24 驻场」无 L1 来源']];
-  box.innerHTML=`<b>完成检查（不阻断，但会随导出带出清单）</b>`+
+  box.innerHTML=`<b>本章完成检查</b>`+
     rows.map(([ok,t,d])=>`<div class="r">${ok?pill('ok','✅'):pill('bad','❌')}<b style="min-width:96px">${t}</b><span class="sr-dim">${d}</span></div>`).join('')+
     `<div style="margin-top:8px"><button class="btn sm primary">仍然标记本章完成</button><span class="sr-dim">完成是人工标记，不代表质量验收通过</span></div>`;
 });
