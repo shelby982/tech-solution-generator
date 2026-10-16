@@ -223,16 +223,19 @@ async def write_page_budget(thread_id: str, req: PageBudgetReq):
             payload = await clear_page_budget(db, state['project_id'], thread_id,
                                               total=req.total, source=req.source)
         else:
-            payload = await save_page_budget(
-                db,
-                state['project_id'],
-                thread_id,
-                total=req.total,
-                source=req.source,
-                allocate=req.allocate,
-                overrides=req.overrides,
-                confirm=req.confirm,
-            )
+            try:
+                payload = await save_page_budget(
+                    db,
+                    state['project_id'],
+                    thread_id,
+                    total=req.total,
+                    source=req.source,
+                    allocate=req.allocate,
+                    overrides=req.overrides,
+                    confirm=req.confirm,
+                )
+            except ValueError as exc:              # 业务性拒绝 → 409（前端直接展示 message）
+                raise HTTPException(status_code=409, detail=str(exc))
     payload['directory_confirmed'] = bool(plan.get('confirmed'))
     payload['response_type'] = plan.get('type') or ''
     return payload

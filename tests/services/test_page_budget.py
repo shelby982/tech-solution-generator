@@ -213,3 +213,32 @@ def test_parent_gets_rollup_not_double_counted():
     rolled = rollup_pages(chapters, pages)
     assert rolled["s1"] == rolled["s1.1"] + rolled["s1.2"] + rolled["s1.3"], "父 = 子树合计"
     assert sum(pages.values()) == 120, "额度只落在最细层，父级不进 allocate_pages 的返回值"
+
+async def test_confirm_rejected_without_allocation(db):
+    """闸：没有实际分配时**不允许确认篇幅**。
+
+    实测脏数据（线程 be396cda）：填总页数 120 直接确认 →
+    split_answers = {total:120, confirmed:true}，而 177 个章节页数全 0。
+    """
+    import pytest
+
+    from services.page_budget import save_page_budget
+
+    await _seed(db)
+    with pytest.raises(ValueError, match="分配"):
+        await save_page_budget(db, 1, "t1", total=120, confirm=True)
+
+    payload = await save_page_budget(db, 1, "t1", total=120, allocate=True, confirm=True)
+    assert payload["confirmed"] is True
+    assert payload["total"] == 120
+
+
+async def test_confirm_rejected_for_zero_total(db):
+    """总页数为 0 时确认没有意义，同样拒绝。"""
+    import pytest
+
+    from services.page_budget import save_page_budget
+
+    await _seed(db)
+    with pytest.raises(ValueError, match="总页数"):
+        await save_page_budget(db, 1, "t1", total=0, confirm=True)

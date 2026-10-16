@@ -397,6 +397,20 @@ async def save_page_budget(
         )
 
     if confirm:
+        # 闸（2026-10-17，用户要求）：确认前**必须有实际分配**。
+        # 实测脏数据（线程 be396cda）：用户填了总页数 120 直接点「确认篇幅」，
+        # 结果 split_answers 落库 {total:120, confirmed:true}，而 177 个章节页数**全是 0** ——
+        # 后续按篇幅展开/编写都拿不到任何页数。这里从根上拒绝。
+        _has_target_flag = any("is_target" in c for c in chapters)
+        _allocated = sum(
+            int(c.get("pages") or 0)
+            for c in chapters
+            if (c.get("is_target") if _has_target_flag else True)
+        )
+        if int(answer.get("total") or 0) <= 0:
+            raise ValueError("总页数必须大于 0，才能确认篇幅")
+        if _allocated <= 0:
+            raise ValueError("还没有分配页数：请先点「按篇幅分配」，再点「确认篇幅」")
         answer["confirmed"] = True
 
     await _write_answer(db, project_id, thread_id, answer)
