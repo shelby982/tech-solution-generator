@@ -9264,46 +9264,84 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       
       
       
-      <div id="dirCard" style="border:1px solid #e2e8f0;border-radius:10px;margin:10px 0 12px;background:#fbfdff">
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #eef2f7">
-          <b style="font-size:13.5px">目录</b>
-          <span class="sr-dim">这份应答的结构、依据与篇幅</span>
-          <span style="flex:1"></span>
-          <button class="mw-btn primary" data-act="response-preview">查看目录草案</button>
-        </div>
-        <div style="display:flex;gap:10px;padding:9px 12px;border-bottom:1px solid #eef2f7">
-          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">依据</span>
-          <span style="flex:1;font-size:12.5px">技术评分点 <b>13</b> 项 · 技术规范要求 <b>411</b> 条
-            <span class="sr-dim">　整合项目背景、范围、实施与交付要求，保留重点条款依据。</span></span>
-          <details class="response-basis-details" style="flex:none"><summary style="font-size:12px;color:#64748b;cursor:pointer">来源与编制规则</summary>
-            <p class="sr-dim" style="font-size:11.5px;margin:6px 0 0">优先遵循招标文件规定的组成与格式；格式和证明材料要求需核对原文。</p></details>
-        </div>
-        <div style="display:flex;gap:10px;padding:9px 12px;border-bottom:1px solid #eef2f7">
-          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">覆盖</span>
-          <span style="flex:1;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px">
-            <span>已关联评分点 <b>13 / 13</b></span><span>规范要求 <b>411 / 411</b></span>
-            <span>原文章节 <b>68 / 68</b></span><span>要求归属 <b>411 / 411</b></span>
-            <span>重点要求前部承接 <b>6 / 19</b></span><span>明确风险要求已安排 <b>0 / 0</b></span>
-            <span class="sr-dim">标题、层级与顺序一致</span>
-            <span class="sr-dim">证明材料与原文格式仍需人工复核</span>
-            <details style="flex-basis:100%"><summary style="font-size:12px;color:#b45309;cursor:pointer">建议前部突出 13 条重点要求 · 不影响确认</summary>
-              <p class="sr-dim" style="font-size:11.5px;margin:6px 0 0">以下要求已在点对点应答中安排，可结合评分章节补充说明。</p></details>
-          </span>
-          <span class="ui-pill is-ok" style="flex:none">目录已确认</span>
-        </div>
-        <div style="display:flex;gap:10px;padding:9px 12px;align-items:center;flex-wrap:wrap">
-          <span style="flex:none;width:52px;font-size:12px;color:#94a3b8">篇幅</span>
-          <span style="flex:1;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12.5px">
-            <span>总页数 <input type="number" id="totalPg" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
-            <span class="sr-dim">来源：技术部分规定</span>
-            <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
-            <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
-            <span class="sr-dim" id="sumLine"></span>
-            <span class="sr-dim" id="sumBanner" style="color:#15803d">合计与需求一致</span>
+      <div id="protoSwitch" style="display:flex;align-items:center;gap:8px;margin:10px 0;padding:6px 10px;border:1px dashed #c7d2fe;border-radius:8px;background:#f5f7ff">
+        <span style="font-size:11.5px;color:#6366f1">原型对比</span>
+        <button class="mw-btn" id="btnPlanA" style="border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8">方案 A · 两个待办卡</button>
+        <button class="mw-btn" id="btnPlanB">方案 B · 向导两步</button>
+        <span class="sr-dim" id="protoHint">同一屏并列的两个待办：① 目录  ② 篇幅</span>
+      </div>
+
+      <!-- ══ 方案 A：两个待办卡 ══ -->
+      <div id="planA">
+        <div class="pcard" style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #eef2f7">
+            <b style="font-size:13.5px">① 目录</b>
+            <span class="ui-pill is-ok">已确认 · 165 个节点</span>
             <span style="flex:1"></span>
-            <button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>
-            <span class="sr-dim" id="budgetDone" style="display:none;color:#15803d">✅ 篇幅已确认</span>
-          </span>
+            <button class="mw-btn">查看目录草案</button>
+            <button class="mw-btn">重新生成</button>
+          </div>
+          <div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid #eef2f7;font-size:12.5px">
+            <span style="flex:none;width:44px;color:#94a3b8">覆盖</span>
+            <span>已关联评分点 <b>13 / 13</b> · 规范要求 <b>411 / 411</b> · 原文章节 <b>68 / 68</b>
+              <span class="sr-dim">　标题、层级与顺序一致</span></span>
+          </div>
+          <div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid #eef2f7;font-size:12.5px">
+            <span style="flex:none;width:44px;color:#94a3b8">提示</span>
+            <span style="color:#b45309">6 / 19 条重点要求建议前部突出
+              <details style="display:inline"><summary style="display:inline;cursor:pointer">▸ 查看这 13 条</summary></details></span>
+          </div>
+          <div style="display:flex;gap:10px;padding:8px 12px;font-size:12.5px">
+            <span style="flex:none;width:44px;color:#94a3b8">依据</span>
+            <span class="sr-dim">技术评分点 13 项 · 技术规范要求 411 条　
+              <details style="display:inline"><summary style="display:inline;cursor:pointer">▸ 来源与编制规则</summary></details></span>
+          </div>
+        </div>
+
+        <div class="pcard" id="cardBudgetA" style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #eef2f7">
+            <b style="font-size:13.5px">② 篇幅</b>
+            <span class="ui-pill is-none" id="budgetStatusA">待确认 · 目标 120 页</span>
+            <span style="flex:1"></span>
+            <button class="mw-btn" id="btnAllocA">按总篇幅分配</button>
+            <button class="mw-btn" id="btnResetA">清除手工调整</button>
+            <button class="mw-btn primary" id="btnConfirmA">确认篇幅</button>
+          </div>
+          <div style="display:flex;gap:10px;padding:8px 12px;align-items:center;flex-wrap:wrap;font-size:12.5px">
+            <span style="flex:none;width:44px;color:#94a3b8">总页数</span>
+            <span><input type="number" id="totalPgA" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
+            <span class="sr-dim">来源：技术部分规定</span>
+            <span class="sr-dim" id="sumA"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 方案 B：向导两步 ══ -->
+      <div id="planB" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span class="ui-pill is-ok" id="stepTag1">① 确认目录</span>
+          <span class="sr-dim">──────</span>
+          <span class="ui-pill is-none" id="stepTag2">② 确认篇幅</span>
+          <span style="flex:1"></span>
+          <span class="sr-dim" id="stepHint">第 1 步 · 先确认这份目录</span>
+        </div>
+        <div id="stepBox1" style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:12px;margin-bottom:12px">
+          <div style="font-size:12.5px;margin-bottom:6px">技术评分点 <b>13</b> · 技术规范要求 <b>411</b></div>
+          <div style="font-size:12.5px;margin-bottom:6px">已关联评分点 <b>13 / 13</b> · 规范要求 <b>411 / 411</b> · 原文章节 <b>68 / 68</b></div>
+          <div style="font-size:12.5px;color:#b45309;margin-bottom:10px">6 / 19 条重点要求建议前部突出　<details style="display:inline"><summary style="display:inline;cursor:pointer">▸ 查看</summary></details></div>
+          <div style="display:flex;gap:8px"><button class="mw-btn">查看目录草案</button><span style="flex:1"></span><button class="mw-btn primary" id="btnStep1">确认目录 →</button></div>
+        </div>
+        <div id="stepBox2" style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:12px;margin-bottom:12px;opacity:.5;pointer-events:none">
+          <div style="font-size:12.5px;margin-bottom:8px">总页数
+            <input type="number" id="totalPgB" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页
+            <span class="sr-dim">来源：技术部分规定</span>
+            <span class="sr-dim" id="sumB"></span></div>
+          <div style="display:flex;gap:8px">
+            <button class="mw-btn" id="btnAllocB">按总篇幅分配</button>
+            <button class="mw-btn" id="btnResetB">清除手工调整</button>
+            <span style="flex:1"></span>
+            <button class="mw-btn primary" id="btnConfirmB">确认篇幅 →</button>
+          </div>
         </div>
       </div>
 <h5 class="sr-sec">目录草案（165 个目录节点）· 评分与重点章节可调整，原文目录固定</h5>
@@ -15209,42 +15247,38 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     el.addEventListener('click', function(){ activate(el.getAttribute('data-stage')); }); });
 
   var stage2=document.querySelector('.sr-stage[data-stage="2"]');
+  /* 隐藏被这两套方案取代的原三块 */
+  ['.response-basis-card','.response-coverage'].forEach(function(s){
+    stage2.querySelectorAll(s).forEach(function(el){ el.style.display='none'; });
+  });
+  stage2.querySelectorAll('div').forEach(function(el){
+    var t=(el.textContent||'').replace(/\s+/g,'');
+    if(t.indexOf('重点与点对点检查')===0 && el.children.length>=4) el.style.display='none';
+  });
+  [].slice.call(stage2.querySelectorAll('details')).forEach(function(d){
+    var s=(d.querySelector('summary')||{}).textContent||''; if(s.indexOf('建议前部突出')>=0) d.style.display='none'; });
 
-  /* ══ ① 隐藏被合并的三块（用产品真实 class / 文本定位）══ */
-  function hideMerged(){
-    var sel=['.response-basis-card','.response-coverage'];
-    sel.forEach(function(s){ document.querySelectorAll(s).forEach(function(el){ el.style.display='none'; }); });
-    var box=document.querySelector('.sr-stage[data-stage="2"]');
-    if(!box) return;
-    box.querySelectorAll('div').forEach(function(el){
-      var t=(el.textContent||'').replace(/\s+/g,'');
-      if(t.indexOf('重点与点对点检查')===0 && el.children.length>=4) el.style.display='none';
-    });
-    var det=[].slice.call(box.querySelectorAll('details')).filter(function(d){
-      var s=(d.querySelector('summary')||{}).textContent||''; return s.indexOf('建议前部突出')>=0; });
-    det.forEach(function(d){ d.style.display='none'; });
-  }
-  /* ══ ② 篇幅：目录行内一列 + 状态驱动主操作 ══ */
+  /* ══ 页数列（165 行）══ */
   var KIND={'技术评分项应答':1.2,'项目理解':0.7,'项目进度计划':1.0,'项目团队人员':0.9,'项目业绩':1.0,
     '开发要求':1.2,'技术实现方案':1.4,'重点及必须响应要求':1.1,'技术规范书点对点应答':1.3,
     '1.总则':0.6,'2.项目描述':0.8,'3.项目服务内容及要求':1.0,'4.项目实施':1.0};
-  var rows=[], confirmed=false;
+  var rows=[], dirConfirmed=false, budgetConfirmed=false, plan='A';
   function collect(){
     rows=[];
-    document.querySelectorAll('.sr-stage[data-stage="2"] .sr-erow').forEach(function(el,idx){
-      var t=(el.querySelector('.sr-erow-title')||{}).textContent||''; t=t.trim();
+    stage2.querySelectorAll('.sr-erow').forEach(function(el,idx){
+      var title=(el.querySelector('.sr-erow-title')||{}).textContent||''; title=title.trim();
       var lvl=Number(el.getAttribute('data-level')||1);
       var cell=document.createElement('span'); cell.className='sr-erow-pages';
       cell.style.cssText='font-size:11.5px;color:#475569;padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums';
       var acts=el.querySelector('.sr-erow-acts'); if(acts) el.insertBefore(cell,acts); else el.appendChild(cell);
-      rows.push({el:el,cell:cell,name:t,level:lvl,idx:idx,score:lvl<=2?(4+((rows.length*7)%22)):0,alloc:lvl<=2,mine:0,pinned:false});
+      rows.push({el:el,cell:cell,name:title,level:lvl,idx:idx,score:lvl<=2?(4+((rows.length*7)%22)):0,alloc:lvl<=2,mine:0,pinned:false});
     });
   }
   var listAlloc=function(){ return rows.filter(function(r){return r.alloc&&r.name;}); };
   var kindOf=function(r){ return KIND[r.name]||1.0; };
   function allocate(reset){
     var list=listAlloc(); if(reset) list.forEach(function(r){ r.pinned=false; });
-    var total=Number($('totalPg').value||0);
+    var total=Number(($('totalPgA').value)||0);
     var free=list.filter(function(r){return !r.pinned;});
     var rest=Math.max(0,total-list.filter(function(r){return r.pinned;}).reduce(function(n,r){return n+r.mine;},0));
     var w=free.map(function(r){return Math.max(0.1,(r.score||1)*kindOf(r));});
@@ -15257,32 +15291,65 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     render();
   }
   function render(){
+    var showPages = (plan==='A') || (plan==='B' && dirConfirmed);   // 方案B第1步不出现页数
     rows.forEach(function(r){
       if(!r.alloc){ r.cell.textContent=''; return; }
+      if(!showPages){ r.cell.textContent=''; return; }
       r.cell.innerHTML='<input type="number" value="'+r.mine+'" data-idx="'+r.idx+'" style="width:54px;font:inherit;font-size:11.5px;padding:1px 5px;border:1px solid #e2e8f0;border-radius:5px;text-align:right" /> 页'+(r.pinned?' <span class="ui-pill is-ok">已调整</span>':'');
       var inp=r.cell.querySelector('input');
       inp.addEventListener('click',function(e){e.stopPropagation();});
       inp.addEventListener('change',function(e){ e.stopPropagation(); r.mine=Number(e.target.value)||0; r.pinned=true; allocate(false); });
     });
-    var list=listAlloc(), sum=list.reduce(function(n,r){return n+r.mine;},0), total=Number($('totalPg').value||0);
-    $('sumLine').innerHTML='分配合计 <b>'+sum+'</b> 页';
-    var b=$('sumBanner');
-    b.textContent = sum===total?'合计与需求一致':('⚠ 相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
-    b.style.color = sum===total?'#15803d':'#b45309';
-    $('btnConfirmBudget').style.display = (confirmed||sum!==total)?'none':'inline-block';
-    $('budgetDone').style.display = confirmed?'inline':'none';
+    var list=listAlloc(), sum=list.reduce(function(n,r){return n+r.mine;},0), total=Number($('totalPgA').value||0);
+    var ok=(sum===total);
+    $('sumA').innerHTML='已分配到 <b>'+list.length+'</b> 章 · 合计 <b>'+sum+'</b> 页 '+(ok?'✅':'⚠ 与目标差 '+(sum-total));
+    $('sumB').innerHTML='已分配到 '+list.length+' 章 · 合计 '+sum+' 页 '+(ok?'✅':'⚠');
     var w=document.querySelector('[data-act="response-write"]');
-    if(w) w.style.display = confirmed?'inline-block':'none';
+    if(w) w.style.display = budgetConfirmed ? 'inline-block' : 'none';
+    $('budgetStatusA').textContent = budgetConfirmed ? '已确认 · '+total+' 页' : '待确认 · 目标 '+total+' 页';
+    $('budgetStatusA').className = 'ui-pill ' + (budgetConfirmed?'is-ok':'is-none');
+    $('stepTag1').className='ui-pill '+(dirConfirmed?'is-ok':'is-none');
+    $('stepTag2').className='ui-pill '+(budgetConfirmed?'is-ok':'is-none');
   }
-  hideMerged();
-  $('totalPg').addEventListener('input',function(){ allocate(false); });
-  $('btnAlloc').addEventListener('click',function(){ allocate(false); });
-  $('btnResetAlloc').addEventListener('click',function(){ allocate(true); });
-  $('btnConfirmBudget').addEventListener('click',function(){ confirmed=true; render();
-    var w=document.querySelector('[data-act="response-write"]'); if(w) w.scrollIntoView({block:'center'}); });
-  collect(); allocate(true);
+  function setPlan(p){
+    plan=p;
+    $('planA').style.display = p==='A'?'block':'none';
+    $('planB').style.display = p==='B'?'block':'none';
+    $('btnPlanA').style.cssText = p==='A' ? 'border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8' : '';
+    $('btnPlanB').style.cssText = p==='B' ? 'border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8' : '';
+    $('protoHint').textContent = p==='A'
+      ? '同一屏并列的两个待办：① 目录  ② 篇幅'
+      : '向导两步：一次只出现一件事，目录确认后解锁篇幅';
+    render();
+  }
+  $('btnPlanA').addEventListener('click',function(){ setPlan('A'); });
+  $('btnPlanB').addEventListener('click',function(){ setPlan('B'); });
+  /* 方案A：篇幅在目录未确认时灰态（顺序保障） */
+  function gateA(){
+    var gated = !dirConfirmed;
+    var c=$('cardBudgetA');
+    c.style.opacity = gated?'.5':'1';
+    c.style.pointerEvents = gated?'none':'auto';
+    c.title = gated?'请先确认目录，再确认篇幅':'';
+  }
+  /* 目录确认（方案B第1步 / 方案A默认已确认） */
+  $('btnStep1').addEventListener('click',function(){
+    dirConfirmed=true; $('stepBox2').style.opacity='1'; $('stepBox2').style.pointerEvents='auto';
+    $('stepHint').textContent='第 2 步 · 按这个目录分配篇幅';
+    render();
+  });
+  $('btnConfirmA').addEventListener('click',function(){ budgetConfirmed=true; render(); });
+  $('btnConfirmB').addEventListener('click',function(){ budgetConfirmed=true; $('stepHint').textContent='两步都已完成，可进入编写'; render(); });
+  $('btnAllocA').addEventListener('click',function(){ allocate(false); });
+  $('btnResetA').addEventListener('click',function(){ allocate(true); });
+  $('btnAllocB').addEventListener('click',function(){ allocate(false); });
+  $('btnResetB').addEventListener('click',function(){ allocate(true); });
+  $('totalPgA').addEventListener('input',function(){ allocate(false); });
+  $('totalPgB').addEventListener('input',function(){ $('totalPgA').value=$('totalPgB').value; allocate(false); });
 
-  /* ══ ③ 编写阶段增量 ══ */
+  collect(); allocate(true); setPlan('A'); gateA();
+
+  /* ══ 编写阶段 ══ */
   var BLOCKS=[
     {role:'方案',color:'#1d4ed8',text:'拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。',src:'L1 本章原文内容 · 技术规范书 3.2',by:'ai'},
     {role:'证据',color:'#15803d',text:'平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。',src:'L1 凭证级 · 实测参数（已核验）',by:'ai'},
