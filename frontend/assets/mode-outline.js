@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v211';
-import { api } from './api.js?v=20261016-v211';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v211';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v215';
+import { api } from './api.js?v=20261016-v215';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v215';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v211';
+       } from './workspace.js?v=20261016-v215';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v211';
+       } from './workspace-model.mjs?v=20261016-v215';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v211';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v215';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3668,37 +3668,32 @@ function pageBudgetBarHtml() {
   const d = pageBudgetData;
   const total = Number(d.total) || 0;
   const allocated = Number(d.allocated) || 0;
-  // 实测 bug（用户线程 be396cda）：填了总页数 120 却直接点「确认篇幅」，
-  // 结果 page_budget 落库为 {total:120, confirmed:true}，而 177 个章节的页数**全是 0**。
-  // 原因：分配数为 0 时仍判「合计与需求一致」，确认按钮可点。这里补上"还没分配"这一态。
-  const unallocated = total > 0 && allocated === 0;
-  const ok = !!d.ok && !unallocated;
   const chapters = Number(d.chapter_count) || 0;
   const hasPinned = Array.isArray(d.chapters) && d.chapters.some((c) => c && c.pinned);
+  const unallocated = total > 0 && allocated === 0;      // 实测脏数据：确认了却没有分配
+  const ok = !!d.ok && !unallocated;
 
-  // 旧数据：已确认但一页未分配（见上面实测 bug）——如实标出，不假装正常
-  const unallocatedZero = total > 0 && allocated === 0;
-
-  // ── 已确认态 ── 一行摘要 + 两个动作。已完成就不该再像"待办"（原来还把输入框、
-  // 分配按钮、确认按钮一起摆着，右列三行、对齐散乱 —— 用户要求重新设计）。
+  // ── 已确认态 ── 与「目录」那一行**同形**（.sr-dir-head + .ui-pill），一行收敛。
+  // 用户反馈：确认完篇幅后这里还是大卡片（74px、带说明段），与目录确认后的一行 pill（50px）
+  // 不一致，显得又高又重。「进入编写」不在这里给它唯一的归属（收尾栏），避免两个入口打架。
   if (d.confirmed) {
-    return `<div class="response-confirm-bar" data-plan-step-bar data-page-budget-bar data-step-pane="2">
-      <div><strong>${d.confirmed ? '篇幅已确认' : '确认篇幅'}</strong>
-        <span>总页数 ${total} 页 · 按分值分配到 ${chapters} 个章节${allocated === total ? ' · 合计与需求一致' : (unallocatedZero ? ' · ⚠ 尚未分配页数，建议点「修改篇幅」重新分配' : ` · 已分配 ${allocated} 页`)}</span></div>
-      <span class="sr-budget-ctl">
+    const mismatched = allocated !== total;
+    return `<div class="sr-dir-head" data-plan-step-bar data-page-budget-bar data-step-pane="2">
+        <h5 class="sr-sec" style="margin:0">篇幅</h5>
+        <span class="ui-pill is-ok">已确认 · ${total} 页 · 分配到 ${chapters} 个章节</span>
+        <span class="sr-dim">${mismatched ? `已分配 ${allocated} 页` : '合计与需求一致'}</span>
+        <span style="flex:1"></span>
         <button class="mw-btn" data-act="page-edit">修改篇幅</button>
-        <button class="mw-btn primary" data-act="page-goto-write">进入编写</button>
-      </span>
-    </div>`;
+      </div>`;
   }
 
-  // ── 待确认态 ── 编辑区一行：总页数 + 分配 + 状态，右侧一个主操作
+  // ── 待确认态 ── 编辑区压成一行（padding 用 is-compact 收窄）
   const check = unallocated ? '⚠ 还没分配'
     : (ok ? `合计 ${allocated} 页 ✓ 一致`
           : `⚠ 差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
-  return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
-      <div><strong>第 2 步 · 确认篇幅</strong>
-        <span>填总页数，系统按各章分值自动分配（父章节显示子树合计）；可逐章手工调整。目录一改需重新确认。</span></div>
+  return `<div class="response-confirm-bar is-compact" data-plan-step-bar data-page-budget-bar data-step-pane="2">
+      <div><strong>确认篇幅</strong>
+        <span>填总页数，按各章分值自动分配；父章节显示子树合计，可逐章调整。</span></div>
       <span class="sr-budget-ctl">
         <label class="sr-budget-total">总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${total}" aria-label="总页数" /> 页</label>
         <button class="mw-btn" data-act="page-alloc">按篇幅分配</button>
@@ -4413,13 +4408,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <details class="response-mapping"><summary>查看章节与原文依据映射</summary>${structBlocks.filter(b=>parseIds(b.review_point_ids).length||parseIds(b.spec_requirement_ids).length).map(b=>`<div class="response-map-row"><strong>${escapeHtml(b.title)}</strong><span>${parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '技术规范要求'}</span><span class="sr-dim">${parseIds(b.spec_requirement_ids).length} 条规范要求</span></div>`).join('')}</details>
       <div class="response-confirm-bar"><div><strong>${categoriesConfirmed ? '目录已确认' : '确认应答目录'}</strong><span>${categoriesConfirmed ? '可直接进入编写，随时查看目录与依据' : '保存目录并校验，成功后直接进入编写'}</span></div><button class="mw-btn primary" data-act="${categoriesConfirmed ? 'response-write' : 'response-confirm'}">${categoriesConfirmed ? `进入${responseLabel}编写` : `确认目录，创建${responseLabel}`}</button></div><div class="response-confirm-feedback" data-confirm-feedback role="status" aria-live="polite" hidden></div>` : ''}
     ${previewReady && data.outline_checks?.response_outline_version === 2 ? `<div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}</span><span>明确风险要求已安排 ${responseChecks.risk_requirements_landed} / ${responseChecks.risk_requirements_total}</span><span>原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total}</span><span>${data.outline_checks.original_structure_matches ? '标题、层级与顺序一致' : '原文结构待核对'}</span><span>要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total}</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div>${responseWarningsHtml}` : ''}
-    ${previewReady ? `<div class="response-confirm-bar sr-dir-foot">
+    ${previewReady ? `<div class="response-confirm-bar is-compact sr-dir-foot">
       <b>完成应答策划</b>
       <span class="ui-pill ${categoriesConfirmed && pageBudgetData?.confirmed ? 'is-ok' : 'is-none'}">${(categoriesConfirmed ? 1 : 0) + (pageBudgetData?.confirmed ? 1 : 0)} / 2 已完成</span>
-      <span>${categoriesConfirmed ? `✅ 目录已确认 · ${structBlocks.length} 个目录节点` : '⏳ 目录待确认'}</span>
-      <span>${pageBudgetData?.confirmed ? `✅ 篇幅已确认 · ${Number(pageBudgetData.total) || 0} 页` : `⏳ 篇幅待确认${pageBudgetData ? ` · 目标 ${Number(pageBudgetData.total) || 0} 页` : ''}`}</span>
+      <span class="sr-dim">${categoriesConfirmed && pageBudgetData?.confirmed ? '目录与篇幅都已确认' : (categoriesConfirmed ? '还差：确认篇幅' : '还差：确认目录')}</span>
       <span style="flex:1"></span>
-      <span class="sr-dim">${categoriesConfirmed && pageBudgetData?.confirmed ? '可以进入应答编写' : (categoriesConfirmed ? '还差：确认篇幅' : '还差：确认目录')}</span>
     </div>` : ''}
     <div class="sr-dim" data-flash-for="generate"></div>`;
 
@@ -4763,6 +4756,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-step.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
   .sr-step.is-todo{opacity:.55}
   .sr-step:disabled{cursor:not-allowed}
+  .response-confirm-bar.is-compact{padding:10px 14px;margin-top:8px}
+  /* 收尾栏的主按钮沿用应用原生样式（padding:10px 16px!important，高 ~40px），
+     与上面两行 pill 的视觉重量不一致，这里对齐成与 .mw-btn 同尺寸 */
+  /* 提高特异性：应用的 .response-confirm-bar>button.primary 用 !important 设了 10px 16px，
+     同权重下按顺序会赢，这里用 body 前缀提权 */
+  body .sr-dir-foot>button.primary{padding:8px 14px!important}
   .sr-lvl{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:0 5px;line-height:16px;flex:none}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
   .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
@@ -5093,8 +5092,15 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       const body = el.querySelector('.sr-stage-body') || el;
       const head = body.querySelector('.sr-dir-head');
       if (head && head.nextElementSibling !== bar) body.insertBefore(bar, head ? head.nextElementSibling : body.firstChild);
-      ['.response-type-options', '.response-basis-card', '.response-coverage'].forEach((sel) => {
+      // 只属于①步（结构编辑）的东西，②步一律收掉：类型卡 / 编制依据 / 覆盖检查 /
+      // 批量操作条 / 新增章节·撤销工具（后者按**身份**隐藏，避免误伤同 class 的其它块）
+      ['.response-type-options', '.response-basis-card', '.response-coverage', '.sr-batch'].forEach((sel) => {
         el.querySelectorAll(sel).forEach((n) => { n.hidden = true; n.style.display = 'none'; });
+      });
+      el.querySelectorAll('.sr-answer').forEach((n) => {
+        if (n.querySelector('[data-act="struct-new"], [data-act="undo-structure"]')) {
+          n.hidden = true; n.style.display = 'none';
+        }
       });
       bar.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     }

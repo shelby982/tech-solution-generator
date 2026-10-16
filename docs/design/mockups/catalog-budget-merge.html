@@ -36,7 +36,8 @@
   .response-confirm-bar strong{display:block;font-size:13px}
   .response-confirm-bar span{display:block;font-size:12px;color:var(--muted);margin-top:5px}
   .response-confirm-bar>button.primary{background:#2563eb!important;border-color:#2563eb!important;color:#fff!important;padding:10px 16px!important;white-space:nowrap;font-weight:600}
-  .response-confirm-bar .sr-budget-ctl{display:inline-flex!important;align-items:center;gap:8px;flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;margin-top:0}
+  .response-confirm-bar .response-confirm-bar.is-compact{padding:10px 14px}
+  .sr-budget-ctl{display:inline-flex!important;align-items:center;gap:8px;flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;margin-top:0}
   .sr-budget-total{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
   .sr-budget-total input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
   #sr-page-check{font-size:12px;color:#15803d}
@@ -102,7 +103,7 @@
       </span>
       <span class="link">查看目录草案</span>
     </div>
-    <div class="response-confirm-bar">
+    <div class="response-confirm-bar is-compact">
       <div><strong>确认篇幅</strong>
         <span>填总页数，按各章分值自动分配；父章节显示子树合计，可逐章调整。</span></div>
       <span class="sr-budget-ctl">
@@ -126,7 +127,7 @@
   </div></div>
 
   <!-- ===== 状态 3：② 已确认（收敛态） ===== -->
-  <div class="card"><h2>状态 3 · <b>第 2 步「篇幅已确认」</b>（收敛 · 一行）</h2><div class="pane">
+  <div class="card"><h2>状态 3 · <b>篇幅已确认</b>（与「目录」同形 · 一行）</h2><div class="pane">
     <div class="sr-dir-head">
       <span class="ttl">目录</span>
       <span class="ui-pill is-ok">已确认 · 177 个目录节点</span>
@@ -137,13 +138,11 @@
       </span>
       <span class="link">查看目录草案</span>
     </div>
-    <div class="response-confirm-bar">
-      <div><strong>篇幅已确认</strong>
-        <span>总页数 120 页 · 按分值分配到 25 个章节 · 合计与需求一致</span></div>
-      <span class="sr-budget-ctl">
-        <button class="mw-btn">修改篇幅</button>
-        <button class="mw-btn primary">进入编写</button>
-      </span>
+    <div class="sr-dir-head">
+      <span class="ttl">篇幅</span>
+      <span class="ui-pill is-ok">已确认 · 120 页 · 分配到 25 个章节</span>
+      <span class="sr-dim">合计与需求一致</span>
+      <span class="sr-dir-chain"><button class="mw-btn">修改篇幅</button></span>
     </div>
     <div class="rows">
       <div class="sr-erow"><span class="grp">▾</span><span class="lvl">L1</span><span class="nm">技术评分项应答</span>
@@ -155,7 +154,8 @@
       <div class="sr-erow"><span class="grp">·</span><span class="lvl">L4</span><span class="nm">项目背景</span>
         <span class="sr-erow-page is-sum">6 页</span></div>
     </div>
-    <div class="foot"><b>完成应答策划</b><span class="sr-dim">目录 ✓ · 篇幅 ✓</span>
+    <div class="foot"><b>完成应答策划</b><span class="ui-pill is-ok">2 / 2 已完成</span>
+      <span class="sr-dim">目录与篇幅都已确认</span>
       <span style="margin-left:auto"><button class="mw-btn primary">进入技术应答编写</button></span></div>
     <div class="note">已完成态收敛为一行：只留摘要 + [修改篇幅] + [进入编写]，不再摆编辑器。</div>
   </div></div>
