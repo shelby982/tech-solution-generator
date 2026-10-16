@@ -14,6 +14,7 @@ import pytest
 from db import init_db
 from services.page_budget import (
     allocate_pages,
+    rollup_pages,
     clear_page_budget,
     get_page_budget,
     is_allocatable,
@@ -62,6 +63,7 @@ def test_allocate_sums_exactly_to_total():
     pages = allocate_pages(120, chapters)
     assert sum(pages.values()) == 120, "合计必须精确等于总页数，不差页"
     assert all(v >= 0 for v in pages.values())
+    assert "1" not in pages, "父章节是子树合计，不参与分配（否则与子章节重复计数）"
 
 
 def test_allocate_only_top_two_levels():
@@ -81,19 +83,19 @@ def test_allocate_respects_pinned_and_absorbs_diff():
         {"block_id": "1.2", "title": "关键技术实现", "level": 2, "score_weight": 18},
     ]
     pages = allocate_pages(120, chapters)
-    assert pages["1"] == 20, "人工改过的章节保持不动"
-    assert sum(pages.values()) == 120, "其余章节吸收差额"
+    assert pages["1.1"] + pages["1.2"] == 120, "额度落在最细可分配层"
+    assert all(v >= 0 for v in pages.values())
 
 
 def test_allocate_handles_zero_total_and_oversized_pins():
     chapters = [{"block_id": "1", "title": "技术方案", "level": 1, "score_weight": 30}]
     assert allocate_pages(0, chapters)["1"] == 0
     pinned = [
-        {"block_id": "1", "title": "技术方案", "level": 1, "score_weight": 30, "pages": 50, "pinned": True},
-        {"block_id": "1.1", "title": "系统架构设计", "level": 2, "score_weight": 12},
+        {"block_id": "1.1", "title": "系统架构设计", "level": 2, "score_weight": 12, "pages": 50, "pinned": True},
+        {"block_id": "1.2", "title": "关键技术实现", "level": 2, "score_weight": 18},
     ]
     pages = allocate_pages(10, pinned)
-    assert pages["1"] == 50 and pages["1.1"] == 0, "固定值超总额时不出现负数"
+    assert pages["1.1"] == 50 and pages["1.2"] == 0, "固定值超总额时不出现负数"
 
 
 def test_kind_factor_and_allocatable():
@@ -109,7 +111,7 @@ def test_summarize_reports_diff():
         {"block_id": "1.1", "title": "系统架构设计", "level": 2, "pages": 12},
     ]
     out = summarize(120, chapters)
-    assert out == {"total": 120, "allocated": 112, "chapter_count": 2, "diff": -8, "ok": False}
+    assert out == {"total": 120, "allocated": 12, "chapter_count": 1, "diff": -108, "ok": False}
 
 
 # ── 落库往返 ─────────────────────────────────────────────────
@@ -119,7 +121,7 @@ async def test_save_then_read_roundtrip(db):
     payload = await save_page_budget(db, 1, "t1", total=120, source="技术部分规定", allocate=True)
     assert payload["ok"] and payload["total"] == 120
     assert payload["allocated"] == 120
-    assert payload["chapter_count"] == 3, "三级章不参与分配"
+    assert payload["chapter_count"] == 2, "额度落在最细可分配层（1.1 / 1.2），一级为其合计"
 
     again = await get_page_budget(db, 1, "t1")
     assert again["total"] == 120 and again["source"] == "技术部分规定"
@@ -129,9 +131,9 @@ async def test_save_then_read_roundtrip(db):
 async def test_manual_override_pins_and_survives_reallocate(db):
     await _seed(db)
     await save_page_budget(db, 1, "t1", total=120, allocate=True)
-    await save_page_budget(db, 1, "t1", overrides=[{"block_id": "1", "pages": 20, "pinned": True}])
+    await save_page_budget(db, 1, "t1", overrides=[{"block_id": "1.1", "pages": 20, "pinned": True}])
     after = await save_page_budget(db, 1, "t1", total=150, allocate=True)
-    first = next(c for c in after["chapters"] if c["block_id"] == "1")
+    first = next(c for c in after["chapters"] if c["block_id"] == "1.1")
     assert first["pages"] == 20 and first["pinned"], "手工改过的章节在重算后保持不动"
     assert after["ok"] and after["allocated"] == 150
 
@@ -139,9 +141,9 @@ async def test_manual_override_pins_and_survives_reallocate(db):
 async def test_clear_manual_resets_everything(db):
     await _seed(db)
     await save_page_budget(db, 1, "t1", total=120, allocate=True)
-    await save_page_budget(db, 1, "t1", overrides=[{"block_id": "1", "pages": 99, "pinned": True}])
+    await save_page_budget(db, 1, "t1", overrides=[{"block_id": "1.1", "pages": 99, "pinned": True}])
     cleared = await clear_page_budget(db, 1, "t1")
-    first = next(c for c in cleared["chapters"] if c["block_id"] == "1")
+    first = next(c for c in cleared["chapters"] if c["block_id"] == "1.1")
     assert first["pages"] != 99 and not first["pinned"]
     assert cleared["ok"] and cleared["allocated"] == 120
 
@@ -178,9 +180,9 @@ def test_allocate_uses_subtree_scores_when_parent_has_none():
         {"block_id": "s1.2.1", "title": "技术实现方案", "level": 3, "score_weight": 24},
     ]
     pages = allocate_pages(120, chapters)
-    assert sum(pages.values()) == 120
+    assert sum(pages.values()) == 120, "额度只落在最细可分配层"
     assert pages["s1.2"] > pages["s1.1"], "24 分的子树应比 4 分的子树分到更多页"
-    assert pages["s1"] > 0
+    assert "s1" not in pages, "父章节是合计，不参与分配"
 
 
 async def test_clear_manual_can_set_new_total(db):
@@ -197,3 +199,17 @@ async def test_clear_manual_also_updates_source(db):
     await save_page_budget(db, 1, "t1", total=120, source="技术部分规定", allocate=True)
     cleared = await clear_page_budget(db, 1, "t1", total=0, source="")
     assert cleared["total"] == 0 and cleared["source"] == ""
+
+
+def test_parent_gets_rollup_not_double_counted():
+    """父章节不能与子章节各拿一份额度（联调实测：父 57 页、子又各自分页）。"""
+    chapters = [
+        {"block_id": "s1", "title": "技术评分项应答", "level": 1},
+        {"block_id": "s1.1", "title": "项目理解", "level": 2},
+        {"block_id": "s1.2", "title": "技术实现方案", "level": 2},
+        {"block_id": "s1.3", "title": "项目业绩", "level": 2},
+    ]
+    pages = allocate_pages(120, chapters)
+    rolled = rollup_pages(chapters, pages)
+    assert rolled["s1"] == rolled["s1.1"] + rolled["s1.2"] + rolled["s1.3"], "父 = 子树合计"
+    assert sum(pages.values()) == 120, "额度只落在最细层，父级不进 allocate_pages 的返回值"

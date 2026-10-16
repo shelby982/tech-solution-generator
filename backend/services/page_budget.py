@@ -110,6 +110,60 @@ def subtree_scores(chapters: list[dict]) -> dict:
     return totals
 
 
+
+def _parent_key(chapters: list[dict], key: str) -> str | None:
+    """按 block_id 前缀找父节点（s1.2.1 → s1.2）。"""
+    keys = {_key(c) for c in chapters if _key(c)}
+    parts = str(key).split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        candidate = ".".join(parts[:cut])
+        if candidate in keys:
+            return candidate
+    return None
+
+
+def allocation_targets(chapters: list[dict]) -> list[dict]:
+    """分配落点：前两层里**没有可分配子节点**的章节。
+
+    否则父章节与子章节会各自拿到一份额度 → 同一份篇幅被算两遍
+    （联调时实测：父章节 57 页，而它的子章节又各自分了页）。
+    """
+    allocatable = {_key(c) for c in chapters if is_allocatable(c)}
+    targets = []
+    for chapter in chapters:
+        if not is_allocatable(chapter):
+            continue
+        key = _key(chapter)
+        has_allocatable_child = any(
+            other != key and str(other).startswith(f"{key}.")
+            for other in allocatable
+        )
+        if not has_allocatable_child:
+            targets.append(chapter)
+    return targets
+
+
+def rollup_totals(chapters: list[dict], pages: dict) -> dict:
+    """父章节的页数 = 子树合计（只用于展示，不参与分配，避免重复计算）。"""
+    out = {}
+    for chapter in chapters:
+        key = _key(chapter)
+        if key is None:
+            continue
+        own = pages.get(key)
+        if own is not None and any(c is chapter for c in []):
+            pass
+        total = 0.0
+        for other_key, value in pages.items():
+            if other_key and (other_key == key or str(other_key).startswith(f"{key}.")):
+                total += value
+        if key in pages:
+            out[key] = int(total)
+        elif total:
+            out[key] = int(total)
+    return out
+
+
 def _weight(chapter: dict, subtree: dict | None = None) -> float:
     """分配权重 = 分值 × 类型系数（分值缺失时退化为类型系数，最低 0.1 防止全 0）。"""
     score = _own_score(chapter)
@@ -128,7 +182,7 @@ def allocate_pages(total: int, chapters: list[dict]) -> dict:
     - 剩余额度不足时从权重最小的章节逐步回收，不会出现负数。
     """
     total = max(0, int(total or 0))
-    allocatable = [c for c in chapters if is_allocatable(c)]
+    allocatable = allocation_targets(chapters)      # 只在最细的可分配层落额度
     pages: dict = {}
 
     pinned = [c for c in allocatable if c.get("pinned")]
@@ -170,6 +224,23 @@ def allocate_pages(total: int, chapters: list[dict]) -> dict:
     return pages
 
 
+def rollup_pages(chapters: list[dict], pages: dict) -> dict:
+    """父章节的页数 = 子树合计（**仅供展示**，不参与分配，也不参与合计校验）。
+
+    单独一个函数的原因：如果混进 allocate_pages 的返回值，调用方 sum(values())
+    会把父子各算一遍（联调实测：120 变成 240）。
+    """
+    out = dict(pages)
+    for chapter in chapters:
+        key = _key(chapter)
+        if key is None or key in pages:
+            continue
+        children = [k for k in pages if k and str(k).startswith(f"{key}.")]
+        if children:
+            out[key] = sum(pages[k] for k in children)
+    return out
+
+
 def _key(chapter: dict):
     return chapter.get("block_id") or chapter.get("id")
 
@@ -177,12 +248,12 @@ def _key(chapter: dict):
 def summarize(total: int, chapters: list[dict]) -> dict:
     """合计与校验（页数从章节自身取，调用方负责已写入分配结果）。"""
     total = max(0, int(total or 0))
-    allocatable = [c for c in chapters if is_allocatable(c)]
-    pages = sum(max(0, int(c.get("pages") or 0)) for c in allocatable)
+    targets = {_key(c) for c in allocation_targets(chapters)}
+    pages = sum(max(0, int(c.get("pages") or 0)) for c in chapters if _key(c) in targets)
     return {
         "total": total,
         "allocated": pages,
-        "chapter_count": len(allocatable),
+        "chapter_count": len(targets),
         "diff": pages - total,
         "ok": pages == total,
     }
@@ -248,10 +319,19 @@ async def list_chapters(db, project_id: int, thread_id: str) -> list[dict]:
     return out
 
 
+
+def _mark_targets(chapters: list[dict]) -> None:
+    """标出"分配落点"（前端据此决定哪些行可编辑、哪些只是父级合计）。"""
+    targets = {_key(c) for c in allocation_targets(chapters)}
+    for chapter in chapters:
+        chapter["is_target"] = _key(chapter) in targets
+
+
 async def get_page_budget(db, project_id: int, thread_id: str) -> dict:
     """读篇幅：总额 + 每章页数 + 合计校验。"""
     answer = await _read_answer(db, project_id, thread_id)
     chapters = await list_chapters(db, project_id, thread_id)
+    _mark_targets(chapters)
     total = max(0, int(answer.get("total") or 0))
     payload = {
         "total": total,
@@ -299,10 +379,14 @@ async def save_page_budget(
             chapter["pinned"] = bool(item.get("pinned", True))
 
     if allocate:
-        pages = allocate_pages(int(answer.get("total") or 0), chapters)
+        targets_pages = allocate_pages(int(answer.get("total") or 0), chapters)
+        display_pages = rollup_pages(chapters, targets_pages)   # 父章节=子树合计（展示）
+        target_keys = {_key(c) for c in allocation_targets(chapters)}
         for chapter in chapters:
-            if is_allocatable(chapter):
-                chapter["pages"] = pages.get(chapter["block_id"], chapter.get("pages") or 0)
+            key = _key(chapter)
+            if key in display_pages:
+                chapter["pages"] = display_pages[key]
+            chapter["is_target"] = key in target_keys
 
     for chapter in chapters:
         await db.execute(

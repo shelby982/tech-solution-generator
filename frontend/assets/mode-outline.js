@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v176';
-import { api } from './api.js?v=20261016-v176';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v176';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v177';
+import { api } from './api.js?v=20261016-v177';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v177';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v176';
+       } from './workspace.js?v=20261016-v177';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v176';
+       } from './workspace-model.mjs?v=20261016-v177';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v176';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v177';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3596,6 +3596,61 @@ function hideLaneTreeWhenPanelShows() {
   if (empty) { empty.hidden = true; empty.innerHTML = ''; }
 }
 
+// ── 篇幅（2026-10-16）：总页数一次填，按分值×类型系数分配到各章 ──
+// 数据落 blocks.page_budget + split_answers['page_budget']，接口见 routes/workflow.py。
+let pageBudgetData = null;
+let pageBudgetThreadId = '';
+
+function pageBudgetKeyOf(b) { return String(b?.block_id || b?.id || ''); }
+
+function pageBudgetChapterOf(blockId) {
+  const list = pageBudgetData?.chapters || [];
+  return list.find(c => String(c.block_id) === String(blockId)) || null;
+}
+
+/** 目录行右侧的页数单元：可分配的章节给输入框，其余显示占位。 */
+function pageBudgetCellHtml(b) {
+  if (!pageBudgetData || !pageBudgetData.directory_confirmed) return '';
+  const key = pageBudgetKeyOf(b);
+  const chapter = pageBudgetChapterOf(key);
+  if (!chapter) return '';
+  // 只有"分配落点"可编辑；父章节只读显示子树合计（额度不与子章节重复计算）
+  if (!chapter.is_target) {
+    if (Number(chapter.pages) > 0) {
+      return `<span class="sr-erow-page is-sum" title="父章节页数 = 子树合计">${Number(chapter.pages)} 页</span>`;
+    }
+    return '<span class="sr-erow-page is-muted" title="更深的叶子计入上级章节">—</span>';
+  }
+  return `<span class="sr-erow-page"><input type="number" class="sr-page-input" min="0" step="1"
+    data-page="${escapeHtml(key)}" value="${Number(chapter.pages) || 0}"
+    title="本章页数；改过之后固定，不再被自动分配覆盖" aria-label="本章页数" /> 页${
+    chapter.pinned ? '<em class="sr-page-pinned">已调整</em>' : ''}</span>`;
+}
+
+/** 篇幅控制条：总页数 + 两个动作 + 合计校验 + 确认篇幅。 */
+function pageBudgetBarHtml() {
+  if (!pageBudgetData || !pageBudgetData.directory_confirmed) return '';
+  const d = pageBudgetData;
+  const ok = !!d.ok;
+  const sum = `<span class="sr-dim" id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>`;
+  const check = d.confirmed
+    ? `<span class="sr-dim" id="sr-page-check" style="color:#15803d">✅ 篇幅已确认</span>`
+    : (ok ? `<span class="sr-dim" id="sr-page-check" style="color:#15803d">合计与需求一致</span>`
+          : `<span class="sr-dim" id="sr-page-check" style="color:#b45309">⚠ 与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页</span>`);
+  return `<h5 class="sr-sec">篇幅</h5>
+    <div class="sr-page-budget" data-page-budget-bar>
+      <span>总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页</span>
+      <span class="sr-dim">来源：${escapeHtml(d.source || '招标文件规定')}</span>
+      <button class="mw-btn" data-act="page-alloc">按总篇幅分配</button>
+      <button class="mw-btn" data-act="page-clear">清除手工调整</button>
+      ${sum}${check}
+      <span style="flex:1"></span>
+      <button class="mw-btn primary" data-act="page-confirm" ${d.confirmed || !ok ? 'disabled' : ''}>确认篇幅</button>
+      <span class="sr-dim">${d.confirmed ? '可进入编写' : '确认后与目录一并保存'}</span>
+      <span class="sr-dim" data-page-feedback role="status" aria-live="polite"></span>
+    </div>`;
+}
+
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
   try { await activePackageReady; } catch (err) {
@@ -3626,6 +3681,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const tid = await resolvePanelThreadId(null);
   let data = null;
   try { data = await api.workflow.splitReport(projectId, tid); } catch (e) { data = null; }
+  // 篇幅与目录同源：面板每次打开都同步一次（目录变了篇幅可能失效，后端以目录确认为前置）
+  pageBudgetThreadId = tid || '';
+  try {
+    const budgetResp = await fetch(`/api/workflow/${encodeURIComponent(tid)}/page-budget`, {signal: AbortSignal.timeout(10000)});
+    pageBudgetData = budgetResp.ok ? await budgetResp.json() : null;
+  } catch (e) { pageBudgetData = null; }
   if (!data) {
     // 不弹窗：把失败写进面板容器（用户点开的地方），一眼能看到
     const host = document.getElementById('split-panel-inline');
@@ -4081,6 +4142,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       ${pts.length ? `<span class="sr-struct-meta">评分点：${escapeHtml(pts.join('、').slice(0, 20))}</span>` : ''}
       ${b.score_weight ? `<span class="sr-struct-score">${b.score_weight} 分</span>` : ''}
       ${reqs ? `<span class="sr-struct-meta">规范书 ${reqs} 条</span>` : ''}
+      ${pageBudgetCellHtml(b)}
       <span class="sr-erow-acts">
         <button class="sr-mini" data-act="struct" data-op="rename" data-block="${escapeHtml(String(b.block_id || b.id))}">改名</button>
         <button class="sr-mini" data-act="struct" data-op="up" data-block="${escapeHtml(String(b.block_id || b.id))}">上移</button>
@@ -4158,6 +4220,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <details class="response-mapping"><summary>查看章节与原文依据映射</summary>${structBlocks.filter(b=>parseIds(b.review_point_ids).length||parseIds(b.spec_requirement_ids).length).map(b=>`<div class="response-map-row"><strong>${escapeHtml(b.title)}</strong><span>${parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '技术规范要求'}</span><span class="sr-dim">${parseIds(b.spec_requirement_ids).length} 条规范要求</span></div>`).join('')}</details>
       <div class="response-confirm-bar"><div><strong>${categoriesConfirmed ? '目录已确认' : '确认应答目录'}</strong><span>${categoriesConfirmed ? '可直接进入编写，随时查看目录与依据' : '保存目录并校验，成功后直接进入编写'}</span></div><button class="mw-btn primary" data-act="${categoriesConfirmed ? 'response-write' : 'response-confirm'}">${categoriesConfirmed ? `进入${responseLabel}编写` : `确认目录，创建${responseLabel}`}</button></div><div class="response-confirm-feedback" data-confirm-feedback role="status" aria-live="polite" hidden></div>` : ''}
     ${previewReady && data.outline_checks?.response_outline_version === 2 ? `<div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}</span><span>明确风险要求已安排 ${responseChecks.risk_requirements_landed} / ${responseChecks.risk_requirements_total}</span><span>原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total}</span><span>${data.outline_checks.original_structure_matches ? '标题、层级与顺序一致' : '原文结构待核对'}</span><span>要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total}</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div>${responseWarningsHtml}` : ''}
+    ${previewReady ? pageBudgetBarHtml() : ''}
     <div class="sr-dim" data-flash-for="generate"></div>`;
 
   // ③ 产物
@@ -4464,6 +4527,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-points-total b{font-size:15px;font-weight:600;margin:0 3px}
   .sr-subpane{display:none}
   .sr-subpane.on{display:block}
+  .sr-page-budget{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;margin:0 0 12px;border:1px solid var(--line);border-radius:8px;background:#fbfdff;font-size:12.5px}
+  .sr-page-budget input{font:inherit;font-size:12.5px;width:78px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right}
+  .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
+  .sr-erow-page input{font:inherit;font-size:11.5px;width:56px;padding:2px 6px;border:1px solid var(--line);border-radius:5px;text-align:right}
+  .sr-erow-page.is-muted{opacity:.5}
+  .sr-erow-page.is-sum{color:var(--text);font-variant-numeric:tabular-nums}
+  .sr-page-pinned{font-style:normal;font-size:10.5px;padding:1px 5px;border-radius:4px;background:#ecfdf5;color:#15803d}
   .sr-erow.is-source .sr-erow-acts button{display:none}.sr-erow.is-source .sr-grip{visibility:hidden;pointer-events:none}.sr-erow.is-source{background:#fafbfc}
   .response-chapter-evidence{padding:12px;margin-top:10px;border:1px solid var(--line);border-radius:6px;font-size:12px;line-height:1.7}.response-evidence-item{padding:10px 0;border-top:1px solid var(--line)}.response-evidence-item small{display:block;color:var(--muted);margin-bottom:5px}
   .response-landing-warning{font-size:12px;line-height:1.7;padding:10px 12px;margin:8px 0;border:1px solid #fde68a;border-radius:6px;background:#fffbeb;color:#92400e}.response-landing-warning summary{cursor:pointer}.response-landing-warning ul{max-height:180px;overflow:auto;padding-left:20px}.response-landing-warning p{margin:6px 0}
@@ -4663,6 +4733,48 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     } catch(error) { slot.textContent = error.message; }
     finally { button.disabled = false; }
   });
+  // ── 篇幅：分配 / 清除手工调整 / 确认 / 逐章改页数 ──
+  const postPageBudget = async (payload) => {
+    const resp = await fetch(`/api/workflow/${encodeURIComponent(tid)}/page-budget`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(15000),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(typeof body.detail === 'string' ? body.detail : '篇幅保存失败，请重试');
+    }
+    pageBudgetData = body;
+    await openSplitReport({stage: '2'});
+  };
+  const pageFeedback = (message) => {
+    const slot = el.querySelector('[data-page-feedback]');
+    if (slot) { slot.textContent = message; slot.style.color = '#b45309'; }
+  };
+  const pageTotal = () => Number(el.querySelector('#sr-page-total')?.value || 0);
+  el.querySelector('[data-act="page-alloc"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    try { await postPageBudget({total: pageTotal(), allocate: true}); }
+    catch (err) { pageFeedback(err.message); }
+  });
+  el.querySelector('[data-act="page-clear"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    try { await postPageBudget({total: pageTotal(), clear_manual: true}); }
+    catch (err) { pageFeedback(err.message); }
+  });
+  el.querySelector('[data-act="page-confirm"]')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await postPageBudget({total: pageTotal(), confirm: true}); }
+    catch (err) { pageFeedback(err.message); button.disabled = false; }
+  });
+  el.querySelectorAll('.sr-page-input').forEach((input) => input.addEventListener('change', async (event) => {
+    event.stopPropagation();
+    const pages = Math.max(0, Number(input.value) || 0);
+    try {
+      await postPageBudget({total: pageTotal(), overrides: [{block_id: input.dataset.page, pages, pinned: true}]});
+    } catch (err) { pageFeedback(err.message); }
+  }));
   el.querySelectorAll('[data-act="redraft-outline"]').forEach(button => button.addEventListener('click', async event => {
     event.stopPropagation();
     button.disabled = true;
