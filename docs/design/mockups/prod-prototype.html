@@ -15600,4 +15600,78 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   }
 })();
 </script>
+
+<script>
+/* 按方案 §6.1/§6.4 补齐：左树预算进度、复合徽标、标题块与图占位、计划文案、完成确认单入口 */
+(function(){
+  var WPP=250;
+  /* ① 左树：恢复方案要求的「差 X 页 / 已达标」——但不占文字宽度，用行底 2px 进度（悬浮出数字） */
+  var st=document.createElement('style');
+  st.textContent='.cs-node[data-budget]::after{content:"";position:absolute;left:3px;right:8px;bottom:2px;height:2px;'+
+    'border-radius:1px;background:linear-gradient(90deg,#93c5fd var(--p),#e8edf3 0)}'+
+    '.cs-node[data-budget][data-full]::after{background:linear-gradient(90deg,#86efac var(--p),#e8edf3 0)}';
+  document.head.appendChild(st);
+  var demoDiff=[3.5,33,10,17,6,5];
+  document.querySelectorAll('.cs-tree .cs-node').forEach(function(n,i){
+    var done=(i%4===0)?null:demoDiff[i%6];       // 演示：部分章节有缺口
+    if(done===null){ n.setAttribute('data-full','1'); n.style.setProperty('--p','100%');
+      n.setAttribute('data-budget','1'); n.title=((n.getAttribute('title')||'')+' · 已达标').trim(); return; }
+    var budget=done+2.5, pct=Math.round(Math.min(100,(2.5/budget)*100));
+    n.setAttribute('data-budget','1'); n.style.setProperty('--p',pct+'%');
+    n.title=((n.getAttribute('title')||'')+' · 差 '+done+' 页（已写 2.5 / '+budget+' 页）').trim();
+  });
+
+  /* ② 块级正文按方案补两类块：标题块、图占位；并补「AI 生成 · 人工改过」复合徽标 */
+  var view=document.getElementById('blockView');
+  if(view && !view.dataset.planDone){
+    var html=view.innerHTML;
+    html=html.replace('<div style="border-left:3px solid #e2e8f0;padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px">'+
+      '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:#1d4ed8;margin-right:6px">方案</span>',
+      '<h4 style="margin:2px 0 8px;font-size:14px;font-weight:600">3.1 建设目标与范围</h4>'+
+      '<div style="border-left:3px solid #e2e8f0;padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px">'+
+      '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:#1d4ed8;margin-right:6px">方案</span>');
+    /* 图占位 + 复合徽标：追加在最后 */
+    html+='<div style="margin:10px 0 6px"><span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:#0e7490;margin-right:6px">图示</span>'+
+      '<span style="font-size:12px;color:#334155">图 3-1 平台总体架构（自动生成·待你确认）</span></div>'+
+      '<div style="border:1px dashed #cbd5e1;border-radius:8px;height:96px;display:flex;align-items:center;justify-content:center;'+
+      'color:#94a3b8;font-size:12px;background:#fcfdff;margin-bottom:9px">［图占位：架构图草图，点此替换或确认］</div>'+
+      '<div style="border-left:3px solid #e2e8f0;padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px">'+
+      '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:#15803d;margin-right:6px">证据</span>'+
+      '本公司在同类项目中已连续三年通过等保三级测评。'+
+      '<div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">'+
+      '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:#ecfdf5;color:#15803d;font-weight:600">AI 生成</span>'+
+      '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:#fffbeb;color:#b45309;font-weight:600">人工改过</span>'+
+      '<span>来源：L1 凭证级 · 等保测评报告</span></div></div>';
+    view.innerHTML=html;
+    view.dataset.planDone='1';
+  }
+
+  /* ③ 编制计划预览：补方案要求的"已有 1、缺 2" */
+  var ai=document.querySelector('[data-action="ai"]');
+  if(ai) ai.addEventListener('click',function(){
+    setTimeout(function(){
+      var b=document.getElementById('planBox'); if(!b) return;
+      if(b.innerHTML.indexOf('需要 3 类证据')>=0 && b.innerHTML.indexOf('已有')<0)
+        b.innerHTML=b.innerHTML.replace('需要 3 类证据','需要 3 类证据（已有 1 类，缺 2 类）');
+    },60);
+  });
+
+  /* ④ 完成确认单入口：把真实的「确认本章完成」从 ▸更多 提到工具条，收尾栏不再放按钮 */
+  var tb=document.querySelector('.cs-toolbar');
+  var doneBtn=null;
+  document.querySelectorAll('button').forEach(function(b){
+    if(!doneBtn && (b.textContent||'').trim()==='确认本章完成') doneBtn=b;
+  });
+  /* 它在工具条内的 ▸更多(details) 里 —— 复制一个到工具条上，并隐掉菜单里那个，保证单入口且可见 */
+  if(tb && doneBtn){
+    var clone=doneBtn.cloneNode(true);
+    clone.style.marginLeft='12px';
+    tb.insertBefore(clone, tb.querySelector('details')||null);
+    doneBtn.style.display='none';
+  }
+  var f=document.getElementById('writeFooter');
+  if(f){ f.querySelectorAll('button').forEach(function(b){ b.remove(); });
+    f.insertAdjacentHTML('beforeend','<span class="sr-dim">入口在工具条：确认本章完成</span>'); }
+})();
+</script>
 </body></html>
