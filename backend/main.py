@@ -156,6 +156,15 @@ async def lifespan(app: FastAPI):
     async with get_db() as conn:
         await init_db(conn)
     logger.info("SQLite 数据库已初始化")
+    # 启动对账：把"进程中途死掉、却看起来像在等用户"的运行标记出来（见 services/run_recovery.py）
+    try:
+        from services.run_recovery import mark_interrupted_runs
+        async with get_db() as _db:
+            _n = await mark_interrupted_runs(_db)
+        if _n:
+            logger.warning("启动对账：标记了 %s 个中途中断的运行", _n)
+    except Exception as _exc:
+        logger.warning("启动对账跳过：%s", _exc)
     from routes.chapter_studio import recover_exports
     await recover_exports()
 

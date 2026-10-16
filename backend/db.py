@@ -374,6 +374,17 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
     # 篇幅（2026-10-16，用户要求：填一个总页数，由系统分配到各章，不能让用户逐章手工填）：
     # 页数直接落在目录节点上（与目录同一个对象），pinned 记录"人工改过、不再被自动分配覆盖"。
+    # 中途中断标记（2026-10-16）：进程在"两个节点之间"被杀/重启时，
+    # workflow_runs.stage 会停在 points_review，与"正等用户确认"完全同形。
+    # 用 checkpoints 对账（见 services/run_recovery.py），这里只加字段存事实。
+    for _col, _kind in (("interrupted_at", "DATETIME"), ("interrupted_node", "TEXT")):
+        try:
+            _cols = {r[1] for r in await (await conn.execute("PRAGMA table_info(workflow_runs)")).fetchall()}
+            if _col not in _cols:
+                await conn.execute(f"ALTER TABLE workflow_runs ADD COLUMN {_col} {_kind}")
+        except Exception as exc:                  # 加列失败不影响启动
+            logger.warning("workflow_runs.%s 迁移跳过：%s", _col, exc)
+
     # packages.display_name 回填（2026-10-16，用户反馈"标的名称没有展示"）：
     # 抽取阶段刻意留空名称（不编造），确认标包时只写了编号标签（如「标的 1」）；
     # 而名称其实就在 evidence 引文里（「标的1：2026年…采购项目」）。
