@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v183';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v183';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v183';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v186';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v186';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v186';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -166,10 +166,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       pageBudget.loaded = true;
     } catch (e) { /* 篇幅拿不到时不影响编写 */ }
   }
+  /** 子树已写字数：父章节自己不写正文，正文在子章节里 —— 直接数自己会得到 0，误导用户。 */
+  function subtreeWords(b) {
+    const key = String(b.block_id || b.id);
+    const self = wordsOf(b);
+    const children = (blocks || []).filter((x) => {
+      const k = String(x.block_id || x.id);
+      return k !== key && k.startsWith(`${key}.`);
+    });
+    return self + children.reduce((sum, x) => sum + wordsOf(x), 0);
+  }
   function budgetLineHtml(b) {
     const c = budgetOf(b);
     if (!c || !Number(c.pages)) return '';
-    const words = wordsOf(b), pages = pagesOf(b);
+    const isParent = c.is_target === false;
+    const words = isParent ? subtreeWords(b) : wordsOf(b);
+    const pages = words / WPP;
     const gap = Number(c.pages) - pages;
     const state = gap <= 0.1
       ? '<span class="is-ok">已达标</span>'
@@ -177,7 +189,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<div class="cs-chapter-budget">
       <span>预算 <b>${Number(c.pages)}</b> 页 · 已写 <b>${pages.toFixed(1)}</b> 页（${words} 字）</span>
       ${state}
-      ${c.is_target === false ? '<span class="cs-muted">父章节按子树合计</span>' : ''}
+      ${isParent ? '<span class="cs-muted">父章节：预算与已写均为子树合计</span>' : ''}
     </div>`;
   }
   const stateOf = b => !units.has(b.id) ? '目录' : profile[b.id]?.writing_status==='complete' ? '完成' : b.content?.trim() ? (profile[b.id]?.writing_status==='review'?'待核对':'草稿') : '未开始';
@@ -190,18 +202,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   if (asideHost && mainHost && typeof MutationObserver !== 'undefined') {
     const moveKindRow = () => {
       const select = asideHost.querySelector('[data-cs="layout"]');
-      if (!select || mainHost.querySelector('[data-cs="layout"]')) return;
+      if (!select) return;
       let row = mainHost.querySelector('.cs-kind-row');
       // 注意：本模块内 document 是接口返回的数据对象（不是 DOM），必须用 globalThis.document
       if (!row) { row = globalThis.document.createElement('div'); row.className = 'cs-kind-row'; }
-      row.innerHTML = '<span class="cs-muted">章节类型</span>';
-      row.appendChild(select);
-      row.insertAdjacentHTML('beforeend', '<span class="cs-muted">决定本章按哪类章节编制（影响提示与结构）</span>');
+      // 右栏每次重渲染都会**新建**一个 select，必须把新的换进来、旧的丢掉，
+      // 否则主栏与右栏会各留一个（实测出现过两个"章节类型"、值还不一样）
+      const stale = row.querySelector('[data-cs="layout"]');
+      if (stale && stale !== select) stale.remove();
+      if (select.parentElement !== row) {
+        row.innerHTML = '<span class="cs-muted">章节类型</span>';
+        row.appendChild(select);
+        row.insertAdjacentHTML('beforeend', '<span class="cs-muted">决定本章按哪类章节编制（影响提示与结构）</span>');
+      }
       const label = select.closest('label');
-      if (label) label.hidden = true;
+      if (label) label.hidden = true;          // 右栏原位置不再重复出现
       const editor = mainHost.querySelector('[data-cs="editor"]');
-      if (editor && editor.parentElement === mainHost) mainHost.insertBefore(row, editor);
-      else mainHost.appendChild(row);
+      if (row.parentElement !== mainHost) {
+        if (editor && editor.parentElement === mainHost) mainHost.insertBefore(row, editor);
+        else mainHost.appendChild(row);
+      }
     };
     new MutationObserver(moveKindRow).observe(asideHost, {childList: true, subtree: true});
     moveKindRow();
@@ -236,7 +256,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (profile[block.id]?.writing_status==='complete') profile[block.id].writing_status='review';
       if (active.id===block.id && editor.value===value) { dirty=false; sessionStorage.removeItem(draftKey(block)); }
       paintTree(); stats();
-      if(active.id===block.id)get('chapter-head').querySelector('span').textContent=`已保存 · ${stateOf(block)}`;
+      if(active.id===block.id){const savedState=stateOf(block);get('chapter-head').querySelector('span').textContent=savedState==='目录'?'已保存':`已保存 · ${savedState}`;}
       host.querySelector('[data-action="save"]').disabled=!dirty;
       status(''); return true;
     } catch (error) { status(`保存失败：${error.message}。本地草稿已保留。`); return false; }
@@ -317,7 +337,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       active=block;context=data;dirty=false;
       profile[block.id]=data.profile;
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${esc(stateOf(block))}</span>${budgetLineHtml(block)}`;
+      const headState = stateOf(block);
+      // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span>${budgetLineHtml(block)}`;
       host.querySelector('[data-action="save"]').disabled=true;
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
