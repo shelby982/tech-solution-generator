@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v202';
-import { api } from './api.js?v=20261016-v202';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v202';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v203';
+import { api } from './api.js?v=20261016-v203';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v203';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v202';
+       } from './workspace.js?v=20261016-v203';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v202';
+       } from './workspace-model.mjs?v=20261016-v203';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v202';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v203';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4958,8 +4958,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     event.stopPropagation();
     const button = event.currentTarget;
     button.disabled = true;
-    try { await postPageBudget({total: pageTotal(), confirm: true}); }
-    catch (err) { pageFeedback(err.message); button.disabled = false; }
+    try {
+      await postPageBudget({total: pageTotal(), confirm: true});
+      // 两步都确认完成 → 这时才进入编写（与用户要求一致：目录 → 篇幅 → 编辑）
+      planStep = null;
+      button.textContent = '已确认，正在打开编写…';
+      await openSplitReport({stage:'4', sub:'writing'});
+      document.querySelector('.sr-stage.on')?.scrollIntoView({behavior:'smooth', block:'start'});
+    } catch (err) { pageFeedback(err.message); button.disabled = false; }
   });
   el.querySelectorAll('.sr-page-input').forEach((input) => input.addEventListener('change', async (event) => {
     event.stopPropagation();
@@ -5063,9 +5069,12 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         error.validation = typeof detail === 'object' ? detail : null;
         throw error;
       }
-      button.textContent = '已确认，正在打开编写…';
-      splitPanelFlash = `已创建${responseLabel}，现在可以按章编写，目录和依据可随时查看。`;
-      await openSplitReport({stage:'4', sub:'writing'});
+      // 用户要求（2026-10-16）：确认目录后**不要**直接跳编写，而要进第 2 步「分配篇幅」；
+      // 篇幅确认之后才进编写。旧行为把两步压成一步，用户看不到篇幅分配。
+      button.textContent = '已确认，进入篇幅分配…';
+      splitPanelFlash = `已确认${responseLabel}目录。下一步：填一个总页数，系统按各章分值自动分配。`;
+      planStep = '2';
+      await openSplitReport({stage:'2'});
       document.querySelector('.sr-stage.on')?.scrollIntoView({behavior:'smooth',block:'start'});
     } catch (err) {
       button.disabled = false;
