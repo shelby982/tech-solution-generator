@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v190';
-import { api } from './api.js?v=20261016-v190';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v190';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v191';
+import { api } from './api.js?v=20261016-v191';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v191';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v190';
+       } from './workspace.js?v=20261016-v191';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v190';
+       } from './workspace-model.mjs?v=20261016-v191';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v190';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v191';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4238,7 +4238,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <details class="sr-dir-more"><summary>▸ 校验明细</summary>
           <div class="sr-dim">已关联评分点 ${landedPoints.size} / ${expectedPoints}${responseType === 'tech' ? ` · 规范要求 ${expectedRequirements.length - missingRequirements.length} / ${expectedRequirements.length}` : ''}${data.outline_checks?.response_outline_version === 2 ? ` · 原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total} · 要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total} · 重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}` : ''}<br>编制依据：${responseType === 'commerce' ? '商务' : '技术'}评分点 ${expectedPoints} 项${responseType === 'tech' ? ` · 技术规范要求 ${specCount} 条` : ''}</div></details>
         <span style="flex:1"></span>
-        <span class="sr-dim">${categoriesConfirmed ? '可继续填写篇幅' : '先确认目录，再确认篇幅'}</span>
+        <span class="sr-dir-chain" title="目录是结构，篇幅是挂在结构上的属性；改目录会使篇幅作废">
+          <span class="${categoriesConfirmed ? 'is-done' : 'is-now'}">① 目录${categoriesConfirmed ? ' 已确认' : ' 待确认'}</span>
+          <i>→</i>
+          <span class="${pageBudgetData?.confirmed ? 'is-done' : (categoriesConfirmed ? 'is-now' : 'is-todo')}">② 篇幅${pageBudgetData?.confirmed ? ' 已确认' : (categoriesConfirmed ? ' 待确认' : ' 待开始')}</span>
+          <i>→</i>
+          <span class="${categoriesConfirmed && pageBudgetData?.confirmed ? 'is-now' : 'is-todo'}">③ 进入编写</span>
+        </span>
       </div>` : ''}
       ${pageBudgetBarHtml()}
       ${pane1}
@@ -4579,6 +4585,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   /* 页面原生 :disabled 是 cursor:wait（等待中）；这里语义是"前置未完成"，改回 not-allowed */
   [data-page-budget-bar]>button:disabled{cursor:not-allowed}
   .sr-dir-head .ui-pill{margin:0}
+  /* 三步依赖链：① 目录 → ② 篇幅 → ③ 进入编写（结构 → 属性 → 放行） */
+  .sr-dir-chain{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+  .sr-dir-chain i{font-style:normal;color:#cbd5e1}
+  .sr-dir-chain>span{padding:1px 7px;border-radius:999px;border:1px solid var(--line);background:#f8fafc}
+  .sr-dir-chain>span.is-now{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;font-weight:600}
+  .sr-dir-chain>span.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
+  .sr-dir-chain>span.is-todo{opacity:.55}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
   .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
   .sr-erow-page.is-muted{opacity:.5}
