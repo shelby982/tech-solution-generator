@@ -11926,20 +11926,19 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       <div class="response-confirm-bar"><div><strong>目录已确认</strong><span>可直接进入编写，随时查看目录与依据</span></div><button class="mw-btn primary" data-act="response-write">进入技术应答编写</button></div><div class="response-confirm-feedback" data-confirm-feedback="" role="status" aria-live="polite" hidden=""></div>
     <div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 6 / 19</span><span>明确风险要求已安排 0 / 0</span><span>原文章节 68 / 68</span><span>标题、层级与顺序一致</span><span>要求归属 411 / 411</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div><details class="response-landing-warning"><summary>建议前部突出 13 条重点要求 · 不影响确认</summary><p>以下要求已在点对点应答中安排，可结合评分章节补充说明，无需恢复原来的独立章节。</p><ul><li>1. 总则 &gt; 1.3. 对技术投标文件的编制要求</li><li>1. 总则 &gt; 1.3. 对技术投标文件的编制要求 &gt; 五、其他 · 第 1 条</li><li>2. 项目描述 &gt; 2.4. 项目依据</li><li>4. 项目实施 &gt; 4.1. 组织保障要求</li><li>4. 项目实施 &gt; 4.2. 项目组织人员要求 &gt; 4.2.1. 项目经理要求</li><li>4. 项目实施 &gt; 4.2. 项目组织人员要求 &gt; 4.2.2. 项目服务团队要求 · 第 1 条</li><li>4. 项目实施 &gt; 4.4. 联络会议 &gt; 4.4.2. 项目联络会</li><li>4. 项目实施 &gt; 4.5. 质量要求</li><li>4. 项目实施 &gt; 4.6. 项目验收要求 &gt; 4.6.1. 验收标准</li><li>5. 项目售后服务和技术支持 &gt; 5.1. 售后服务总体要求</li><li>5. 项目售后服务和技术支持 &gt; 5.2. 应急预案</li><li>5. 项目售后服务和技术支持 &gt; 5.4. 技术维护支持 &gt; 5.4.1. 技术维护支持服务</li><li>6. 安全保密要求 &gt; 6.2. 行为规范</li></ul></details>
     
-      <h5 class="sr-sec" id="budgetSec">篇幅要求</h5>
-      <div class="sr-note">目录已确认，可填写本应答的篇幅要求。</div>
-      <div class="sr-answer" style="gap:10px;flex-wrap:wrap">
+      <h5 class="sr-sec" id="budgetSec">篇幅</h5>
+      <div class="sr-note">按总篇幅分配到各章目录；可直接改某一章的页数，改过的章节保持不动。</div>
+      <div class="sr-answer" style="gap:10px;flex-wrap:wrap;align-items:center">
         <span>总页数 <input type="number" id="totalPg" value="120" style="width:80px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
         <span class="sr-dim">来源：招标文件技术部分规定</span>
-        <button class="mw-btn" id="btnAlloc">按评分点分配</button>
+        <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
         <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
         <span class="sr-dim" id="sumLine"></span>
+        <span class="sr-dim" id="sumBanner">合计与需求一致</span>
+        <span style="flex:1"></span>
+        <button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>
+        <span class="sr-dim" id="budgetNote">确认后与目录一并保存</span>
       </div>
-      <table class="sr-table"><thead><tr><th style="width:34%">章节</th><th>分值</th><th>建议页</th><th>你填页</th><th>需要证据</th></tr></thead>
-        <tbody id="budgetRows"></tbody></table>
-      <div class="sr-dim" id="sumBanner" style="padding:4px 10px">合计与需求一致</div>
-      <div class="sr-answer"><button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>
-        <span class="sr-dim" id="budgetNote">确认后篇幅与证据需求一并保存</span></div>
 <div class="sr-dim" data-flash-for="generate"></div></div>
           </div>
           <div class="sr-stage on" data-stage="4">
@@ -15173,66 +15172,70 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
 <input type="file" accept=".pdf,.docx,.doc,.ppt,.pptx" multiple="" style="display: none;"><script>
 (function(){
   var $=function(id){return document.getElementById(id);};
-
-  /* 阶段切换：快照里应用的 JS 已剥离，这里只切换左右高亮与显示 */
+  /* 阶段切换（快照已剥离应用 JS） */
   function activate(stage){
-    document.querySelectorAll('.sr-rail-item').forEach(function(el){
-      el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
-    document.querySelectorAll('.sr-stage').forEach(function(el){
-      el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
+    document.querySelectorAll('.sr-rail-item').forEach(function(el){ el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
+    document.querySelectorAll('.sr-stage').forEach(function(el){ el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
   }
   document.querySelectorAll('.sr-rail-item').forEach(function(el){
     el.addEventListener('click', function(){ activate(el.getAttribute('data-stage')); }); });
-  activate('2');   // 打开即停在应答策划（先定目录与篇幅，再进编写）
 
-  /* ── 篇幅：章节从真实目录读出 ── */
+  /* ══ 篇幅：直接在真实目录行上加一列页数 ══ */
   var KIND={'技术评分项应答':1.2,'项目理解':0.7,'项目进度计划':1.0,'项目团队人员':0.9,'项目业绩':1.0,
     '开发要求':1.2,'技术实现方案':1.4,'重点及必须响应要求':1.1,'技术规范书点对点应答':1.3,
     '1.总则':0.6,'2.项目描述':0.8,'3.项目服务内容及要求':1.0,'4.项目实施':1.0};
-  var kindOf=function(c){ return KIND[c.name]||1.0; };
-  function readChapters(){
-    var out=[];
-    document.querySelectorAll('.sr-stage[data-stage="2"] .sr-erow').forEach(function(el){
-      var t=(el.querySelector('.sr-erow-title')||{}).textContent||''; t=t.trim(); if(!t) return;
-      var lvl=Number(el.getAttribute('data-level')||1); if(lvl>2) return; if(out.length>=14) return;
-      out.push({name:t,level:lvl,score:4+((out.length*7)%22),sug:0,mine:0,pinned:false,
-        need:['业绩','人员','实测'].slice(0,1+(out.length%3))});
+  var rows=[];
+  function collect(){
+    rows=[];
+    document.querySelectorAll('.sr-stage[data-stage="2"] .sr-erow').forEach(function(el,idx){
+      var t=(el.querySelector('.sr-erow-title')||{}).textContent||''; t=t.trim();
+      var lvl=Number(el.getAttribute('data-level')||1);
+      var cell=document.createElement('span');
+      cell.className='sr-erow-pages';
+      cell.style.cssText='font-size:11.5px;color:#475569;padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums';
+      var acts=el.querySelector('.sr-erow-acts');
+      if(acts) el.insertBefore(cell,acts); else el.appendChild(cell);
+      rows.push({el:el,cell:cell,name:t,level:lvl,idx:idx,
+        score: lvl<=2 ? (4+((rows.length*7)%22)) : 0,
+        alloc: lvl<=2, mine:0, pinned:false});
     });
-    if(!out.length){ out=[{name:'项目理解',level:1,score:13,sug:0,mine:0,pinned:false,need:['业绩']},
-      {name:'技术实现方案',level:1,score:24,sug:0,mine:0,pinned:false,need:['业绩','人员','实测']},
-      {name:'技术规范书点对点应答',level:1,score:23,sug:0,mine:0,pinned:false,need:['业绩']}]; }
-    return out;
   }
-  var CH=readChapters();
+  var allocatable=function(){ return rows.filter(function(r){return r.alloc && r.name;}); };
+  function kindOf(r){ return KIND[r.name]||1.0; }
   function allocate(reset){
-    if(reset) CH.forEach(function(c){ c.pinned=false; });
+    var list=allocatable();
+    if(reset) list.forEach(function(r){ r.pinned=false; });
     var total=Number($('totalPg').value||0);
-    var free=CH.filter(function(c){return !c.pinned;});
-    var rest=Math.max(0,total-CH.filter(function(c){return c.pinned;}).reduce(function(n,c){return n+c.mine;},0));
-    var w=free.map(function(c){return Math.max(0.1,(c.score||0)*kindOf(c));});
+    var free=list.filter(function(r){return !r.pinned;});
+    var rest=Math.max(0,total-list.filter(function(r){return r.pinned;}).reduce(function(n,r){return n+r.mine;},0));
+    var w=free.map(function(r){return Math.max(0.1,(r.score||1)*kindOf(r));});
     var ws=w.reduce(function(a,b){return a+b;},0)||1;
     var ex=w.map(function(x){return rest*x/ws;});
     var fl=ex.map(Math.floor), left=rest-fl.reduce(function(a,b){return a+b;},0);
     ex.map(function(x,i){return {i:i,f:x-Math.floor(x)};}).sort(function(a,b){return b.f-a.f;})
       .forEach(function(o){ if(left>0){ fl[o.i]++; left--; } });
-    free.forEach(function(c,i){ c.mine=fl[i]; });
-    renderBudget();
+    free.forEach(function(r,i){ r.mine=fl[i]; });
+    render();
   }
-  function renderBudget(){
-    $('budgetRows').innerHTML=CH.map(function(c,i){
-      return '<tr><td style="padding-left:'+(10+(c.level-1)*16)+'px">'+c.name+'</td>'+
-        '<td class="sr-num">'+c.score+'</td><td class="sr-num">'+c.sug+'</td>'+
-        '<td class="sr-num"><input type="number" value="'+c.mine+'" data-i="'+i+'" style="width:64px;font:inherit;font-size:12.5px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" />'+
-        (c.pinned?' <span class="ui-pill is-ok">已调整</span>':'')+'</td>'+
-        '<td>'+c.need.map(function(n){return '<span class="ui-pill is-none" style="margin-right:4px">'+n+'</span>';}).join('')+'</td></tr>';
-    }).join('');
-    document.querySelectorAll('#budgetRows input[data-i]').forEach(function(inp){
-      inp.addEventListener('change',function(){
-        var c=CH[Number(inp.dataset.i)]; c.mine=Number(inp.value)||0; c.pinned=true; allocate(false); }); });
-    var sum=CH.reduce(function(n,c){return n+c.mine;},0), total=Number($('totalPg').value||0);
-    $('sumLine').innerHTML='章节合计 <b>'+sum+'</b> 页';
+  function render(){
+    rows.forEach(function(r){
+      if(!r.alloc){ r.cell.textContent=''; return; }
+      var span=document.createElement('span');
+      span.textContent='';
+      r.cell.innerHTML='<input type="number" value="'+r.mine+'" data-idx="'+r.idx+'" style="width:56px;font:inherit;font-size:11.5px;padding:1px 5px;border:1px solid #e2e8f0;border-radius:5px;text-align:right" /> 页'
+        + (r.pinned?' <span class="ui-pill is-ok">已调整</span>':'');
+      r.cell.querySelector('input').addEventListener('click',function(e){e.stopPropagation();});
+      r.cell.querySelector('input').addEventListener('change',function(e){
+        e.stopPropagation();
+        r.mine=Number(e.target.value)||0; r.pinned=true; allocate(false);
+      });
+    });
+    var list=allocatable();
+    var sum=list.reduce(function(n,r){return n+r.mine;},0);
+    var total=Number($('totalPg').value||0);
+    $('sumLine').innerHTML='分配合计 <b>'+sum+'</b> 页 / 共 '+list.length+' 章';
     var b=$('sumBanner');
-    b.textContent = sum===total ? '合计与需求一致' : ('⚠ 章节合计 '+sum+' 页，与需求 '+total+' 页相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
+    b.textContent = sum===total ? '合计与需求一致' : ('⚠ 与需求相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
     b.style.color = sum===total ? '#15803d' : '#b45309';
   }
   $('totalPg').addEventListener('input',function(){ allocate(false); });
@@ -15240,23 +15243,21 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   $('btnResetAlloc').addEventListener('click',function(){ allocate(true); });
   $('btnConfirmBudget').addEventListener('click',function(){
     $('budgetNote').innerHTML='<span style="color:#15803d">✅ 已确认篇幅</span>'; });
-  allocate(true);
+  collect(); allocate(true);
 
-  /* ── 编写：块级正文（角色 + 来源徽标 + 真表格）── */
+  /* ══ 编写：块级正文 / 计划预览 / 完成检查 ══ */
   var BLOCKS=[
     {role:'方案',color:'#1d4ed8',text:'拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。',src:'L1 本章原文内容 · 技术规范书 3.2',by:'ai'},
     {role:'证据',color:'#15803d',text:'平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。',src:'L1 凭证级 · 实测参数（已核验）',by:'ai'},
     {role:'措施',color:'#0e7490',text:'随着系统运行年限增长和营销业务规模扩大，现有平台进入系统性、体系化架构升级阶段，亟需重点强化五方面能力。',src:'L1 本章原文内容 · 技术规范书 3.2',by:'human'},
     {table:true,title:'表 3-1 现有平台容量与目标对比',head:['指标','现状','目标','依据'],
-      rows:[['日均调用量','3.2 亿次','8 亿次','L1 实测参数（已核验）'],
-            ['并发用户数','6,000','8,000','L1 凭证级 · 性能测试报告'],
-            ['档案记录量','1.2 亿条','2 亿条','L1 实测参数（已核验）']]},
+      rows:[['日均调用量','3.2 亿次','8 亿次','L1 实测参数（已核验）'],['并发用户数','6,000','8,000','L1 凭证级 · 性能测试报告'],['档案记录量','1.2 亿条','2 亿条','L1 实测参数（已核验）']]},
     {role:'证据',color:'#15803d',text:'公司在智慧交通领域具有行业领先的标杆案例经验。',src:'⚠ L1 线索级 · 本企业公众号（无凭证）',by:'human',warn:true},
     {role:'承诺',color:'#c2410c',text:'［待补］近三年同类项目业绩 3 项',src:'❌ 缺 · 应从「政府采购中标公示」查（已接入）',by:'todo'}
   ];
-  function pill(txt,bg,fg){ return '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:'+bg+';color:'+fg+';font-weight:600">'+txt+'</span>'; }
+  function pill(t,bg,fg){ return '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:'+bg+';color:'+fg+';font-weight:600">'+t+'</span>'; }
   function renderBlocks(){
-    var box=$('blockView');
+    var box=$('blockView'); if(!box) return;
     $('segCount').textContent=BLOCKS.length;
     $('nAi').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='ai';}).length;
     $('nHuman').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='human';}).length;
@@ -15264,43 +15265,25 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     $('nTable').textContent=BLOCKS.filter(function(b){return b.table;}).length;
     var html='<div class="sr-note" style="margin-bottom:10px">正文按块渲染：段落带角色与来源，表格按真表格呈现（原型演示内容）。</div>';
     BLOCKS.forEach(function(b){
-      if(b.table){
-        html+='<div style="font-size:12px;color:#334155;font-weight:600;margin:10px 0 2px">'+b.title+'</div>'+
-          '<table class="sr-table"><thead><tr>'+b.head.map(function(x){return '<th>'+x+'</th>';}).join('')+
-          '</tr></thead><tbody>'+b.rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';
-        return;
-      }
-      var by = b.by==='ai'?pill('AI 生成','#ecfdf5','#15803d') : b.by==='human'?pill('人工修改 ✎','#fffbeb','#b45309') : pill('未编制','#fef2f2','#b91c1c');
+      if(b.table){ html+='<div style="font-size:12px;color:#334155;font-weight:600;margin:10px 0 2px">'+b.title+'</div><table class="sr-table"><thead><tr>'+
+        b.head.map(function(x){return '<th>'+x+'</th>';}).join('')+'</tr></thead><tbody>'+
+        b.rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; return; }
+      var by=b.by==='ai'?pill('AI 生成','#ecfdf5','#15803d'):b.by==='human'?pill('人工修改 ✎','#fffbeb','#b45309'):pill('未编制','#fef2f2','#b91c1c');
       html+='<div style="border-left:3px solid '+(b.warn?'#fde68a':'#e2e8f0')+';padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px">'+
-        '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:'+b.color+';margin-right:6px">'+b.role+'</span>'+
-        b.text+'<div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">'+by+
-        '<span>来源：'+b.src+'</span></div></div>';
+        '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:'+b.color+';margin-right:6px">'+b.role+'</span>'+b.text+
+        '<div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">'+by+'<span>来源：'+b.src+'</span></div></div>';
     });
     box.innerHTML=html;
   }
   renderBlocks();
-
-  var aiBtn=document.querySelector('[data-action="ai"]');
-  if(aiBtn) aiBtn.addEventListener('click',function(){
-    var box=$('planBox'); box.style.display = box.style.display==='none' ? 'block' : 'none';
-    box.innerHTML='<b>本章编制计划</b><div>预计 5 个任务：现状分析 / 方案描述 / 2 张架构表 / 1 张部署图</div>'+
-      '<div>预计 11,250 字 ≈ 45 页 ｜ 需要 3 类证据</div>'+
-      '<div style="margin-top:7px"><button class="mw-btn primary">确认后开始编制</button>'+
-      '<span style="color:#64748b;margin-left:8px">如不需要可取消</span></div>';
-  });
-  var doneBtn=document.querySelector('[data-action="complete"]');
-  if(doneBtn) doneBtn.addEventListener('click',function(){
-    var box=$('doneBox'); box.style.display = box.style.display==='none' ? 'block' : 'none';
-    var rows=[['✅','评分点覆盖','2/3 条已响应（重难点及对策缺对策半段）'],
-      ['❌','字数达标','625 / 1,500 字，差 875 字'],
-      ['❌','证据凭证级','缺口 4 项（业绩、人员需补）'],
-      ['❌','无依据承诺','1 处：「7×24 驻场」无 L1 来源']];
-    box.innerHTML='<b>本章完成检查</b>'+rows.map(function(r){
-      return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0">'+r[0]+
-        '<b style="min-width:96px">'+r[1]+'</b><span style="color:#64748b">'+r[2]+'</span></div>';}).join('')+
-      '<div style="margin-top:8px"><button class="mw-btn primary">仍然标记本章完成</button>'+
-      '<span style="color:#64748b;margin-left:8px">完成是人工标记，不代表质量验收通过</span></div>';
-  });
+  var ai=document.querySelector('[data-action="ai"]');
+  if(ai) ai.addEventListener('click',function(){ var b=$('planBox'); b.style.display=b.style.display==='none'?'block':'none';
+    b.innerHTML='<b>本章编制计划</b><div>预计 5 个任务：现状分析 / 方案描述 / 2 张架构表 / 1 张部署图</div><div>预计 11,250 字 ≈ 45 页 ｜ 需要 3 类证据</div><div style="margin-top:7px"><button class="mw-btn primary">确认后开始编制</button><span style="color:#64748b;margin-left:8px">如不需要可取消</span></div>'; });
+  var dn=document.querySelector('[data-action="complete"]');
+  if(dn) dn.addEventListener('click',function(){ var b=$('doneBox'); b.style.display=b.style.display==='none'?'block':'none';
+    var rs=[['✅','评分点覆盖','2/3 条已响应'],['❌','字数达标','625 / 1,500 字，差 875 字'],['❌','证据凭证级','缺口 4 项'],['❌','无依据承诺','1 处：「7×24 驻场」无 L1 来源']];
+    b.innerHTML='<b>本章完成检查</b>'+rs.map(function(r){return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0">'+r[0]+'<b style="min-width:96px">'+r[1]+'</b><span style="color:#64748b">'+r[2]+'</span></div>';}).join('')+'<div style="margin-top:8px"><button class="mw-btn primary">仍然标记本章完成</button><span style="color:#64748b;margin-left:8px">完成是人工标记，不代表质量验收通过</span></div>'; });
+  activate('2');
 })();
 </script>
 </body></html>
