@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 v3 · 应答策划（篇幅一体）+ 应答编写（编制台）</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --panel:#fff; --line:#e2e8f0; --line2:#eef2f7;
+    --text:#0f172a; --muted:#64748b; --accent:#2563eb; --accent-soft:#eff6ff;
+    --ok:#16a34a; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+    --bad:#dc2626; --bad-soft:#fef2f2; --l2:#7c3aed; --l2-soft:#f5f3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",Inter,Roboto,sans-serif}
+  .topbar{height:50px;display:flex;align-items:center;gap:12px;padding:0 18px;background:#fff;border-bottom:1px solid var(--line2)}
+  .topbar .title{font-size:15.5px;font-weight:600}
+  .topbar .sub{font-size:12.5px;color:var(--muted)}
+  .sp{flex:1}
+  .ctxpill{font-size:12px;padding:3px 10px;border-radius:999px;background:var(--accent-soft);
+    border:1px solid #bfdbfe;color:#1d4ed8;font-weight:600}
+  .tabs{display:flex;gap:6px;padding:8px 18px 0;background:#fff;border-bottom:1px solid var(--line2)}
+  .tab{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:999px 999px 0 0;border:1px solid transparent;
+    border-bottom:0;background:transparent;color:var(--muted);cursor:pointer}
+  .tab.on{background:#fff;border-color:var(--line);color:var(--accent);font-weight:600;margin-bottom:-1px}
+  .wrap{padding:12px 18px 44px;max-width:1400px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .card h2{margin:0 0 3px;font-size:14.5px}
+  .hint{font-size:12px;color:var(--muted);margin-bottom:10px}
+  .btn{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:#fff;cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.sm{font-size:11.5px;padding:3px 9px;border-radius:7px}
+  .newtag{font-size:10px;padding:0 5px;border-radius:4px;background:var(--ok-soft);color:#15803d;border:1px solid #bbf7d0;margin-left:5px;vertical-align:1px}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .pill.ok{background:var(--ok-soft);border-color:#bbf7d0;color:#15803d}
+  .pill.warn{background:var(--warn-soft);border-color:#fde68a;color:#b45309}
+  .pill.bad{background:var(--bad-soft);border-color:#fecaca;color:#b91c1c}
+  .pill.idle{color:var(--muted)}
+  .pill.l2{background:var(--l2-soft);border-color:#ddd6fe;color:#6d28d9}
+  .pill.budget{background:var(--accent-soft);border-color:#bfdbfe;color:#1d4ed8;font-variant-numeric:tabular-nums}
+  /* 类型单选 */
+  .types{display:flex;gap:10px;flex-wrap:wrap}
+  .typeOpt{border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;cursor:pointer;min-width:290px;background:#fff}
+  .typeOpt.on{border-color:var(--accent);background:var(--accent-soft)}
+  .typeOpt b{font-size:13.5px}
+  .typeOpt .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  th{font-size:11.5px;color:var(--muted);background:#fafbfd;border-bottom:1px solid var(--line);font-weight:600}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  .ind{padding-left:24px}
+  tr.sub td:first-child{color:var(--text)}
+  tr.sep td{background:#f8fafc;font-size:11.5px;color:var(--muted)}
+  tr.tot td{background:#fbfdff;font-weight:600}
+  input[type=number]{font:inherit;font-size:12.5px;padding:3px 7px;border:1px solid var(--line);border-radius:6px;width:66px;text-align:right}
+  select{font:inherit;font-size:12px;padding:3px 7px;border:1px solid var(--line);border-radius:6px}
+  .banner{border-radius:9px;padding:8px 11px;font-size:12.5px;margin-top:10px}
+  .banner.warn{background:var(--warn-soft);border:1px solid #fde68a;color:#b45309}
+  .banner.ok{background:var(--ok-soft);border:1px solid #bbf7d0;color:#15803d}
+  .rowline{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12.5px}
+  /* 编写页（贴 chapter-studio 结构） */
+  .cs{display:grid;grid-template-columns:214px minmax(0,1fr) 344px;gap:12px;align-items:start}
+  .cs-tree{padding:10px 8px}
+  .cs-tree-label{font-size:11.5px;color:var(--muted);padding:0 6px 6px}
+  .cs-tree input{width:100%;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px}
+  .ti{font-size:12.5px;padding:5px 8px;border-radius:7px;cursor:pointer;display:flex;gap:6px;align-items:center}
+  .ti:hover{background:#f8fafc}.ti.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .ti .st{font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap}
+  .ti.on .st{color:var(--accent)}
+  .cs-main{display:flex;flex-direction:column;gap:10px}
+  .cs-document-head{display:flex;align-items:center;gap:10px;padding:9px 14px;font-size:12.5px}
+  .cs-document-head strong{font-size:13.5px}
+  .cs-delivery{margin-left:auto;font-size:12px;color:var(--muted)}
+  .cs-chapter-head{padding:10px 14px;border-bottom:1px solid var(--line2)}
+  .line1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .line2{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:7px;font-size:12px;color:var(--muted)}
+  .cs-toolbar{display:flex;align-items:center;gap:8px;padding:9px 14px;flex-wrap:wrap}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{font:inherit;font-size:12px;padding:5px 12px;border:0;background:#fff;cursor:pointer;color:var(--muted)}
+  .seg button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .shortbar{display:flex;align-items:center;gap:10px;margin:0 14px 6px;padding:8px 11px;border-radius:9px;
+    background:var(--warn-soft);border:1px solid #fde68a;color:#b45309;font-size:12px}
+  .cs-editor{padding:12px 16px 18px;min-height:300px}
+  .para{border-left:3px solid var(--line);padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px}
+  .role{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;margin-right:6px}
+  .role.plan{background:var(--accent-soft);color:#1d4ed8}
+  .role.act{background:#ecfeff;color:#0e7490}
+  .role.ev{background:var(--ok-soft);color:#15803d}
+  .role.pr{background:#fff7ed;color:#c2410c}
+  .srcline{font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .mtable{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
+  .mtable th,.mtable td{border:1px solid var(--line);padding:6px 9px}
+  .mtable th{background:#f8fafc;color:var(--muted);font-size:11.5px}
+  .cs-aside{padding:10px 12px}
+  .cs-inspector-tabs{display:flex;gap:4px;margin-bottom:10px}
+  .cs-inspector-tabs button{font:inherit;font-size:12px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
+  .cs-inspector-tabs button[aria-pressed=true]{background:var(--accent-soft);border-color:#bfdbfe;color:var(--accent);font-weight:600}
+  .cs-aside h4{margin:0 0 7px;font-size:12.5px}
+  .cs-aside section{margin-bottom:14px}
+  details.bs{border:1px solid var(--line2);border-radius:8px;padding:6px 9px;margin-bottom:6px;font-size:12px}
+  details.bs summary{cursor:pointer}
+  details.bs p{margin:6px 0 0;color:var(--muted);font-size:11.5px}
+  .gap{border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:8px;padding:8px 10px;margin-bottom:7px}
+  .gap.warn{border-left-color:var(--warn)}
+  .gap .t{font-size:12.5px;font-weight:600}
+  .gap .m{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .gap .a{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .planbox{border:1px dashed #bfdbfe;background:#f8fbff;border-radius:9px;padding:10px 12px;font-size:12px;margin:8px 14px 0;line-height:1.7}
+  .checklist{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 14px 0;font-size:12px}
+  .checklist .r{display:flex;gap:8px;align-items:center;padding:3px 0}
+  .hidden{display:none}
+  .kpi{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .kpi span{font-size:11.5px;padding:2px 8px;border-radius:999px;background:#f8fafc;border:1px solid var(--line);color:#475569}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="title">XX市政交通项目</span>
+    <span class="sub">· 标的1 / 标包2 · 高可靠技术专题</span>
+    <span class="ctxpill" id="ctxType">当前：技术应答</span>
+    <span class="sp"></span>
+    <span class="sub">来源口径：企业信息只认 L1 ｜ 官网/公众号为线索级 ｜ 第三方不引</span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" data-view="plan">应答策划</button>
+    <button class="tab" data-view="write">应答编写</button>
+    <button class="tab" data-view="check">评审与交付</button>
+  </div>
+
+  <div class="wrap">
+    <!-- ══════════ 应答策划 ══════════ -->
+    <section id="v-plan">
+      <div class="card">
+        <h2>应答类型<span class="newtag">决定整页上下文</span></h2>
+        <div class="hint">商务与技术是<b>两份独立的应答</b>：各自一套目录、正文、运行与<b>篇幅要求</b>。选了类型，就在那一份里工作。</div>
+        <div class="types" id="typeOpts"></div>
+      </div>
+
+      <div class="card">
+        <h2>本类型篇幅要求<span class="newtag">新</span></h2>
+        <div class="hint">总页数由<b>你填</b>；系统只给「评分点分值 × 章节类型」的可改建议。<b>只在本类型内校验</b>，不与其他类型合计。</div>
+        <div class="rowline">
+          <span>总页数 <input type="number" id="totalPg" value="120" /> 页</span>
+          <span>来源 <select id="pgSource"><option>招标文件技术部分规定</option><option>公司标书模板经验值</option></select></span>
+          <span class="sp" style="flex:1"></span>
+          <span id="sumLine" class="muted"></span>
+        </div>
+        <div id="sumBanner" class="banner ok">合计与需求一致</div>
+      </div>
+
+      <div class="card">
+        <h2 id="planTitle">技术应答 · 目录与篇幅<span class="newtag">同一张表</span></h2>
+        <div class="hint">点任意一行定位该章；改目录会撤销确认（需重新确认目录与篇幅）。</div>
+        <table>
+          <thead><tr>
+            <th style="width:30%">章节</th><th class="num">分值</th><th class="num">建议页</th>
+            <th class="num">你填页</th><th>需要证据</th><th>状态</th>
+          </tr></thead>
+          <tbody id="planRows"></tbody>
+        </table>
+        <div class="rowline" style="margin-top:12px">
+          <button class="btn primary" id="btnConfirm">确认目录与篇幅</button>
+          <span class="sub" id="confirmNote">确认后一起冻结：目录 + 篇幅 + 证据需求</span>
+          <span class="sp" style="flex:1"></span>
+          <span class="sub">证据缺口 <b id="gapCount">3</b> 项</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ 应答编写 ══════════ -->
+    <section id="v-write" class="cs hidden">
+      <aside class="card cs-tree">
+        <div class="cs-tree-label">应答目录 · <span id="treeCount">126</span></div>
+        <input type="search" placeholder="搜索章节" />
+        <div id="tree"></div>
+      </aside>
+
+      <div class="cs-main">
+        <div class="card cs-document-head">
+          <strong>章节编写</strong>
+          <span class="sub" id="docProgress">126 个编写单元 · 草稿 4 · 完成 0</span>
+          <span class="pill ok">篇幅达标 118/126<span class="newtag">新</span></span>
+          <details class="cs-delivery"><summary>Word 导出格式</summary></details>
+        </div>
+
+        <div class="card">
+          <div class="cs-chapter-head">
+            <div class="line1">
+              <b id="chTitle">项目背景</b>
+              <span class="pill budget" id="budgetPill">预算 6 页 · 已写 2.5 页 · 差 3.5 页</span>
+              <span class="pill warn" id="chState">待核对</span>
+              <span class="sp" style="flex:1"></span>
+              <span class="sub" id="chMeta">证据 3/5 · 覆盖 2/3 评分点</span>
+            </div>
+            <!-- 新增：主语状态条 -->
+            <div class="line2">
+              <span>本章 <b id="segCount">6</b> 个块：</span>
+              <span class="pill ok">AI 已编 <b id="nAi">2</b></span>
+              <span class="pill warn">人工改过 <b id="nHuman">2</b></span>
+              <span class="pill idle">未编制 <b id="nTodo">1</b></span>
+              <span class="pill idle">表格 <b id="nTable">1</b></span>
+              <span class="newtag">新</span>
+              <span class="sp" style="flex:1"></span>
+              <span>人工修改的段落不会被后台覆盖</span>
+            </div>
+          </div>
+
+          <div class="cs-toolbar">
+            <button class="btn primary" id="btnAi">AI 编制本章 · 先看计划</button>
+            <button class="btn" disabled>保存</button>
+            <div class="seg"><button aria-pressed="true">编辑</button><button aria-pressed="false">预览</button></div>
+            <button class="btn">添加内容</button>
+            <button class="btn" id="btnDone">完成并检查<span class="newtag">新</span></button>
+            <span class="sp" style="flex:1"></span>
+            <span class="sub">正文预览 · Word 实际分页请查看导出排版预览</span>
+          </div>
+
+          <div id="planBox" class="planbox hidden"></div>
+          <div class="shortbar"><span id="shortText">本章 625 / 1,500 字 · 差 875 字</span>
+            <span class="sp" style="flex:1"></span><button class="btn sm" id="btnSugg">查看补写建议</button></div>
+          <div id="suggBox" class="hidden" style="margin:0 14px 6px"></div>
+          <div id="doneBox" class="checklist hidden"></div>
+
+          <div class="cs-editor" id="editor"></div>
+        </div>
+      </div>
+
+      <aside class="card cs-aside">
+        <nav class="cs-inspector-tabs">
+          <button data-panel="basis" aria-pressed="true">依据</button>
+          <button data-panel="materials" aria-pressed="false">素材</button>
+          <button data-panel="ai" aria-pressed="false">编制进度</button>
+        </nav>
+        <div id="aside"></div>
+      </aside>
+    </section>
+
+    <!-- ══════════ 评审与交付 ══════════ -->
+    <section id="v-check" class="hidden">
+      <div class="card">
+        <h2>导出与红线拦截</h2>
+        <div class="hint">导出仅包含已保存正文；未通过项会随导出带出清单（不阻断保存）。</div>
+        <div class="rowline">
+          <span>当前应答：<b id="checkType">技术应答</b></span>
+          <span class="sp" style="flex:1"></span>
+          <button class="btn primary">导出 Word 草稿</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>红线拦截（4 处）</h2>
+        <table>
+          <thead><tr><th style="width:24%">章节</th><th>类型</th><th>内容</th><th>处理</th></tr></thead>
+          <tbody>
+            <tr><td>项目背景</td><td><span class="pill bad">线索级当凭证</span></td><td>「行业领先的标杆案例」只有公众号来源</td><td><button class="btn sm">补凭证</button></td></tr>
+            <tr><td>技术方案</td><td><span class="pill bad">无依据承诺</span></td><td>「承诺 7×24 驻场」无 L1 来源</td><td><button class="btn sm">改表述 / 删</button></td></tr>
+            <tr><td>项目管理方案</td><td><span class="pill bad">宣传口径</span></td><td>「国内首创」属宣传措辞</td><td><button class="btn sm">改可核验表述</button></td></tr>
+            <tr><td>服务承诺</td><td><span class="pill bad">L2 越界</span></td><td>公开统计口径被用作我方承诺</td><td><button class="btn sm">移到背景段</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>字数不达标章节</h2>
+        <table>
+          <thead><tr><th style="width:24%">章节</th><th class="num">预算</th><th class="num">已写</th><th class="num">差额</th><th>建议</th></tr></thead>
+          <tbody id="shortRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script>
+const WPP = 250;                        // 1 页 ≈ 250 字
+// ── 两种应答：各自独立的目录、篇幅、证据（R1/R2）──────────────────
+const PLANS = {
+  tech: {
+    label:'技术应答',
+    desc:'依据技术评分点 + 已关联技术规范书（含背景与范围）',
+    total:120, source:'招标文件技术部分规定',
+    chapters:[
+      {id:'t1',name:'项目背景',score:4,sug:6,mine:6,done:2.5,state:'待核对',need:['实测参数'],gaps:4,
+       sugg:[["「建设内容」只写 3 项，评分点要求逐项响应 → 展开到 6 项",400],["「重难点及对策」缺对策半段 → 补 2 条对策",300],["项目目标与建设范围表述重复 → 合并",175]]},
+      {id:'t2',name:'技术方案',score:30,sug:42,mine:51,done:18,state:'待核对',need:['业绩','人员','实测'],gaps:6,
+       sugg:[["按评分点逐项展开技术方案（当前只覆盖 5/8）",3000],["「关键技术实现」补 2 张架构图 + 1 张部署图",2000],["「系统架构设计」补高可靠容灾与性能两段",1750]]},
+      {id:'t3',name:'系统架构设计',score:12,sug:16,mine:16,done:6,state:'待核对',need:['实测'],gaps:3,sub:true},
+      {id:'t4',name:'关键技术实现',score:18,sug:26,mine:29,done:12,state:'待核对',need:['业绩','实测'],gaps:4,sub:true},
+      {id:'t5',name:'项目管理方案',score:8,sug:10,mine:10,done:4,state:'待核对',need:['人员'],gaps:2},
+      {id:'t6',name:'服务承诺',score:6,sug:8,mine:8,done:3,state:'待核对',need:['业绩','人员','实测'],gaps:3},
+      {id:'pp',name:'点对点应答（原文章节 68 章）',sep:true,range:'按原文体量给区间，不参与分值分摊',need:['原文即依据']},
+    ],
+    evidence:{'t1':['—','—','—','✅','✅'],'t2':['⚠','✅','❌','❌','✅'],'t3':['—','—','—','❌','✅'],
+      't4':['❌','—','❌','✅','—'],'t5':['—','—','❌','—','—'],'t6':['❌','—','❌','—','—']},
+  },
+  biz: {
+    label:'商务应答',
+    desc:'依据商务评分点；不挂技术规范书',
+    total:30, source:'招标文件商务部分规定',
+    chapters:[
+      {id:'b1',name:'商务投标文件质量',score:5,sug:4,mine:4,done:4,state:'已核对',need:['—'],gaps:0},
+      {id:'b2',name:'商务响应与偏差',score:5,sug:4,mine:4,done:3.5,state:'待核对',need:['—'],gaps:1,
+       sugg:[["响应与偏差表未逐条列出，建议补完整对照表",150]]},
+      {id:'b3',name:'财务状况（营业净利率）',score:10,sug:8,mine:8,done:1,state:'待核对',need:['财务'],gaps:2,
+       sugg:[["需补近三年审计报告与净利率计算过程",1750]]},
+      {id:'b4',name:'管理体系认证',score:4,sug:3,mine:3,done:0,state:'未开始',need:['资质'],gaps:1},
+      {id:'b5',name:'人员要求',score:3,sug:3,mine:3,done:0,state:'未开始',need:['人员'],gaps:1},
+      {id:'b6',name:'服务质量要求',score:3,sug:2,mine:2,done:0,state:'未开始',need:['业绩'],gaps:1},
+    ],
+    evidence:{'b1':['—','—','—','—','—'],'b2':['—','—','—','—','—'],'b3':['—','✅','—','—','—'],
+      'b4':['—','❌','—','—','—'],'b5':['—','—','❌','—','—'],'b6':['❌','—','—','—','—']},
+  },
+};
+let type = 'tech';
+let cur = 't1';
+const P=(role,cls,text,src,by,warn)=>({role,cls,text,src,by,warn});
+// 技术应答演示正文（含真表格）
+const BODY = {
+  t1:[
+    P('方案','plan','拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。','L1 本章原文内容 · 技术规范书 3.2','ai'),
+    P('证据','ev','平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。','L1 凭证级 · 实测参数（已核验）','ai'),
+    P('措施','act','随着系统运行年限增长和营销业务规模扩大，现有平台进入系统性、体系化架构升级阶段，亟需重点强化以下五方面能力。','L1 本章原文内容 · 技术规范书 3.2','human'),
+    {table:true,title:'表 3-1 现有平台容量与目标对比',head:['指标','现状','目标','依据'],rows:[
+      ['日均调用量','3.2 亿次','8 亿次','L1 实测参数（已核验）'],
+      ['并发用户数','6,000','8,000','L1 凭证级 · 性能测试报告'],
+      ['档案记录量','1.2 亿条','2 亿条','L1 实测参数（已核验）']]},
+    P('证据','ev','公司在智慧交通领域具有行业领先的标杆案例经验。','⚠ L1 线索级 · 本企业公众号（无凭证）→ 不得进正文','human',true),
+    P('承诺','pr','［待补］近三年同类项目业绩 3 项','❌ 缺 · 应从「政府采购中标公示」查（✅已接入）','todo'),
+  ],
+  t2:[
+    P('方案','plan','总体架构采用"云原生 + 微服务"分层设计，按接入层、服务层、数据层、基础设施层四层组织。','L1 本章原文内容 · 技术规范书 4.1','ai'),
+    P('证据','ev','关键组件已在同类项目中经受日均 8 亿次调用验证。','L1 凭证级 · 实测参数（已核验）','ai'),
+    P('措施','act','针对高可靠容灾要求，提出同城双活 + 异地灾备的三级容灾体系。','L1 线索级 · 公司官网（需补凭证）','human',true),
+    P('承诺','pr','［待补］项目经理及核心团队人员证书','❌ 缺 · 应从「人事花名册」查（⚠未接入）','todo'),
+  ],
+  b3:[
+    P('方案','plan','本公司近三年营业净利率分别为 8.2%、9.1%、10.3%，整体呈上升趋势。','L1 财务审计报告（需上传）','todo'),
+    P('承诺','pr','［待补］近三年审计报告原件（含资产负债表、利润表、现金流量表）','❌ 缺 · 财务审计报告（⚠未接入）','todo'),
+  ],
+};
+function plan(){ return PLANS[type]; }
+function ch(id){ return plan().chapters.find(x=>x.id===id) || plan().chapters[0]; }
+function needOf(c){ return c.done ? Math.max(0, Math.round((c.mine-c.done)*WPP)) : c.mine*WPP; }
+const pill=(c,t)=>`<span class="pill ${c}">${t}</span>`;
+
+// ── 策划页 ──────────────────────────────────────────
+function renderTypes(){
+  document.getElementById('typeOpts').innerHTML = Object.entries(PLANS).map(([k,v])=>
+    `<div class="typeOpt${k===type?' on':''}" data-type="${k}">
+      <b>${k===type?'◉':'○'} ${v.label}</b><div class="d">${v.desc}</div></div>`).join('');
+  document.querySelectorAll('.typeOpt').forEach(el=>el.addEventListener('click',()=>{
+    type = el.dataset.type;
+    cur = plan().chapters[0].id;
+    document.getElementById('ctxType').textContent = '当前：' + plan().label;
+    document.getElementById('checkType').textContent = plan().label;
+    document.getElementById('totalPg').value = plan().total;
+    document.getElementById('pgSource').value = plan().source;
+    renderAll();
+  }));
+}
+function renderPlanTable(){
+  const rows = plan().chapters.map(c=>{
+    if (c.sep) return `<tr class="sep"><td colspan="6">── ${c.name}：${c.range} ──</td></tr>`;
+    const st = c.state==='未开始'?pill('idle','未开始') : (c.state==='已核对'?pill('ok','已核对') : pill('warn','待核对'));
+    const need = c.need.map(n=>n==='—'?'':n).filter(Boolean);
+    return `<tr data-ch="${c.id}"><td class="${c.sub?'ind':''}">${c.name}</td>
+      <td class="num">${c.score}</td><td class="num" style="color:#64748b">${c.sug}</td>
+      <td class="num"><input type="number" value="${c.mine}" data-mine="${c.id}" /></td>
+      <td>${need.length?need.map(n=>`<span class="pill idle" style="margin-right:4px">${n}</span>`).join(''):'—'}</td>
+      <td>${st}</td></tr>`;
+  }).join('');
+  document.getElementById('planRows').innerHTML = rows;
+  document.getElementById('planTitle').innerHTML = `${plan().label} · 目录与篇幅<span class="newtag">同一张表</span>`;
+  document.getElementById('gapCount').textContent = plan().chapters.reduce((n,c)=>n+(c.gaps||0),0);
+  document.querySelectorAll('[data-mine]').forEach(inp=>{
+    inp.addEventListener('click',e=>e.stopPropagation());
+    inp.addEventListener('change',()=>{ ch(inp.dataset.mine).mine = Number(inp.value)||0; renderPlanTable(); renderSum(); });
+  });
+  document.querySelectorAll('tr[data-ch]').forEach(tr=>tr.addEventListener('click',()=>{
+    cur = tr.dataset.ch; show('write'); renderAll();
+  }));
+}
+function renderSum(){
+  const total = Number(document.getElementById('totalPg').value||0);
+  const mine = plan().chapters.reduce((n,c)=>n+(c.mine||0),0);
+  document.getElementById('sumLine').innerHTML = `本类型章节合计 <b>${mine}</b> 页`;
+  const b = document.getElementById('sumBanner');
+  if (mine===total){ b.className='banner ok'; b.textContent='本类型合计与需求一致 ✅（只校验本类型，不与其他类型合计）'; }
+  else { b.className='banner warn';
+    b.textContent=`⚠ 本类型章节合计 ${mine} 页，与需求 ${total} 页相差 ${mine-total>0?'+':''}${mine-total} 页 —— 请调整或改本类型总页数`; }
+}
+document.getElementById('totalPg').addEventListener('input',()=>{ plan().total=Number(document.getElementById('totalPg').value||0); renderSum(); });
+document.getElementById('pgSource').addEventListener('change',e=>{ plan().source=e.target.value; });
+document.getElementById('btnConfirm').addEventListener('click',()=>{
+  const total=Number(document.getElementById('totalPg').value||0);
+  const mine=plan().chapters.reduce((n,c)=>n+(c.mine||0),0);
+  if (mine!==total){ document.getElementById('confirmNote').innerHTML =
+    '<span style="color:#b45309">⚠ 本类型合计与需求不一致，请先调整再确认</span>'; return; }
+  document.getElementById('confirmNote').innerHTML =
+    `<span style="color:#15803d">✅ 已确认并冻结：${plan().label} 的目录 + 篇幅（${total} 页）+ 证据需求（缺口 ${plan().chapters.reduce((n,c)=>n+(c.gaps||0),0)} 项）</span>`;
+});
+
+// ── 编写页 ──────────────────────────────────────────
+function renderTree(){
+  document.getElementById('tree').innerHTML = plan().chapters.filter(c=>!c.sep).map(c=>{
+    const d = c.done?(c.mine-c.done<=0.1?'已达标':'差'+(c.mine-c.done).toFixed(1)+'页'):'未开始';
+    return `<div class="ti${c.id===cur?' on':''}" data-id="${c.id}">${c.sub?'<span style="color:#94a3b8">└</span>':''}${c.name}<span class="st">${d}</span></div>`;
+  }).join('');
+  document.querySelectorAll('.ti').forEach(el=>el.addEventListener('click',()=>{ cur=el.dataset.id; renderAll(); }));
+}
+function renderEditor(){
+  const c = ch(cur), need = needOf(c);
+  document.getElementById('chTitle').textContent = c.name;
+  document.getElementById('budgetPill').textContent = `预算 ${c.mine} 页 · 已写 ${c.done} 页 · ${(c.mine-c.done)<=0.1?'已达标':'差 '+(c.mine-c.done).toFixed(1)+' 页'}`;
+  document.getElementById('chState').textContent = c.state;
+  document.getElementById('chState').className = 'pill ' + (c.state==='已核对'?'ok':(c.state==='未开始'?'idle':'warn'));
+  document.getElementById('chMeta').innerHTML = `证据 ${c.need.filter(n=>n!=='—').length} 类 · 缺口 ${c.gaps||0} 项`;
+  const paras = BODY[cur] || [];
+  const nAi = paras.filter(p=>!p.table && p.by==='ai').length;
+  const nH  = paras.filter(p=>!p.table && p.by==='human').length;
+  const nT  = paras.filter(p=>!p.table && p.by==='todo').length;
+  document.getElementById('segCount').textContent = paras.length || 0;
+  document.getElementById('nAi').textContent = nAi; document.getElementById('nHuman').textContent = nH;
+  document.getElementById('nTodo').textContent = nT;
+  document.getElementById('nTable').textContent = paras.filter(p=>p.table).length;
+  const sb=document.getElementById('shortText');
+  if(c.done>0&&need>0) sb.textContent=`本章 ${Math.round(c.done*WPP).toLocaleString()} / ${(c.mine*WPP).toLocaleString()} 字 · 差 ${need.toLocaleString()} 字`;
+  else if(!c.done) sb.textContent='本章尚未开始编写';
+  else sb.textContent='本章已达标';
+  const ed=document.getElementById('editor'); ed.innerHTML='';
+  if(!paras.length){ ed.innerHTML='<div style="font-size:12.5px;color:#64748b">（原型演示：本章正文略）</div>'; return; }
+  paras.forEach(p=>{
+    if(p.table){
+      const t=document.createElement('div');
+      t.innerHTML=`<div style="font-size:12px;color:#334155;font-weight:600;margin:8px 0 2px">${p.title}</div>
+        <table class="mtable"><thead><tr>${p.head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${p.rows.map(r=>`<tr>${r.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      ed.appendChild(t); return;
+    }
+    const d=document.createElement('div'); d.className='para'; if(p.warn) d.style.borderLeftColor='#fde68a';
+    const by = p.by==='ai'?pill('ok','AI 生成') : p.by==='human'?pill('warn','人工修改 ✎') : pill('bad','未编制');
+    d.innerHTML=`<span class="role ${p.cls}">${p.role}</span>${p.text}
+      <div class="srcline">${by}<span>来源：${p.src}</span></div>`;
+    ed.appendChild(d);
+  });
+}
+function renderAside(panel){
+  const c = ch(cur);
+  const basis = `<section><h4>本章编制依据</h4>
+      <details class="bs" open><summary>${c.name} · ${c.score} 分（评分口径）</summary><p>对本章要求的响应是否准确、深入、全面。</p></details>
+      <details class="bs"><summary>规范要求 3 条 · 查看原文</summary><p>技术规范书 3.2 / 4.1</p></details>
+      <details class="bs"><summary>本章原文内容</summary><p>（原文摘录）</p></details></section>
+    <section><h4>本章缺口（${c.gaps||0} 项）<span class="newtag">新</span></h4>
+      ${c.need.filter(n=>n!=='—').map(n=>`<div class="gap${n==='业绩'||n==='人员'?'':' warn'}">
+        <div class="t">${n==='实测参数'?'⚠':'❌'} ${n}</div>
+        <div class="m">权威源 <b>${n==='业绩'?'政府采购中标公示（✅已接入）':n==='人员'?'人事花名册（⚠未接入）':n==='财务'?'财务审计报告（⚠未接入）':n==='资质'?'发证机构官方核验（✅已接入）':'L1 无来源（禁止用第三方）'}</b></div>
+        <div class="a"><button class="btn sm" data-act="${n==='业绩'?'query':'upload'}">${n==='业绩'?'去查询':'上传凭证'}</button></div></div>`).join('') || '<p style="font-size:11.5px;color:#64748b">本章无证据缺口</p>'}
+    </section>`;
+  const materials = `<section><div style="display:flex;align-items:center;gap:8px"><h4 style="margin:0">本章素材 3</h4>
+      <span class="sp" style="flex:1"></span><button class="btn sm">上传素材</button></div>
+      <p style="font-size:11.5px;color:#64748b;margin:6px 0 10px">PDF／Word 提取原文与页码；图片保留原图，需人工核对含义。</p>
+      <article style="border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:8px">
+        <strong style="font-size:12.5px">近三年同类项目业绩表.pdf</strong>
+        <div style="margin-top:4px">${pill('ok','L1 凭证级')} <span style="font-size:11.5px;color:#64748b">来源：政府采购中标公示</span></div>
+        <small style="color:#64748b;display:block;margin-top:4px">已解析 · 已核对 · 正文已引用</small></article>
+      <article style="border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:8px">
+        <strong style="font-size:12.5px">公司官网·荣誉页</strong>
+        <div style="margin-top:4px">${pill('warn','L1 线索级')} <span style="font-size:11.5px;color:#64748b">来源：公司官网（需补凭证）</span></div>
+        <small style="color:#b45309;display:block;margin-top:4px">不得用于业绩/资质类段落</small></article>
+      <article style="border:1px solid var(--line);border-radius:9px;padding:9px 10px">
+        <strong style="font-size:12.5px">行业市场规模公报.pdf</strong>
+        <div style="margin-top:4px">${pill('l2','L2 公开')} <span style="font-size:11.5px;color:#64748b">来源：统计局公报 2025</span></div>
+        <small style="color:#64748b;display:block;margin-top:4px">只能用于背景/趋势段</small></article></section>`;
+  const paras = BODY[cur] || [];
+  const progress = `<section><h4>编制进度</h4>
+      <div style="font-size:12.5px;margin-bottom:8px">本章 ${paras.length} 段：已写 <b>${paras.filter(p=>p.by!=='todo').length}</b> 段
+        （其中人工改过 <b>${paras.filter(p=>p.by==='human').length}</b> 段）<span class="newtag">用户语言</span></div>
+      <div style="height:6px;background:#eef2f7;border-radius:99px;overflow:hidden;margin-bottom:10px">
+        <i style="display:block;height:100%;width:${Math.min(100,Math.round(c.done/Math.max(c.mine,1)*100))}%;background:var(--accent)"></i></div>
+      <div style="font-size:12px">▸ 主编已排好计划</div>
+      <div style="font-size:12px">▸ 正文与图表已交付，2 段人工改过</div>
+      <div style="font-size:12px">▸ 合规检查：1 处无依据承诺待处理</div></section>`;
+  document.getElementById('aside').innerHTML = panel==='materials'?materials : panel==='ai'?progress : basis;
+  document.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>alert(
+    b.dataset.act==='query'?'已发起「政府采购中标公示」查询（L1 · 凭证级），结果带公示链接与快照'
+      :'请上传原件扫描件；上传后自动核验并升级为凭证级')));
+}
+document.getElementById('btnAi').addEventListener('click',()=>{
+  const box=document.getElementById('planBox'); box.classList.toggle('hidden');
+  const c=ch(cur);
+  box.innerHTML=`<b>编制计划（先看计划，再执行）</b>
+    <div>预计 <b>${c.sub||cur==='t2'?5:3}</b> 个任务：现状分析 / 方案描述 / ${cur==='t2'?'2 张架构表 / 1 张部署图':'1 张表'}</div>
+    <div>预计 <b>${(c.mine*WPP).toLocaleString()}</b> 字 ≈ <b>${c.mine}</b> 页 ｜ 需要 <b>${c.need.filter(n=>n!=='—').length}</b> 类证据（缺口 ${c.gaps||0} 项）</div>
+    <div style="margin-top:7px"><button class="btn sm primary">确认后开始编制</button>
+      <span style="color:#64748b">启动前你还有机会否决这个计划</span></div>`;
+});
+document.getElementById('btnDone').addEventListener('click',()=>{
+  const box=document.getElementById('doneBox'); box.classList.toggle('hidden');
+  const c=ch(cur), need=needOf(c);
+  const rows=[
+    [c.done>0,'评分点覆盖','2/3 条已响应（“重难点及对策”缺对策半段）'],
+    [need===0,`字数达标`,`${Math.round(c.done*WPP).toLocaleString()} / ${(c.mine*WPP).toLocaleString()} 字，差 ${need.toLocaleString()} 字`],
+    [(c.gaps||0)===0,'证据凭证级',`缺口 ${c.gaps||0} 项（业绩/人员需补）`],
+    [false,'无依据承诺','1 处：「7×24 驻场」无 L1 来源'],
+  ];
+  box.innerHTML=`<b>完成检查（不阻断，但会随导出带出清单）</b>
+    ${rows.map(([ok,t,d])=>`<div class="r">${ok?pill('ok','✅'):pill('bad','❌')}<b style="min-width:96px">${t}</b><span style="color:#64748b">${d}</span></div>`).join('')}
+    <div style="margin-top:8px"><button class="btn sm primary">仍然标记本章完成</button>
+      <span style="color:#64748b">完成是人工标记，不代表质量验收通过</span></div>`;
+});
+document.getElementById('btnSugg').addEventListener('click',()=>{
+  const c=ch(cur), box=document.getElementById('suggBox'); box.classList.toggle('hidden');
+  const sum=(c.sugg||[]).reduce((n,x)=>n+x[1],0);
+  box.innerHTML=`<div style="border:1px dashed #bfdbfe;background:#f8fbff;border-radius:8px;padding:9px 11px;font-size:12px">
+    <div style="color:#64748b;margin-bottom:5px">补写建议（合计 +${sum.toLocaleString()} 字，与差额 ${needOf(c).toLocaleString()} 字一致）</div>
+    ${(c.sugg||[]).map((x,i)=>`<div>${i+1}. ${x[0]} <b>+${x[1].toLocaleString()} 字</b></div>`).join('') || '<div style="color:#64748b">本章暂无建议</div>'}
+    <div style="margin-top:7px"><button class="btn sm primary">生成补写草稿</button>
+      <span style="color:#64748b">生成后<b>由你确认再合并</b>，不覆盖人工修改</span></div></div>`;
+});
+document.querySelectorAll('.cs-inspector-tabs button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.cs-inspector-tabs button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  renderAside(b.dataset.panel);
+}));
+document.getElementById('shortRows').innerHTML =
+  (PLANS.tech.chapters.filter(c=>!c.sep&&c.done<c.mine)).map(c=>
+    `<tr><td>${c.name}</td><td class="num">${c.mine}</td><td class="num">${c.done}</td>
+     <td class="num">−${(c.mine-c.done).toFixed(1)}</td>
+     <td>${(c.sugg||[]).length?c.sugg[0][0]:'建议按评分点逐项展开'}</td></tr>`).join('');
+function show(v){
+  ['plan','write','check'].forEach(k=>document.getElementById('v-'+k).classList.toggle('hidden',k!==v));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.view===v));
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>show(t.dataset.view)));
+function renderAll(){ renderTypes(); renderPlanTable(); renderSum(); renderTree(); renderEditor(); renderAside('basis'); }
+renderAll();
+</script>
+</body>
+</html>
