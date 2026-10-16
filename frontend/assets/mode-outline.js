@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v199';
-import { api } from './api.js?v=20261016-v199';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v199';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v200';
+import { api } from './api.js?v=20261016-v200';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v200';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v199';
+       } from './workspace.js?v=20261016-v200';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v199';
+       } from './workspace-model.mjs?v=20261016-v200';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v199';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v200';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3674,7 +3674,7 @@ function pageBudgetBarHtml() {
 async function ensureRawTocExit() {
   const pane = document.querySelector('.sr-stage.on[data-stage="2"] .sr-stage-body')
     || document.querySelector('.sr-stage[data-stage="2"] .sr-stage-body');
-  if (!pane || pane.querySelector('[data-raw-toc-action]')) return;
+  if (!pane) return;
   // 应用自己插了警示就直接用；没插（实测有的入口不插）就用**同一个后端预检**判断，
   // 而不是靠 DOM 标记 —— 这是上一轮没修好的原因。
   let need = !!document.getElementById('raw-toc-warn');
@@ -3687,6 +3687,8 @@ async function ensureRawTocExit() {
     } catch (err) { return; }
   }
   if (!need) return;
+  // 让位必须**每次**都做（面板会重渲染，步骤条会重新出现）；
+  // 之前把去重判断放在最前面，导致"出口块已存在"后就不再让位（实测步骤条又冒出来）。
   pane.querySelectorAll('[data-empty-state], [data-step-pane="1"], .sr-dir-chain').forEach((node) => {
     node.hidden = true;
     node.style.display = 'none';   // 自带 display，hidden 会被自家 CSS 覆盖
