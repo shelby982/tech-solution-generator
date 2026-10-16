@@ -4375,8 +4375,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       <div class="response-basis-footer"><button class="mw-btn primary response-basis-action" data-act="response-preview">${previewReady ? '查看目录草案' : '生成目录草案'}</button></div>
     </div>
     ${!previewReady ? `<div class="response-confirm-bar" data-empty-state>
-      <div><strong>还没有可确认的目录${responsePlanChoice ? `（已选 ${responsePlanChoice === 'commerce' ? '商务应答' : '技术应答'}）` : ''}</strong>
-        <span>${currentPlanMatches ? '目录草案正在生成，完成后本页会自动出现目录与篇幅两步。' : '选定应答类型后生成目录草案，随后进入第 1 步「确认目录」。'}</span></div>
+      <div><strong>还没有生成应答目录草案${responsePlanChoice ? `（已选 ${responsePlanChoice === 'commerce' ? '商务应答' : '技术应答'}）` : ''}</strong>
+        <span>${currentPlanMatches
+          ? '正在派生目录，完成后本页会自动出现「① 确认目录 → ② 分配篇幅」。'
+          : '目录由「解析依据」里已拆出的评分点与规范要求派生。同一标包只保留一份草案，重复点击会直接打开已有那份。'}</span></div>
       ${currentPlanMatches
         ? '<button class="mw-btn" data-act="redraft-outline">重试生成</button>'
         : `<button class="mw-btn primary" data-act="response-preview">生成目录草案</button>`}

@@ -233,6 +233,14 @@ async def get_split_report(project_id: int, threadId: str | None = None):
 
     async with get_db() as db:
         report = await build_split_report(db, project_id, tid, spec=spec)
+        # 顺手补齐包记录缺失的"标的"（只填空值、唯一命中才写、幂等）。
+        # 实测 project 29：packages.target_code 为空而评分表解析出"标的1"，
+        # 前端按 target+package_no 匹配失败 → 页面显示"没有解析到技术评分点"。
+        try:
+            from services.scope_backfill import backfill_package_targets
+            await backfill_package_targets(db, project_id, report)
+        except Exception as exc:
+            logger.warning(f"split-report：标的回填跳过（{exc}）")
     return JSONResponse(content=report)
 
 
