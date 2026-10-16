@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v189';
-import { api } from './api.js?v=20261016-v189';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v189';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v190';
+import { api } from './api.js?v=20261016-v190';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v190';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v189';
+       } from './workspace.js?v=20261016-v190';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v189';
+       } from './workspace-model.mjs?v=20261016-v190';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v189';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v190';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3636,12 +3636,11 @@ function pageBudgetBarHtml() {
   // 目录被改动 → 确认失效 → 篇幅必须重新确认（否则目录一改篇幅就乱）。
   // 此时**不能静默隐藏**整块：用户只会觉得"输入框不见了"，要说明原因。
   if (!pageBudgetData.directory_confirmed) {
-    return `<h5 class="sr-sec">篇幅</h5>
-      <div class="response-confirm-bar" data-page-budget-gate>
-        <div><strong>篇幅 <span class="ui-pill is-warn">需重新确认</span></strong>
-          <span>目录有改动，需先重新确认目录，再确认篇幅（目录一改，篇幅分配就会失准）。</span></div>
-        <button class="mw-btn primary" disabled>确认篇幅</button>
-      </div>`;
+    // 与页面「目录已确认」卡同形：strong + span 两行，不放 h5、不放胶囊（避免与上方标题重复）
+    return `<div class="response-confirm-bar" data-page-budget-gate>
+      <div><strong>篇幅待确认</strong>
+        <span>目录有改动，需先重新确认目录，再确认篇幅 —— 目录一改，篇幅分配就会失准。</span></div>
+    </div>`;
   }
   const d = pageBudgetData;
   const ok = !!d.ok;
@@ -3649,10 +3648,9 @@ function pageBudgetBarHtml() {
   const check = d.confirmed
     ? '✅ 篇幅已确认'
     : (ok ? '合计与需求一致' : `⚠ 与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
-  return `<h5 class="sr-sec">篇幅</h5>
-    <div class="response-confirm-bar" data-page-budget-bar>
+  return `<div class="response-confirm-bar" data-page-budget-bar>
       <div>
-        <strong>篇幅 ${d.confirmed ? '<span class="ui-pill is-ok">已确认</span>' : '<span class="ui-pill is-none">待确认</span>'}</strong>
+        <strong>${d.confirmed ? '篇幅已确认' : '篇幅'} · ${Number(d.total) || 0} 页</strong>
         <span>总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页 · 来源：${escapeHtml(d.source || '招标文件规定')}</span>
         <span id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>
         <span id="sr-page-check" class="${ok ? '' : 'sr-page-warn'}">${check}</span>
@@ -4578,6 +4576,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   [data-page-budget-bar] b{font-variant-numeric:tabular-nums}
   [data-page-budget-bar] .sr-page-warn{color:var(--warn)}
   [data-page-budget-bar] .ui-pill{margin-left:0}
+  /* 页面原生 :disabled 是 cursor:wait（等待中）；这里语义是"前置未完成"，改回 not-allowed */
+  [data-page-budget-bar]>button:disabled{cursor:not-allowed}
   .sr-dir-head .ui-pill{margin:0}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
   .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
@@ -4860,12 +4860,20 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     preview.classList.add('mw-btn');
     head.appendChild(preview);
   })();
-  (function moveWriteButton() {
+  (function moveFooterButtons() {
     const foot = el.querySelector('.sr-dir-foot');
+    if (!foot) return;
+    // 「确认目录」原在被合并的那张卡里 → 必须搬到收尾栏，否则目录待确认时用户无路可走
+    const confirmBtn = el.querySelector('[data-act="response-confirm"]');
+    if (confirmBtn) { confirmBtn.style.marginLeft = '0'; foot.appendChild(confirmBtn); }
+    // 「进入编写」要求目录与篇幅都已确认，按状态出现（唯一主操作）
     const writeBtn = el.querySelector('[data-act="response-write"]');
-    if (!foot || !writeBtn) return;
-    writeBtn.style.marginLeft = '0';
-    foot.appendChild(writeBtn);
+    if (writeBtn) {
+      writeBtn.style.marginLeft = '0';
+      const ready = !!categoriesConfirmed && !!(pageBudgetData && pageBudgetData.confirmed);
+      writeBtn.hidden = !ready;
+      if (ready) foot.appendChild(writeBtn);
+    }
   })();
   el.querySelectorAll('[data-act="redraft-outline"]').forEach(button => button.addEventListener('click', async event => {
     event.stopPropagation();
