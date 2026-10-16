@@ -132,6 +132,8 @@ def _ground_sections(
     index, _ = build_bm25_index(corpus)
 
     for sec in sections:
+        if (sec.chain or {}).get('response_part') in ('point_to_point', 'priority'):
+            continue
         if not sec.title:
             continue
         hits = keyword_search(corpus, sec.title, top_k=1, bm25_index=index)
@@ -452,7 +454,7 @@ class ZhangHengAgent:
             if points_only:
                 return OutlineDraftResult(sections=[], error=det_note,
                                           coverage=coverage, points_only=True)
-            if count_top_level(sections) >= MIN_TOP_LEVEL_NODES:
+            if coverage.get('response_outline_version') == 2 or count_top_level(sections) >= MIN_TOP_LEVEL_NODES:
                 _ground_sections(sections, source_toc)
                 return OutlineDraftResult(sections=sections, error=det_note,
                                           coverage=coverage)
@@ -643,6 +645,8 @@ class ZhangHengAgent:
                 scope_note = (f"材料里的标包没有编号（无法对应「{package_no}」），"
                               f"已按「{'、'.join(selected_categories)}」类的全部评分点拆解")
             else:
+                if answer_categories:
+                    raise OutlineDraftError('当前标包没有所选应答类型的评分点，请核对解析结果；不会混入其他类别生成目录')
                 picked = list(pts)
                 effective_package_no = ""
                 effective_category = ""
@@ -764,13 +768,19 @@ class ZhangHengAgent:
 
         # 注意：类别过滤已在上面按**集合**完成，这里不能再传单类别
         # （传了会把多选的第二类重新过滤掉）。
-        outline = build_outline(picked, spec_sections=spec_sections,
+        technical_response = 'tech' in selected_categories
+        if technical_response:
+            from infra.parser.technical_response import build_technical_response
+            outline = build_technical_response(picked, spec_sections, requirements,
+                subpoints=subpoints or None, package_no=effective_package_no)
+        else:
+            outline = build_outline(picked, spec_sections=[],
                                 category="", package_no=effective_package_no,
                                 subpoints_by_criterion=subpoints or None,
                                 placement_targets=placement,
-                                requirement_ids_by_title=requirement_ids_by_title(requirements),
-                                requirement_groups=requirement_groups,
-                                topic_placement=topic_placement or None)
+                                requirement_ids_by_title=requirement_ids_by_title(requirements) if technical_response else {},
+                                requirement_groups=requirement_groups if technical_response else [],
+                                topic_placement=(topic_placement or None) if technical_response else None)
         if not outline:
             return None
 
@@ -783,6 +793,7 @@ class ZhangHengAgent:
             while stack_idx and outline[stack_idx[-1]].level >= n.level:
                 stack_idx.pop()
             item = {"level": n.level, "title": n.title}
+            item.update(n.metadata)
             if stack_idx:
                 item["parent"] = stack_idx[-1]
             # 来源链透传到 blocks（评分点 / 规范要求 / 分值 / 评分口径 / 规范专题）
@@ -801,12 +812,34 @@ class ZhangHengAgent:
         # 上限放宽：DEFAULT_MAX_NODES=120 是给**模型输出**设的保护（防跑飞），
         # 而确定性骨架的节点数由评分表自身决定（实测标的1 有 13 个评分点、
         # 展开后 140+ 节），用 120 截断会**静默丢掉后面整个评分点**。
-        nodes, warnings = normalize_nodes(raw_nodes, max_nodes=600)
-        sections = build_sections(nodes)
+        nodes, warnings = normalize_nodes(raw_nodes, max_nodes=max(600, len(raw_nodes)),
+            max_level=max(n.level for n in outline) if technical_response else 4,
+            preserve_duplicates=technical_response)
+        sections = build_sections(nodes, max_level=max(n.level for n in outline) if technical_response else 4)
+        if technical_response:
+            for section, node in zip(sections, outline):
+                if node.metadata.get('response_part') in ('point_to_point', 'priority'):
+                    section.raw_content = node.source_content
+                    section.special_marks = list(node.source_marks)
+                    section.source_file = node.metadata.get('source_file', '')
         from infra.parser.outline_builder import compute_coverage
-        coverage = compute_coverage(outline, picked, requirements)
-        note = ("目录按评分表结构生成：评分因素 → 详细评审项 → 分项要素要点，"
-                "并已并入技术规范书对应专题与工作项")
+        coverage = compute_coverage(outline, picked, requirements if technical_response else [])
+        if technical_response:
+            originals = [n for n in outline if n.metadata.get('response_part') == 'point_to_point' and n.metadata.get('source_path')]
+            expected = [(s.get('source_file',''),s.get('title','')) for s in spec_sections]
+            actual = [(n.metadata['source_file'],n.metadata['original_title']) for n in originals]
+            if actual != expected:
+                raise OutlineDraftError('点对点应答与原文章节顺序不一致，已停止生成')
+            point_to_point_ids = {rid for n in originals for rid in n.spec_requirement_ids}
+            coverage.update(response_outline_version=2, original_sections_total=len(expected),
+                original_source_files=list(dict.fromkeys(s.get('source_file','') for s in spec_sections)),
+                priority_expected_paths=[{'source_file':n.metadata['source_file'],'source_path':n.metadata['source_path']}
+                    for n in outline if n.metadata.get('response_part')=='priority' and n.metadata.get('source_path')],
+                original_sections_preserved=len(originals), original_structure_matches=True,
+                point_to_point_requirements=len(point_to_point_ids),
+                priority_sections=sum(n.metadata.get('response_part')=='priority' and bool(n.metadata.get('source_path')) for n in outline))
+        note = ("目录按评分表结构生成：评分因素 → 详细评审项 → 分项要素要点"
+                + ("；重点要求明确呈现；最后按规范书原文结构逐章点对点应答" if technical_response else "；商务应答不并入技术规范书要求"))
         if placement:
             note += f"；已按提炼要求把规范书专题放入「{'、'.join(placement[:3])}」"
         if scope_note:

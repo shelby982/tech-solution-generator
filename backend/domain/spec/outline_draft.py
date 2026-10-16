@@ -41,6 +41,8 @@ def _coerce_int(value) -> int | None:
 def normalize_nodes(
     raw_nodes,
     max_nodes: int = DEFAULT_MAX_NODES,
+    max_level: int = MAX_LEVEL,
+    preserve_duplicates: bool = False,
 ) -> tuple[list[NormalizedNode], list[str]]:
     """把模型输出的 nodes 数组规整成父子自洽的序列。
 
@@ -74,7 +76,7 @@ def normalize_nodes(
             continue
 
         raw_level = _coerce_int(raw.get("level")) or 1
-        raw_level = max(1, min(MAX_LEVEL, raw_level))
+        raw_level = max(1, min(max_level, raw_level))
 
         parent_idx: int | None = None
         level = raw_level
@@ -99,7 +101,7 @@ def normalize_nodes(
                 rehung += 1
 
         key = (parent_idx, title)
-        if key in seen_siblings:
+        if key in seen_siblings and not preserve_duplicates:
             dropped_dup += 1
             continue
         seen_siblings.add(key)
@@ -139,7 +141,7 @@ def stable_chapter_key(chain: dict, title_path: str) -> str:
     return f"{point}|{norm}" if point else norm
 
 
-def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
+def build_sections(nodes: list[NormalizedNode], *, max_level: int = MAX_LEVEL) -> list[Section]:
     """给规整后的节点分配 ``s1 / s1.1 / s1.1.1`` 形式的 id，转成 Section。
 
     id 格式沿用 ``Section.id`` 的既有约定，前端 ``inferTocLevel`` / ``buildToc``
@@ -172,7 +174,7 @@ def build_sections(nodes: list[NormalizedNode]) -> list[Section]:
             section_id = f"s{top_counter}"
         else:
             # 层级以父级为准：parent 是权威关系，避免 level 与 parent 不一致
-            level = max(1, min(MAX_LEVEL, parent_section.level + 1))
+            level = max(1, min(max_level, parent_section.level + 1))
             used = child_counters.get(parent_section.id, 0) + 1
             child_counters[parent_section.id] = used
             section_id = f"{parent_section.id}.{used}"

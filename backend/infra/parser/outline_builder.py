@@ -65,6 +65,9 @@ class OutlineNode:
     # 没有它就只能靠 8 段散文猜"这章为哪个评分点得分、响应了哪条规范要求"。
     review_point_id: str = ""              # 该节点由哪条评分点派生（rp-xxxx）
     spec_requirement_ids: list[str] = field(default_factory=list)   # 承载的规范要求 id
+    metadata: dict = field(default_factory=dict)
+    source_content: str = ''
+    source_marks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {

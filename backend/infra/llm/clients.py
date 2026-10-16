@@ -265,6 +265,7 @@ async def generate_oneshot_openai(
     timeout: float = 60.0,
     raise_on_empty: bool = False,
     call_site: str = "",
+    thinking: bool | None = None,
 ) -> str:
     if _is_mock_mode():
         return await _mock.respond(system_prompt, user_prompt, stream=False, max_tokens=max_tokens)
@@ -278,6 +279,11 @@ async def generate_oneshot_openai(
     )
     started = time.monotonic()
     try:
+        extra = {}
+        if thinking is not None and config.provider == 'deepseek':
+            # 官方开关：https://api-docs.deepseek.com/guides/thinking_mode/
+            # 仅章节快速草稿显式传入；其他调用保留原有模式。
+            extra['extra_body'] = {'thinking': {'type': 'enabled' if thinking else 'disabled'}}
         response = await client.chat.completions.create(
             model=config.model,
             messages=[
@@ -285,6 +291,7 @@ async def generate_oneshot_openai(
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=max_tokens,
+            **extra,
         )
     except Exception as e:
         await _emit_usage(config, call_site, streaming=False, fields={},
@@ -393,6 +400,7 @@ async def stream_openai(
     system_prompt: str,
     user_prompt: str,
     call_site: str = "",
+    thinking: bool | None = None,
 ) -> AsyncIterator[str]:
     if _is_mock_mode():
         iterator = await _mock.respond(system_prompt, user_prompt, stream=True, max_tokens=STREAM_MAX_TOKENS)
@@ -423,6 +431,7 @@ async def stream_openai(
             messages=messages,
             max_tokens=STREAM_MAX_TOKENS,
             stream=True,
+            **({'extra_body':{'thinking':{'type':'enabled' if thinking else 'disabled'}}} if thinking is not None and config.provider=='deepseek' else {}),
             **({"stream_options": {"include_usage": True}} if with_usage else {}),
         )
 
