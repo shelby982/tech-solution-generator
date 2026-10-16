@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v177';
-import { api } from './api.js?v=20261016-v177';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v177';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v179';
+import { api } from './api.js?v=20261016-v179';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v179';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v177';
+       } from './workspace.js?v=20261016-v179';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v177';
+       } from './workspace-model.mjs?v=20261016-v179';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v177';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v179';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3651,6 +3651,7 @@ function pageBudgetBarHtml() {
     </div>`;
 }
 
+
 async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', sub = '' } = {}) {
   hideLaneTreeWhenPanelShows();
   try { await activePackageReady; } catch (err) {
@@ -4198,6 +4199,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const missingRequirements = expectedRequirements.filter(r => !landedRequirements.has(r.requirement_id));
   const responseChecks = data.outline_checks || {};
   const responseWarningsHtml = responseChecks.warnings?.length ? `<details class="response-landing-warning"><summary>建议前部突出 ${responseChecks.warnings.length} 条重点要求 · 不影响确认</summary><p>以下要求已在点对点应答中安排，可结合评分章节补充说明，无需恢复原来的独立章节。</p><ul>${responseChecks.warnings.map(r=>`<li>${escapeHtml(r.title)}${r.critical ? '（明确风险要求）' : ''}</li>`).join('')}</ul></details>` : '';
+  const focusSuggest = data.outline_checks?.response_outline_version === 2
+    ? Math.max(0, Number(responseChecks.focus_requirements_total || 0) - Number(responseChecks.focus_requirements_in_front || 0))
+    : 0;
   const confirmPane = !analyzedAll ? '<div class="sr-empty">请先完成当前标包的评分点拆分。</div>' : `
     <div class="response-type-options" role="group" aria-label="选择应答类型">
       ${[['commerce','商务应答','以商务评分点为主，核对商务格式与证明材料'],['tech','技术应答','整合技术评分点、技术规范书及项目基础内容']].map(([id,label,desc])=>`
@@ -4216,11 +4220,28 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     ${previewReady && responseType === 'tech' && data.outline_checks?.response_outline_version !== 2 ? '<div class="sr-answer"><span class="sr-dim">目录编排规则已更新：评分点 → 重点要求 → 原文点对点应答。</span><button class="mw-btn" data-act="redraft-outline">按新规则重新生成</button></div>' : ''}
     ${previewReady ? `<div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 ${landedPoints.size} / ${expectedPoints}</span>${responseType==='tech' ? `<span>规范要求 ${expectedRequirements.length-missingRequirements.length} / ${expectedRequirements.length}</span>` : ''}<span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
       ${responseType==='tech' && missingRequirements.length ? `<details class="response-missing"><summary>未挂载规范要求 ${missingRequirements.length} 条</summary>${missingRequirements.map(r=>`<p>${escapeHtml(r.title)}：${escapeHtml(r.text)}</p>`).join('')}</details>` : ''}
+      ${previewReady ? `<div class="sr-dir-head">
+        <h5 class="sr-sec" style="margin:0">目录</h5>
+        <span class="sr-dir-pill ${categoriesConfirmed ? 'is-ok' : ''}">${categoriesConfirmed ? '已确认' : '待确认'} · ${structBlocks.length} 个目录节点</span>
+        ${focusSuggest > 0 ? `<span class="sr-dir-warn">⚠ ${focusSuggest} 条重点要求建议前部突出</span>` : ''}
+        <details class="sr-dir-more"><summary>▸ 校验明细</summary>
+          <div class="sr-dim">已关联评分点 ${landedPoints.size} / ${expectedPoints}${responseType === 'tech' ? ` · 规范要求 ${expectedRequirements.length - missingRequirements.length} / ${expectedRequirements.length}` : ''}${data.outline_checks?.response_outline_version === 2 ? ` · 原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total} · 要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total} · 重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}` : ''}<br>编制依据：${responseType === 'commerce' ? '商务' : '技术'}评分点 ${expectedPoints} 项${responseType === 'tech' ? ` · 技术规范要求 ${specCount} 条` : ''}</div></details>
+        <span style="flex:1"></span>
+        <span class="sr-dim">${categoriesConfirmed ? '可继续填写篇幅' : '先确认目录，再确认篇幅'}</span>
+      </div>` : ''}
+      ${pageBudgetBarHtml()}
       ${pane1}
       <details class="response-mapping"><summary>查看章节与原文依据映射</summary>${structBlocks.filter(b=>parseIds(b.review_point_ids).length||parseIds(b.spec_requirement_ids).length).map(b=>`<div class="response-map-row"><strong>${escapeHtml(b.title)}</strong><span>${parseIds(b.review_point_ids).map(reqNameOf).filter(Boolean).map(escapeHtml).join('、') || '技术规范要求'}</span><span class="sr-dim">${parseIds(b.spec_requirement_ids).length} 条规范要求</span></div>`).join('')}</details>
       <div class="response-confirm-bar"><div><strong>${categoriesConfirmed ? '目录已确认' : '确认应答目录'}</strong><span>${categoriesConfirmed ? '可直接进入编写，随时查看目录与依据' : '保存目录并校验，成功后直接进入编写'}</span></div><button class="mw-btn primary" data-act="${categoriesConfirmed ? 'response-write' : 'response-confirm'}">${categoriesConfirmed ? `进入${responseLabel}编写` : `确认目录，创建${responseLabel}`}</button></div><div class="response-confirm-feedback" data-confirm-feedback role="status" aria-live="polite" hidden></div>` : ''}
     ${previewReady && data.outline_checks?.response_outline_version === 2 ? `<div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}</span><span>明确风险要求已安排 ${responseChecks.risk_requirements_landed} / ${responseChecks.risk_requirements_total}</span><span>原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total}</span><span>${data.outline_checks.original_structure_matches ? '标题、层级与顺序一致' : '原文结构待核对'}</span><span>要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total}</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div>${responseWarningsHtml}` : ''}
-    ${previewReady ? pageBudgetBarHtml() : ''}
+    ${previewReady ? `<div class="sr-dir-foot">
+      <b>完成应答策划</b>
+      <span class="sr-dir-pill ${categoriesConfirmed && pageBudgetData?.confirmed ? 'is-ok' : ''}">${(categoriesConfirmed ? 1 : 0) + (pageBudgetData?.confirmed ? 1 : 0)} / 2 已完成</span>
+      <span>${categoriesConfirmed ? `✅ 目录已确认 · ${structBlocks.length} 个目录节点` : '⏳ 目录待确认'}</span>
+      <span>${pageBudgetData?.confirmed ? `✅ 篇幅已确认 · ${Number(pageBudgetData.total) || 0} 页` : `⏳ 篇幅待确认${pageBudgetData ? ` · 目标 ${Number(pageBudgetData.total) || 0} 页` : ''}`}</span>
+      <span style="flex:1"></span>
+      <span class="sr-dim">${categoriesConfirmed && pageBudgetData?.confirmed ? '可以进入应答编写' : (categoriesConfirmed ? '还差：确认篇幅' : '还差：确认目录')}</span>
+    </div>` : ''}
     <div class="sr-dim" data-flash-for="generate"></div>`;
 
   // ③ 产物
@@ -4527,6 +4548,16 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-points-total b{font-size:15px;font-weight:600;margin:0 3px}
   .sr-subpane{display:none}
   .sr-subpane.on{display:block}
+  .sr-dir-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:4px 0 8px}
+  .sr-dir-pill{font-size:11.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);background:#f8fafc;color:var(--muted)}
+  .sr-dir-pill.is-ok{background:#ecfdf5;border-color:#bbf7d0;color:#15803d}
+  .sr-dir-warn{font-size:12px;color:#b45309}
+  .sr-dir-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fbfdff;font-size:12.5px}
+  .sr-dir-foot>b{font-size:13.5px}
+  .sr-dir-foot>button{margin-left:0}
+  .sr-dir-more{font-size:12px}
+  .sr-dir-more>summary{cursor:pointer;color:var(--muted)}
+  .sr-dir-more>div{margin-top:4px;line-height:1.7}
   .sr-page-budget{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;margin:0 0 12px;border:1px solid var(--line);border-radius:8px;background:#fbfdff;font-size:12.5px}
   .sr-page-budget input{font:inherit;font-size:12.5px;width:78px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
@@ -4775,6 +4806,42 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       await postPageBudget({total: pageTotal(), overrides: [{block_id: input.dataset.page, pages, pinned: true}]});
     } catch (err) { pageFeedback(err.message); }
   }));
+  // ── 与原型对齐：被合并 / 被替代的块不再重复出现（原型里合并进「目录」段与收尾栏）──
+  el.querySelectorAll('.sr-stage.on[data-stage="2"] .sr-stage-body > h5.sr-sec, .sr-stack h5.sr-sec').forEach((h) => {
+    if ((h.textContent || '').indexOf('目录草案') === 0) h.hidden = true;   // 已由「目录」段标题替代
+  });
+  el.querySelectorAll('.response-basis-card, .response-coverage, .response-landing-warning, .response-chapter-evidence, .response-mapping, .response-confirm-bar').forEach((node) => { node.hidden = true; });
+  el.querySelectorAll('.sr-dim').forEach((span) => {
+    if (span.children.length) return;
+    const text = span.textContent || '';
+    // 「点一行 → …」与「结构完整 = …」都已并入「? 操作说明与原文依据映射」，不再各占一行
+    if (text.indexOf('点一行') >= 0 || text.indexOf('结构完整 =') >= 0) span.hidden = true;
+  });
+  (function mergeDirHints() {
+    const bar = el.querySelector('.sr-answer');
+    if (!bar || bar.querySelector('[data-dir-help]')) return;
+    const help = document.createElement('details');
+    help.setAttribute('data-dir-help', '1');
+    help.className = 'sr-dir-help';
+    help.style.flexBasis = '100%';
+    help.innerHTML = '<summary>? 操作说明与原文依据映射</summary><div class="sr-dim">选择章节，查看对应评分点和技术规范书原文依据；点一行 → 该行出现操作，改动即时保存。<br>结构完整 = 每个评分点都有承载章节；缺的会在上方自检里以 ⚠ 提示。</div>';
+    bar.appendChild(help);
+  })();
+  (function movePreviewButton() {
+    // 「查看目录草案 / 生成目录草案」原在编制依据卡里；该卡被合并后必须搬出来，否则功能消失
+    const head = el.querySelector('.sr-dir-head');
+    const preview = el.querySelector('[data-act="response-preview"]');
+    if (!head || !preview) return;
+    preview.classList.add('mw-btn');
+    head.appendChild(preview);
+  })();
+  (function moveWriteButton() {
+    const foot = el.querySelector('.sr-dir-foot');
+    const writeBtn = el.querySelector('[data-act="response-write"]');
+    if (!foot || !writeBtn) return;
+    writeBtn.style.marginLeft = '0';
+    foot.appendChild(writeBtn);
+  })();
   el.querySelectorAll('[data-act="redraft-outline"]').forEach(button => button.addEventListener('click', async event => {
     event.stopPropagation();
     button.disabled = true;
