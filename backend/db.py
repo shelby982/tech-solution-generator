@@ -9,10 +9,13 @@ DB_PATH 默认为 backend/ 同级目录下的 ge_solution.db，
 测试可通过修改 db.DB_PATH = ":memory:" 切换为内存库。
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.path.join(_this_dir, "data", "ge_solution.db")
@@ -371,6 +374,42 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
     # 篇幅（2026-10-16，用户要求：填一个总页数，由系统分配到各章，不能让用户逐章手工填）：
     # 页数直接落在目录节点上（与目录同一个对象），pinned 记录"人工改过、不再被自动分配覆盖"。
+    # packages.display_name 回填（2026-10-16，用户反馈"标的名称没有展示"）：
+    # 抽取阶段刻意留空名称（不编造），确认标包时只写了编号标签（如「标的 1」）；
+    # 而名称其实就在 evidence 引文里（「标的1：2026年…采购项目」）。
+    # 这里从**已有引文**回填，不重跑解析、不编造（引文即原文）。
+    # 只回填"为空 或 只是编号标签"的行，人工/已确认的名称一律不动。
+    try:
+        import json as _json_local
+        import re as _re
+
+        from services.package_analysis import name_from_quotes as _name_from_quotes
+
+        _bare = _re.compile(r"^(标的|标包|标段)\s*[0-9一二三四五六七八九十]*$")
+        _cur = await conn.execute("SELECT id, display_name, evidence FROM packages")
+        _rows = await _cur.fetchall()
+        _filled = 0
+        for _row in _rows:
+            _get = (lambda k: _row[k]) if hasattr(_row, "keys") else (lambda k, r=_row: r[{"id": 0, "display_name": 1, "evidence": 2}[k]])
+            _disp = str(_get("display_name") or "").strip()
+            if _disp and not _bare.match(_disp):
+                continue                      # 已有真实名称：不动
+            try:
+                _ev = _json_local.loads(_get("evidence") or "[]")
+            except Exception:
+                _ev = []
+            _name = _name_from_quotes([e.get("quote") for e in _ev if isinstance(e, dict)])
+            if not _name:
+                continue
+            await conn.execute("UPDATE packages SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (_name, _get("id")))
+            _filled += 1
+        if _filled:
+            await conn.commit()
+            logger.info("packages.display_name 回填：%s 个标包从引文取到名称", _filled)
+    except Exception as exc:                  # 回填失败不能影响启动
+        logger.warning("packages.display_name 回填跳过：%s", exc)
+
     if "page_budget" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget INTEGER")
     if "page_budget_pinned" not in existing_cols:

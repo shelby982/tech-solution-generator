@@ -28,6 +28,44 @@ _RE_SECTION = re.compile(rf"标\s*段\s*[:：]?\s*({_NUM})")
 _RE_ORDINAL = re.compile(rf"第\s*({_NUM})\s*标\s*(包|段)")
 _RE_PAIR = re.compile(rf"标\s*的\s*[:：]?\s*({_NUM})\s*标\s*包\s*[:：]?\s*({_NUM})")
 
+# 「标的1：2026年…采购项目」——刻意与编号正则分开：只取**冒号后面的名称**。
+# 设计约定（见本模块开头与 confirm 校验）：名称必须是原文里出现的连续子串，**不编造**。
+# 引文本身就是原文，因此从这里取名称不违反该约定；取不到就留空。
+# 名称允许**内部空格**（PDF 抽文常把长名称断在空格处），随后统一去空格；
+# 在句末标点或后续从句起始处截断。
+_RE_NAME = re.compile(rf"标\s*(?:的|包|段)\s*[:：]?\s*(?:{_NUM})\s*[:：]\s*([^。；;，,]{{2,120}})")
+_NAME_STOP = ("本项目", "本工程", "本标段", "项目概况", "项目概述", "采购范围", "建设内容", "招标范围")
+
+
+def name_from_quotes(quotes) -> str:
+    """从原文引文里取「标的N：名称」的名称部分（取不到返回 ''）。
+
+    注意两点实测经验：
+    1. 名称可能被 PDF 抽文断成带空格的两段（「…应用中台客户 档案管理认证系统…」）→ 去空格后再判断；
+    2. 名称后面常紧跟下一个从句（「…采购项目 本项目基于…」）→ 在从句起始处截断。
+    """
+    for raw in quotes or []:
+        for chunk in re.split(r"[\n\r]", str(raw or "")):
+            m = _RE_NAME.search(chunk)
+            if not m:
+                continue
+            name = m.group(1)
+            for stop in _NAME_STOP:
+                idx = name.find(stop)
+                if idx > 0:
+                    name = name[:idx]
+            name = re.sub(r"\s+", "", name).strip(" 　:：（()）")
+            # 名称通常以「…项目 / …服务」收尾；截掉后面粘上来的从句
+            # （实测：「…采购项目为提升客户服务体验」）
+            for tail in ("项目", "服务", "工程"):
+                idx = name.find(tail)
+                if idx > 0:
+                    name = name[: idx + len(tail)]
+                    break
+            if 2 <= len(name) <= 80:
+                return name
+    return ""
+
 _CN_DIGITS = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
               "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 
@@ -159,7 +197,9 @@ def analyze_packages(chunks: Iterable[dict], materials: Iterable[dict] | None = 
         out.append({
             "target": target,
             "package_no": package_no,
-            "package_name": "",                      # 不编造：留给用户在界面上填/确认
+            # 名称从**原文引文**里取（引文即原文，符合"必须是连续子串"的约定）；
+            # 取不到才留空，仍不编造
+            "package_name": name_from_quotes([e.get("quote") for e in all_ev]),
             "mentions": len(all_ev),
             "confidence": _confidence([{"kind": e["kind"]} for e in all_ev]),
             "source_material_ids": sorted({e["material_id"] for e in all_ev if e["material_id"]}),
