@@ -15556,4 +15556,42 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   }
 })();
 </script>
+
+<script>
+/* 左树与章头：状态改用颜色点，文字只在 hover（title）里出现 */
+(function(){
+  var COLOR={'未开始':'#cbd5e1','待核对':'#f59e0b','进行中':'#3b82f6','已完成':'#16a34a','已达标':'#16a34a','目录':'#e2e8f0'};
+  function toDot(el){
+    var txt=(el.textContent||'').trim();
+    var c=COLOR[txt];
+    if(!c) return false;
+    el.textContent='';
+    el.title=txt;                                   // 文字保留在悬浮提示里
+    el.setAttribute('aria-label',txt);
+    el.style.cssText='display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;'
+      +'background:'+c+';margin-left:6px;vertical-align:middle;'
+      +(txt==='目录'?'border:1px solid #cbd5e1;background:transparent;':'');
+    return true;
+  }
+  /* ① 左树 165 行 */
+  var tree=document.querySelector('.cs-tree');
+  if(tree){
+    tree.querySelectorAll('.cs-node').forEach(function(node){
+      var deepest=null;
+      node.querySelectorAll('span,em,i,b,small').forEach(function(sp){   // 真实行里状态在 <small> 里
+        if(sp.children.length===0 && COLOR[(sp.textContent||'').trim()]) deepest=sp;
+      });
+      if(deepest) toDot(deepest);
+    });
+  }
+  /* ② 章头状态 */
+  var st=document.querySelector('.cs-chapter-state');
+  if(st) toDot(st);
+  /* ③ 图例：不用文字，只在树的标题上加一个悬浮说明 */
+  var lab=document.querySelector('.cs-tree-label');
+  if(lab && !lab.title){
+    lab.title='灰=未开始 · 橙=待核对 · 蓝=进行中 · 绿=已完成';
+  }
+})();
+</script>
 </body></html>
