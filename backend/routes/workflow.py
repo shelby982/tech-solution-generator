@@ -172,6 +172,71 @@ async def confirm_response_plan(thread_id: str):
     return {'confirmed': True, 'response_type': plan['type']}
 
 
+class PageBudgetReq(BaseModel):
+    """篇幅写入。total 为总页数；allocate 触发生成分配；overrides 为人工改过的章节；
+    clear_manual 清除全部人工调整；confirm 表示确认篇幅（要求目录已确认）。"""
+    total: int | None = None
+    source: str | None = None
+    allocate: bool = False
+    clear_manual: bool = False
+    overrides: list[dict] = []
+    confirm: bool = False
+
+
+async def _page_budget_context(thread_id: str):
+    from services.split_answers import get_answers
+
+    runner = get_runner()
+    state = await runner.state(thread_id)
+    if not state:
+        raise HTTPException(status_code=404, detail='应答运行不存在')
+    return state
+
+
+@router.get('/{thread_id}/page-budget')
+async def read_page_budget(thread_id: str):
+    """读篇幅：总额 + 各章页数 + 合计校验 + 目录是否已确认（篇幅确认的前置）。"""
+    from services.page_budget import get_page_budget
+    from services.split_answers import get_answers
+
+    state = await _page_budget_context(thread_id)
+    async with get_db() as db:
+        payload = await get_page_budget(db, state['project_id'], thread_id)
+        plan = (await get_answers(db, state['project_id'], thread_id)).get('response_plan') or {}
+    payload['directory_confirmed'] = bool(plan.get('confirmed'))
+    payload['response_type'] = plan.get('type') or ''
+    return payload
+
+
+@router.post('/{thread_id}/page-budget')
+async def write_page_budget(thread_id: str, req: PageBudgetReq):
+    """写篇幅。目录未确认时拒绝**确认篇幅**（先目录、后篇幅，否则目录一改篇幅就乱）。"""
+    from services.page_budget import clear_page_budget, save_page_budget
+    from services.split_answers import get_answers
+
+    state = await _page_budget_context(thread_id)
+    async with get_db() as db:
+        plan = (await get_answers(db, state['project_id'], thread_id)).get('response_plan') or {}
+        if req.confirm and not plan.get('confirmed'):
+            raise HTTPException(status_code=409, detail='请先确认目录，再确认篇幅')
+        if req.clear_manual:
+            payload = await clear_page_budget(db, state['project_id'], thread_id)
+        else:
+            payload = await save_page_budget(
+                db,
+                state['project_id'],
+                thread_id,
+                total=req.total,
+                source=req.source,
+                allocate=req.allocate,
+                overrides=req.overrides,
+                confirm=req.confirm,
+            )
+    payload['directory_confirmed'] = bool(plan.get('confirmed'))
+    payload['response_type'] = plan.get('type') or ''
+    return payload
+
+
 @router.post("/start")
 async def start(req: StartReq):
     # 兼容尚未迁移的单包旧项目；只要项目已有稳定标包，就不能再绕过确认门控

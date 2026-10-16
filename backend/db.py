@@ -369,6 +369,12 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     if "score_weight" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN score_weight REAL")
+    # 篇幅（2026-10-16，用户要求：填一个总页数，由系统分配到各章，不能让用户逐章手工填）：
+    # 页数直接落在目录节点上（与目录同一个对象），pinned 记录"人工改过、不再被自动分配覆盖"。
+    if "page_budget" not in existing_cols:
+        await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget INTEGER")
+    if "page_budget_pinned" not in existing_cols:
+        await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget_pinned INTEGER NOT NULL DEFAULT 0")
 
     # spec_requirements.package_no（2026-10-13）：技术要求按标包/标的归属
     # （用户口径：不存在"全项目共享"）。旧库需补列，否则落库写入直接报错。
