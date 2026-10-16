@@ -9263,7 +9263,21 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     <div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 13 / 13</span><span>规范要求 411 / 411</span><span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
       
       
-      <h5 class="sr-sec">目录草案（165 个目录节点）· 评分与重点章节可调整，原文目录固定</h5>
+      
+      <div id="budgetBar" style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin:10px 0 12px;background:#fbfdff">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <b style="font-size:13px">篇幅</b>
+          <span class="sr-dim">按总篇幅分配到各章目录</span>
+          <span style="flex:1"></span>
+          <span>总页数 <input type="number" id="totalPg" value="120" style="width:78px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
+          <span class="sr-dim">来源：技术部分规定</span>
+          <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
+          <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
+          <span class="sr-dim" id="sumLine"></span>
+          <span class="sr-dim" id="sumBanner">合计与需求一致</span>
+        </div>
+      </div>
+<h5 class="sr-sec">目录草案（165 个目录节点）· 评分与重点章节可调整，原文目录固定</h5>
       <div class="sr-batch is-empty" id="sr-batch">
         <span class="sr-dim">已选 <b id="sr-batch-n">0</b> 项</span>
         <button class="sr-mini" data-batch="up">批量上移</button>
@@ -11925,21 +11939,7 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       <details class="response-mapping"><summary>查看章节与原文依据映射</summary><div class="response-map-row"><strong>项目理解</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求理解完整性</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目背景</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目目标</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目建设范围</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求及特点</strong><span>项目需求理解完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求理解逻辑性、合理性</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求理解逻辑性</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求理解合理性</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目背景认识</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目目标认识</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>建设范围认识</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目需求及特点认识</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>分析全面准确性</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>描述清晰详细性</strong><span>项目需求理解逻辑性、合理性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目重难点分析及解决方案的完整性</strong><span>项目重难点分析及解决方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>重点分析</strong><span>项目重难点分析及解决方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>难点分析</strong><span>项目重难点分析及解决方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>解决方案及措施</strong><span>项目重难点分析及解决方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>功能实现方案</strong><span>项目重难点分析及解决方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目重难点</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目重难点分析</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>解决方案</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案科学性</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案合理性</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案先进性</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案可靠性</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>招标文件要求理解</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>描述清晰详细</strong><span>项目重难点</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目进度计划</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>进度计划及保障措施</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>进度计划分解</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>计划合理可行</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>满足项目建设要求</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>描述详细</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>进度保障措施</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>可操作性强</strong><span>进度计划及保障措施</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目团队人员</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>团队人员学历情况</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目团队本科及以上学历人数</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>连续6个月社保缴纳证明</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>学历、学位证书</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>学信网认证证明</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>学历真实性承诺</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>国（境）外学位证书</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>国外学历学位认证书</strong><span>团队人员学历情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目负责人</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目负责人资格证书</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>同类项目负责人经验</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目负责人简历</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>连续6个月社保证明</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>相关项目合同证明文件</strong><span>项目负责人</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>团队其他成员相关经验情况</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>团队其他成员同类项目经验</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>同类项目经验界定</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>合同关键页复印件</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>合同关键页内容要素</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>甲方出具证明材料</strong><span>团队其他成员相关经验情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目团队其他成员资质证书情况</strong><span>项目团队其他成员资质证书情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>团队其他成员配置</strong><span>项目团队其他成员资质证书情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>一类资质证书</strong><span>项目团队其他成员资质证书情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>二类资质证书</strong><span>项目团队其他成员资质证书情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>证书证明材料</strong><span>项目团队其他成员资质证书情况</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目业绩</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>经验案例</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>近三年项目业绩</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>信息化领域同类型项目</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目金额规模</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>信息系统开发实施类项目</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>中标通知书</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>合同关键页扫描件</strong><span>经验案例</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>开发要求</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>功能要求</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>技术规范书功能要求响应</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>功能拓展或优化</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>优于项佐证材料</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>原型截图或测试报告</strong><span>功能要求</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>技术实现方案</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>工作方案的完整性</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>代码编写</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>测试工作</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>集成工作</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>技术质量管理方案</strong><span>工作方案的完整性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>工作方案的科学性、合理性、先进性、可靠性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目技术工作方案</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案科学性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案合理性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案先进性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案可靠性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>项目技术要求响应</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>技术成熟度</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>方案可扩展性</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">0 条规范要求</span></div><div class="response-map-row"><strong>7. 其他</strong><span>工作方案的科学性、合理性、先进性、可靠性</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>3.4.2. ★自主可控要求</strong><span>技术规范要求</span><span class="sr-dim">5 条规范要求</span></div><div class="response-map-row"><strong>1.2.2. 计划工期</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>1.3. 对技术投标文件的编制要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>一、综述</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>二、工作方案</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>三、售后服务及技术支持</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>四、项目管理</strong><span>技术规范要求</span><span class="sr-dim">9 条规范要求</span></div><div class="response-map-row"><strong>五、其他</strong><span>技术规范要求</span><span class="sr-dim">3 条规范要求</span></div><div class="response-map-row"><strong>2.3. 项目范围</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>2.4. 项目依据</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>3. 项目服务内容及要求</strong><span>技术规范要求</span><span class="sr-dim">4 条规范要求</span></div><div class="response-map-row"><strong>3.2. 功能要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>3.2.1. 客户档案管理模块</strong><span>技术规范要求</span><span class="sr-dim">141 条规范要求</span></div><div class="response-map-row"><strong>3.2.2. 客户标签管理模块</strong><span>技术规范要求</span><span class="sr-dim">75 条规范要求</span></div><div class="response-map-row"><strong>3.2.3. 客户全景视图管理模块</strong><span>技术规范要求</span><span class="sr-dim">54 条规范要求</span></div><div class="response-map-row"><strong>3.2.4. 客户行为管理模块</strong><span>技术规范要求</span><span class="sr-dim">18 条规范要求</span></div><div class="response-map-row"><strong>3.2.5. 客户认证管理模块</strong><span>技术规范要求</span><span class="sr-dim">6 条规范要求</span></div><div class="response-map-row"><strong>3.2.6. 客户关系管理模块</strong><span>技术规范要求</span><span class="sr-dim">44 条规范要求</span></div><div class="response-map-row"><strong>3.2.7. 业务档案管理模块</strong><span>技术规范要求</span><span class="sr-dim">9 条规范要求</span></div><div class="response-map-row"><strong>3.4.1. 技术管控要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>3.4.2. ★自主可控要求</strong><span>技术规范要求</span><span class="sr-dim">5 条规范要求</span></div><div class="response-map-row"><strong>4. 项目实施</strong><span>技术规范要求</span><span class="sr-dim">4 条规范要求</span></div><div class="response-map-row"><strong>4.1. 组织保障要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.2. 项目组织人员要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.2.1. 项目经理要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.2.2. 项目服务团队要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.3.1. 总体进度要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.3.2. 进度管理要求</strong><span>技术规范要求</span><span class="sr-dim">2 条规范要求</span></div><div class="response-map-row"><strong>4.4.1. 项目例会</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.4.2. 项目联络会</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.5. 质量要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.6.1. 验收标准</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.6.2. 验收方法</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.6.3. 初步验收</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.6.4. 竣工验收</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.8.1. 培训要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.8.2. 培训方式</strong><span>技术规范要求</span><span class="sr-dim">3 条规范要求</span></div><div class="response-map-row"><strong>4.8.3. 现场培训</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>4.8.4. 其他培训要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>5. 项目售后服务和技术支持</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>5.1. 售后服务总体要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>5.2. 应急预案</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>5.4.1. 技术维护支持服务</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>5.4.2. 维护工具</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>6. 安全保密要求</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>6.1. 个人信息提供</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>6.2. 行为规范</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>7. 其他</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div><div class="response-map-row"><strong>8. 效力说明</strong><span>技术规范要求</span><span class="sr-dim">1 条规范要求</span></div></details>
       <div class="response-confirm-bar"><div><strong>目录已确认</strong><span>可直接进入编写，随时查看目录与依据</span></div><button class="mw-btn primary" data-act="response-write">进入技术应答编写</button></div><div class="response-confirm-feedback" data-confirm-feedback="" role="status" aria-live="polite" hidden=""></div>
     <div class="response-coverage"><strong>重点与点对点检查</strong><span>重点要求前部承接 6 / 19</span><span>明确风险要求已安排 0 / 0</span><span>原文章节 68 / 68</span><span>标题、层级与顺序一致</span><span>要求归属 411 / 411</span><span class="sr-dim">仅检查承接位置，正文响应质量待编写后核对。</span></div><details class="response-landing-warning"><summary>建议前部突出 13 条重点要求 · 不影响确认</summary><p>以下要求已在点对点应答中安排，可结合评分章节补充说明，无需恢复原来的独立章节。</p><ul><li>1. 总则 &gt; 1.3. 对技术投标文件的编制要求</li><li>1. 总则 &gt; 1.3. 对技术投标文件的编制要求 &gt; 五、其他 · 第 1 条</li><li>2. 项目描述 &gt; 2.4. 项目依据</li><li>4. 项目实施 &gt; 4.1. 组织保障要求</li><li>4. 项目实施 &gt; 4.2. 项目组织人员要求 &gt; 4.2.1. 项目经理要求</li><li>4. 项目实施 &gt; 4.2. 项目组织人员要求 &gt; 4.2.2. 项目服务团队要求 · 第 1 条</li><li>4. 项目实施 &gt; 4.4. 联络会议 &gt; 4.4.2. 项目联络会</li><li>4. 项目实施 &gt; 4.5. 质量要求</li><li>4. 项目实施 &gt; 4.6. 项目验收要求 &gt; 4.6.1. 验收标准</li><li>5. 项目售后服务和技术支持 &gt; 5.1. 售后服务总体要求</li><li>5. 项目售后服务和技术支持 &gt; 5.2. 应急预案</li><li>5. 项目售后服务和技术支持 &gt; 5.4. 技术维护支持 &gt; 5.4.1. 技术维护支持服务</li><li>6. 安全保密要求 &gt; 6.2. 行为规范</li></ul></details>
-    
-      <h5 class="sr-sec" id="budgetSec">篇幅</h5>
-      <div class="sr-note">按总篇幅分配到各章目录；可直接改某一章的页数，改过的章节保持不动。</div>
-      <div class="sr-answer" style="gap:10px;flex-wrap:wrap;align-items:center">
-        <span>总页数 <input type="number" id="totalPg" value="120" style="width:80px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
-        <span class="sr-dim">来源：招标文件技术部分规定</span>
-        <button class="mw-btn" id="btnAlloc">按总篇幅分配</button>
-        <button class="mw-btn" id="btnResetAlloc">清除手工调整</button>
-        <span class="sr-dim" id="sumLine"></span>
-        <span class="sr-dim" id="sumBanner">合计与需求一致</span>
-        <span style="flex:1"></span>
-        <button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>
-        <span class="sr-dim" id="budgetNote">确认后与目录一并保存</span>
-      </div>
-<div class="sr-dim" data-flash-for="generate"></div></div>
+    <div class="sr-dim" data-flash-for="generate"></div></div>
           </div>
           <div class="sr-stage on" data-stage="4">
             <div class="sr-stage-head"><span class="t">应答编写</span><span class="hint">按章编制 · 图文表统一导出</span></div>
@@ -15172,7 +15172,6 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
 <input type="file" accept=".pdf,.docx,.doc,.ppt,.pptx" multiple="" style="display: none;"><script>
 (function(){
   var $=function(id){return document.getElementById(id);};
-  /* 阶段切换（快照已剥离应用 JS） */
   function activate(stage){
     document.querySelectorAll('.sr-rail-item').forEach(function(el){ el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
     document.querySelectorAll('.sr-stage').forEach(function(el){ el.classList.toggle('on', el.getAttribute('data-stage')===stage); });
@@ -15180,11 +15179,44 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   document.querySelectorAll('.sr-rail-item').forEach(function(el){
     el.addEventListener('click', function(){ activate(el.getAttribute('data-stage')); }); });
 
-  /* ══ 篇幅：直接在真实目录行上加一列页数 ══ */
+  /* ── 状态摘要整合：把"重点与点对点检查"与"建议前部突出"并入覆盖检查一行 ── */
+  function mergeSummary(){
+    var cov = document.querySelector('.response-coverage');
+    var box = document.querySelector('.sr-stage[data-stage="2"]');
+    if(!cov || !box) return;
+    var labels=['重点与点对点检查','建议前部突出'];
+    var facts='';
+    labels.forEach(function(lab){
+      // 找"自己文本以该标签开头、且内部没有同样开头元素"的最外层块
+      var best=null;
+      box.querySelectorAll('div,section,p').forEach(function(el){
+        var t=(el.textContent||'').replace(/\s+/g,'');
+        if(t.indexOf(lab)<0 || t.indexOf(lab)>3) return;   // 容错：可能带 ▶ 之类前缀
+        var nested=false;
+        el.querySelectorAll('div,section,p').forEach(function(c){
+          var ct=(c.textContent||'').replace(/\s+/g,''); if(ct.indexOf(lab)>=0 && ct.indexOf(lab)<=3) nested=true;
+        });
+        if(!nested && !best) best=el;
+      });
+      if(!best) return;
+      var raw=(best.textContent||'').replace(/\s+/g,' ').trim();
+      if(lab==='重点与点对点检查'){
+        facts = raw.replace(lab,'').replace(/仅检查承接位置.*$/,'').trim();
+        // 指标之间补分隔符，避免"6/19明确风险…"糊成一串
+        facts = facts.replace(/(\d)\s*\/\s*(\d)(?=[一-龥])/g, '$1/$2 · ');
+      }
+      best.style.display='none';
+      best.setAttribute('data-merged','1');
+    });
+    if(facts) cov.insertAdjacentHTML('beforeend','<span class="sr-dim">'+facts+'</span>');
+    cov.insertAdjacentHTML('beforeend','<span class="sr-dim">目录 ✅ 已确认</span>');
+  }
+
+  /* ── 篇幅：目录行内一列 + 状态驱动的主操作 ── */
   var KIND={'技术评分项应答':1.2,'项目理解':0.7,'项目进度计划':1.0,'项目团队人员':0.9,'项目业绩':1.0,
     '开发要求':1.2,'技术实现方案':1.4,'重点及必须响应要求':1.1,'技术规范书点对点应答':1.3,
     '1.总则':0.6,'2.项目描述':0.8,'3.项目服务内容及要求':1.0,'4.项目实施':1.0};
-  var rows=[];
+  var rows=[], confirmed=false;
   function collect(){
     rows=[];
     document.querySelectorAll('.sr-stage[data-stage="2"] .sr-erow').forEach(function(el,idx){
@@ -15193,18 +15225,14 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
       var cell=document.createElement('span');
       cell.className='sr-erow-pages';
       cell.style.cssText='font-size:11.5px;color:#475569;padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums';
-      var acts=el.querySelector('.sr-erow-acts');
-      if(acts) el.insertBefore(cell,acts); else el.appendChild(cell);
-      rows.push({el:el,cell:cell,name:t,level:lvl,idx:idx,
-        score: lvl<=2 ? (4+((rows.length*7)%22)) : 0,
-        alloc: lvl<=2, mine:0, pinned:false});
+      var acts=el.querySelector('.sr-erow-acts'); if(acts) el.insertBefore(cell,acts); else el.appendChild(cell);
+      rows.push({el:el,cell:cell,name:t,level:lvl,idx:idx,score:lvl<=2?(4+((rows.length*7)%22)):0,alloc:lvl<=2,mine:0,pinned:false});
     });
   }
-  var allocatable=function(){ return rows.filter(function(r){return r.alloc && r.name;}); };
-  function kindOf(r){ return KIND[r.name]||1.0; }
+  var listAlloc=function(){ return rows.filter(function(r){return r.alloc && r.name;}); };
+  var kindOf=function(r){ return KIND[r.name]||1.0; };
   function allocate(reset){
-    var list=allocatable();
-    if(reset) list.forEach(function(r){ r.pinned=false; });
+    var list=listAlloc(); if(reset) list.forEach(function(r){ r.pinned=false; });
     var total=Number($('totalPg').value||0);
     var free=list.filter(function(r){return !r.pinned;});
     var rest=Math.max(0,total-list.filter(function(r){return r.pinned;}).reduce(function(n,r){return n+r.mine;},0));
@@ -15220,32 +15248,38 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
   function render(){
     rows.forEach(function(r){
       if(!r.alloc){ r.cell.textContent=''; return; }
-      var span=document.createElement('span');
-      span.textContent='';
-      r.cell.innerHTML='<input type="number" value="'+r.mine+'" data-idx="'+r.idx+'" style="width:56px;font:inherit;font-size:11.5px;padding:1px 5px;border:1px solid #e2e8f0;border-radius:5px;text-align:right" /> 页'
-        + (r.pinned?' <span class="ui-pill is-ok">已调整</span>':'');
-      r.cell.querySelector('input').addEventListener('click',function(e){e.stopPropagation();});
-      r.cell.querySelector('input').addEventListener('change',function(e){
-        e.stopPropagation();
-        r.mine=Number(e.target.value)||0; r.pinned=true; allocate(false);
-      });
+      r.cell.innerHTML='<input type="number" value="'+r.mine+'" data-idx="'+r.idx+'" style="width:54px;font:inherit;font-size:11.5px;padding:1px 5px;border:1px solid #e2e8f0;border-radius:5px;text-align:right" /> 页'+(r.pinned?' <span class="ui-pill is-ok">已调整</span>':'');
+      var inp=r.cell.querySelector('input');
+      inp.addEventListener('click',function(e){e.stopPropagation();});
+      inp.addEventListener('change',function(e){ e.stopPropagation(); r.mine=Number(e.target.value)||0; r.pinned=true; allocate(false); });
     });
-    var list=allocatable();
-    var sum=list.reduce(function(n,r){return n+r.mine;},0);
-    var total=Number($('totalPg').value||0);
-    $('sumLine').innerHTML='分配合计 <b>'+sum+'</b> 页 / 共 '+list.length+' 章';
+    var list=listAlloc(), sum=list.reduce(function(n,r){return n+r.mine;},0), total=Number($('totalPg').value||0);
+    $('sumLine').innerHTML='分配合计 <b>'+sum+'</b> 页';
     var b=$('sumBanner');
-    b.textContent = sum===total ? '合计与需求一致' : ('⚠ 与需求相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
-    b.style.color = sum===total ? '#15803d' : '#b45309';
+    b.textContent = sum===total?'合计与需求一致':('⚠ 相差 '+(sum-total>0?'+':'')+(sum-total)+' 页');
+    b.style.color = sum===total?'#15803d':'#b45309';
+    var ok = sum===total;
+    $('btnConfirmBudget').style.display = (confirmed||!ok)?'none':'inline-block';
+    $('budgetDone').style.display = confirmed?'inline':'none';
+    var writeBtn=document.querySelector('[data-act="response-write"]');
+    if(writeBtn){ writeBtn.style.display = confirmed?'inline-block':'none'; }
   }
+  /* 唯一主操作：确认篇幅（放在篇幅控制条内） */
+  var bar=$('budgetBar');
+  bar.insertAdjacentHTML('beforeend','<div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+    '<button class="mw-btn primary" id="btnConfirmBudget">确认篇幅</button>'+
+    '<span class="sr-dim" id="budgetDone" style="display:none;color:#15803d">✅ 篇幅已确认；可进入技术应答编写</span>'+
+    '<span class="sr-dim" id="budgetNote">确认后与目录一并保存</span></div>');
   $('totalPg').addEventListener('input',function(){ allocate(false); });
   $('btnAlloc').addEventListener('click',function(){ allocate(false); });
   $('btnResetAlloc').addEventListener('click',function(){ allocate(true); });
   $('btnConfirmBudget').addEventListener('click',function(){
-    $('budgetNote').innerHTML='<span style="color:#15803d">✅ 已确认篇幅</span>'; });
-  collect(); allocate(true);
+    confirmed=true; $('budgetNote').textContent=''; render();
+    var w=document.querySelector('[data-act="response-write"]'); if(w) w.scrollIntoView({block:'center'});
+  });
+  collect(); allocate(true); mergeSummary();
 
-  /* ══ 编写：块级正文 / 计划预览 / 完成检查 ══ */
+  /* ── 编写阶段：块级正文 / 计划预览 / 完成检查 ── */
   var BLOCKS=[
     {role:'方案',color:'#1d4ed8',text:'拟实施项目中，营销管理应用作为公司市场营销业务支撑平台，自 2015 年投产上线以来已持续运行十年，全面承载全网市场营销业务。',src:'L1 本章原文内容 · 技术规范书 3.2',by:'ai'},
     {role:'证据',color:'#15803d',text:'平台当前覆盖五省区合计 1.2 亿电力客户，并保障超过 10 万名营销从业人员开展日常业务办理。',src:'L1 凭证级 · 实测参数（已核验）',by:'ai'},
@@ -15256,7 +15290,7 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     {role:'承诺',color:'#c2410c',text:'［待补］近三年同类项目业绩 3 项',src:'❌ 缺 · 应从「政府采购中标公示」查（已接入）',by:'todo'}
   ];
   function pill(t,bg,fg){ return '<span style="font-size:11px;padding:1px 7px;border-radius:5px;background:'+bg+';color:'+fg+';font-weight:600">'+t+'</span>'; }
-  function renderBlocks(){
+  (function renderBlocks(){
     var box=$('blockView'); if(!box) return;
     $('segCount').textContent=BLOCKS.length;
     $('nAi').textContent=BLOCKS.filter(function(b){return !b.table&&b.by==='ai';}).length;
@@ -15265,17 +15299,12 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     $('nTable').textContent=BLOCKS.filter(function(b){return b.table;}).length;
     var html='<div class="sr-note" style="margin-bottom:10px">正文按块渲染：段落带角色与来源，表格按真表格呈现（原型演示内容）。</div>';
     BLOCKS.forEach(function(b){
-      if(b.table){ html+='<div style="font-size:12px;color:#334155;font-weight:600;margin:10px 0 2px">'+b.title+'</div><table class="sr-table"><thead><tr>'+
-        b.head.map(function(x){return '<th>'+x+'</th>';}).join('')+'</tr></thead><tbody>'+
-        b.rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; return; }
+      if(b.table){ html+='<div style="font-size:12px;color:#334155;font-weight:600;margin:10px 0 2px">'+b.title+'</div><table class="sr-table"><thead><tr>'+b.head.map(function(x){return '<th>'+x+'</th>';}).join('')+'</tr></thead><tbody>'+b.rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; return; }
       var by=b.by==='ai'?pill('AI 生成','#ecfdf5','#15803d'):b.by==='human'?pill('人工修改 ✎','#fffbeb','#b45309'):pill('未编制','#fef2f2','#b91c1c');
-      html+='<div style="border-left:3px solid '+(b.warn?'#fde68a':'#e2e8f0')+';padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px">'+
-        '<span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:'+b.color+';margin-right:6px">'+b.role+'</span>'+b.text+
-        '<div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">'+by+'<span>来源：'+b.src+'</span></div></div>';
+      html+='<div style="border-left:3px solid '+(b.warn?'#fde68a':'#e2e8f0')+';padding:7px 0 7px 11px;margin-bottom:9px;font-size:12.5px"><span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:#f1f5f9;color:'+b.color+';margin-right:6px">'+b.role+'</span>'+b.text+'<div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">'+by+'<span>来源：'+b.src+'</span></div></div>';
     });
     box.innerHTML=html;
-  }
-  renderBlocks();
+  })();
   var ai=document.querySelector('[data-action="ai"]');
   if(ai) ai.addEventListener('click',function(){ var b=$('planBox'); b.style.display=b.style.display==='none'?'block':'none';
     b.innerHTML='<b>本章编制计划</b><div>预计 5 个任务：现状分析 / 方案描述 / 2 张架构表 / 1 张部署图</div><div>预计 11,250 字 ≈ 45 页 ｜ 需要 3 类证据</div><div style="margin-top:7px"><button class="mw-btn primary">确认后开始编制</button><span style="color:#64748b;margin-left:8px">如不需要可取消</span></div>'; });
