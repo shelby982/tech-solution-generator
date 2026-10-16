@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v191';
-import { api } from './api.js?v=20261016-v191';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v191';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v192';
+import { api } from './api.js?v=20261016-v192';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v192';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v191';
+       } from './workspace.js?v=20261016-v192';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v191';
+       } from './workspace-model.mjs?v=20261016-v192';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v191';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v192';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3603,6 +3603,9 @@ function hideLaneTreeWhenPanelShows() {
 // 数据落 blocks.page_budget + split_answers['page_budget']，接口见 routes/workflow.py。
 let pageBudgetData = null;
 let pageBudgetThreadId = '';
+// 步骤（2026-10-16）：应答策划分两步 —— ① 确认目录 ② 分配篇幅；**两步操作同一个目录**。
+// null 表示按状态自动落位（目录已确认 → 第2步）。
+let planStep = null;
 
 function pageBudgetKeyOf(b) { return String(b?.block_id || b?.id || ''); }
 
@@ -3631,24 +3634,23 @@ function pageBudgetCellHtml(b) {
 }
 
 /** 篇幅控制条：总页数 + 两个动作 + 合计校验 + 确认篇幅。 */
+function resolvedStep(directoryConfirmed) {
+  if (planStep === '2' && !directoryConfirmed) return '1';   // 第2步以第1步完成为前提
+  return planStep || (directoryConfirmed ? '2' : '1');
+}
+
 function pageBudgetBarHtml() {
   if (!pageBudgetData) return '';
   // 目录被改动 → 确认失效 → 篇幅必须重新确认（否则目录一改篇幅就乱）。
   // 此时**不能静默隐藏**整块：用户只会觉得"输入框不见了"，要说明原因。
-  if (!pageBudgetData.directory_confirmed) {
-    // 与页面「目录已确认」卡同形：strong + span 两行，不放 h5、不放胶囊（避免与上方标题重复）
-    return `<div class="response-confirm-bar" data-page-budget-gate>
-      <div><strong>篇幅待确认</strong>
-        <span>目录有改动，需先重新确认目录，再确认篇幅 —— 目录一改，篇幅分配就会失准。</span></div>
-    </div>`;
-  }
+
   const d = pageBudgetData;
   const ok = !!d.ok;
   const sum = `<span class="sr-dim" id="sr-page-sum">已分配到 <b>${Number(d.chapter_count) || 0}</b> 章 · 合计 <b>${Number(d.allocated) || 0}</b> 页</span>`;
   const check = d.confirmed
     ? '✅ 篇幅已确认'
     : (ok ? '合计与需求一致' : `⚠ 与需求相差 ${d.diff > 0 ? '+' : ''}${d.diff} 页`);
-  return `<div class="response-confirm-bar" data-page-budget-bar>
+  return `<div class="response-confirm-bar" data-page-budget-bar data-step-pane="2">
       <div>
         <strong>${d.confirmed ? '篇幅已确认' : '篇幅'} · ${Number(d.total) || 0} 页</strong>
         <span>总页数 <input type="number" id="sr-page-total" min="0" step="1" value="${Number(d.total) || 0}" aria-label="总页数" /> 页 · 来源：${escapeHtml(d.source || '招标文件规定')}</span>
@@ -4238,13 +4240,21 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         <details class="sr-dir-more"><summary>▸ 校验明细</summary>
           <div class="sr-dim">已关联评分点 ${landedPoints.size} / ${expectedPoints}${responseType === 'tech' ? ` · 规范要求 ${expectedRequirements.length - missingRequirements.length} / ${expectedRequirements.length}` : ''}${data.outline_checks?.response_outline_version === 2 ? ` · 原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total} · 要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total} · 重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}` : ''}<br>编制依据：${responseType === 'commerce' ? '商务' : '技术'}评分点 ${expectedPoints} 项${responseType === 'tech' ? ` · 技术规范要求 ${specCount} 条` : ''}</div></details>
         <span style="flex:1"></span>
-        <span class="sr-dir-chain" title="目录是结构，篇幅是挂在结构上的属性；改目录会使篇幅作废">
-          <span class="${categoriesConfirmed ? 'is-done' : 'is-now'}">① 目录${categoriesConfirmed ? ' 已确认' : ' 待确认'}</span>
-          <i>→</i>
-          <span class="${pageBudgetData?.confirmed ? 'is-done' : (categoriesConfirmed ? 'is-now' : 'is-todo')}">② 篇幅${pageBudgetData?.confirmed ? ' 已确认' : (categoriesConfirmed ? ' 待确认' : ' 待开始')}</span>
-          <i>→</i>
-          <span class="${categoriesConfirmed && pageBudgetData?.confirmed ? 'is-now' : 'is-todo'}">③ 进入编写</span>
-        </span>
+        <span class="sr-dir-chain" role="group" aria-label="应答策划步骤">
+          ${(() => {
+            const pageDone = !!pageBudgetData?.confirmed;
+            const step = resolvedStep(categoriesConfirmed);
+            const cls = (n) => (n === 1 && categoriesConfirmed) || (n === 2 && pageDone) ? 'is-done'
+              : (step === String(n) ? 'is-now' : 'is-todo');
+            return `<button class="sr-step ${cls(1)}" data-step-go="1">① 确认目录${categoriesConfirmed ? ' ✓' : ''}</button>
+              <i>→</i>
+              <button class="sr-step ${cls(2)}" data-step-go="2" ${categoriesConfirmed ? '' : 'disabled title="先完成第 1 步：确认目录"'}>② 分配篇幅${pageDone ? ' ✓' : ''}</button>`;
+          })()}
+      </div>` : ''}
+      ${previewReady ? `<div class="response-confirm-bar" data-step-pane="1">
+        <div><strong>第 1 步 · 确认目录</strong>
+          <span>检查结构：改名 / 增删章节 / 调整层级 / 核对覆盖；原文点对点章节固定不动。改动只会让"已确认"失效，不会丢内容。</span></div>
+        <span data-step-slot="1"></span>
       </div>` : ''}
       ${pageBudgetBarHtml()}
       ${pane1}
@@ -4578,6 +4588,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   /* 篇幅区复用页面原生 .response-confirm-bar（含实心蓝主按钮）与 .ui-pill，这里只做排布微调 */
   .response-confirm-bar [data-page-budget-bar] strong{display:flex;align-items:center;gap:8px}
   [data-page-budget-bar] .mw-inline{display:inline-flex;gap:8px;margin-top:6px}
+  [data-step-slot]{display:inline-flex;gap:8px}
   [data-page-budget-bar] input{font:inherit;font-size:12px;width:76px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right}
   [data-page-budget-bar] b{font-variant-numeric:tabular-nums}
   [data-page-budget-bar] .sr-page-warn{color:var(--warn)}
@@ -4586,12 +4597,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   [data-page-budget-bar]>button:disabled{cursor:not-allowed}
   .sr-dir-head .ui-pill{margin:0}
   /* 三步依赖链：① 目录 → ② 篇幅 → ③ 进入编写（结构 → 属性 → 放行） */
+  /* 两步导航：可点击切换（当前步高亮、已完成打勾、未解锁禁用） */
   .sr-dir-chain{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
   .sr-dir-chain i{font-style:normal;color:#cbd5e1}
-  .sr-dir-chain>span{padding:1px 7px;border-radius:999px;border:1px solid var(--line);background:#f8fafc}
-  .sr-dir-chain>span.is-now{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;font-weight:600}
-  .sr-dir-chain>span.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
-  .sr-dir-chain>span.is-todo{opacity:.55}
+  .sr-step{font:inherit;font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:#f8fafc;color:var(--muted);cursor:pointer}
+  .sr-step.is-now{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;font-weight:600}
+  .sr-step.is-done{border-color:#bbf7d0;background:#ecfdf5;color:#15803d}
+  .sr-step.is-todo{opacity:.55}
+  .sr-step:disabled{cursor:not-allowed}
   .sr-erow-page{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);margin-left:4px;white-space:nowrap}
   .sr-erow-page input{font:inherit;font-size:12px;width:58px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
   .sr-erow-page.is-muted{opacity:.5}
@@ -4814,6 +4827,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     if (slot) { slot.textContent = message; slot.style.color = '#b45309'; }
   };
   const pageTotal = () => Number(el.querySelector('#sr-page-total')?.value || 0);
+  el.querySelectorAll('[data-step-go]').forEach((btn) => btn.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    planStep = btn.getAttribute('data-step-go');
+    await openSplitReport({stage: '2'});
+  }));
   el.querySelector('[data-act="page-alloc"]')?.addEventListener('click', async (event) => {
     event.stopPropagation();
     try { await postPageBudget({total: pageTotal(), allocate: true}); }
@@ -4873,20 +4891,35 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     preview.classList.add('mw-btn');
     head.appendChild(preview);
   })();
-  (function moveFooterButtons() {
-    const foot = el.querySelector('.sr-dir-foot');
-    if (!foot) return;
-    // 「确认目录」原在被合并的那张卡里 → 必须搬到收尾栏，否则目录待确认时用户无路可走
+  (function moveStepButtons() {
+    // 「确认目录」原在被合并的那张卡里 → 搬到第 1 步操作条（目录待确认时用户必须有路可走）
     const confirmBtn = el.querySelector('[data-act="response-confirm"]');
-    if (confirmBtn) { confirmBtn.style.marginLeft = '0'; foot.appendChild(confirmBtn); }
-    // 「进入编写」要求目录与篇幅都已确认，按状态出现（唯一主操作）
+    const slot = el.querySelector('[data-step-slot="1"]');
+    if (confirmBtn && slot) { confirmBtn.style.marginLeft = '0'; slot.appendChild(confirmBtn); }
+    // 「进入编写」要求两步都完成，放收尾栏（唯一终态主操作）
+    const foot = el.querySelector('.sr-dir-foot');
     const writeBtn = el.querySelector('[data-act="response-write"]');
-    if (writeBtn) {
+    if (foot && writeBtn) {
       writeBtn.style.marginLeft = '0';
       const ready = !!categoriesConfirmed && !!(pageBudgetData && pageBudgetData.confirmed);
       writeBtn.hidden = !ready;
       if (ready) foot.appendChild(writeBtn);
     }
+  })();
+  (function applyStep() {
+    // 两步**操作同一个目录**：第 1 步行内是结构操作，第 2 步行内是页数输入
+    const step = resolvedStep(!!categoriesConfirmed);
+    el.querySelectorAll('[data-step-pane]').forEach((node) => { node.hidden = node.getAttribute('data-step-pane') !== step; });
+    el.querySelectorAll('.sr-erow-page').forEach((node) => { node.hidden = step !== '2'; });
+    el.querySelectorAll('.sr-erow-acts').forEach((node) => { node.hidden = step !== '1'; });
+    el.querySelectorAll('[data-step-go]').forEach((btn) => {
+      const target = btn.getAttribute('data-step-go');
+      btn.classList.toggle('is-now', target === step);
+      btn.setAttribute('aria-current', target === step ? 'step' : 'false');
+    });
+    // 第 1 步补一句现状说明，避免用户不知道"目录为什么是待确认"
+    const head = el.querySelector('.sr-dir-head');
+    if (head) head.setAttribute('data-step', step);
   })();
   el.querySelectorAll('[data-act="redraft-outline"]').forEach(button => button.addEventListener('click', async event => {
     event.stopPropagation();
