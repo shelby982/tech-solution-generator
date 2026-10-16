@@ -2,13 +2,13 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import { GenerateSession } from './generate-session.js?v=20261016-v143';
+import { GenerateSession } from './generate-session.js?v=20261016-v176';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
-import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v143';
-import { initContextPanel } from './context-panel.js?v=20261016-v143';
-import { api } from './api.js?v=20261016-v143';
+import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v176';
+import { initContextPanel } from './context-panel.js?v=20261016-v176';
+import { api } from './api.js?v=20261016-v176';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction ,
-         uiAlert, uiConfirm} from './workspace.js?v=20261016-v143';
+         uiAlert, uiConfirm} from './workspace.js?v=20261016-v176';
 
 // ── 本章要求 bar 的应答条目缓存 ──────────────────────────────
 // 必须**声明在模块最前面**：它原本声明在文件中部，而模块之间存在循环依赖
@@ -21,7 +21,7 @@ let responseItemsByBlock = {};
 // "每行显示 #undefined"）。
 import { CONSTRAINT_LEVELS, constraintLevelLabel,
          evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v143';
+         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v176';
 initContextPanel();
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
@@ -53,6 +53,8 @@ const params = new URLSearchParams(location.search);
 // projectId 只取数字部分：链接里混进说明文字（如 `?projectId=19**(Cmd+Shift+R)`）时
 // 原实现把整串当 id，导致每个接口 422、页面空白且没有任何解释。
 const projectId = (params.get('projectId') || '').match(/\d+/)?.[0] || '';
+const packageId = (params.get('packageId') || '').match(/\d+/)?.[0] || '';
+const packageQuery = packageId ? `&packageId=${encodeURIComponent(packageId)}` : '';
 let threadId = params.get('threadId');
 // URL ?backend=... 兜底：跨页面跳转时显式带，让进度条第一次绘制就用真实 backend stage
 const _backendParam = params.get('backend');
@@ -223,11 +225,11 @@ document.getElementById('stage-progress')?.addEventListener('click', (e) => {
   const enc = encodeURIComponent(tid);
   const backendQuery = backendForUrl ? `&backend=${encodeURIComponent(backendForUrl)}` : '';
   const routes = {
-    parsing: `/three-mode?projectId=${projectId}&threadId=${enc}&view=outline${backendQuery}`,
-    matching: `/three-mode?projectId=${projectId}&threadId=${enc}&view=matching${backendQuery}`,
-    generating: `/three-mode?projectId=${projectId}&threadId=${enc}&view=editor${backendQuery}`,
-    reviewing: `/review?threadId=${enc}${backendQuery}`,
-    report_review: `/review?threadId=${enc}${backendQuery}`,
+    parsing: `/three-mode?projectId=${projectId}${packageQuery}&threadId=${enc}&view=outline${backendQuery}`,
+    matching: `/three-mode?projectId=${projectId}${packageQuery}&threadId=${enc}&view=matching${backendQuery}`,
+    generating: `/three-mode?projectId=${projectId}${packageQuery}&threadId=${enc}&view=editor${backendQuery}`,
+    reviewing: `/review?projectId=${projectId}${packageQuery}&threadId=${enc}${backendQuery}`,
+    report_review: `/review?projectId=${projectId}${packageQuery}&threadId=${enc}${backendQuery}`,
   };
   if (routes[stage]) location.href = routes[stage];
 });
@@ -249,7 +251,7 @@ document.querySelector('#generation-done-banner .btn-go-review')?.addEventListen
   // 主动推进顶部进度条到"双视角评审"，给用户视觉过渡 200ms 看到变化再跳转
   setStage('reviewing');
   setTimeout(() => {
-    location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
+    location.href = `/review?projectId=${projectId}${packageQuery}&threadId=${encodeURIComponent(threadId)}`;
   }, 200);
 });
 
@@ -268,7 +270,7 @@ if (btnGoReviewTop) {
       if (stage !== 'reviewing' && stage !== 'report_review' && stage !== 'done') {
         await api.workflow.skipToReview(threadId).catch(() => {});
       }
-      location.href = `/review?threadId=${encodeURIComponent(threadId)}`;
+      location.href = `/review?projectId=${projectId}${packageQuery}&threadId=${encodeURIComponent(threadId)}`;
     } catch (e) {
       console.error('[workbench] go-review-top failed', e);
       btnGoReviewTop.disabled = false;
@@ -1087,6 +1089,7 @@ function renderReqBar(b) {
 
 function workspaceReviewUrl(blockId) {
   const q = new URLSearchParams({ projectId: String(projectId) });
+  if (packageId) q.set('packageId', packageId);
   if (threadId) q.set('threadId', threadId);
   if (blockId) q.set('blockId', String(blockId));
   return `/review?${q}`;
@@ -2327,7 +2330,7 @@ if (btnBatchGen) {
     if (workspace.threadId) {
       if (editorDirty) { uiAlert('请先保存正文。'); return; }
       const ids = workspace.chapters.filter(b => !b.content.trim()).map(b => b.block_id);
-      if (!ids.length) { location.href = '/review?projectId=' + projectId + '&threadId=' + encodeURIComponent(workspace.threadId); return; }
+      if (!ids.length) { location.href = `/review?projectId=${projectId}${packageQuery}&threadId=${encodeURIComponent(workspace.threadId)}`; return; }
       confirmChapterAction(ids, 'revise'); return;
     }
     openBatchPromptPreview();

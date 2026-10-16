@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v143';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v143';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v176';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v176';
 const $ = id => document.getElementById(id);
 
 // 「← 作业面板」带上当前项目/线程/标包 —— 回面板仍是同一条作业、同一个标包
@@ -8,7 +8,7 @@ const $ = id => document.getElementById(id);
   if (!a) return;
   const q = new URLSearchParams(location.search);
   const out = new URLSearchParams();
-  for (const k of ['projectId', 'threadId', 'pkg']) {
+  for (const k of ['projectId', 'packageId', 'threadId']) {
     const v = q.get(k);
     if (v) out.set(k, v);
   }
@@ -164,7 +164,11 @@ $('quality-recheck').onclick = () => confirmChapterAction([...selected],'review'
 $('quality-history').onclick = () => showHistory(workspace.chapters.find(b=>b.block_id===activeId)?.db_id);
 for (const button of document.querySelectorAll('[data-doc-mode]')) button.onclick=()=>{mode=button.dataset.docMode;renderDetail();};
 $('quality-export').onclick = () => {
-  openDialog('导出当前正文', `<p>导出当前已保存正文。导出不代表评审通过；仍有问题的章节可继续修订。</p><a class="ws-button" href="/api/projects/${workspace.projectId}/export">下载 Word</a>`);
+  const exportQuery = new URLSearchParams();
+  if (workspace.packageId) exportQuery.set('packageId', workspace.packageId);
+  if (workspace.threadId) exportQuery.set('threadId', workspace.threadId);
+  const packageQuery = `?${exportQuery}`;
+  openDialog('导出当前正文', `<p>导出当前标包已保存正文。导出不代表评审通过；仍有问题的章节可继续修订。</p><a class="ws-button" href="/api/projects/${workspace.projectId}/export${packageQuery}">下载 Word</a>`);
 };
 $('model-selector-btn').onclick = async () => {
   const dialog = openDialog('模型配置','<p>加载中…</p>');

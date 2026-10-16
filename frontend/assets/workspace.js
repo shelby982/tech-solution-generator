@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v143';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v176';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v143';
+} from './material-roles.mjs?v=20261016-v176';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -16,7 +16,7 @@ const params = new URLSearchParams(location.search);
 // projectId 只取数字部分（与 mode-outline / mode-editor 一致）：链接里混进说明文字时
 // 不再把整串当 id，避免每个接口 422 而页面毫无提示。
 const _pid = (params.get('projectId') || '').match(/\d+/)?.[0] || '';
-export const workspace = { projectId: _pid, threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
+export const workspace = { projectId: _pid, packageId: params.get('packageId'), threadId: params.get('threadId'), state: {}, chapters: [], ready: false, busy: false, orphaned: false,
   // runStage：workflow_runs 里的阶段（运行期会被 runner 更新，见 orchestrator/runner.py
   // 的 _mark_next_phase）。stageLabel：**页面自己**给出的阶段文案（project-init 最清楚
   // "准备到哪了"，它一设这里就盖过 stageLabels 的默认词）。
@@ -32,6 +32,7 @@ workspace.selectedBlockId = null;
 export function workspaceUrl(view, blockId) {
   const q = new URLSearchParams();
   if (workspace.projectId) q.set('projectId', workspace.projectId);
+  if (workspace.packageId) q.set('packageId', workspace.packageId);
   if (workspace.threadId) q.set('threadId', workspace.threadId);
   const bid = blockId ?? workspace.selectedBlockId ?? params.get('blockId');
   if (bid) q.set('blockId', bid);
@@ -140,7 +141,8 @@ export async function refreshWorkspace() {
   try {
     if (workspace.projectId) {
       // 每次刷新都读一次 workflow_runs：运行期阶段（extracting/matching）只有这张表是准的
-      const runs = await request(`/api/projects/${workspace.projectId}/workflow-runs`).catch(() => []);
+      const scope = workspace.packageId ? `?packageId=${encodeURIComponent(workspace.packageId)}` : '';
+      const runs = await request(`/api/projects/${workspace.projectId}/workflow-runs${scope}`).catch(() => []);
       // **跳过已作废/失败的运行**：runs 是按创建时间倒序的，最新那个可能已作废，
       // 照着它取 blocks 会让顶栏数字与目录树不一致（实测顶栏显示 0/276、
       // 而目录树是有效运行的 212 节 —— 同一页面两个数字打架）。
