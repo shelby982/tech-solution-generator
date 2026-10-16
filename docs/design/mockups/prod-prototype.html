@@ -15558,24 +15558,30 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
 </script>
 
 <script>
-/* 左树：状态色条统一贴齐最左边（对齐成一列），选中态改用中性底，避免蓝黄对撞 */
+/* 左树：状态与选中共用行自带的 border-left 通道（与产品选中条同一条线，天然对齐） */
 (function(){
-  /* 一套同饱和度/同亮度的柔和色，蓝与黄不再"跳" */
   var COLOR={待核对:'#d97706', 进行中:'#4a6fd4', 已完成:'#2f9e5f', 已达标:'#2f9e5f'};
   var tree=document.querySelector('.cs-tree');
   if(!tree) return;
   var st=document.createElement('style');
   st.textContent=
-    /* 状态条：所有行统一 left:0，宽度一致 → 视觉上对齐成一列 */
-    '.cs-node{position:relative}'+
-    '.cs-node[data-st]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--st)}'+
-    /* 选中态改为中性底 + 加粗，不再用亮蓝整行高亮（避免与状态色对撞） */
-    '.cs-node.on{background:#f1f5f9 !important;color:#0f172a !important;font-weight:600}'+
-    /* 层级只用字重区分 */
-    '.cs-node[data-lv="1"] span{font-weight:600}'+
-    '.cs-node[data-lv="2"] span{font-weight:500}'+
-    '.cs-node[data-lv="3"] span,.cs-node[data-lv="4"] span{font-weight:400}';
+    /* 统一通道与宽度：所有行都是 3px 左描边（原来是 2px transparent + 产品选中 2px 蓝） */
+    '.cs-tree .cs-node{border-left:3px solid transparent !important}'+
+    /* 状态 = 这条描边的颜色 */
+    '.cs-tree .cs-node[data-st="待核对"]{border-left-color:#d97706 !important}'+
+    '.cs-tree .cs-node[data-st="进行中"]{border-left-color:#4a6fd4 !important}'+
+    '.cs-tree .cs-node[data-st="已完成"]{border-left-color:#2f9e5f !important}'+
+    /* 选中不再占用描边（改用中性底+加粗），避免与状态抢同一条线 */
+    '.cs-tree .cs-node.on{border-left-color:transparent !important}'+
+    '.cs-tree .cs-node.on{background:#f1f5f9 !important;color:#0f172a !important;font-weight:600}'+
+    /* 层级只用字重 */
+    '.cs-tree .cs-node[data-lv="1"] span{font-weight:600}'+
+    '.cs-tree .cs-node[data-lv="2"] span{font-weight:500}'+
+    '.cs-tree .cs-node[data-lv="3"] span,.cs-tree .cs-node[data-lv="4"] span{font-weight:400}';
   document.head.appendChild(st);
+  /* 左树加宽，避免深层长名称被省略号截断 */
+  var grid=document.querySelector('.cs-workspace, .cs');
+  if(grid) grid.style.gridTemplateColumns='248px minmax(0,1fr) 336px';
   tree.querySelectorAll('.cs-node').forEach(function(node){
     node.querySelectorAll('.cs-pages').forEach(function(x){ x.remove(); });
     var small=node.querySelector('small');
@@ -15583,15 +15589,13 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
     if(small) small.style.display='none';
     var pad=parseInt((node.style.paddingLeft||'0').replace('px',''),10)||10;
     node.setAttribute('data-lv',String(pad<=10?1:(pad<=26?2:(pad<=42?3:4))));
-    node.style.background=''; node.style.boxShadow=''; node.removeAttribute('data-st');
-    var sp=node.querySelector('span'); if(sp){ sp.style.color=''; sp.style.fontWeight=''; }
-    if(COLOR[txt]){ node.setAttribute('data-st',txt); node.style.setProperty('--st',COLOR[txt]); }
+    node.style.removeProperty('background-color');
+    if(COLOR[txt]) node.setAttribute('data-st',txt); else node.removeAttribute('data-st');
     if(txt) node.title=((node.getAttribute('title')||'').split(' · ')[0]+' · '+txt);
   });
   var cs=document.querySelector('.cs-chapter-state');
   if(cs){
-    var t=(cs.textContent||cs.title||'').trim();
-    cs.textContent=t;
+    var t=(cs.textContent||cs.title||'').trim(); cs.textContent=t;
     cs.style.color={未开始:'#94a3b8',待核对:'#d97706',进行中:'#4a6fd4',已完成:'#2f9e5f'}[t]||'';
   }
 })();
