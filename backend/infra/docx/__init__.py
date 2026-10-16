@@ -7,7 +7,6 @@ DOCX 生成服务
 import io
 import re
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ logger = logging.getLogger(__name__)
 def sections_to_docx(
     sections: list[dict],
     doc_title: str = "技术方案",
+    *, template: str | None = None, images: dict | None = None, include_toc: bool = False, template_data: bytes | None = None,
 ) -> bytes:
     """
     将章节数据列表转为 DOCX 字节流。
@@ -32,35 +32,54 @@ def sections_to_docx(
     from docx import Document
     from docx.shared import Pt, Cm, RGBColor
 
-    doc = Document()
+    if template:
+        from .template_store import load_template
+        template_data = template_data or load_template(template)[0]
+    doc = Document(io.BytesIO(template_data)) if template_data else Document()
 
-    # ── 页面设置（A4，2.5 cm 边距）──────────────
-    sec = doc.sections[0]
-    sec.page_width  = Cm(21)
-    sec.page_height = Cm(29.7)
-    sec.left_margin = sec.right_margin = Cm(2.5)
-    sec.top_margin  = sec.bottom_margin = Cm(2.5)
-
-    # ── 字体默认（宋体/仿宋正文）────────────────
-    style_normal = doc.styles["Normal"]
-    style_normal.font.name = "宋体"
-    style_normal.font.size = Pt(11)
-
-    _apply_heading_styles(doc)
+    if not template_data:
+        sec = doc.sections[0]
+        sec.page_width, sec.page_height = Cm(21), Cm(29.7)
+        sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(2.5)
+        doc.styles['Normal'].font.name = '宋体'
+        doc.styles['Normal'].font.size = Pt(11)
+        _apply_heading_styles(doc)
+    if template:
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        if include_toc:
+            doc.add_heading(doc_title, level=0)
+            doc.add_paragraph('目录', style='Title')
+            paragraph = doc.add_paragraph()
+            toc = OxmlElement('w:fldSimple')
+            toc.set(qn('w:instr'), 'TOC \\o "1-9" \\h \\z \\u')
+            paragraph._p.append(toc)
+            doc.add_paragraph('目录页码在 Word 中更新域后显示。')
+            doc.add_page_break()
 
     # ── 各章节 ────────────────────────────────
     for sec_data in sections:
         if not sec_data.get("done"):
             continue
 
-        sec_level = min(int(sec_data.get("level", 1)), 4)
+        sec_level = max(1, min(int(sec_data.get("level", 1)), 9 if template else 4))
         sec_title = sec_data.get("title", "")
         sec_content = sec_data.get("content", "")
         sec_content = _strip_source_markers(sec_content)
 
         doc.add_heading(sec_title, level=sec_level)
         if sec_content.strip():
-            _parse_markdown(doc, _strip_leading_headings(sec_content))
+            if not template:
+                sec_content = _strip_leading_headings(sec_content)
+            else:
+                # 仅去除与本章同名的重复抬头，保留用户编写的第一节标题。
+                first = re.match(r'^\s*#{1,6}\s+([^\n]+)\n?', sec_content)
+                if first and first.group(1).strip() == sec_title.strip():
+                    sec_content = sec_content[first.end():]
+            from .document_model import parse_markdown, render_blocks
+            model = sec_data.get('document_blocks')
+            render_blocks(doc, model if model is not None else parse_markdown(sec_content),
+                          chapter_level=sec_level, images=images)
 
     # ── 序列化 ────────────────────────────────
     buf = io.BytesIO()
@@ -190,118 +209,6 @@ def _apply_heading_styles(doc):
             pass  # 样式不存在时静默忽略
 
 
-# ─────────────────────────────────────────────
-# Markdown 解析（行级别）
-# ─────────────────────────────────────────────
-
-def _parse_markdown(doc, md_text: str):
-    """将 Markdown 文本逐行解析并插入 doc"""
-    lines = md_text.split("\n")
-    i = 0
-    while i < len(lines):
-        raw = lines[i]
-        line = raw.rstrip()
-        s = line.strip()
-
-        # ── 空行 ──────────────────────────────
-        if not s:
-            i += 1
-            continue
-
-        # ── 标题 # ────────────────────────────
-        m = re.match(r'^(#{1,6})\s+(.*)', s)
-        if m:
-            level = min(len(m.group(1)), 4)
-            doc.add_heading(m.group(2).strip(), level=level)
-            i += 1
-            continue
-
-        # ── 代码块 ``` ────────────────────────
-        if s.startswith("```"):
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].strip().startswith("```"):
-                code_lines.append(lines[i])
-                i += 1
-            i += 1  # 跳过结尾 ```
-            _add_code_block(doc, "\n".join(code_lines))
-            continue
-
-        # ── 水平分隔线 ────────────────────────
-        if re.match(r'^[-*_]{3,}$', s):
-            i += 1
-            continue
-
-        # ── 整行图形占位符 ────────────────────
-        m_img = _PH_IMG_BLOCK_PAT.match(line)
-        if m_img:
-            _add_placeholder_image(doc, m_img.group(1), m_img.group(2).strip())
-            i += 1
-            continue
-
-        # ── 表格 | ────────────────────────────
-        if s.startswith("|") and "|" in s[1:]:
-            tbl_lines = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                tbl_lines.append(lines[i].strip())
-                i += 1
-            _add_table(doc, tbl_lines)
-            continue
-
-        # ── 无序列表 ──────────────────────────
-        if re.match(r'^[-*+] ', s):
-            p = doc.add_paragraph(style="List Bullet")
-            _add_runs(p, s[2:])
-            i += 1
-            continue
-
-        # ── 有序列表 ──────────────────────────
-        if re.match(r'^\d+\. ', s):
-            text = re.sub(r'^\d+\. ', '', s)
-            p = doc.add_paragraph(style="List Number")
-            _add_runs(p, text)
-            i += 1
-            continue
-
-        # ── 普通段落 ──────────────────────────
-        p = doc.add_paragraph()
-        _add_runs(p, s)
-        i += 1
-
-
-# ─────────────────────────────────────────────
-# 辅助：行内格式
-# ─────────────────────────────────────────────
-
-_INLINE_PAT = re.compile(
-    r'`([^`]+)`'           # `code`
-    r'|\*\*([^*]+)\*\*'   # **bold**
-    r'|\*([^*]+)\*'        # *italic*
-    r'|([^`*]+)'           # plain
-)
-
-
-def _add_runs(para, text: str):
-    """解析行内 Markdown（`code`、**bold**、*italic*）并添加 Run；同时为占位符着色。"""
-    from docx.shared import Pt, RGBColor
-
-    for m in _INLINE_PAT.finditer(text):
-        code, bold, italic, plain = m.groups()
-        if code:
-            run = para.add_run(code)
-            run.font.name = "Courier New"
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(0x7C, 0x3A, 0xED)
-        elif bold:
-            run = para.add_run(bold)
-            run.bold = True
-        elif italic:
-            run = para.add_run(italic)
-            run.italic = True
-        elif plain:
-            _add_runs_with_placeholders(para, plain)
-
-
 def _add_runs_with_placeholders(para, text: str):
     """在普通文本里识别并着色占位符：【待补充：xx】红字、【公司全称】等变量蓝字。"""
     from docx.shared import RGBColor
@@ -324,74 +231,32 @@ def _add_runs_with_placeholders(para, text: str):
         para.add_run(text[pos:])
 
 
-def _add_code_block(doc, code_text: str):
-    """添加代码块段落（Courier New 灰底）"""
-    from docx.shared import Pt, RGBColor
-    from docx.oxml.ns import qn
+def _add_studio_image(doc, data, title):
+    from docx.shared import Emu
+    section = doc.sections[-1]
+    width = section.page_width - section.left_margin - section.right_margin
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = 1
+    from PIL import Image
+    from docx.shared import Cm
+    with Image.open(io.BytesIO(data)) as image:
+        height = width * image.height / image.width
+    max_height = Cm(21)
+    if height > max_height:
+        paragraph.add_run().add_picture(io.BytesIO(data), height=Emu(max_height))
+    else:
+        paragraph.add_run().add_picture(io.BytesIO(data), width=Emu(width))
+    caption = doc.add_paragraph(style='Caption')
+    caption.alignment = 1
     from docx.oxml import OxmlElement
-
-    p = doc.add_paragraph()
-    p.paragraph_format.left_indent = Pt(18)
-
-    # 灰色背景通过段落底纹实现
-    try:
-        pPr = p._p.get_or_add_pPr()
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"), "clear")
-        shd.set(qn("w:color"), "auto")
-        shd.set(qn("w:fill"), "F3F4F6")
-        pPr.append(shd)
-    except Exception:
-        pass
-
-    run = p.add_run(code_text or " ")
-    run.font.name = "Courier New"
-    run.font.size = Pt(9)
-    run.font.color.rgb = RGBColor(0x1F, 0x29, 0x37)
-
-
-def _add_table(doc, tbl_lines: list[str]):
-    """将 Markdown 表格转为 DOCX 表格"""
-    from docx.shared import Pt, RGBColor
     from docx.oxml.ns import qn
-
-    def parse_row(line: str) -> list[str]:
-        return [c.strip() for c in line.strip().strip("|").split("|")]
-
-    # 过滤分隔行（:---、----）
-    data_rows = [l for l in tbl_lines if not re.match(r'^[\s|:\-]+$', l)]
-    if not data_rows:
-        return
-
-    headers   = parse_row(data_rows[0])
-    col_count = len(headers)
-    body_rows = [parse_row(r) for r in data_rows[1:]]
-
-    table = doc.add_table(rows=1 + len(body_rows), cols=col_count)
-    table.style = "Table Grid"
-
-    # 表头（加粗 + 浅蓝底）
-    hdr_row = table.rows[0]
-    for j, h in enumerate(headers):
-        cell = hdr_row.cells[j]
-        cell.text = ""
-        p = cell.paragraphs[0]
-        run = p.add_run(h)
-        run.bold = True
-        try:
-            from docx.oxml import OxmlElement
-            tcPr = cell._tc.get_or_add_tcPr()
-            shd = OxmlElement("w:shd")
-            shd.set(qn("w:val"), "clear")
-            shd.set(qn("w:color"), "auto")
-            shd.set(qn("w:fill"), "DBEAFE")
-            tcPr.append(shd)
-        except Exception:
-            pass
-
-    # 数据行
-    for i, row_data in enumerate(body_rows):
-        for j in range(min(len(row_data), col_count)):
-            table.rows[i + 1].cells[j].text = row_data[j]
-
-    doc.add_paragraph()  # 表格后空行
+    caption.add_run('图 ')
+    field = OxmlElement('w:fldSimple')
+    field.set(qn('w:instr'), 'SEQ Figure \\* ARABIC')
+    run = OxmlElement('w:r')
+    text = OxmlElement('w:t')
+    text.text = str(len(doc.inline_shapes))
+    run.append(text)
+    field.append(run)
+    caption._p.append(field)
+    caption.add_run(' ' + title)

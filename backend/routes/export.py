@@ -11,7 +11,7 @@ import json
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -77,23 +77,36 @@ def _compute_diff(base_blocks: list[dict], current_blocks: list[dict]) -> dict:
 
 
 @router.get("/projects/{project_id}/diff")
-async def get_diff(project_id: int):
+async def get_diff(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
     async with get_db() as db:
         project = await get_project(db, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        tid = await current_run_thread_id(db, project_id)
-        current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
+        package = None
+        if package_id is not None:
+            from services.package_scope import package_run_thread, require_package
+            package = await require_package(db, project_id, package_id)
+            tid = await package_run_thread(db, project_id, package_id)
+            current_blocks = await list_blocks(db, project_id, tid, fallback_all=False) if tid else []
+            snapshot_row = await (await db.execute(
+                """SELECT * FROM project_snapshots
+                   WHERE project_id = ? AND package_id = ? ORDER BY id DESC LIMIT 1""",
+                (project_id, package_id),
+            )).fetchone()
+            snapshot = dict(snapshot_row) if snapshot_row else None
+        else:
+            tid = await current_run_thread_id(db, project_id)
+            current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
+            snapshot = await get_snapshot(db, project["base_snapshot_id"]) if project.get("base_snapshot_id") else None
 
-        if not project.get("base_snapshot_id"):
+        if snapshot is None:
             added = [{"block_id": b["block_id"], "title": b.get("title"), "content": b.get("content")}
                      for b in current_blocks]
             return JSONResponse(content={"added": added, "removed": [], "changed": []})
-
-        snapshot = await get_snapshot(db, project["base_snapshot_id"])
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="base_snapshot 不存在")
 
     base_blocks: list[dict] = json.loads(snapshot["snapshot"])
     result = _compute_diff(base_blocks, current_blocks)
@@ -106,20 +119,36 @@ class DiffApplyRequest(BaseModel):
 
 
 @router.post("/projects/{project_id}/diff/apply")
-async def apply_diff(project_id: int, body: DiffApplyRequest):
+async def apply_diff(
+    project_id: int,
+    body: DiffApplyRequest,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
     """接受/拒绝 diff：reject 的 block 写回 base 内容；清除 needs_review；生成新 snapshot"""
     async with get_db() as db:
         project = await get_project(db, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        tid = await current_run_thread_id(db, project_id)
-        current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
+        package_snapshot = None
+        if package_id is not None:
+            from services.package_scope import package_run_thread
+            tid = await package_run_thread(db, project_id, package_id)
+            current_blocks = await list_blocks(db, project_id, tid, fallback_all=False) if tid else []
+            row = await (await db.execute(
+                """SELECT * FROM project_snapshots
+                   WHERE project_id = ? AND package_id = ? ORDER BY id DESC LIMIT 1""",
+                (project_id, package_id),
+            )).fetchone()
+            package_snapshot = dict(row) if row else None
+        else:
+            tid = await current_run_thread_id(db, project_id)
+            current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
         current_map = {b["block_id"]: b for b in current_blocks}
 
         base_map: dict[str, dict] = {}
-        if project.get("base_snapshot_id"):
-            snapshot = await get_snapshot(db, project["base_snapshot_id"])
+        if package_snapshot or project.get("base_snapshot_id"):
+            snapshot = package_snapshot or await get_snapshot(db, project["base_snapshot_id"])
             if snapshot:
                 base_map = {b["block_id"]: b for b in json.loads(snapshot["snapshot"])}
 
@@ -144,6 +173,8 @@ async def apply_diff(project_id: int, body: DiffApplyRequest):
             project_id=project_id,
             trigger="apply_diff",
             snapshot_json=json.dumps(current_blocks, ensure_ascii=False),
+            package_id=package_id,
+            run_thread_id=tid,
         )
 
     logger.info(f"diff apply 完成：project={project_id}, snapshot_id={new_snap['id']}")
@@ -155,15 +186,50 @@ async def apply_diff(project_id: int, body: DiffApplyRequest):
 
 
 @router.get("/projects/{project_id}/export")
-async def export_docx(project_id: int):
+async def export_docx(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+    thread_id: str | None = Query(default=None, alias="threadId"),
+):
     """导出 Word 文档，过滤 status=empty 的 blocks"""
     async with get_db() as db:
         project = await get_project(db, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        tid = await current_run_thread_id(db, project_id)
-        all_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
+        package = None
+        if thread_id:
+            run = await (await db.execute(
+                'SELECT package_id FROM workflow_runs WHERE thread_id=? AND project_id=?',
+                (thread_id, project_id))).fetchone()
+            if not run or (package_id is not None and run[0] != package_id):
+                raise HTTPException(status_code=404, detail='应答运行不属于当前项目或标包')
+            tid = thread_id
+            all_blocks = await list_blocks(db, project_id, tid, fallback_all=False)
+        elif package_id is not None:
+            from services.package_scope import package_run_thread, require_package
+            package = await require_package(db, project_id, package_id)
+            tid = await package_run_thread(db, project_id, package_id)
+            all_blocks = await list_blocks(db, project_id, tid, fallback_all=False) if tid else []
+        else:
+            tid = await current_run_thread_id(db, project_id)
+            all_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
+        from services.split_answers import get_answers
+        answers = await get_answers(db, project_id, tid) if tid else {}
+        response_type = (answers.get('response_plan') or {}).get('type')
+        response_label = {'commerce': '商务应答', 'tech': '技术应答'}.get(response_type, '')
+        template_row = await (await db.execute('SELECT template FROM response_document_settings WHERE project_id=? AND thread_id=?',
+                                              (project_id, tid or ''))).fetchone()
+        template = template_row[0] if template_row else None
+        # 旧导出入口也读取本应答模板及内部图片，避免不同入口丢图。
+        import re
+        from routes.chapter_studio import image_bytes
+        images = {}
+        for b in all_blocks:
+            for mid in re.findall(r'!\[[^\]]*\]\(/api/studio/materials/(\d+)/image\)', b.get('content') or ''):
+                key = f'/api/studio/materials/{mid}/image'
+                if key not in images:
+                    images[key] = (await image_bytes(db, int(mid), project_id))[0]
 
     sections_data = [
         {
@@ -181,12 +247,14 @@ async def export_docx(project_id: int):
         raise HTTPException(status_code=404, detail="无可导出内容，所有章节均为空")
 
     try:
-        docx_bytes = sections_to_docx(sections_data, doc_title=project.get("name", "技术方案"))
+        kwargs = {'template': template, 'images': images} if template or images else {}
+        docx_bytes = sections_to_docx(sections_data, doc_title=project.get("name", "技术方案") + (f' · {response_label}' if response_label else ''), **kwargs)
     except Exception as exc:
         logger.exception(f"DOCX 生成失败：{exc}")
         raise HTTPException(status_code=500, detail=f"Word 文档生成失败：{exc}")
 
-    filename = f"{project.get('name', '技术方案')}.docx"
+    package_name = (package or {}).get("display_name") or (package or {}).get("package_code")
+    filename = f"{project.get('name', '技术方案')}{'-' + package_name if package_name else ''}{'-' + response_label if response_label else ''}.docx"
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
