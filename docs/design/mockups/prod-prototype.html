@@ -9273,41 +9273,30 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
 
       <!-- ══ 方案 A：一个「目录」段，四行同级 ══ -->
       <div id="planA">
-        <div style="display:flex;align-items:center;gap:10px;padding:0 0 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:0 0 6px">
           <b style="font-size:14px">目录</b>
           <span class="ui-pill is-ok" id="dirStatusA">已确认 · 165 个节点</span>
+          <span style="font-size:12.5px;color:#b45309" id="warnA">⚠ 6 条重点要求建议前部突出</span>
           <span style="flex:1"></span>
-          <button class="mw-btn">查看目录草案</button>
-          <button class="mw-btn">重新生成</button>
+          <details style="font-size:12px"><summary style="display:inline;cursor:pointer;color:#64748b">▸ 校验明细</summary>
+            <div class="sr-dim" style="font-size:11.5px;margin-top:4px">
+              评分点 13 / 13 · 规范要求 411 / 411 · 原文章节 68 / 68 · 标题层级与顺序一致<br>
+              技术评分点 13 项 · 技术规范要求 411 条 · 来源与编制规则
+            </div></details>
+          <button class="mw-btn" style="font-size:12px">重新生成</button>
         </div>
-
-        <div style="border-top:1px solid #eef2f7">
-          <div class="prow" style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid #f1f5f9;font-size:12.5px">
-            <span style="flex:none;width:44px;color:#94a3b8">覆盖</span>
-            <span>已关联评分点 <b>13 / 13</b> · 规范要求 <b>411 / 411</b> · 原文章节 <b>68 / 68</b>
-              <span class="sr-dim">　标题、层级与顺序一致</span></span>
-          </div>
-          <div class="prow" style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid #f1f5f9;font-size:12.5px">
-            <span style="flex:none;width:44px;color:#94a3b8">提示</span>
-            <span style="color:#b45309">6 / 19 条重点要求建议前部突出
-              <details style="display:inline"><summary style="display:inline;cursor:pointer">▸ 查看这 13 条</summary></details></span>
-          </div>
-          <div class="prow" id="budgetRowA" style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid #f1f5f9;font-size:12.5px;align-items:center;flex-wrap:wrap">
-            <span style="flex:none;width:44px;color:#94a3b8">篇幅</span>
-            <span class="ui-pill is-none" id="budgetPillA">待确认</span>
-            <span>总页数 <input type="number" id="totalPgA" value="120" style="width:74px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
-            <span class="sr-dim">来源：技术部分规定</span>
-            <span class="sr-dim" id="sumA"></span>
-            <span style="flex:1"></span>
-            <button class="mw-btn" id="btnAllocA">按总篇幅分配</button>
-            <button class="mw-btn" id="btnResetA">清除手工调整</button>
-            <button class="mw-btn primary" id="btnConfirmA">确认篇幅</button>
-          </div>
-          <div class="prow" style="display:flex;gap:10px;padding:8px 2px;font-size:12.5px">
-            <span style="flex:none;width:44px;color:#94a3b8">依据</span>
-            <span class="sr-dim">技术评分点 13 项 · 技术规范要求 411 条　
-              <details style="display:inline"><summary style="display:inline;cursor:pointer">▸ 来源与编制规则</summary></details></span>
-          </div>
+        <div id="budgetRowA" style="display:flex;align-items:center;gap:12px;padding:8px 2px;border-top:1px solid #eef2f7;border-bottom:1px solid #eef2f7;font-size:12.5px">
+          <span style="flex:none;width:32px;color:#94a3b8">篇幅</span>
+          <span>总页数 <input type="number" id="totalPgA" value="120" style="width:70px;font:inherit;font-size:12.5px;padding:3px 8px;border:1px solid #e2e8f0;border-radius:6px;text-align:right" /> 页</span>
+          <span class="sr-dim" id="sumA"></span>
+          <span class="ui-pill is-none" id="budgetPillA">待确认</span>
+          <span style="flex:1"></span>
+          <details style="font-size:12px"><summary style="display:inline;cursor:pointer;color:#64748b">⋯</summary>
+            <div style="margin-top:4px;display:flex;gap:6px">
+              <button class="mw-btn" id="btnAllocA">按总篇幅重新分配</button>
+              <button class="mw-btn" id="btnResetA">清除手工调整</button>
+            </div></details>
+          <button class="mw-btn primary" id="btnConfirmA">确认篇幅</button>
         </div>
       </div>
 
