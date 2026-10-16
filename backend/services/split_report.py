@@ -208,6 +208,8 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
 
     # ── ③ 技术要求矩阵（按主题分组）──
     by_topic: "OrderedDict[str, list[dict]]" = OrderedDict()
+    from services.spec_attention import annotate_requirements
+    reqs = annotate_requirements(reqs, (spec or {}).get('source_toc') or [])
     for r in reqs:
         topic = str(r.get("topic") or "(未归类)")
         by_topic.setdefault(topic, []).append({
@@ -216,6 +218,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
             "text": r.get("text") or "",            # 要求原文同样不截断
             "mandatory_level": r.get("mandatory_level") or "",
             "source_file": r.get("source_file") or "",
+            "attention": r.get('attention') or {},
             # package_no：这条技术要求属于哪个标包（用户口径：技术要求按标包/标的归属，
             # 不存在"全项目共享"）。以前不落库 → 面板说不清归属。
             "package_no": r.get("package_no") or "",
@@ -226,7 +229,14 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         "package_no": next((x.get("package_no") for x in v if x.get("package_no")), ""),
     } for t, v in by_topic.items()]
     req_source_files = sorted({r.get("source_file") for r in reqs if r.get("source_file")})
+    from services.spec_attention import original_topic_title
+    for topic in tech_matrix:
+        topic['display_title'] = original_topic_title(topic['topic'], topic['source_files'], (spec or {}).get('source_toc') or [])
     req_package_nos = sorted({r.get("package_no") for r in reqs if r.get("package_no")})
+    from services.spec_structure import build_spec_structure
+    spec_structure = build_spec_structure(
+        [r for group in tech_matrix for r in group['requirements']],
+        (spec or {}).get('source_toc') or [])
 
     # ── ④ 评分 ↔ 技术要求 映射矩阵（章节链上的 id 就是连接键）──
     req_by_id = {r["requirement_id"]: r for r in reqs}
@@ -391,7 +401,13 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
     current_categories = sorted({(p.get("category") or "") for p in points if p.get("category")})
 
 
+    outline_checks = dict((spec or {}).get('outline_coverage') or {})
+    if outline_checks.get('response_outline_version') == 2:
+        from infra.parser.technical_response import check_response_structure
+        outline_checks.update(check_response_structure((spec or {}).get('toc') or [],
+            (spec or {}).get('source_toc') or [], reqs, outline_checks.get('original_source_files') or [], outline_checks.get('priority_expected_paths') or []))
     return {
+        "outline_checks": outline_checks,
         "review_points": {
             "items": rp_rows,
             "count": len(rp_rows),
@@ -408,6 +424,7 @@ async def build_split_report(db, project_id: int, thread_id: str | None,
         },
         "tech_matrix": {
             "topics": tech_matrix,
+            "structure": spec_structure,
             # 这批要求的归属与来源（面板据此标注，不再说"共享"）
             "package_nos": req_package_nos,
             "source_files": req_source_files,

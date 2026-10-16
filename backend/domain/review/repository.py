@@ -148,14 +148,15 @@ class WorkflowRunRepository:
 
     async def create(
         self, thread_id: str, project_id: int, stage: str = "idle",
-        *, target: str = "", package_no: str = "",
+        *, target: str = "", package_no: str = "", package_id: int | None = None,
     ) -> dict:
         if stage not in _VALID_STAGES:
             raise ValueError(f"非法 stage：{stage}")
         await self.db.execute(
-            """INSERT INTO workflow_runs (thread_id, project_id, stage, target, package_no)
-               VALUES (?, ?, ?, ?, ?)""",
-            (thread_id, project_id, stage, target or "", package_no or ""),
+            """INSERT INTO workflow_runs
+               (thread_id, project_id, stage, target, package_no, package_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (thread_id, project_id, stage, target or "", package_no or "", package_id),
         )
         await self.db.commit()
         row = await self.get(thread_id)
@@ -171,20 +172,22 @@ class WorkflowRunRepository:
         return dict(row) if row else None
 
     async def list_by_project(
-        self, project_id: int, *, only_active: bool = False,
+        self, project_id: int, *, only_active: bool = False, package_id: int | None = None,
     ) -> list[dict]:
+        scope_sql = " AND package_id = ?" if package_id is not None else ""
+        params = (project_id, package_id) if package_id is not None else (project_id,)
         if only_active:
             cursor = await self.db.execute(
-                """SELECT * FROM workflow_runs
-                   WHERE project_id = ? AND stage NOT IN ('done', 'aborted')
+                f"""SELECT * FROM workflow_runs
+                   WHERE project_id = ?{scope_sql} AND stage NOT IN ('done', 'aborted')
                    ORDER BY created_at DESC""",
-                (project_id,),
+                params,
             )
         else:
             cursor = await self.db.execute(
-                """SELECT * FROM workflow_runs
-                   WHERE project_id = ? ORDER BY created_at DESC""",
-                (project_id,),
+                f"""SELECT * FROM workflow_runs
+                   WHERE project_id = ?{scope_sql} ORDER BY created_at DESC""",
+                params,
             )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

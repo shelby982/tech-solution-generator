@@ -19,7 +19,7 @@ from typing import Iterable
 
 # 中文数字（招标文件里「标的二」「第3标包」这类写法很常见）
 _CN = "一二三四五六七八九十两"
-_NUM = rf"(?:\d{{1,2}}|[{_CN}]{{1,3}})"
+_NUM = rf"(?:\d{{1,2}}(?!\d|年)|[{_CN}]{{1,3}})"
 
 # 「标的1」「标的 一」「标包2」「标段三」「第3标包」「包号2」
 _RE_TARGET = re.compile(rf"标\s*的\s*[:：]?\s*({_NUM})")
@@ -167,6 +167,17 @@ def analyze_packages(chunks: Iterable[dict], materials: Iterable[dict] | None = 
         })
     # 稳定排序：先标的、再标包
     out.sort(key=lambda x: (x["target"] or "", x["package_no"] or ""))
+    # 同一编号只有一个明确父标的时，合并独立出现的包号，避免残缺视角重复。
+    for p in list(out):
+        if p["target"] or not p["package_no"]:
+            continue
+        parents = [q for q in out if q["target"] and q["package_no"] == p["package_no"]]
+        if len(parents) == 1:
+            q = parents[0]
+            q["evidence"] = (q["evidence"] + p["evidence"])[:5]
+            q["source_material_ids"] = sorted(set(q["source_material_ids"] + p["source_material_ids"]))
+            q["mentions"] += p["mentions"]
+            out.remove(p)
     return out
 
 
@@ -179,6 +190,14 @@ async def save_analysis(db, project_id: int, packages: list[dict]) -> dict:
     import json as _json
 
     await db.execute("DELETE FROM project_packages WHERE project_id = ?", (project_id,))
+    keys = {(str(p.get("target") or ""), str(p.get("package_no") or "")) for p in packages}
+    previous = await (await db.execute("SELECT * FROM packages WHERE project_id = ?", (project_id,))).fetchall()
+    for old in previous:
+        if old["confidence"] == "manual" or old["status"] == "archived":
+            continue
+        if (old["target_code"], old["package_code"]) not in keys:
+            await db.execute("UPDATE packages SET status = ? WHERE id = ?",
+                             ("needs_review" if old["status"] in ("confirmed", "needs_review") else "archived", old["id"]))
     links = 0
     for p in packages or []:
         target = str(p.get("target") or "")
@@ -193,6 +212,28 @@ async def save_analysis(db, project_id: int, packages: list[dict]) -> dict:
              _json.dumps(p.get("source_material_ids") or [], ensure_ascii=False),
              _json.dumps(p.get("evidence") or [], ensure_ascii=False)),
         )
+        # 同步稳定标包实体。重新识别更新事实字段，但不会把用户已确认的状态和名称冲掉。
+        await db.execute(
+            """INSERT INTO packages
+               (project_id, target_code, package_code, display_name, status, confidence,
+                source_material_ids, evidence, updated_at)
+               VALUES (?,?,?,?, 'candidate', ?,?,?, CURRENT_TIMESTAMP)
+               ON CONFLICT(project_id, target_code, package_code) DO UPDATE SET
+                 display_name = CASE WHEN packages.status IN ('confirmed','needs_review') OR packages.confidence='manual'
+                                     THEN packages.display_name ELSE excluded.display_name END,
+                 status = CASE WHEN packages.status='archived'
+                               THEN 'candidate'
+                               WHEN packages.status='confirmed' AND packages.evidence != excluded.evidence
+                               THEN 'needs_review' ELSE packages.status END,
+                 confidence = CASE WHEN packages.confidence='manual' THEN 'manual' ELSE excluded.confidence END,
+                 source_material_ids = excluded.source_material_ids,
+                 evidence = excluded.evidence,
+                 updated_at = CURRENT_TIMESTAMP""",
+            (project_id, target, package_no, str(p.get("package_name") or ""),
+             str(p.get("confidence") or "low"),
+             _json.dumps(p.get("source_material_ids") or [], ensure_ascii=False),
+             _json.dumps(p.get("evidence") or [], ensure_ascii=False)),
+        )
     # 文件↔标包：只保留本次分析命中的（另外允许用户手工改 —— 手工改动走单独的接口）
     await db.execute("DELETE FROM material_packages WHERE project_id = ?", (project_id,))
     for p in packages or []:
@@ -200,8 +241,10 @@ async def save_analysis(db, project_id: int, packages: list[dict]) -> dict:
             if not mid:
                 continue
             await db.execute(
-                """INSERT OR IGNORE INTO material_packages (material_id, project_id, target, package_no)
-                   VALUES (?,?,?,?)""",
+                """INSERT OR IGNORE INTO material_packages
+                   (material_id, project_id, package_id, target, package_no)
+                   SELECT ?, project_id, id, target_code, package_code FROM packages
+                    WHERE project_id = ? AND target_code = ? AND package_code = ?""",
                 (int(mid), project_id, str(p.get("target") or ""), str(p.get("package_no") or "")),
             )
             links += 1
@@ -243,6 +286,7 @@ async def run_analysis(db, project_id: int, *, use_llm: bool = False,
         """SELECT c.material_id, c.chunk_index, c.page, c.content
              FROM material_chunks c JOIN materials m ON m.id = c.material_id
             WHERE m.project_id = ? AND m.deleted_at IS NULL
+              AND m.role IN ('main_rfp','requirement','spec','scoring','evaluation')
             ORDER BY c.material_id, c.chunk_index""", (project_id,))).fetchall()
     chs = [{"material_id": r[0], "chunk_index": r[1], "page": r[2], "content": r[3]} for r in chunks]
     packages = analyze_packages(chs, mats)

@@ -168,7 +168,11 @@ async def zhang_heng_parse_node(
     # 优先带 material_id 取（新契约）：解析结果里就能记住"这次用了哪几份文件"。
     # 旧 loader 只接受一个位置参数 → 退回旧调用，行为不变。
     try:
-        sources = await spec_loader(project_id, with_ids=True)
+        selected_ids = (state.get('config') or {}).get('material_ids')
+        if selected_ids is not None:
+            sources = await spec_loader(project_id, with_ids=True, material_ids=selected_ids)
+        else:
+            sources = await spec_loader(project_id, with_ids=True)
     except TypeError:
         sources = await spec_loader(project_id)
 

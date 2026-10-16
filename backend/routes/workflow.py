@@ -22,6 +22,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from db import get_db
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -118,8 +120,82 @@ async def workspace_action(thread_id: str, req: WorkspaceActionReq):
 # 端点
 # ─────────────────────────────────────────────
 
+class ResponsePlanReq(BaseModel):
+    response_type: Literal['commerce', 'tech']
+
+
+@router.post('/{thread_id}/response-plan')
+async def create_response_plan(thread_id: str, req: ResponsePlanReq):
+    try:
+        tid = await get_runner().create_response_plan(thread_id, req.response_type)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='解析运行不存在')
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {'thread_id': tid, 'response_type': req.response_type}
+
+
+@router.post('/{thread_id}/response-plan/confirm')
+async def confirm_response_plan(thread_id: str):
+    from services.split_answers import get_answers, set_answer
+    from services.block_store import list_blocks
+    runner = get_runner()
+    state = await runner.state(thread_id)
+    if not state:
+        raise HTTPException(status_code=404, detail='应答运行不存在')
+    if runner._is_running(thread_id) or (state.get('spec') or {}).get('outline_pending'):
+        raise HTTPException(status_code=409, detail='目录尚未生成完成')
+    if await runner._requirement_files_changed(state):
+        raise HTTPException(status_code=409, detail='依据文件已变更，请重新解析后生成目录')
+    async with get_db() as db:
+        answers = await get_answers(db, state['project_id'], thread_id)
+        plan = answers.get('response_plan') or {}
+        if plan.get('type') not in ('commerce', 'tech'):
+            raise HTTPException(status_code=409, detail='请先选择应答类型并生成独立目录草案')
+        if not await list_blocks(db, state['project_id'], thread_id):
+            raise HTTPException(status_code=409, detail='目录为空，不能创建应答')
+        spec = state.get('spec') or {}
+        coverage = spec.get('outline_coverage') or {}
+        if coverage.get('response_outline_version') == 2:
+            from services.point_store import list_spec_requirements
+            from infra.parser.technical_response import check_response_structure
+            reqs = [dict(r) for r in await list_spec_requirements(db, run_thread_id=thread_id)]
+            checks = check_response_structure(spec.get('toc') or [], spec.get('source_toc') or [], reqs,
+                coverage.get('original_source_files') or [], coverage.get('priority_expected_paths') or [])
+            if not checks['can_confirm']:
+                raise HTTPException(status_code=409, detail={
+                    'message':'目录检查未通过：'+'；'.join(checks['blocking_issues'])+'。现有调整已保留。',
+                    'missing_sections':checks['missing_risk_requirements'],
+                    'original_structure_matches':checks['original_structure_matches'],
+                    'point_to_point_missing':checks['point_to_point_requirements_total']-checks['point_to_point_requirements']})
+        await set_answer(db, state['project_id'], thread_id, 'response_plan', {**plan, 'confirmed': True})
+    return {'confirmed': True, 'response_type': plan['type']}
+
+
 @router.post("/start")
 async def start(req: StartReq):
+    # 兼容尚未迁移的单包旧项目；只要项目已有稳定标包，就不能再绕过确认门控
+    # 用项目级入口启动，否则会重新引入跨标包运行。
+    async with get_db() as db:
+        package_id = (req.config or {}).get("package_id")
+        if package_id not in (None, ""):
+            from services.package_scope import require_package
+            package = await require_package(db, req.project_id, int(package_id))
+            req.config.update({
+                "package_id": int(package_id),
+                "target": package["target_code"],
+                "package_no": package["package_code"],
+            })
+        else:
+            row = await (await db.execute(
+                "SELECT 1 FROM packages WHERE project_id = ? AND status != 'archived' LIMIT 1",
+                (req.project_id,),
+            )).fetchone()
+            if row:
+                raise HTTPException(
+                    status_code=409,
+                    detail="该项目已启用标包工作空间，请从已确认标包内启动流程",
+                )
     runner = get_runner()
     tid = await runner.start(req.project_id, req.config)
     return JSONResponse({"thread_id": tid})

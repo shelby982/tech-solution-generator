@@ -19,6 +19,49 @@ DB_PATH: str = os.path.join(_this_dir, "data", "ge_solution.db")
 DB_PATH = os.path.normpath(DB_PATH)
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS chapter_writing_jobs (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    block_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    stage TEXT NOT NULL DEFAULT '待编制',
+    snapshot TEXT NOT NULL,
+    artifacts TEXT NOT NULL DEFAULT '{}',
+    content TEXT NOT NULL DEFAULT '',
+    saved INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS chapter_studio (
+    block_id INTEGER PRIMARY KEY REFERENCES blocks(id),
+    layout TEXT NOT NULL DEFAULT 'solution',
+    writing_status TEXT NOT NULL DEFAULT 'draft',
+    confirmed_hash TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS chapter_materials (
+    block_id INTEGER NOT NULL REFERENCES blocks(id),
+    material_id INTEGER NOT NULL REFERENCES materials(id),
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(block_id, material_id)
+);
+CREATE TABLE IF NOT EXISTS response_document_settings (
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    template TEXT NOT NULL DEFAULT 'standard',
+    PRIMARY KEY(project_id, thread_id)
+);
+CREATE TABLE IF NOT EXISTS document_export_jobs (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    progress INTEGER NOT NULL DEFAULT 0,
+    snapshot TEXT NOT NULL,
+    result BLOB,
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -76,14 +119,39 @@ CREATE TABLE IF NOT EXISTS project_packages (
     PRIMARY KEY (project_id, target, package_no)
 );
 
+-- 标包工作空间的稳定聚合根。project_packages 保留原始分析快照；packages 提供不会因
+-- 重新识别而变化的 package_id，并承载候选/已确认/已归档状态。
+CREATE TABLE IF NOT EXISTS packages (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id          INTEGER NOT NULL REFERENCES projects(id),
+    kind                TEXT NOT NULL DEFAULT 'package',
+    target_code         TEXT NOT NULL DEFAULT '',
+    package_code        TEXT NOT NULL DEFAULT '',
+    display_name        TEXT NOT NULL DEFAULT '',
+    status              TEXT NOT NULL DEFAULT 'candidate',
+    confidence          TEXT NOT NULL DEFAULT 'low',
+    source_material_ids TEXT NOT NULL DEFAULT '[]',
+    evidence            TEXT NOT NULL DEFAULT '[]',
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, target_code, package_code)
+);
+
 -- 文件 ↔ 标包：**多对多**（用户口径：「一个文件可能会属于多个标包，这块没有严格的对应关系」）。
 -- 所以不能用 materials.package_no 单列。来源是分析命中的事实，也可由用户手改。
 CREATE TABLE IF NOT EXISTS material_packages (
     material_id INTEGER NOT NULL REFERENCES materials(id),
     project_id  INTEGER NOT NULL REFERENCES projects(id),
+    package_id  INTEGER REFERENCES packages(id),
     target      TEXT NOT NULL DEFAULT '',
     package_no  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (material_id, target, package_no)
+);
+
+CREATE TABLE IF NOT EXISTS package_spec_selections (
+    package_id INTEGER PRIMARY KEY REFERENCES packages(id),
+    material_ids TEXT NOT NULL DEFAULT '[]',
+    no_spec INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -172,6 +240,8 @@ CREATE TABLE IF NOT EXISTS block_revisions (
 CREATE TABLE IF NOT EXISTS project_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER REFERENCES projects(id),
+    package_id  INTEGER REFERENCES packages(id),
+    run_thread_id TEXT,
     trigger     TEXT,
     snapshot    TEXT,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -193,6 +263,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     -- ——评分点/目录/编写/评审都各自独立，所以运行必须能按标包归属与检索。
     target      TEXT NOT NULL DEFAULT '',
     package_no  TEXT NOT NULL DEFAULT '',
+    package_id  INTEGER REFERENCES packages(id),
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME
@@ -212,6 +283,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_thread_block ON reviews(thread_id, block_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_project ON workflow_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_packages_project_status ON packages(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_blocks_project ON blocks(project_id);
 CREATE INDEX IF NOT EXISTS idx_block_revisions_block ON block_revisions(block_id);
 
@@ -243,8 +315,32 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_site ON llm_usage(call_site, model);
 async def init_db(conn: aiosqlite.Connection) -> None:
     """执行建表 DDL（CREATE TABLE IF NOT EXISTS，幂等）。"""
     await conn.executescript(_DDL)
+    await conn.executescript('''
+        CREATE TRIGGER IF NOT EXISTS cleanup_chapter_studio AFTER DELETE ON blocks BEGIN
+            DELETE FROM chapter_studio WHERE block_id=OLD.id;
+            DELETE FROM chapter_materials WHERE block_id=OLD.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS cleanup_chapter_material AFTER DELETE ON materials BEGIN
+            DELETE FROM chapter_materials WHERE material_id=OLD.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS review_chapter_material_delete BEFORE DELETE ON materials BEGIN
+            UPDATE chapter_studio SET writing_status='review' WHERE writing_status='complete'
+                AND block_id IN (SELECT block_id FROM chapter_materials WHERE material_id=OLD.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS review_chapter_material_change AFTER UPDATE OF parse_status ON materials
+            WHEN NEW.parse_status != OLD.parse_status AND NEW.parse_status != 'done' BEGIN
+            UPDATE chapter_materials SET confirmed=0 WHERE material_id=NEW.id;
+            UPDATE chapter_studio SET writing_status='review' WHERE writing_status='complete'
+                AND block_id IN (SELECT block_id FROM chapter_materials WHERE material_id=NEW.id);
+        END;
+    ''')
     await conn.commit()
     # 迁移已有数据库：添加新列（如果不存在）
+    export_columns = {r[1] for r in await (await conn.execute('PRAGMA table_info(document_export_jobs)')).fetchall()}
+    for name, kind in [('preview_pdf', 'BLOB'), ('preview_status', "TEXT DEFAULT 'pending'"),
+                       ('preview_error', "TEXT DEFAULT ''")]:
+        if name not in export_columns:
+            await conn.execute(f'ALTER TABLE document_export_jobs ADD COLUMN {name} {kind}')
     cursor = await conn.execute("PRAGMA table_info(blocks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
     # run_thread_id：该行属于哪一次 workflow run。老库的行留 NULL（不回填），
@@ -290,6 +386,39 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             if _col not in _wr_cols:
                 await conn.execute(
                     f"ALTER TABLE workflow_runs ADD COLUMN {_col} TEXT NOT NULL DEFAULT ''")
+        if "package_id" not in _wr_cols:
+            await conn.execute("ALTER TABLE workflow_runs ADD COLUMN package_id INTEGER")
+
+    _mp_cols = {row[1] for row in await (await conn.execute(
+        "PRAGMA table_info(material_packages)")).fetchall()}
+    if _mp_cols and "package_id" not in _mp_cols:
+        await conn.execute("ALTER TABLE material_packages ADD COLUMN package_id INTEGER")
+
+    # 旧项目已有 project_packages 时，首次启动自动生成稳定 package_id；重复执行幂等。
+    await conn.execute(
+        """INSERT OR IGNORE INTO packages
+           (project_id, target_code, package_code, display_name, confidence,
+            source_material_ids, evidence, status)
+           SELECT project_id, target, package_no, package_name, confidence,
+                  source_material_ids, evidence, 'candidate'
+             FROM project_packages"""
+    )
+    await conn.execute(
+        """UPDATE material_packages
+              SET package_id = (SELECT p.id FROM packages p
+                                 WHERE p.project_id = material_packages.project_id
+                                   AND p.target_code = material_packages.target
+                                   AND p.package_code = material_packages.package_no)
+            WHERE package_id IS NULL"""
+    )
+    await conn.execute(
+        """UPDATE workflow_runs
+              SET package_id = (SELECT p.id FROM packages p
+                                 WHERE p.project_id = workflow_runs.project_id
+                                   AND p.target_code = workflow_runs.target
+                                   AND p.package_code = workflow_runs.package_no)
+            WHERE package_id IS NULL"""
+    )
 
     # reviews：对齐评分口径的判断（审查是否真正满足要求）。
     #   criterion_text 评审依据的评分口径；satisfied 满足度；
@@ -334,6 +463,14 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE llm_usage ADD COLUMN project_id INTEGER")
     if "thread_id" not in existing_cols:
         await conn.execute("ALTER TABLE llm_usage ADD COLUMN thread_id TEXT")
+
+    _snapshot_cols = {row[1] for row in await (await conn.execute(
+        "PRAGMA table_info(project_snapshots)")).fetchall()}
+    if _snapshot_cols:
+        if "package_id" not in _snapshot_cols:
+            await conn.execute("ALTER TABLE project_snapshots ADD COLUMN package_id INTEGER")
+        if "run_thread_id" not in _snapshot_cols:
+            await conn.execute("ALTER TABLE project_snapshots ADD COLUMN run_thread_id TEXT")
     # 索引建在加列之后：老库的 blocks 表先执行上面的 ALTER 才有 run_thread_id，
     # 放进 _DDL 会在老库上引用了尚不存在的列而直接报错。
     await conn.execute(
@@ -342,6 +479,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # 同上：thread_id 要先 ALTER 出来才能建索引。
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_llm_usage_run ON llm_usage(thread_id)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_package ON project_snapshots(project_id, package_id, id)"
     )
     await conn.commit()
 

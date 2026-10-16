@@ -9,7 +9,7 @@ backend/routes/revisions.py — Block 版本历史查看与回溯
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from db import get_db
@@ -38,7 +38,10 @@ async def list_block_revisions(block_id: int):
 
 
 @router.get("/projects/{project_id}/revisions")
-async def list_project_revisions(project_id: int):
+async def list_project_revisions(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
     """
     返回项目下全部 block 的全部修订，按时间倒序。
 
@@ -51,7 +54,13 @@ async def list_project_revisions(project_id: int):
         )
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
-        rows = await _list_project_revisions(db, project_id)
+        run_thread_id = None
+        if package_id is not None:
+            from services.package_scope import package_run_thread
+            run_thread_id = await package_run_thread(db, project_id, package_id)
+            if run_thread_id is None:
+                return JSONResponse(content={"revisions": []})
+        rows = await _list_project_revisions(db, project_id, run_thread_id)
 
     return JSONResponse(content={"revisions": rows})
 

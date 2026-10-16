@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # review_points：**评分点确认**（用户要求的两阶段：先确认评分点，再确认目录拆分）。
 # 落库后报告里该项即为"已作答"，前端据此把面板从"确认评分点"推进到"确认目录"。
-VALID_KEYS = ("scope", "categories", "topic_placement", "review_points", "structure")
+VALID_KEYS = ("scope", "categories", "topic_placement", "review_points", "structure", "response_plan")
 
 
 async def get_answers(db, project_id: int, thread_id: str | None = None) -> dict:

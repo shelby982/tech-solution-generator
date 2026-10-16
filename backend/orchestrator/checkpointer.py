@@ -26,7 +26,7 @@ from typing import AsyncIterator
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from db import DB_PATH
+import db as db_module
 
 
 @asynccontextmanager
@@ -43,7 +43,9 @@ async def checkpointer_from_path(path: str) -> AsyncIterator[AsyncSqliteSaver]:
 @asynccontextmanager
 async def checkpointer_from_default() -> AsyncIterator[AsyncSqliteSaver]:
     """复用 ``db.DB_PATH`` 打开 saver，与业务表共库。"""
-    async with checkpointer_from_path(DB_PATH) as saver:
+    # 测试会在运行时替换 db.DB_PATH。这里不能在模块导入时复制该值，
+    # 否则默认 checkpointer 仍会连接真实项目数据库。
+    async with checkpointer_from_path(db_module.DB_PATH) as saver:
         yield saver
 
 

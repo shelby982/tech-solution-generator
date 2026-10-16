@@ -61,15 +61,18 @@ async def list_projects(
     db: aiosqlite.Connection,
     status: str | None = None,
 ) -> list[dict]:
+    sql = """SELECT p.*,
+                    COUNT(pkg.id) AS package_count,
+                    SUM(CASE WHEN pkg.status = 'confirmed' THEN 1 ELSE 0 END)
+                      AS confirmed_package_count
+               FROM projects p
+               LEFT JOIN packages pkg ON pkg.project_id = p.id AND pkg.status != 'archived'"""
+    params: tuple = ()
     if status is not None:
-        cursor = await db.execute(
-            "SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC",
-            (status,),
-        )
-    else:
-        cursor = await db.execute(
-            "SELECT * FROM projects ORDER BY created_at DESC"
-        )
+        sql += " WHERE p.status = ?"
+        params = (status,)
+    sql += " GROUP BY p.id ORDER BY p.created_at DESC"
+    cursor = await db.execute(sql, params)
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 
@@ -166,6 +169,9 @@ async def replace_materials_by_role(
     rows = await cursor.fetchall()
     paths: list[str] = []
     for row in rows:
+        await invalidate_material_packages(db, row["id"])
+        await db.execute("DELETE FROM material_chunks WHERE material_id = ?", (row["id"],))
+        await db.execute("DELETE FROM material_packages WHERE material_id = ?", (row["id"],))
         await db.execute("DELETE FROM materials WHERE id = ?", (row["id"],))
         paths.append(row["file_path"] or "")
     await db.commit()
@@ -185,9 +191,24 @@ async def delete_material(db: aiosqlite.Connection, material_id: int) -> bool:
     cursor = await db.execute("SELECT id FROM materials WHERE id = ?", (material_id,))
     if await cursor.fetchone() is None:
         return False
+    await invalidate_material_packages(db, material_id)
+    await db.execute("DELETE FROM material_chunks WHERE material_id = ?", (material_id,))
+    await db.execute("DELETE FROM material_packages WHERE material_id = ?", (material_id,))
     await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
     await db.commit()
     return True
+
+
+async def invalidate_material_packages(db, material_id: int) -> None:
+    """来源文件变化后保留成果，但撤销依赖它的标包确认。"""
+    await db.execute(
+        """UPDATE packages SET status='needs_review', updated_at=CURRENT_TIMESTAMP
+           WHERE status='confirmed' AND (id IN
+             (SELECT package_id FROM material_packages WHERE material_id=?)
+             OR EXISTS (SELECT 1 FROM json_each(packages.source_material_ids)
+                        WHERE CAST(value AS TEXT)=CAST(? AS TEXT)))""",
+        (material_id, material_id),
+    )
 
 
 async def update_material_parsed(
@@ -376,13 +397,21 @@ async def purge_blocks_except_run(
 async def current_run_thread_id(
     db: aiosqlite.Connection,
     project_id: int,
+    package_id: int | None = None,
 ) -> str | None:
-    """本项目最新一次 workflow run 的 thread_id；一次都没跑过则返回 None。"""
-    cursor = await db.execute(
-        "SELECT thread_id FROM workflow_runs WHERE project_id = ? "
-        "ORDER BY created_at DESC LIMIT 1",
-        (project_id,),
-    )
+    """项目或指定稳定标包的最新 workflow run；一次都没跑过则返回 None。"""
+    if package_id is None:
+        cursor = await db.execute(
+            "SELECT thread_id FROM workflow_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT thread_id FROM workflow_runs
+               WHERE project_id = ? AND package_id = ?
+               ORDER BY created_at DESC, rowid DESC LIMIT 1""",
+            (project_id, package_id),
+        )
     row = await cursor.fetchone()
     return row[0] if row else None
 
@@ -899,10 +928,14 @@ async def create_snapshot(
     project_id: int,
     trigger: str,
     snapshot_json: str,
+    *,
+    package_id: int | None = None,
+    run_thread_id: str | None = None,
 ) -> dict:
     cursor = await db.execute(
-        "INSERT INTO project_snapshots (project_id, trigger, snapshot) VALUES (?, ?, ?)",
-        (project_id, trigger, snapshot_json),
+        """INSERT INTO project_snapshots
+           (project_id, package_id, run_thread_id, trigger, snapshot) VALUES (?, ?, ?, ?, ?)""",
+        (project_id, package_id, run_thread_id, trigger, snapshot_json),
     )
     await db.commit()
     return await get_snapshot(db, cursor.lastrowid)
@@ -922,6 +955,7 @@ async def get_snapshot(
 async def list_project_revisions(
     db: aiosqlite.Connection,
     project_id: int,
+    run_thread_id: str | None = None,
 ) -> list[dict]:
     sql = """
         SELECT br.id, br.block_id, b.title AS block_title,
@@ -940,9 +974,10 @@ async def list_project_revisions(
         FROM block_revisions br
         JOIN blocks b ON br.block_id = b.id
         WHERE b.project_id = ?
+          AND (? IS NULL OR b.run_thread_id = ?)
         ORDER BY br.created_at DESC
     """
-    cursor = await db.execute(sql, (project_id,))
+    cursor = await db.execute(sql, (project_id, run_thread_id, run_thread_id))
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 

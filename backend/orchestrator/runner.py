@@ -188,6 +188,68 @@ class WorkflowRunner:
 
     # ── 公共 API ──────────────────────────────
 
+    async def create_response_plan(self, source_thread_id: str, response_type: str) -> str:
+        """复用解析事实，独立保存商务/技术应答；不走会清理旧 blocks 的 start。"""
+        import copy
+        from orchestrator.graph import NODE_PARSE
+        from services.split_answers import get_answers, set_answer
+        if response_type not in ('commerce', 'tech'):
+            raise ValueError('应答类型必须是商务或技术')
+        if not hasattr(self, '_response_plan_lock'):
+            self._response_plan_lock = asyncio.Lock()
+        async with self._response_plan_lock:
+            state = await self.state(source_thread_id)
+            if not state or not state.get('project_id'):
+                raise KeyError(source_thread_id)
+            if self._is_running(source_thread_id):
+                raise ValueError('当前运行尚未完成，请稍后生成目录草案')
+            if await self._requirement_files_changed(state):
+                raise ValueError('依据文件已变更，请先重新解析评分点')
+            source = (state.get('config') or {}).get('response_source_thread_id') or source_thread_id
+            project_id = state['project_id']
+            async with get_db() as db:
+                existing = await (await db.execute(
+                    """SELECT thread_id FROM split_answers WHERE project_id=? AND key='response_plan'
+                       AND json_extract(value,'$.source_thread_id')=?
+                       AND json_extract(value,'$.type')=? ORDER BY updated_at DESC LIMIT 1""",
+                    (project_id, source, response_type))).fetchone()
+                if existing:
+                    return existing[0]
+                meta = await (await db.execute(
+                    'SELECT target, package_no, package_id FROM workflow_runs WHERE thread_id=? AND project_id=?',
+                    (source_thread_id, project_id))).fetchone()
+                if not meta or not (state.get('spec') or {}).get('source_toc'):
+                    raise ValueError('缺少当前标包的解析事实，请先完成评分点拆分')
+                tid = str(uuid.uuid4())
+                await WorkflowRunRepository(db).create(tid, project_id, stage='parsing',
+                    target=meta[0], package_no=meta[1], package_id=meta[2])
+                answers = await get_answers(db, project_id, source_thread_id)
+                if answers.get('scope'):
+                    await set_answer(db, project_id, tid, 'scope', answers['scope'])
+                await set_answer(db, project_id, tid, 'categories', {'categories': [response_type]})
+                await set_answer(db, project_id, tid, 'response_plan',
+                    {'type': response_type, 'source_thread_id': source, 'confirmed': False})
+            spec = copy.deepcopy(state['spec'])
+            for key in ('toc', 'outline_matrix', 'outline_coverage', 'outline_error', 'outline_revision'):
+                spec.pop(key, None)
+            spec['outline_pending'] = True
+            config = dict(state.get('config') or {}, response_type=response_type,
+                          response_source_thread_id=source, points_only=False)
+            config['outline_instruction'] = (
+                '仅生成商务应答目录，以商务评分点为准，围绕商务评审项、资格、格式及证明材料组织内容。只包含商务内容。'
+                if response_type == 'commerce' else
+                '仅生成技术应答目录，整合技术评分点、当前标包的技术规范书及项目背景、范围、实施交付等基础内容，不并入商务评分点。'
+            )
+            initial = dict(project_id=project_id, thread_id=tid, stage='parsing',
+                           spec=spec, config=config, user_choice='', cancel_requested=False, errors=[])
+            run = _Run(tid, EventEmitter())
+            self._runs[tid] = run
+            async with self._checkpointer_provider() as saver:
+                graph = self._build(saver, run.emitter, thread_id=tid)
+                await graph.aupdate_state({'configurable': {'thread_id': tid}}, initial, as_node=NODE_PARSE)
+            await self.redraft_outline(tid, '')
+            return tid
+
     async def start(self, project_id: int, config: dict) -> str:
         """启动新工作流，返回 thread_id。后台 task 跑到第一个闸门后等续跑指令。
 
@@ -200,10 +262,13 @@ class WorkflowRunner:
         # 前端才能按标包找/建运行；清理旧数据也必须收敛到同一个标包。
         scope_target = str((config or {}).get("target") or "")
         scope_pkg = str((config or {}).get("package_no") or "")
+        package_id = (config or {}).get("package_id")
+        package_id = int(package_id) if package_id not in (None, "") else None
         async with get_db() as db:
             repo = WorkflowRunRepository(db)
             await repo.create(thread_id, project_id, stage="idle",
-                              target=scope_target, package_no=scope_pkg)
+                              target=scope_target, package_no=scope_pkg,
+                              package_id=package_id)
             from services.block_store import purge_scope_blocks
 
             dropped = await purge_scope_blocks(
@@ -674,6 +739,11 @@ class WorkflowRunner:
             )
 
         # 旧 emitter 可能已 close（前次 stream 已结束），重建一份让新 stream 收事件
+        from services.split_answers import get_answers, set_answer
+        async with get_db() as db:
+            plan = (await get_answers(db, state['project_id'], thread_id)).get('response_plan')
+            if plan:
+                await set_answer(db, state['project_id'], thread_id, 'response_plan', {**plan, 'confirmed': False})
         run.emitter = EventEmitter()
         run.cancel_flag = False
 
@@ -874,6 +944,16 @@ class WorkflowRunner:
             raise ValueError("当前任务仍在运行，请等这一步结束后再调整目录")
 
         clean = validate_structure(nodes)   # 非法时抛 StructureError（路由转 400）
+        source_toc = (state.get('spec') or {}).get('toc') or []
+        locked = [s for s in source_toc if (s.get('chain') or {}).get('response_part') == 'point_to_point']
+        if locked:
+            locked_ids = {s['id'] for s in locked}
+            submitted_locked = [n for n in clean if n['block_id'] in locked_ids]
+            expected = [(s['id'],s['title'],s['level']) for s in locked]
+            actual = [(n['block_id'],n['title'],n['level']) for n in submitted_locked]
+            first = next((i for i,n in enumerate(clean) if n['block_id'] in locked_ids),len(clean))
+            if actual != expected or any(n['block_id'] not in locked_ids for n in clean[first:]):
+                raise ValueError('点对点应答须保持原文标题、层级与顺序，并固定在最后；请在前部评分项或重点要求中调整目录')
 
         # **少了但没声明的章节 → 拒绝**。这是"面板列表陈旧 → 保存静默删掉差额"的根治闸：
         # 客户端把用户主动删掉的 id 放在 removed_ids 里，其余任何缺失都视为提交方不可信。
@@ -942,6 +1022,11 @@ class WorkflowRunner:
                 {"configurable": {"thread_id": thread_id}},
                 {"spec": {"toc": new_toc, "outline_matrix": pruned_matrix}},
             )
+        from services.split_answers import get_answers, set_answer
+        async with get_db() as db:
+            plan = (await get_answers(db, project_id, thread_id)).get('response_plan')
+            if plan and plan.get('confirmed'):
+                await set_answer(db, project_id, thread_id, 'response_plan', {**plan, 'confirmed': False})
 
         # 把**归一化后的**结构回给前端：服务端会压平跨级加深、clamp 到 1..4，
         # 前端若只按自己的入参重绘，就会与库里的权威结构发散（例如用户把某节点

@@ -411,27 +411,28 @@ async def upload_material(
             role=material_role,
             file_size=len(content),
         )
-
-    if material_role in ("source", "scoring", "evaluation"):
-        abs_path = _abs_upload_path(mat["file_path"])
-        suffix = Path(file.filename).suffix.lower()
-        # 后台跑 OCR + 切片，立即返回上传成功；前端通过 GET /materials 轮询 parse_status 看进度。
-        task = _asyncio.create_task(
-            _parse_and_chunk_in_background(
-                material_id=mat["id"],
-                abs_path=str(abs_path),
-                suffix=suffix,
-                filename=file.filename,
-                material_role=material_role,
+        if material_role != 'source':
+            await db.execute(
+                """UPDATE packages SET status='needs_review', updated_at=CURRENT_TIMESTAMP
+                   WHERE project_id=? AND status='confirmed'""", (project_id,),
             )
+            await db.commit()
+
+    abs_path = _abs_upload_path(mat["file_path"])
+    suffix = Path(file.filename).suffix.lower()
+    # 所有材料都必须解析正文。标包识别首先依赖主招标文件/技术规范书，
+    # 不能再把这两类文件直接标成 done 却不给 material_chunks 写入内容。
+    task = _asyncio.create_task(
+        _parse_and_chunk_in_background(
+            material_id=mat["id"],
+            abs_path=str(abs_path),
+            suffix=suffix,
+            filename=file.filename,
+            material_role=material_role,
         )
-        _PARSE_TASKS.add(task)
-        task.add_done_callback(_PARSE_TASKS.discard)
-    else:
-        # 主招标文件不在上传时切片，直接置 done 让前端不显示"解析中"标签
-        async with get_db() as db_done:
-            await update_material_parse_status(db_done, mat["id"], "done")
-        mat["parse_status"] = "done"
+    )
+    _PARSE_TASKS.add(task)
+    task.add_done_callback(_PARSE_TASKS.discard)
 
     return JSONResponse(content=mat)
 
@@ -473,6 +474,27 @@ async def delete_material_route(material_id: int):
     return JSONResponse(content={"ok": True})
 
 
+@router.post("/materials/{material_id}/reparse")
+async def reparse_material(material_id: int):
+    from services.block_store import invalidate_material_packages
+    async with get_db() as db:
+        row = await (await db.execute("SELECT * FROM materials WHERE id=?", (material_id,))).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        if row["parse_status"] in ("pending", "parsing"):
+            raise HTTPException(status_code=409, detail="文件正在解析，请稍候")
+        await invalidate_material_packages(db, material_id)
+        await db.execute("DELETE FROM material_chunks WHERE material_id=?", (material_id,))
+        await update_material_parse_status(db, material_id, "pending")
+    task = _asyncio.create_task(_parse_and_chunk_in_background(
+        material_id, str(_abs_upload_path(row["file_path"])),
+        Path(row["filename"]).suffix.lower(), row["filename"], row["role"],
+    ))
+    _PARSE_TASKS.add(task)
+    task.add_done_callback(_PARSE_TASKS.discard)
+    return {"ok": True}
+
+
 @router.patch("/materials/{material_id}")
 async def update_material_route(material_id: int, body: dict):
     """更新材料属性：当前仅支持 role 修改（spec/main_rfp/scoring/evaluation/source）"""
@@ -482,6 +504,8 @@ async def update_material_route(material_id: int, body: dict):
     if not new_role or new_role not in allowed:
         raise HTTPException(status_code=400, detail=f"非法 role：{new_role!r}")
     async with get_db() as db:
+        from services.block_store import invalidate_material_packages
+        await invalidate_material_packages(db, material_id)
         await update_material_role(db, material_id, new_role)
     return JSONResponse(content={"id": material_id, "role": new_role})
 

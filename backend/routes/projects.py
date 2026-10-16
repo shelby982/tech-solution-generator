@@ -12,7 +12,7 @@ backend/routes/projects.py — Vault CRUD + lock
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -35,8 +35,11 @@ router = APIRouter(tags=["projects"])
 # ── GET /api/projects ─────────────────────────────────────
 
 @router.post("/projects/{project_id}/reset-analysis")
-async def reset_analysis(project_id: int):
-    """**清空该项目的全部拆解结果**（保留上传的材料与项目本身）。
+async def reset_analysis(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
+    """清空指定标包的拆解结果；旧调用不带 packageId 时维持项目级兼容。
 
     用户要求：再点一次「拆解评分点」必须**从零开始**，不要让旧数据影响新结果 ——
     此前旧的评分点/规范要求/章节/作答（含范围与类别选择、主题归属）会跨运行残留，
@@ -50,28 +53,48 @@ async def reset_analysis(project_id: int):
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
 
-        threads = [r[0] for r in await (await db.execute(
-            "SELECT thread_id FROM workflow_runs WHERE project_id = ?", (project_id,)
-        )).fetchall()]
+        if package_id is not None:
+            from services.package_scope import require_package
+            await require_package(db, project_id, package_id)
+            threads = [r[0] for r in await (await db.execute(
+                "SELECT thread_id FROM workflow_runs WHERE project_id = ? AND package_id = ?",
+                (project_id, package_id),
+            )).fetchall()]
+        else:
+            threads = [r[0] for r in await (await db.execute(
+                "SELECT thread_id FROM workflow_runs WHERE project_id = ?", (project_id,)
+            )).fetchall()]
+        placeholders = ",".join("?" for _ in threads)
         deleted = {}
-        for table, sql, params in (
-            ("blocks", "DELETE FROM blocks WHERE project_id = ?", (project_id,)),
-            # reviews 表没有 project_id，只能按 thread_id 关联（实测按 project_id 会报
-            # "no such column: project_id"，被 except 吞掉 → 旧评审静默残留）
-            ("reviews", "DELETE FROM reviews WHERE thread_id IN "
-                        "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
-             (project_id,)),
-            ("split_answers", "DELETE FROM split_answers WHERE project_id = ?", (project_id,)),
-            # 这两张表有 project_id：直接按项目删，覆盖该项目所有历史运行
-            ("review_points", "DELETE FROM review_points WHERE project_id = ?", (project_id,)),
-            ("spec_requirements", "DELETE FROM spec_requirements WHERE project_id = ?", (project_id,)),
-            ("checkpoints", "DELETE FROM checkpoints WHERE thread_id IN "
-                            "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
-             (project_id,)),
-            ("writes", "DELETE FROM writes WHERE thread_id IN "
-                       "(SELECT thread_id FROM workflow_runs WHERE project_id = ?)",
-             (project_id,)),
-        ):
+        scoped = package_id is not None
+        statements = []
+        if threads:
+            thread_params = tuple(threads)
+            statements.extend([
+                ("block_revisions", f"DELETE FROM block_revisions WHERE block_id IN "
+                 f"(SELECT id FROM blocks WHERE run_thread_id IN ({placeholders}))", thread_params),
+                ("reviews", f"DELETE FROM reviews WHERE thread_id IN ({placeholders})", thread_params),
+                ("split_answers", f"DELETE FROM split_answers WHERE thread_id IN ({placeholders})", thread_params),
+                ("review_points", f"DELETE FROM review_points WHERE run_thread_id IN ({placeholders})", thread_params),
+                ("spec_requirements", f"DELETE FROM spec_requirements WHERE run_thread_id IN ({placeholders})", thread_params),
+                ("blocks", f"DELETE FROM blocks WHERE run_thread_id IN ({placeholders})", thread_params),
+                ("checkpoints", f"DELETE FROM checkpoints WHERE thread_id IN ({placeholders})", thread_params),
+                ("writes", f"DELETE FROM writes WHERE thread_id IN ({placeholders})", thread_params),
+            ])
+        if scoped:
+            statements.append((
+                "project_snapshots", "DELETE FROM project_snapshots WHERE project_id = ? AND package_id = ?",
+                (project_id, package_id),
+            ))
+        else:
+            # 老项目可能没有 workflow_runs/run_thread_id，只在兼容路径清理这些无归属数据。
+            statements.extend([
+                ("blocks", "DELETE FROM blocks WHERE project_id = ?", (project_id,)),
+                ("split_answers", "DELETE FROM split_answers WHERE project_id = ?", (project_id,)),
+                ("review_points", "DELETE FROM review_points WHERE project_id = ?", (project_id,)),
+                ("spec_requirements", "DELETE FROM spec_requirements WHERE project_id = ?", (project_id,)),
+            ])
+        for table, sql, params in statements:
             try:
                 cur = await db.execute(sql, params)
                 deleted[table] = cur.rowcount or 0
@@ -80,9 +103,14 @@ async def reset_analysis(project_id: int):
                 deleted[table] = -1
         # 运行记录本身保留（历史可追溯），但标成已作废，避免前端把它当"当前运行"
         if threads:
-            await db.execute(
-                "UPDATE workflow_runs SET stage = 'aborted', updated_at = CURRENT_TIMESTAMP "
-                "WHERE project_id = ?", (project_id,))
+            if scoped:
+                await db.execute(
+                    """UPDATE workflow_runs SET stage = 'aborted', updated_at = CURRENT_TIMESTAMP
+                       WHERE project_id = ? AND package_id = ?""", (project_id, package_id))
+            else:
+                await db.execute(
+                    "UPDATE workflow_runs SET stage = 'aborted', updated_at = CURRENT_TIMESTAMP "
+                    "WHERE project_id = ?", (project_id,))
         await db.commit()
 
     logger.info(f"reset-analysis：项目 {project_id} 已清空拆解结果 {deleted}")
@@ -177,7 +205,11 @@ async def lock_project(project_id: int):
 # ── GET /api/projects/{id}/workflow-runs ──────────────────
 
 @router.get("/projects/{project_id}/workflow-runs")
-async def list_project_workflow_runs(project_id: int, only_active: bool = False):
+async def list_project_workflow_runs(
+    project_id: int,
+    only_active: bool = False,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
     """返回该项目的 workflow_runs（按 created_at DESC）。
 
     供前端项目列表点击时按最新 thread 的 stage 路由到对应页面。
@@ -187,5 +219,10 @@ async def list_project_workflow_runs(project_id: int, only_active: bool = False)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
         repo = WorkflowRunRepository(db)
-        runs = await repo.list_by_project(project_id, only_active=only_active)
+        if package_id is not None:
+            from services.package_scope import require_package
+            await require_package(db, project_id, package_id, confirmed=False)
+        runs = await repo.list_by_project(
+            project_id, only_active=only_active, package_id=package_id,
+        )
     return JSONResponse(content=runs)
