@@ -189,3 +189,11 @@ async def test_clear_manual_can_set_new_total(db):
     await save_page_budget(db, 1, "t1", total=120, allocate=True)
     cleared = await clear_page_budget(db, 1, "t1", total=0)
     assert cleared["total"] == 0 and cleared["allocated"] == 0
+
+
+async def test_clear_manual_also_updates_source(db):
+    """清除手工调整时，来源字段也要跟着更新（只透传 total 会静默丢 source）。"""
+    await _seed(db)
+    await save_page_budget(db, 1, "t1", total=120, source="技术部分规定", allocate=True)
+    cleared = await clear_page_budget(db, 1, "t1", total=0, source="")
+    assert cleared["total"] == 0 and cleared["source"] == ""

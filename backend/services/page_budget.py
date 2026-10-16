@@ -328,12 +328,17 @@ async def save_page_budget(
     return payload
 
 
-async def clear_page_budget(db, project_id: int, thread_id: str, total: int | None = None) -> dict:
-    """清除全部人工调整，按总额重新分配。`total` 传入时同时更新总额。"""
+async def clear_page_budget(db, project_id: int, thread_id: str, total: int | None = None,
+                            source: str | None = None) -> dict:
+    """清除全部人工调整，按总额重新分配。`total`/`source` 传入时**一并更新**。
+
+    注意：这里必须把 total 与 source 都透传给 save_page_budget —— 只传 total 时，
+    调用方传进来的 source 会被静默丢弃（联调时踩到过：来源清不掉）。
+    """
     await db.execute(
         "UPDATE blocks SET page_budget = 0, page_budget_pinned = 0, updated_at = CURRENT_TIMESTAMP "
         "WHERE project_id = ? AND run_thread_id = ?",
         (project_id, thread_id or ""),
     )
     await db.commit()
-    return await save_page_budget(db, project_id, thread_id, total=total, allocate=True)
+    return await save_page_budget(db, project_id, thread_id, total=total, source=source, allocate=True)
