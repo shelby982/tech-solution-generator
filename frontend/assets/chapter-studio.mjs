@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v179';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v179';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v179';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v182';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v182';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v182';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -116,7 +116,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const profile = document.profiles || {};
   const draftKey = b => `chapter-draft:${threadId}:${b.id}`;
   host.innerHTML = `
-    <div class="cs-document-head"><div><strong>章节编写</strong><span data-cs="progress"></span></div><details class="cs-delivery"><summary>Word 导出格式</summary>    <div class="cs-document"><label>交付格式 <select data-cs="template">${Object.entries(document.templates).map(([key,t])=>`<option value="${key}" ${key===document.template?'selected':''}>${esc(t.label)}</option>`).join('')}</select></label><span class="cs-muted" data-cs="format-summary"></span><a data-cs="format-sample" target="_blank" rel="noopener">预览样张</a><a data-cs="format-download">Word 样张</a><details class="cs-format-rules"><summary>规则与应用时机</summary><p>编写前确认招标规定的目录与固定表单；本设置在导出时应用，不改变正文。内置格式不包含企业封面或招标指定表单。</p><p>统一正文与标题样式、图题、页码和跨页表头。实际分页以导出排版预览为准；Word 与 LibreOffice 的字体和分页可能存在差异。</p><p data-cs="format-version"></p></details></div>
+    <div class="cs-document-head"><div hidden><strong>章节编写</strong><span data-cs="progress"></span></div><details class="cs-delivery"><summary>Word 导出格式</summary>    <div class="cs-document"><label>交付格式 <select data-cs="template">${Object.entries(document.templates).map(([key,t])=>`<option value="${key}" ${key===document.template?'selected':''}>${esc(t.label)}</option>`).join('')}</select></label><span class="cs-muted" data-cs="format-summary"></span><a data-cs="format-sample" target="_blank" rel="noopener">预览样张</a><a data-cs="format-download">Word 样张</a><details class="cs-format-rules"><summary>规则与应用时机</summary><p>编写前确认招标规定的目录与固定表单；本设置在导出时应用，不改变正文。内置格式不包含企业封面或招标指定表单。</p><p>统一正文与标题样式、图题、页码和跨页表头。实际分页以导出排版预览为准；Word 与 LibreOffice 的字体和分页可能存在差异。</p><p data-cs="format-version"></p></details></div>
 </details></div>
     <div class="cs-workspace">
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
@@ -147,10 +147,77 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     get('progress').textContent = `${units.size} 个编写单元 · 草稿 ${written} · 完成 ${complete}`;
     onStats?.({written, total:units.size, complete});
   };
+  // ── 篇幅（2026-10-16）：预算页数来自 /page-budget，已写字数来自正文长度 ──
+  // 原型要求：目录行只给颜色（状态）与行底进度（预算），名称必须完整。
+  const WPP = 250;                    // 1 页 ≈ 250 字（与策划页分配口径一致）
+  const pageBudget = { byBlock: {}, loaded: false };
+  const budgetOf = b => pageBudget.byBlock[String(b.block_id || b.id)] || null;
+  const wordsOf = b => String(b.content || '').replace(/\s+/g, '').length;
+  const pagesOf = b => wordsOf(b) / WPP;
+  async function loadPageBudget() {
+    const tid = threadId;                 // mountChapterStudio 的参数，不猜 URL
+    if (!tid) return;
+    try {
+      const resp = await fetch(`/api/workflow/${encodeURIComponent(tid)}/page-budget`, {signal: AbortSignal.timeout(10000)});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      pageBudget.byBlock = {};
+      (data.chapters || []).forEach((c) => { pageBudget.byBlock[String(c.block_id)] = c; });
+      pageBudget.loaded = true;
+    } catch (e) { /* 篇幅拿不到时不影响编写 */ }
+  }
+  function budgetLineHtml(b) {
+    const c = budgetOf(b);
+    if (!c || !Number(c.pages)) return '';
+    const words = wordsOf(b), pages = pagesOf(b);
+    const gap = Number(c.pages) - pages;
+    const state = gap <= 0.1
+      ? '<span class="is-ok">已达标</span>'
+      : `<span class="is-gap">差 ${gap.toFixed(1)} 页</span>`;
+    return `<div class="cs-chapter-budget">
+      <span>预算 <b>${Number(c.pages)}</b> 页 · 已写 <b>${pages.toFixed(1)}</b> 页（${words} 字）</span>
+      ${state}
+      ${c.is_target === false ? '<span class="cs-muted">父章节按子树合计</span>' : ''}
+    </div>`;
+  }
   const stateOf = b => !units.has(b.id) ? '目录' : profile[b.id]?.writing_status==='complete' ? '完成' : b.content?.trim() ? (profile[b.id]?.writing_status==='review'?'待核对':'草稿') : '未开始';
+  // 拿到篇幅后重画左树与章头（不阻塞首屏）
+  loadPageBudget().then(() => { if (active) paintTree(); });
+  // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
+  // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
+  const asideHost = host.querySelector('[data-cs="aside"]');
+  const mainHost = host.querySelector('.cs-main');
+  if (asideHost && mainHost && typeof MutationObserver !== 'undefined') {
+    const moveKindRow = () => {
+      const select = asideHost.querySelector('[data-cs="layout"]');
+      if (!select || mainHost.querySelector('[data-cs="layout"]')) return;
+      let row = mainHost.querySelector('.cs-kind-row');
+      // 注意：本模块内 document 是接口返回的数据对象（不是 DOM），必须用 globalThis.document
+      if (!row) { row = globalThis.document.createElement('div'); row.className = 'cs-kind-row'; }
+      row.innerHTML = '<span class="cs-muted">章节类型</span>';
+      row.appendChild(select);
+      row.insertAdjacentHTML('beforeend', '<span class="cs-muted">决定本章按哪类章节编制（影响提示与结构）</span>');
+      const label = select.closest('label');
+      if (label) label.hidden = true;
+      const editor = mainHost.querySelector('[data-cs="editor"]');
+      if (editor && editor.parentElement === mainHost) mainHost.insertBefore(row, editor);
+      else mainHost.appendChild(row);
+    };
+    new MutationObserver(moveKindRow).observe(asideHost, {childList: true, subtree: true});
+    moveKindRow();
+  }
   const paintTree = () => {
     const keyword = get('search').value.trim().toLowerCase();
-    get('tree').innerHTML = blocks.filter(b=>!keyword || b.title.toLowerCase().includes(keyword)).map(b=>`<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(b.title)}"><span>${esc(b.title)}</span><small>${stateOf(b)}</small></button>`).join('');
+    get('tree').innerHTML = blocks.filter(b=>!keyword || b.title.toLowerCase().includes(keyword)).map(b=>{
+      const st = stateOf(b), c = budgetOf(b);
+      const target = c && Number(c.pages) ? Number(c.pages) : 0;
+      const pg = target ? Math.min(100, Math.round(pagesOf(b) / target * 100)) : null;
+      // title 带状态与预算，悬浮可读；行内不再显示文字，保证名称完整
+      const tips = [b.title, st, target ? `预算 ${target} 页 · 已写 ${pagesOf(b).toFixed(1)} 页` : ''].filter(Boolean).join(' · ');
+      return `<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
+        ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
+        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
+    }).join('');
   };
   async function save() {
     if(live.active&&live.pending){status('图文表尚未完成，编制进度已保留；完成或移除未完成项后可保存正文。');return false;}
@@ -250,7 +317,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       active=block;context=data;dirty=false;
       profile[block.id]=data.profile;
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${esc(stateOf(block))}</span>`;
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${esc(stateOf(block))}</span>${budgetLineHtml(block)}`;
       host.querySelector('[data-action="save"]').disabled=true;
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
@@ -347,7 +414,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           if(check.empty){status('正文为空，请先编写后确认完成。');return;}
           pendingCompletion={...check,blockId:active.id};
           if(!check.gaps.length&&!check.issues.length){await confirmComplete(pendingCompletion);return;}
-          get('completion-summary').innerHTML=`<h3>确认本章完成</h3><p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
+          get('completion-summary').innerHTML=`<h3>确认本章完成</h3>${(() => {
+        // 真实检查：预算页数来自 /page-budget，已写字数来自正文（不编造）
+        const c = budgetOf(active), words = wordsOf(active), pages = pagesOf(active);
+        if (!c || !Number(c.pages)) return '';
+        const gap = Number(c.pages) - pages;
+        return `<p class="${gap <= 0.1 ? 'cs-muted' : 'cs-warning'}">字数达标：预算 ${Number(c.pages)} 页 · 已写 ${pages.toFixed(1)} 页（${words} 字）${gap <= 0.1 ? ' ✅ 已达标' : ` ⚠ 差 ${gap.toFixed(1)} 页`}</p>`;
+      })()}<p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
           get('completion').showModal();
         }finally{button.disabled=false;}
       }

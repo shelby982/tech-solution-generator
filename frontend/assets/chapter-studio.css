@@ -11,3 +11,29 @@
 .cs-view-switch{display:flex;border:1px solid #cbd5e1;border-radius:6px;padding:2px;background:#f1f5f9;gap:2px}.cs-view-switch button{border:0;background:transparent}.cs-view-switch [aria-pressed=true]{background:#fff;color:#1d4ed8;font-weight:600;box-shadow:0 1px 3px #17203315}.cs-main>.cs-preview{background:#fff;min-height:420px;padding:24px;overflow-wrap:anywhere}.cs-preview-note{font-size:11px;color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:10px;margin:0 0 20px}
 .cs-main .cs-chapter-heading{display:flex;align-items:center;gap:12px;padding:14px 16px}.cs-chapter-heading h3{margin:0;font-size:17px;flex:1}.cs-chapter-state{font-size:11px;color:#64748b;white-space:nowrap}.cs-toolbar{padding:8px 12px}.cs-toolbar .cs-more{margin-left:auto}.cs-toolbar .cs-more[open]{display:block}.cs-more-menu{position:absolute;right:0;top:32px;z-index:5;min-width:160px;display:flex;flex-direction:column;padding:5px;background:#fff;border:1px solid #dbe3ef;border-radius:7px;box-shadow:0 5px 16px #17203318}.cs-more-menu button{border:0;border-radius:4px;text-align:left;padding:9px 12px;white-space:nowrap}.cs-more-menu button:hover{background:#eff6ff}.cs-main [data-cs=recovery]:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff7ed;color:#9a3412;font-size:12px}.cs-main [data-cs=recovery] summary{cursor:pointer}.cl-complete header span{display:none}.ct-jobs>article>p{margin:5px 0;font-size:12px}.cs-team h4{font-size:13px}.cs-preview-note{margin-bottom:14px}.cs-main [data-cs=status]:empty{display:none}
 .cs-more-menu>details>summary{cursor:pointer;padding:9px 12px;font-size:12px}.cs-more-menu>details button{display:block;width:100%;padding-left:22px}.cs-completion{width:min(560px,85vw);max-height:75vh;overflow:auto;border:1px solid #dbe3ef;border-radius:10px;padding:22px;color:#172033;font-size:13px;line-height:1.8}.cs-completion::backdrop{background:#17203355}.cs-completion h3{font-size:17px;margin:0 0 10px}.cs-completion h4{font-size:13px;margin:15px 0 6px}.cs-completion ul{padding-left:20px}.cs-completion li{margin:6px 0}.cs-completion-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:14px;border-top:1px solid #e2e8f0}.cs-completion-actions [data-action=completion-confirm]{background:#2563eb;color:#fff;border-color:#2563eb}
+
+/* ── 目录状态与篇幅（2026-10-16，对齐原型）─────────────────────────
+   状态只用**一个通道**：行自带的 border-left（2px 透明 → 上色）。
+   选中态改用中性底 + 加粗，不再占用同一条线，避免两种颜色抢一条边。
+   预算进度画在行底（与状态不同轴，语义不同：一个是进度、一个是状态）。
+   状态文字不再占用行内宽度（原型要求：名称必须完整），但保留给读屏。 */
+.cs-node[data-st] { border-left-width: 3px; }
+.cs-node[data-st="草稿"]   { border-left-color: #4a6fd4; }
+.cs-node[data-st="待核对"] { border-left-color: #d97706; }
+.cs-node[data-st="完成"]   { border-left-color: #2f9e5f; }
+.cs-node.on { border-left-color: transparent; background: #f1f5f9; color: #0f172a; font-weight: 600; }
+.cs-node small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.cs-workspace .cs-node.on { border-left-color: transparent; background: #f1f5f9; color: #0f172a; }
+.cs-node[data-pg]::after {
+  content: ""; position: absolute; left: 3px; right: 8px; bottom: 2px; height: 2px;
+  border-radius: 1px; background: linear-gradient(90deg, #93c5fd var(--pg), #e8edf3 0);
+}
+.cs-node[data-pg][data-st="完成"]::after { background: linear-gradient(90deg, #86efac var(--pg), #e8edf3 0); }
+.cs-node { position: relative; }
+.cs-node span { flex: 1; }
+.cs-kind-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: #475569; border-bottom: 1px solid #e2e8f0; background: #fbfdff; }
+.cs-kind-row select { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #dbe3ef; border-radius: 6px; }
+.cs-chapter-budget { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; color: #475569; }
+.cs-chapter-budget b { font-variant-numeric: tabular-nums; }
+.cs-chapter-budget .is-gap { color: #b45309; }
+.cs-chapter-budget .is-ok { color: #15803d; }
