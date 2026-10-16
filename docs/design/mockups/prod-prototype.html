@@ -15558,39 +15558,48 @@ GB/T 35274-2023《数据安全技术 大数据服务安全能力要求》
 </script>
 
 <script>
-/* 左树：整条按状态着色（不新增任何元素、不占文字宽度） */
+/* 左树：整条状态表达（短圆角色条 + 淡底；默认态不标记） */
 (function(){
-  var TINT={'未开始':'#f8fafc','待核对':'#fffaf0','进行中':'#eff6ff','已完成':'#f0fdf4','已达标':'#f0fdf4','目录':null};
-  var BAR ={'未开始':'#cbd5e1','待核对':'#f59e0b','进行中':'#3b82f6','已完成':'#16a34a','已达标':'#16a34a','目录':null};
+  /* 默认态（未开始）不标记；只有需要你注意的状态才着色 */
+  var STYLE={
+    待核对:{bar:'#f59e0b', tint:'#fffaf0', ink:'#92400e'},
+    进行中:{bar:'#2563eb', tint:'#f5f9ff', ink:'#1d4ed8'},
+    已完成:{bar:'#16a34a', tint:'#f4fdf7', ink:'#15803d'},
+    已达标:{bar:'#16a34a', tint:'#f4fdf7', ink:'#15803d'},
+    未开始:null, 目录:null
+  };
   var tree=document.querySelector('.cs-tree');
   if(!tree) return;
+  var st=document.createElement('style');
+  st.textContent='.cs-node{position:relative}'+
+    '.cs-node[data-st]::before{content:"";position:absolute;left:5px;top:5px;bottom:5px;width:3px;border-radius:2px;background:var(--st)}';
+  document.head.appendChild(st);
   tree.querySelectorAll('.cs-node').forEach(function(node){
-    /* ① 清掉我上一版加的东西：圆点、空占位 span */
     node.querySelectorAll('.cs-pages').forEach(function(x){ x.remove(); });
-    /* ② 找到状态文字所在的 <small>（真实标记） */
     var small=node.querySelector('small');
     var txt=small?(small.textContent||'').trim():'';
-    if(small){ small.style.display='none'; }            // 文字不显示（悬浮/读屏仍可读）
-    /* ③ 整条着色 */
-    var bar=BAR[txt], tint=TINT[txt];
-    if(bar){
-      node.style.boxShadow='inset 3px 0 0 '+bar;        // 左侧色条，零宽度占用
-      node.style.background=tint;
+    if(small) small.style.display='none';
+    var cfg=STYLE[txt];
+    node.removeAttribute('data-st');
+    node.style.background=''; node.style.boxShadow='';
+    if(cfg){
+      node.setAttribute('data-st',txt);
+      node.style.setProperty('--st',cfg.bar);
+      node.style.background=cfg.tint;
+      var sp=node.querySelector('span');
+      if(sp && !node.classList.contains('on')) sp.style.color=cfg.ink;
     }
-    if(txt){ node.title=((node.getAttribute('title')||'')+' · '+txt).replace(/^ · /,''); }
+    /* 状态词只进 title（悬浮可读），不再画原生提示以外的任何东西 */
+    if(txt) node.title=((node.getAttribute('title')||'').split(' · ')[0]+' · '+txt);
   });
-  /* 章头状态：不新增元素，用文字颜色表达 */
-  var st=document.querySelector('.cs-chapter-state');
-  if(st && st.style.borderRadius){ /* 恢复上一版被改成圆点的状态文字 */
-    st.style.cssText=''; st.textContent=st.title||st.getAttribute('aria-label')||'';
+  /* 章头状态：文字 + 状态色 */
+  var cs=document.querySelector('.cs-chapter-state');
+  if(cs){
+    cs.style.cssText='';
+    var t=(cs.textContent||cs.title||'').trim();
+    var m={未开始:['','#94a3b8'],待核对:['','#b45309'],进行中:['','#2563eb'],已完成:['','#16a34a']};
+    if(m[t]){ cs.textContent=t; cs.style.color=m[t][1]; cs.style.fontWeight='500'; }
   }
-  if(st){
-    var m={'未开始':'#94a3b8','待核对':'#b45309','进行中':'#2563eb','已完成':'#16a34a'};
-    var t=(st.textContent||'').trim();
-    if(m[t]){ st.style.color=m[t]; st.style.fontWeight='600'; }
-  }
-  var lab=document.querySelector('.cs-tree-label');
-  if(lab) lab.title='整条颜色：灰=未开始 · 橙=待核对 · 蓝=进行中 · 绿=已完成';
 })();
 </script>
 </body></html>
