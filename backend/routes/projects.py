@@ -258,4 +258,27 @@ async def list_project_workflow_runs(
         runs = await repo.list_by_project(
             project_id, only_active=only_active, package_id=package_id,
         )
+        # 补上「这条 run 是不是某类型的目录草案」：同一标包会有
+        # **1 条解析运行 + 商务/技术各 1 份目录草案**（见 services/response_drafts.py），
+        # 前端据此区分（选 run 时优先落在草案上、运行详情里把解析记录折叠）。
+        if runs:
+            placeholders = ",".join("?" * len(runs))
+            plan_rows = await (await db.execute(
+                f"SELECT thread_id, value FROM split_answers "
+                f"WHERE project_id = ? AND key = 'response_plan' AND thread_id IN ({placeholders})",
+                (project_id, *[r["thread_id"] for r in runs]))).fetchall()
+            plans: dict[str, dict] = {}
+            for row in plan_rows:
+                try:
+                    plan = json.loads(row["value"] or "{}")
+                except Exception:
+                    continue
+                if isinstance(plan, dict):
+                    plans[row["thread_id"]] = plan
+            for run in runs:
+                plan = plans.get(run["thread_id"]) or {}
+                run["plan_type"] = str(plan.get("type") or "")
+                run["plan_confirmed"] = bool(plan.get("confirmed"))
+                run["plan_source_thread_id"] = str(plan.get("source_thread_id") or "")
+                run["is_parse_record"] = not run["plan_type"]
     return JSONResponse(content=runs)

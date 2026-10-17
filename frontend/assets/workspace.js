@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v217';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v218';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v217';
+} from './material-roles.mjs?v=20261016-v218';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -228,13 +228,54 @@ function showRun() {
   const s = workspace.state;
   const c = s.review?.convergence;
   const pending = workspace.chapters.filter(b => ['material','revise','stale','error'].includes(b.status));
-  openDialog('运行详情', `<p>补充素材 → 撰写 / 修订 → 技术与合规评审 → 人工检查；未通过的章节继续循环。</p>
+  openDialog('运行详情', `<div id="ws-run-records"><p class="ws-dim">正在加载本标包的处理记录…</p></div>
+    <p>补充素材 → 撰写 / 修订 → 技术与合规评审 → 人工检查；未通过的章节继续循环。</p>
     <div class="ws-summary"><strong>${esc(stageLabels[s.stage] || '未开始')}</strong><span>第 ${Number(s.iteration || 0)+1} 轮</span></div>
     ${c?.status === 'max_iterations' ? '<p class="ws-error">自动修订已达上限，请检查剩余问题，再决定补料、手改或发起局部修订。</p>' : ''}
     <p>仅复审不会改写正文；按意见修订会读取最新素材，并对选中的章节重新生成和复审。</p>
     <h3>需要处理的章节</h3>${pending.length ? pending.slice(0,100).map(b => `<p><a href="${esc(workspaceUrl('review',b.block_id))}">${esc(b.title)}</a> · ${statusLabels[b.status]}</p>`).join('') : '<p>暂无已识别的待办；无正文或缺少评审不代表通过。</p>'}
     ${(s.errors || []).length ? '<h3>运行错误</h3>'+s.errors.map(e=>`<p class="ws-error">${esc(e.message)}</p>`).join('') : ''}`);
+  void fillRunRecords();
 }
+/** 本标包的处理记录：目录草案（商务/技术各自一份）+ 折叠的解析记录。
+ *
+ * 用户问过"为什么同一个标包有两条 run"：一条是解析运行（依据来源），
+ * 一条是按应答类型派生的目录草案。「运行详情」里把这两类关系摊开，
+ * 草案直接可打开，解析记录默认折叠（它不是目录，只是来源）。
+ */
+async function fillRunRecords() {
+  const host = document.getElementById('ws-run-records');
+  if (!host) return;
+  if (!workspace.projectId || !workspace.packageId) { host.remove(); return; }
+  const linkFor = (tid) => {
+    const u = new URL(location.href);
+    u.searchParams.set('threadId', tid);
+    u.searchParams.set('planning', '1');
+    return u.toString();
+  };
+  try {
+    const d = await request(`/api/projects/${workspace.projectId}/response-drafts?packageId=${encodeURIComponent(workspace.packageId)}`);
+    if (!host.isConnected) return;
+    const drafts = d.drafts || [];
+    const rows = drafts.map((x) => {
+      const state = x.confirmed ? '已确认' : (x.has_outline ? '待确认' : '生成中');
+      return `<p>· <b>${x.type === 'commerce' ? '商务' : '技术'}应答目录</b>`
+        + ` · ${Number(x.outline_count) || 0} 个节点 · ${state}`
+        + ` <a href="${esc(linkFor(x.thread_id))}">打开</a></p>`;
+    }).join('');
+    host.innerHTML = `<h3>本标包的处理记录</h3>`
+      + (rows || '<p class="ws-dim">还没有生成目录草案：在「应答策划」点「商务」/「技术」卡片即可生成。</p>')
+      + (d.source_thread_id
+        ? `<details><summary>解析记录（依据来源，不是目录）</summary>`
+          + `<p class="ws-dim">thread ${esc(String(d.source_thread_id).slice(0, 8))}… <a href="${esc(linkFor(d.source_thread_id))}">打开</a></p>`
+          + `</details>`
+        : '');
+    host.dispatchEvent(new CustomEvent('filled'));   // 供测试/其它逻辑判断已填
+  } catch (err) {
+    if (host.isConnected) host.innerHTML = `<p class="ws-dim">记录加载失败：${esc(String(err?.message || err))}</p>`;
+  }
+}
+
 export async function showHistory(dbId) {
   const dialog = openDialog(dbId ? '章节版本记录' : '项目版本记录', '<p>加载中…</p>');
   const body = dialog.querySelector('.ws-dialog-body');
