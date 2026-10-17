@@ -1,5 +1,5 @@
 // frontend/assets/api.js
-// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v215' 使用
+// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v217' 使用
 
 // workflow 动作的统一调用：非 2xx 时抛出**带 code 的** Error。
 // code 来自后端响应头 X-Error-Code（如 workflow_aborted）—— 前端据此决定
@@ -70,6 +70,9 @@ export const api = {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packages: packages || [] }),
       }).then(parseJsonResponse),
+    /** 按标包列出各应答类型的目录草案：(标包, 类型) → 草案线程（应答策划的切换依据） */
+    responseDrafts: (projectId, packageId) =>
+      fetch(`/api/projects/${projectId}/response-drafts?packageId=${encodeURIComponent(packageId)}`).then(parseJsonResponse),
     // 一键对齐：把解析出来的评分点按已确认范围/类别落库（不调用模型）
     syncPoints: (projectId, payload) =>
       fetch(`/api/projects/${projectId}/sync-points`, {

@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v215';
-import { api } from './api.js?v=20261016-v215';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v215';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v217';
+import { api } from './api.js?v=20261016-v217';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v217';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v215';
+       } from './workspace.js?v=20261016-v217';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v215';
+       } from './workspace-model.mjs?v=20261016-v217';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v215';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v217';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3601,6 +3601,7 @@ function hideLaneTreeWhenPanelShows() {
 
 // ── 篇幅（2026-10-16）：总页数一次填，按分值×类型系数分配到各章 ──
 // 数据落 blocks.page_budget + split_answers['page_budget']，接口见 routes/workflow.py。
+let responseDraftsData = null;   // 该标包各应答类型的目录草案（后端解析：(标包,类型) → 线程）
 let pageBudgetData = null;
 let pageBudgetThreadId = '';
 // 步骤（2026-10-16）：应答策划分两步 —— ① 确认目录 ② 分配篇幅；**两步操作同一个目录**。
@@ -3634,6 +3635,12 @@ function pageBudgetCellHtml(b) {
 }
 
 /** 篇幅控制条：总页数 + 两个动作 + 合计校验 + 确认篇幅。 */
+/** 该类型已生成的目录草案（后端解析）。没有则返回 null → 前端知道该"生成"。 */
+function draftOfType(type) {
+  const list = (responseDraftsData && responseDraftsData.drafts) || [];
+  return list.find((d) => d && d.type === type) || null;
+}
+
 function resolvedStep(directoryConfirmed) {
   if (planStep === '2' && !directoryConfirmed) return '1';   // 第2步以第1步完成为前提
   return planStep || (directoryConfirmed ? '2' : '1');
@@ -3840,6 +3847,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const tid = await resolvePanelThreadId(null);
   let data = null;
   try { data = await api.workflow.splitReport(projectId, tid); } catch (e) { data = null; }
+  // 该标包各应答类型的目录草案：类型卡据此显示"已生成/未生成"，点击时决定**切换**还是**生成**
+  try {
+    const pkgId = (activePackage && activePackage.id) || params.get('packageId');
+    responseDraftsData = pkgId ? await api.projects.responseDrafts(projectId, pkgId) : null;
+  } catch (err) { responseDraftsData = null; }
   // 篇幅与目录同源：面板每次打开都同步一次（目录变了篇幅可能失效，后端以目录确认为前置）
   pageBudgetThreadId = tid || '';
   try {
@@ -4363,7 +4375,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   const confirmPane = !analyzedAll ? '<div class="sr-empty">请先完成当前标包的评分点拆分。</div>' : `
     <div class="response-type-options" role="group" aria-label="选择应答类型">
       ${[['commerce','商务应答','以商务评分点为主，核对商务格式与证明材料'],['tech','技术应答','整合技术评分点、技术规范书及项目基础内容']].map(([id,label,desc])=>`
-        <button type="button" class="response-type ${responseType===id ? 'on' : ''}" data-response-type="${id}" aria-pressed="${responseType===id}"><strong>${label}</strong><span>${desc}</span></button>`).join('')}
+        ${(() => {
+          const d = draftOfType(id);
+          const cur = !!d && String(d.thread_id) === String(tid);
+          const state = d
+            ? `${d.confirmed ? '已确认' : (d.has_outline ? '已生成' : '生成中')} · ${Number(d.outline_count) || 0} 个节点${cur ? ' · 正在查看' : ' · 点击切换'}`
+            : '尚未生成 · 点击生成';
+          return `<button type="button" class="response-type ${responseType===id ? 'on' : ''}${cur ? ' is-current' : ''}" data-response-type="${id}" aria-pressed="${responseType===id}"><strong>${label}</strong><span>${desc}</span><em class="response-type-state${d ? (d.confirmed ? ' is-ok' : '') : ' is-none'}">${state}</em></button>`;
+        })()}`).join('')}
     </div>
     <div class="response-basis-card">
       <div class="response-basis-top"><div class="response-basis-main"><strong>编制依据</strong>
@@ -4372,17 +4391,27 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       </div>
       <details class="response-basis-details"><summary>来源与编制规则</summary><div class="response-basis-detail-body">${responseType==='tech' ? (tm.source_files || []).map(f=>`<div class="response-source-file"><span>技术规范书</span><p>${escapeHtml(f)}</p></div>`).join('') : '<p>来源：当前标包招标文件中的商务评分表及商务文件格式要求。</p>'}
         <p>优先遵循招标文件规定的组成与格式；格式和证明材料要求需核对原文。</p></div></details>
-      <div class="response-basis-footer"><button class="mw-btn primary response-basis-action" data-act="response-preview">${previewReady ? '查看目录草案' : '生成目录草案'}</button></div>
+      ${previewReady ? '<div class="response-basis-footer"><button class="mw-btn response-basis-action" data-act="response-preview">查看目录草案</button></div>' : ''}
     </div>
-    ${!previewReady ? `<div class="response-confirm-bar" data-empty-state>
-      <div><strong>还没有生成应答目录草案${responsePlanChoice ? `（已选 ${responsePlanChoice === 'commerce' ? '商务应答' : '技术应答'}）` : ''}</strong>
-        <span>${currentPlanMatches
-          ? '正在派生目录，完成后本页会自动出现「① 确认目录 → ② 分配篇幅」。'
-          : '目录由「解析依据」里已拆出的评分点与规范要求派生。同一标包只保留一份草案，重复点击会直接打开已有那份。'}</span></div>
-      ${currentPlanMatches
-        ? '<button class="mw-btn" data-act="redraft-outline">重试生成</button>'
-        : `<button class="mw-btn primary" data-act="response-preview">生成目录草案</button>`}
-    </div>` : ''}
+    ${!previewReady ? (() => {
+      const d = draftOfType(responseType);
+      if (d && d.thread_id) {
+        // 目录已经生成，只是不在当前这条线程上（草案独立保存）→ 直接给"打开"
+        return `<div class="response-confirm-bar" data-empty-state>
+          <div><strong>本标包的${responseLabel}目录已生成 · ${Number(d.outline_count) || 0} 个目录节点</strong>
+            <span>它保存在独立的目录草案里（商务/技术各自一份）。点右侧打开，或在类型卡片之间切换。</span></div>
+          <button class="mw-btn primary" data-act="open-draft">打开应答目录</button>
+        </div>`;
+      }
+      const anyDraft = ((responseDraftsData && responseDraftsData.drafts) || []).length > 0;
+      return `<div class="response-confirm-bar" data-empty-state>
+        <div><strong>还没有生成${responseLabel}目录草案</strong>
+          <span>${currentPlanMatches
+            ? '正在派生目录，完成后本页会自动出现「① 确认目录 → ② 分配篇幅」。'
+            : `点上方「${responseLabel}」卡片即可生成（复用已解析内容，通常 10-30 秒）。${anyDraft ? '本标包另一类型已有目录，可随时切换。' : ''}`}</span></div>
+        ${currentPlanMatches ? '<button class="mw-btn" data-act="redraft-outline">重试生成</button>' : ''}
+      </div>`;
+    })() : ''}
     ${currentPlanMatches && !generated ? '<div class="sr-answer"><span class="sr-dim">草案尚未完成，可在运行详情查看进度。</span><button class="mw-btn" data-act="redraft-outline">重试生成</button></div>' : ''}
     ${previewReady && responseType === 'tech' && data.outline_checks?.response_outline_version !== 2 ? '<div class="sr-answer"><span class="sr-dim">目录编排规则已更新：评分点 → 重点要求 → 原文点对点应答。</span><button class="mw-btn" data-act="redraft-outline">按新规则重新生成</button></div>' : ''}
     ${previewReady ? `<div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 ${landedPoints.size} / ${expectedPoints}</span>${responseType==='tech' ? `<span>规范要求 ${expectedRequirements.length-missingRequirements.length} / ${expectedRequirements.length}</span>` : ''}<span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
@@ -4759,6 +4788,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-step.is-todo{opacity:.55}
   .sr-step:disabled{cursor:not-allowed}
   .response-confirm-bar.is-compact{padding:10px 14px;margin-top:8px}
+  /* 类型卡上的目录状态：已生成/未生成/正在查看（类型卡=切换器） */
+  .response-type-state{display:block;margin-top:6px;font-size:11.5px;color:var(--muted);font-style:normal}
+  .response-type-state.is-ok{color:#15803d}
+  .response-type-state.is-none{color:#b45309}
+  .response-type.is-current{border-color:#bbf7d0;background:#f6fffa}
   /* 收尾栏的主按钮沿用应用原生样式（padding:10px 16px!important，高 ~40px），
      与上面两行 pill 的视觉重量不一致，这里对齐成与 .mw-btn 同尺寸 */
   /* 提高特异性：应用的 .response-confirm-bar>button.primary 用 !important 设了 10px 16px，
@@ -4933,9 +4967,48 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     await renderWritePane();
     await chapterStudio?.select(button.dataset.writeChapter);
   }));
-  el.querySelectorAll('[data-response-type]').forEach(button => button.addEventListener('click', async () => {
-    responsePlanChoice = button.dataset.responseType;
-    await openSplitReport({stage: '2'});
+  el.querySelector('[data-act="open-draft"]')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const d = draftOfType(responseType);
+    if (!d || !d.thread_id) return;
+    const url = new URL(location.href);
+    url.searchParams.set('threadId', d.thread_id);
+    url.searchParams.set('planning', '1');
+    location.assign(url.href);
+  });
+  // 类型卡 = **切换器**（用户要求）：点「商务」显示商务应答目录，点「技术」显示/生成技术应答目录。
+  // 有 → 切到那条线程；没有 → 以当前线程为来源生成（后端幂等：同标包同类型只保留一份）。
+  el.querySelectorAll('[data-response-type]').forEach(button => button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const type = button.dataset.responseType;
+    const label = type === 'commerce' ? '商务' : '技术';
+    responsePlanChoice = type;
+    const draft = draftOfType(type);
+    const url = new URL(location.href);
+    if (draft && draft.thread_id && String(draft.thread_id) !== String(tid)) {
+      url.searchParams.set('threadId', draft.thread_id);
+      url.searchParams.set('planning', '1');
+      location.assign(url.href);
+      return;
+    }
+    if (draft) { await openSplitReport({stage: '2'}); return; }   // 已在看这一份
+    const slot = el.querySelector('[data-flash-for="generate"]');
+    button.disabled = true;
+    if (slot) slot.textContent = `正在派生${label}应答目录…（复用已解析内容，通常 10-30 秒）`;
+    try {
+      const resp = await fetch(`/api/workflow/${encodeURIComponent(tid)}/response-plan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response_type: type }),
+      });
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(body.detail || '生成目录草案失败');
+      url.searchParams.set('threadId', body.thread_id);
+      url.searchParams.set('planning', '1');
+      location.assign(url.href);
+    } catch (err) {
+      button.disabled = false;
+      if (slot) slot.textContent = err.message || '生成失败，请重试';
+    }
   }));
   el.querySelector('[data-act="response-preview"]')?.addEventListener('click', async (event) => {
     if (previewReady) { el.querySelector('.sr-struct-edit')?.scrollIntoView({behavior:'smooth', block:'start'}); return; }
