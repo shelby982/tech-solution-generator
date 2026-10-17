@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v220';
-import { api } from './api.js?v=20261016-v220';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v220';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v222';
+import { api } from './api.js?v=20261016-v222';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v222';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v220';
+       } from './workspace.js?v=20261016-v222';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v220';
+       } from './workspace-model.mjs?v=20261016-v222';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v220';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v222';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3641,6 +3641,53 @@ function draftOfType(type) {
   return list.find((d) => d && d.type === type) || null;
 }
 
+/** 只在"面板/目录区"显示一行加载态：整页与上方类型卡都不动。
+ *
+ * 用户反馈（2026-10-17）：点「商务」/「技术」互切时整页重新加载、抖动明显，
+ * 希望只让下面目录那一侧显示加载。原实现用 location.assign → 整页导航。
+ */
+function showPaneBusy(text) {
+  const pane = document.querySelector('.sr-stage[data-stage="2"] .sr-stage-body');
+  if (!pane) return;
+  let tip = pane.querySelector('[data-pane-busy]');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.setAttribute('data-pane-busy', '1');
+    tip.className = 'sr-empty';
+    pane.appendChild(tip);          // 追加在类型卡/说明之后 = 目录区
+  }
+  tip.textContent = text;
+}
+
+function clearPaneBusy() {
+  document.querySelectorAll('[data-pane-busy]').forEach((n) => n.remove());
+}
+
+/** **原地**切换到另一条 run（目录草案）：改线程 + URL + 事件流，然后只重画面板。
+ *
+ * 与"切换标包"同一套做法（那条路径本来就是原地的），不再整页 location.assign。
+ * 注意：本函数在模块作用域，只能引用模块级变量（projectId / params / currentThreadId）。
+ */
+async function switchPanelThread(newTid, busyText) {
+  if (!newTid) return;
+  currentThreadId = newTid;
+  try { setThread(projectId, newTid); } catch (err) { /* sessionStorage 不可用不影响 */ }
+  const url = new URL(location.href);
+  url.searchParams.set('threadId', newTid);
+  url.searchParams.set('planning', '1');
+  history.replaceState(null, '', url.toString());
+  // **必须同步模块级 params**：resolvePanelThreadId 优先读 params.get('threadId')，
+  // 只改地址栏的话面板仍按旧线程取数（实测：切到商务后目录 0 行、卡片状态不更新）。
+  try { params.set('threadId', newTid); params.set('planning', '1'); } catch (err) { /* 只读场景忽略 */ }
+  if (typeof attachStream === 'function') { try { attachStream(newTid); } catch (err) { /* 流可选 */ } }
+  showPaneBusy(busyText || '正在切换应答目录…');
+  try {
+    await openSplitReport({ stage: '2' });
+  } finally {
+    clearPaneBusy();
+  }
+}
+
 function resolvedStep(directoryConfirmed) {
   if (planStep === '2' && !directoryConfirmed) return '1';   // 第2步以第1步完成为前提
   return planStep || (directoryConfirmed ? '2' : '1');
@@ -4999,14 +5046,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     await renderWritePane();
     await chapterStudio?.select(button.dataset.writeChapter);
   }));
-  el.querySelector('[data-act="open-draft"]')?.addEventListener('click', (event) => {
+  el.querySelector('[data-act="open-draft"]')?.addEventListener('click', async (event) => {
     event.stopPropagation();
     const d = draftOfType(responseType);
     if (!d || !d.thread_id) return;
-    const url = new URL(location.href);
-    url.searchParams.set('threadId', d.thread_id);
-    url.searchParams.set('planning', '1');
-    location.assign(url.href);
+    await switchPanelThread(d.thread_id, '正在打开应答目录…');
   });
   // 类型卡 = **切换器**（用户要求）：点「商务」显示商务应答目录，点「技术」显示/生成技术应答目录。
   // 有 → 切到那条线程；没有 → 以当前线程为来源生成（后端幂等：同标包同类型只保留一份）。
@@ -5018,11 +5062,11 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     const draft = draftOfType(type);
     const url = new URL(location.href);
     if (draft && draft.has_outline === false && draft.thread_id) {
-      // 草案存在但目录没派生出来（例如被别的解析按项目清空过）→ 直接补派生，
-      // 而不是切进去看一个空页。
+      // 草案存在但目录没派生出来（例如被别的解析清空过）→ 直接补派生，再原地切过去。
       const slot0 = el.querySelector('[data-flash-for="generate"]');
       button.disabled = true;
       if (slot0) slot0.textContent = `正在重新派生${label}应答目录…`;
+      showPaneBusy(`正在重新派生${label}应答目录…（复用已解析内容）`);
       try {
         const rr = await fetch(`/api/workflow/${encodeURIComponent(draft.thread_id)}/redraft-outline`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
@@ -5031,18 +5075,15 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         if (!rr.ok) throw new Error(rb.detail || '重新派生失败');
       } catch (err) {
         button.disabled = false;
+        clearPaneBusy();
         if (slot0) slot0.textContent = err.message || '重新派生失败，请重试';
         return;
       }
-      url.searchParams.set('threadId', draft.thread_id);
-      url.searchParams.set('planning', '1');
-      location.assign(url.href);
+      await switchPanelThread(draft.thread_id, `正在打开${label}应答目录…`);
       return;
     }
     if (draft && draft.thread_id && String(draft.thread_id) !== String(tid)) {
-      url.searchParams.set('threadId', draft.thread_id);
-      url.searchParams.set('planning', '1');
-      location.assign(url.href);
+      await switchPanelThread(draft.thread_id, `正在切换到${label}应答目录…`);
       return;
     }
     if (draft) { await openSplitReport({stage: '2'}); return; }   // 已在看这一份
@@ -5056,11 +5097,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       });
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.detail || '生成目录草案失败');
-      url.searchParams.set('threadId', body.thread_id);
-      url.searchParams.set('planning', '1');
-      location.assign(url.href);
+      await switchPanelThread(body.thread_id, `正在打开${label}应答目录…`);
     } catch (err) {
       button.disabled = false;
+      clearPaneBusy();
       if (slot) slot.textContent = err.message || '生成失败，请重试';
     }
   }));
