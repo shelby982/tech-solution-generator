@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v222';
-import { api } from './api.js?v=20261016-v222';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v222';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v223';
+import { api } from './api.js?v=20261016-v223';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v223';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v222';
+       } from './workspace.js?v=20261016-v223';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v222';
+       } from './workspace-model.mjs?v=20261016-v223';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v222';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v223';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4487,14 +4487,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     })() : ''}
     ${currentPlanMatches && !generated ? '<div class="sr-answer"><span class="sr-dim">草案尚未完成，可在运行详情查看进度。</span><button class="mw-btn" data-act="redraft-outline">重试生成</button></div>' : ''}
     ${previewReady && responseType === 'tech' && data.outline_checks?.response_outline_version !== 2 ? '<div class="sr-answer"><span class="sr-dim">目录编排规则已更新：评分点 → 重点要求 → 原文点对点应答。</span><button class="mw-btn" data-act="redraft-outline">按新规则重新生成</button></div>' : ''}
-    ${previewReady ? `<div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 ${landedPoints.size} / ${expectedPoints}</span>${responseType==='tech' ? `<span>规范要求 ${expectedRequirements.length-missingRequirements.length} / ${expectedRequirements.length}</span>` : ''}<span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
-      ${responseType==='tech' && missingRequirements.length ? `<details class="response-missing"><summary>未挂载规范要求 ${missingRequirements.length} 条</summary>${missingRequirements.map(r=>`<p>${escapeHtml(r.title)}：${escapeHtml(r.text)}</p>`).join('')}</details>` : ''}
+    ${previewReady ? `<div class="response-coverage"><strong>覆盖检查</strong><span>已关联评分点 ${landedPoints.size} / ${expectedPoints}</span><span class="sr-dim">证明材料与原文格式仍需人工复核</span></div>
       ${previewReady ? `<div class="sr-dir-head">
         <h5 class="sr-sec" style="margin:0">目录</h5>
         <span class="ui-pill ${categoriesConfirmed ? 'is-ok' : 'is-none'}">${categoriesConfirmed ? '已确认' : '待确认'} · ${structBlocks.length} 个目录节点</span>
         ${focusSuggest > 0 ? `<span class="sr-dir-warn">⚠ ${focusSuggest} 条重点要求建议前部突出</span>` : ''}
         <details class="sr-dir-more"><summary>▸ 校验明细</summary>
-          <div class="sr-dim">已关联评分点 ${landedPoints.size} / ${expectedPoints}${responseType === 'tech' ? ` · 规范要求 ${expectedRequirements.length - missingRequirements.length} / ${expectedRequirements.length}` : ''}${data.outline_checks?.response_outline_version === 2 ? ` · 原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total} · 要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total} · 重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}` : ''}<br>编制依据：${responseType === 'commerce' ? '商务' : '技术'}评分点 ${expectedPoints} 项${responseType === 'tech' ? ` · 技术规范要求 ${specCount} 条` : ''}</div></details>
+          <div class="sr-dim">已关联评分点 ${landedPoints.size} / ${expectedPoints}${data.outline_checks?.response_outline_version === 2 ? ` · 原文章节 ${data.outline_checks.original_sections_preserved} / ${data.outline_checks.original_sections_total} · 要求归属 ${data.outline_checks.point_to_point_requirements} / ${data.outline_checks.point_to_point_requirements_total} · 重点要求前部承接 ${responseChecks.focus_requirements_in_front} / ${responseChecks.focus_requirements_total}` : ''}<br>编制依据：${responseType === 'commerce' ? '商务' : '技术'}评分点 ${expectedPoints} 项${responseType === 'tech' ? ` · 技术规范要求 ${specCount} 条` : ''}</div></details>
         <span style="flex:1"></span>
         <span class="sr-dir-chain" role="group" aria-label="应答策划步骤">
           ${(() => {
