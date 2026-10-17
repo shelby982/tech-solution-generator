@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v218';
-import { api } from './api.js?v=20261016-v218';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v218';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v220';
+import { api } from './api.js?v=20261016-v220';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v220';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v218';
+       } from './workspace.js?v=20261016-v220';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v218';
+       } from './workspace-model.mjs?v=20261016-v220';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -174,7 +174,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v218';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v220';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3730,9 +3730,31 @@ async function ensureRawTocExit() {
       const tid = new URLSearchParams(location.search).get('threadId');
       if (!tid) return;
       const chk = await api.workflow.redraftCheck(tid);
+      // 只在"确实没派生、且不是正在派生"时才给出口。
+      // 实测教训（project 29 商务草案）：草案正在派生（run_in_progress / outline_pending）时，
+      // 这个出口也会冒出来，还写着"目录不能再改"并给出破坏性的「重新拆分评分点」——
+      // 用户点了它会新建运行，而新运行的 parse **按项目清空 blocks**，把技术草案的目录一起清掉。
+      const busy = !!chk && (chk.reasons || []).indexOf('run_in_progress') >= 0;
+      if (busy) {
+        // 派生进行中：只显示进度，不给任何破坏性动作
+        const empty = pane.querySelector('[data-empty-state]');
+        const box = empty || pane;
+        if (!pane.querySelector('[data-draft-progress]')) {
+          const tip = document.createElement('div');
+          tip.className = 'response-confirm-bar is-compact';
+          tip.setAttribute('data-draft-progress', '1');
+          tip.innerHTML = '<div><strong>正在派生应答目录…</strong>'
+            + '<span>复用已解析内容（评分点 / 规范要求），通常 10-30 秒；完成后本步会出现「① 确认目录 → ② 分配篇幅」。</span></div>';
+          if (empty && empty.parentElement) empty.parentElement.insertBefore(tip, empty);
+          else box.appendChild(tip);
+        }
+        return;
+      }
       need = !!chk && chk.has_outline === false && Number(chk.source_sections) > 0;
     } catch (err) { return; }
   }
+  const staleTip = pane.querySelector('[data-draft-progress]');
+  if (staleTip) staleTip.remove();                 // 已不在派生中 → 撤掉进度条
   if (!need) return;
   // 让位必须**每次**都做（面板会重渲染，步骤条会重新出现）；
   // 之前把去重判断放在最前面，导致"出口块已存在"后就不再让位（实测步骤条又冒出来）。
@@ -4378,9 +4400,13 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
         ${(() => {
           const d = draftOfType(id);
           const cur = !!d && String(d.thread_id) === String(tid);
-          const state = d
-            ? `${d.confirmed ? '已确认' : (d.has_outline ? '已生成' : '生成中')} · ${Number(d.outline_count) || 0} 个节点${cur ? ' · 正在查看' : ' · 点击切换'}`
-            : '尚未生成 · 点击生成';
+          // 三种状态要分清：已派生（可切换查看）/ 未派生（要重新派生）/ 尚无草案（要生成）。
+          // 实测 project 29：技术草案的 blocks 被新解析清空后，卡片还写着"已生成"，
+          // 切进去却是空页 —— 用户无从判断。
+          const state = !d ? '尚未生成 · 点击生成'
+            : (d.has_outline
+              ? `${d.confirmed ? '已确认' : '已生成'} · ${Number(d.outline_count) || 0} 个节点${cur ? ' · 正在查看' : ' · 点击切换'}`
+              : '目录未派生 · 点击重新派生');
           return `<button type="button" class="response-type ${responseType===id ? 'on' : ''}${cur ? ' is-current' : ''}" data-response-type="${id}" aria-pressed="${responseType===id}"><strong>${label}</strong><span>${desc}</span><em class="response-type-state${d ? (d.confirmed ? ' is-ok' : '') : ' is-none'}">${state}</em></button>`;
         })()}`).join('')}
     </div>
@@ -4991,6 +5017,28 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     responsePlanChoice = type;
     const draft = draftOfType(type);
     const url = new URL(location.href);
+    if (draft && draft.has_outline === false && draft.thread_id) {
+      // 草案存在但目录没派生出来（例如被别的解析按项目清空过）→ 直接补派生，
+      // 而不是切进去看一个空页。
+      const slot0 = el.querySelector('[data-flash-for="generate"]');
+      button.disabled = true;
+      if (slot0) slot0.textContent = `正在重新派生${label}应答目录…`;
+      try {
+        const rr = await fetch(`/api/workflow/${encodeURIComponent(draft.thread_id)}/redraft-outline`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        const rb = await rr.json();
+        if (!rr.ok) throw new Error(rb.detail || '重新派生失败');
+      } catch (err) {
+        button.disabled = false;
+        if (slot0) slot0.textContent = err.message || '重新派生失败，请重试';
+        return;
+      }
+      url.searchParams.set('threadId', draft.thread_id);
+      url.searchParams.set('planning', '1');
+      location.assign(url.href);
+      return;
+    }
     if (draft && draft.thread_id && String(draft.thread_id) !== String(tid)) {
       url.searchParams.set('threadId', draft.thread_id);
       url.searchParams.set('planning', '1');

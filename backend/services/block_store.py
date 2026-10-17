@@ -324,6 +324,16 @@ async def list_blocks(
             "SELECT * FROM blocks WHERE project_id = ? ORDER BY order_idx", (project_id,)
         )
     else:
+        # 回退只在"项目里其实只有这一条 run"（老项目 / 单次运行）时才允许。
+        # 为什么收紧：项目一旦有多条 run（同一标包的商务草案 / 技术草案 / 重开一次解析），
+        # 某条 run 的 blocks 被清空后，旧的"退回全部行"会把**别的 run 的目录**渲染出来。
+        # 实测 project 29：技术草案的 124 条被新解析按项目清空后，页面渲染出 725 行混杂。
+        allow_fallback = 0
+        if fallback_all:
+            row = await (await db.execute(
+                "SELECT COUNT(*) FROM workflow_runs WHERE project_id = ?", (project_id,))).fetchone()
+            run_count = int((row[0] if row else 0) or 0)
+            allow_fallback = 1 if run_count <= 1 else 0
         cursor = await db.execute(
             """SELECT * FROM blocks
                 WHERE project_id = ?
@@ -332,8 +342,7 @@ async def list_blocks(
                              SELECT 1 FROM blocks
                               WHERE project_id = ? AND run_thread_id = ?)))
                 ORDER BY order_idx""",
-            (project_id, run_thread_id,
-             1 if fallback_all else 0, project_id, run_thread_id),
+            (project_id, run_thread_id, allow_fallback, project_id, run_thread_id),
         )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
