@@ -83,7 +83,15 @@ def normalize_nodes(
 
         explicit = _coerce_int(raw.get("parent"))
         mapped = raw_to_accepted.get(explicit) if explicit is not None else None
-        if (
+        if raw.get("level_locked"):
+            # 确定性骨架（agents/zhang_heng.py 从原文派生）：**层级锁定**，保持原文层级 + 偏移。
+            # 为什么需要：外壳 L1 + 首节点 L3 这种**跨级**骨架会让下面的
+            # "level 恰好比 parent 大 1"判据不成立，于是走"最近一个更小前驱"回退，
+            # 把首节点从 L3 改成 L2（其余仍是 +1）→ 确认时「目录检查」报层级与原文不一致。
+            # 实测：project 29 技术草案，纯派生、用户未编辑。
+            parent_idx = mapped if (mapped is not None and 0 <= mapped < len(accepted)) else None
+            level = raw_level
+        elif (
             mapped is not None
             and 0 <= mapped < len(accepted)
             and accepted[mapped].level == raw_level - 1
@@ -109,6 +117,8 @@ def normalize_nodes(
         raw_to_accepted[raw_idx] = len(accepted)
         extra = {k: v for k, v in raw.items()
                  if k not in ("level", "title", "parent", "children")}
+        if raw.get("level_locked"):
+            extra["locked_level"] = raw_level      # 落库时按它写 level，见 build_sections
         accepted.append(NormalizedNode(level=level, title=title, parent=parent_idx,
                                        extra=extra))
 
@@ -167,14 +177,17 @@ def build_sections(nodes: list[NormalizedNode], *, max_level: int = MAX_LEVEL) -
             if isinstance(parent, int) and 0 <= parent < len(sections)
             else None
         )
+        locked_level = _coerce_int((node.extra or {}).get("locked_level"))
         if parent_section is None:
             # 一级节点（normalize_nodes 保证 level>1 必有父；这里对脏输入兜底）
             top_counter += 1
-            level = 1
+            level = max(1, min(max_level, locked_level)) if locked_level else 1
             section_id = f"s{top_counter}"
         else:
-            # 层级以父级为准：parent 是权威关系，避免 level 与 parent 不一致
-            level = max(1, min(max_level, parent_section.level + 1))
+            # 层级以父级为准：parent 是权威关系，避免 level 与 parent 不一致。
+            # 例外：确定性骨架（locked_level）的层级由原文派生，不能被"父级+1"覆盖。
+            level = (max(1, min(max_level, locked_level)) if locked_level
+                     else max(1, min(max_level, parent_section.level + 1)))
             used = child_counters.get(parent_section.id, 0) + 1
             child_counters[parent_section.id] = used
             section_id = f"{parent_section.id}.{used}"

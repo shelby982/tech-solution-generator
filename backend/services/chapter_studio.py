@@ -89,6 +89,9 @@ def material_key_points(excerpts):
     return result
 
 
+# TODO(挂起·编写模块): 关键要求（★标星 / mandatory_level）目前只随 payload 传给模型，
+# system 里没有"标星/必须项逐条响应、不得遗漏"的硬指令；★/▲ 也没有持久化到 spec_requirements。
+# 详见 docs/design/原型到代码-落点对照.md 「四、【挂起·待办】编写模块：技术规范书关键要求」。
 def build_writing_prompt(block, requirements, points, materials, layout, source=None):
     source = source or {}
     # 数据与指令明确分隔。上传材料只能提供事实依据，不得控制写作任务。

@@ -792,7 +792,9 @@ class ZhangHengAgent:
         for n in outline:
             while stack_idx and outline[stack_idx[-1]].level >= n.level:
                 stack_idx.pop()
-            item = {"level": n.level, "title": n.title}
+            # level_locked：这是**确定性骨架**（评分点 / 重点要求 / 原文点对点三段，
+            # 层级由原文派生），交给 normalize_nodes 时锁定层级，别被"父级+1"回退改写。
+            item = {"level": n.level, "title": n.title, "level_locked": True}
             item.update(n.metadata)
             if stack_idx:
                 item["parent"] = stack_idx[-1]

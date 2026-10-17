@@ -284,3 +284,32 @@ def test_normalize_maps_parent_over_dropped_nodes():
     ids = [s.id for s in build_sections(nodes)]
     # A=s1, B=s1.1, C=s1.2, D 必须挂在 B 下（s1.1.x），不能挂到 C 下
     assert ids == ["s1", "s1.1", "s1.2", "s1.1.1"]
+
+
+def test_deterministic_skeleton_levels_are_locked():
+    """确定性骨架的层级由原文派生（原文层级 + 1），不能被"父级 + 1"的归一化改掉。
+
+    实测（project 29 技术草案，纯派生、用户未编辑）：
+      外壳「技术规范书点对点应答」= L1，其下 总则 = 原文L2 + 1 = L3
+      → 外层与首节点**跨了 2 级**，normalize_nodes 的判据
+        `accepted[parent].level == raw_level - 1` 不成立 → 走"最近一个更小前驱"回退
+      → 总则被改成 L2、概述改成 L3（其余 52 条仍是 +1）
+      → 确认时「目录检查」报"点对点目录的标题、层级、顺序或末尾位置与原文不一致"，用户被卡住。
+    """
+    from domain.spec.outline_draft import build_sections, normalize_nodes
+
+    raw = [
+        {"level": 1, "title": "技术规范书点对点应答", "level_locked": True,
+         "response_part": "point_to_point"},
+        {"level": 3, "title": "总则", "parent": 0, "level_locked": True,
+         "response_part": "point_to_point", "source_path": ["总则"]},
+        {"level": 4, "title": "概述", "parent": 1, "level_locked": True,
+         "response_part": "point_to_point", "source_path": ["总则", "概述"]},
+        {"level": 4, "title": "定义", "parent": 1, "level_locked": True,
+         "response_part": "point_to_point", "source_path": ["总则", "定义"]},
+    ]
+    nodes, _warnings = normalize_nodes(raw)
+    sections = build_sections(nodes)
+    assert [s.level for s in sections] == [1, 3, 4, 4], [s.level for s in sections]
+    # 父链仍要自洽（体现在稳定 id 上：总则=s1.1、概述=s1.1.1、定义=s1.1.2）
+    assert [s.id for s in sections] == ["s1", "s1.1", "s1.1.1", "s1.1.2"], [s.id for s in sections]
