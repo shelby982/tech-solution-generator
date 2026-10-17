@@ -204,6 +204,39 @@ async def lock_project(project_id: int):
 
 # ── GET /api/projects/{id}/workflow-runs ──────────────────
 
+@router.get("/projects/{project_id}/response-drafts")
+async def get_response_drafts(project_id: int,
+                              packageId: int | None = Query(default=None, alias="packageId")):
+    """按标包列出各应答类型的目录草案。
+
+    应答策划用它决定：点「商务」/「技术」时是**切到已有目录**还是**生成一份**。
+    在此之前前端只读"当前线程"的 response_plan，于是同一个标包已经生成过技术目录，
+    页面仍显示「生成目录草案」。
+    """
+    from services.package_scope import require_package
+    from services.response_drafts import list_response_drafts
+
+    if packageId is None:
+        raise HTTPException(status_code=400, detail="缺少 packageId")
+    async with get_db() as db:
+        await require_package(db, project_id, packageId, confirmed=False)
+        result = await list_response_drafts(db, project_id, packageId)
+
+    # 目录是否"已派生"要看 run 的 spec：blocks 计数会把原文占位也算进去
+    try:
+        import routes.workflow as _wf
+        runner = getattr(_wf, "_runner", None)
+        if runner is not None:
+            for draft in result.get("drafts") or []:
+                spec = ((await runner.state(draft["thread_id"])) or {}).get("spec") or {}
+                draft["has_outline"] = bool(spec.get("outline_revision"))
+                draft["outline_count"] = len(spec.get("toc") or []) or draft.get("outline_count", 0)
+                draft["source_sections"] = len(spec.get("source_toc") or [])
+    except Exception as exc:            # spec 读取失败不影响草案清单
+        logger.warning(f"response-drafts：读取 run spec 失败（{exc}）")
+    return JSONResponse(content=result)
+
+
 @router.get("/projects/{project_id}/workflow-runs")
 async def list_project_workflow_runs(
     project_id: int,
