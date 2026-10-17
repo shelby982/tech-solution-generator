@@ -362,6 +362,11 @@ async def purge_scope_blocks(
     **每个标包是单独的内容** —— 跑标包 1 不能把标包 2 已经拆好的目录清掉。
     所以清理范围必须收敛到"同一个 (target, package_no)"。
     """
+    # 再收敛一层：**保护目录草案**。
+    # 商务/技术是同一标包下的**两份独立应答**（各自一条 run + 各自目录），
+    # 重新解析该标包（新 run）时不能把它们的目录清掉 ——
+    # 实测 project 29：点「重新拆分评分点」新建 run 后，技术草案已派生好的 124 条被清空。
+    # 判据用 split_answers.response_plan 是否存在（草案才有）。
     cursor = await db.execute(
         """DELETE FROM blocks
             WHERE project_id = ?
@@ -371,8 +376,12 @@ async def purge_scope_blocks(
                    WHERE project_id = ?
                      AND COALESCE(target, '') = ?
                      AND COALESCE(package_no, '') = ?
+              )
+              AND COALESCE(run_thread_id, '') NOT IN (
+                  SELECT COALESCE(thread_id, '') FROM split_answers
+                   WHERE project_id = ? AND key = 'response_plan'
               )""",
-        (project_id, keep_thread_id, project_id, target or "", package_no or ""),
+        (project_id, keep_thread_id, project_id, target or "", package_no or "", project_id),
     )
     await db.commit()
     return cursor.rowcount or 0

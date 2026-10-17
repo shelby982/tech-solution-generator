@@ -52,3 +52,35 @@ async def test_single_run_project_still_falls_back(db):
     # 该 run 没有任何行（用不存在的 run id 模拟"还没落库"）
     rows = await list_blocks(db, 1, "not-yet", fallback_all=True)
     assert len(rows) == 1
+
+
+async def test_purge_scope_keeps_draft_directories(db):
+    """重新解析某标包时，不能清掉同标包下商务/技术草案已经派生好的目录。
+
+    实测（project 29）：点「重新拆分评分点」新建 run → purge_scope_blocks(keep=None)
+    把技术草案的 124 条目录一起清空。
+    """
+    from services.block_store import purge_scope_blocks
+
+    await db.execute(
+        "INSERT INTO workflow_runs (thread_id, project_id, stage, target, package_no) "
+        "VALUES ('parse-1', 1, 'points_review', '', '2')")
+    await db.execute(
+        "INSERT INTO workflow_runs (thread_id, project_id, stage, target, package_no) "
+        "VALUES ('draft-tech', 1, 'outline_review', '', '2')")
+    await db.execute(
+        "INSERT INTO split_answers (project_id, thread_id, key, value) "
+        "VALUES (1, 'draft-tech', 'response_plan', '{\"type\": \"tech\"}')")
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, content, order_idx, run_thread_id, status) "
+        "VALUES (1, 'p1', '旧解析', 'x', 0, 'parse-1', 'done')")
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, content, order_idx, run_thread_id, status) "
+        "VALUES (1, 'd1', '技术目录', 'x', 0, 'draft-tech', 'done')")
+    await db.commit()
+
+    dropped = await purge_scope_blocks(db, 1, target="", package_no="2", keep_thread_id=None)
+    assert dropped == 1, "只清旧解析的行"
+    left = {r["run_thread_id"] for r in await (await db.execute(
+        "SELECT run_thread_id FROM blocks WHERE project_id=1")).fetchall()}
+    assert left == {"draft-tech"}, "草案的目录必须保留"
