@@ -37,3 +37,10 @@
 .cs-chapter-budget b { font-variant-numeric: tabular-nums; }
 .cs-chapter-budget .is-gap { color: #b45309; }
 .cs-chapter-budget .is-ok { color: #15803d; }
+/* 「章节类型」行右侧的篇幅三元组（分配 / 已写 / 剩余） */
+.cs-kind-budget-slot { margin-left: auto; }
+.cs-kind-budget { display: inline-flex; align-items: center; gap: 12px; font-size: 12px; color: #475569; white-space: nowrap; }
+.cs-kind-budget b { font-variant-numeric: tabular-nums; }
+.cs-kind-budget .is-ok { color: #15803d; }
+.cs-kind-budget .is-gap { color: #b45309; }
+.cs-kind-budget .is-over { color: #b91c1c; font-weight: 600; }

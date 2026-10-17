@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v224';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v224';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v224';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v228';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v228';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v228';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -176,25 +176,55 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     });
     return self + children.reduce((sum, x) => sum + wordsOf(x), 0);
   }
-  function budgetLineHtml(b) {
-    const c = budgetOf(b);
-    if (!c || !Number(c.pages)) return '';
-    const isParent = c.is_target === false;
-    const words = isParent ? subtreeWords(b) : wordsOf(b);
+  /** 单个章节的篇幅数字（父章节自动取子树合计）。
+   *  章头、章节类型行、目录树悬浮提示共用**同一个口径**，避免三处各算一套。 */
+  function budgetStats(b) {
+    const c = b ? budgetOf(b) : null;
+    const isParent = !!(c && c.is_target === false);
+    const words = b ? (isParent ? subtreeWords(b) : wordsOf(b)) : 0;
     const pages = words / WPP;
-    const gap = Number(c.pages) - pages;
-    const state = gap <= 0.1
+    const target = c && Number(c.pages) ? Number(c.pages) : 0;
+    const gap = target ? target - pages : null;
+    return {
+      c, isParent, words: Math.round(words), pages, target, gap,
+      gapText: target ? (gap <= 0.1 ? '已达标' : `差 ${gap.toFixed(1)} 页`) : '',
+      over: !!(target && gap < 0),
+    };
+  }
+
+  /** 「章节类型」行右侧：与**章头那行保持一致**的写法（预算 / 已写 / 差多少）。 */
+  function kindBudgetHtml(b) {
+    const st = budgetStats(b);
+    if (!st.target) {
+      return '<span class="cs-kind-budget"><span class="cs-muted">本章未分配篇幅</span></span>';
+    }
+    const gapCls = st.gap <= 0.1 ? 'is-ok' : (st.over ? 'is-over' : 'is-gap');
+    return '<span class="cs-kind-budget" title="分配来自「应答策划」的篇幅分配；已写按 1 页≈'
+      + WPP + ' 字折算">'
+      + `预算 <b>${st.target}</b> 页 · 已写 <b>${st.pages.toFixed(1)}</b> 页（${st.words} 字）`
+      + `<span class="${gapCls}"> · ${st.gapText}</span>`
+      + `${st.isParent ? '<span class="cs-muted"> · 子树合计</span>' : ''}`
+      + '</span>';
+  }
+  function paintKindBudget(b) {
+    const slot = host.querySelector('[data-cs="kind-budget"]');
+    if (slot) slot.innerHTML = kindBudgetHtml(b);
+  }
+  function budgetLineHtml(b) {
+    const st = budgetStats(b);
+    if (!st.target) return '';
+    const state = st.gap <= 0.1
       ? '<span class="is-ok">已达标</span>'
-      : `<span class="is-gap">差 ${gap.toFixed(1)} 页</span>`;
+      : `<span class="is-gap">差 ${st.gap.toFixed(1)} 页</span>`;
     return `<div class="cs-chapter-budget">
-      <span>预算 <b>${Number(c.pages)}</b> 页 · 已写 <b>${pages.toFixed(1)}</b> 页（${words} 字）</span>
+      <span>预算 <b>${st.target}</b> 页 · 已写 <b>${st.pages.toFixed(1)}</b> 页（${st.words} 字）</span>
       ${state}
-      ${isParent ? '<span class="cs-muted">父章节：预算与已写均为子树合计</span>' : ''}
+      ${st.isParent ? '<span class="cs-muted">父章节：预算与已写均为子树合计</span>' : ''}
     </div>`;
   }
   const stateOf = b => !units.has(b.id) ? '目录' : profile[b.id]?.writing_status==='complete' ? '完成' : b.content?.trim() ? (profile[b.id]?.writing_status==='review'?'待核对':'草稿') : '未开始';
   // 拿到篇幅后重画左树与章头（不阻塞首屏）
-  loadPageBudget().then(() => { if (active) paintTree(); });
+  loadPageBudget().then(() => { if (active) { paintTree(); paintKindBudget(active); } });
   // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
   // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
   const asideHost = host.querySelector('[data-cs="aside"]');
@@ -213,7 +243,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (select.parentElement !== row) {
         row.innerHTML = '<span class="cs-muted">章节类型</span>';
         row.appendChild(select);
-        row.insertAdjacentHTML('beforeend', '<span class="cs-muted">决定本章按哪类章节编制（影响提示与结构）</span>');
+        select.title = '决定本章按哪类章节编制（影响提示与结构）';
+        row.insertAdjacentHTML('beforeend', '<span class="cs-kind-budget-slot" data-cs="kind-budget"></span>');
       }
       const label = select.closest('label');
       if (label) label.hidden = true;          // 右栏原位置不再重复出现
@@ -222,9 +253,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         if (editor && editor.parentElement === mainHost) mainHost.insertBefore(row, editor);
         else mainHost.appendChild(row);
       }
+      // 行由 MutationObserver 触发重建时要**顺手填值**：只靠挂载时画一次，值会一直是空的
+      paintKindBudget(active);
     };
     new MutationObserver(moveKindRow).observe(asideHost, {childList: true, subtree: true});
     moveKindRow();
+    paintKindBudget(null);
   }
   const paintTree = () => {
     const keyword = get('search').value.trim().toLowerCase();
@@ -233,7 +267,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const target = c && Number(c.pages) ? Number(c.pages) : 0;
       const pg = target ? Math.min(100, Math.round(pagesOf(b) / target * 100)) : null;
       // title 带状态与预算，悬浮可读；行内不再显示文字，保证名称完整
-      const tips = [b.title, st, target ? `预算 ${target} 页 · 已写 ${pagesOf(b).toFixed(1)} 页` : ''].filter(Boolean).join(' · ');
+      // 口径与章头/章节类型行一致：父章节按**子树合计**，并给出"差多少"
+      const bs = budgetStats(b);
+      const tips = [b.title, st,
+        bs.target ? `预算 ${bs.target} 页 · 已写 ${bs.pages.toFixed(1)} 页 · ${bs.gapText}${bs.isParent ? '（子树合计）' : ''}` : '',
+      ].filter(Boolean).join(' · ');
       return `<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
         ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
         style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
@@ -343,6 +381,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
       get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span>${budgetLineHtml(block)}`;
+      paintKindBudget(block);
       host.querySelector('[data-action="save"]').disabled=true;
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
