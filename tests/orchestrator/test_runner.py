@@ -1565,3 +1565,52 @@ def _state_stub(value):
     async def _inner(*_a, **_k):
         return value
     return _inner
+
+
+async def test_confirm_skips_point_to_point_check_for_commerce(runner_env, monkeypatch):
+    """点对点结构检查只应作用于技术应答。
+
+    点对点目录由技术规范书派生（build_technical_response 只在 tech 分支调用），
+    商务目录没有点对点部分；此前无条件检查 → 商务草稿必然报
+    "点对点应答缺少 N 条要求的归属"，永远无法确认（实测 project 29 / p27 的商务草案
+    一直是 confirmed=False）。
+    """
+    from fastapi import HTTPException
+    from routes import workflow as workflow_route
+
+    runner, pid, _ = runner_env
+    monkeypatch.setattr(workflow_route, '_runner', runner)
+    source = await runner.start(pid, {})
+    await _wait_task(runner._runs[source])
+    commerce = await runner.create_response_plan(source, 'commerce')
+    await _wait_task(runner._runs[commerce])
+    tech = await runner.create_response_plan(source, 'tech')
+    await _wait_task(runner._runs[tech])
+
+    real_state = runner.state
+
+    async def fake_state(tid):
+        """在真实 state 上**只覆盖检查相关字段**（material_files 等保持原样，
+        否则 confirm 会先被"依据文件已变更"拦掉）。"""
+        st = dict(await real_state(tid) or {})
+        if tid in (commerce, tech):
+            sp = dict(st.get('spec') or {})
+            sp['outline_coverage'] = {**(sp.get('outline_coverage') or {}),
+                                      'response_outline_version': 2,
+                                      'original_source_files': ['x.docx']}
+            if tid == tech:
+                # 故意给一个"缺少点对点章节"的 toc，验证技术仍被拦住
+                sp['toc'] = [{'level': 1, 'title': '技术评分项应答',
+                              'chain': {'response_part': 'scoring'}}]
+                sp['source_toc'] = [{'level': 2, 'title': '总则', 'source_file': 'x.docx'}]
+            st['spec'] = sp
+        return st
+
+    monkeypatch.setattr(runner, 'state', fake_state)
+
+    # 商务：不受点对点检查影响，可以确认
+    assert (await workflow_route.confirm_response_plan(commerce))['confirmed']
+    # 技术：仍然严格检查（该 toc 缺全部点对点章节 → 409）
+    with pytest.raises(HTTPException) as blocked:
+        await workflow_route.confirm_response_plan(tech)
+    assert blocked.value.status_code == 409

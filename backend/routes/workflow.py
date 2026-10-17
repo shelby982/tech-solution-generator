@@ -156,7 +156,11 @@ async def confirm_response_plan(thread_id: str):
             raise HTTPException(status_code=409, detail='目录为空，不能创建应答')
         spec = state.get('spec') or {}
         coverage = spec.get('outline_coverage') or {}
-        if coverage.get('response_outline_version') == 2:
+        # 点对点结构检查**只对技术应答生效**：点对点目录由技术规范书派生
+        # （build_technical_response 只在 tech 分支调用），商务目录里根本没有点对点部分。
+        # 此前无条件检查 → 商务草稿必然报"点对点应答缺少 N 条要求的归属"，**永远无法确认**
+        # （实测 project 29 的 05a7f722 / d471e1c3，p27 的 46bed749 一直是 confirmed=False）。
+        if coverage.get('response_outline_version') == 2 and plan.get('type') == 'tech':
             from services.point_store import list_spec_requirements
             from infra.parser.technical_response import check_response_structure
             reqs = [dict(r) for r in await list_spec_requirements(db, run_thread_id=thread_id)]
