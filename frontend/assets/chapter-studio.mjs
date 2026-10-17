@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v223';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v223';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v223';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v224';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v224';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v224';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -298,6 +298,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     paintTree();stats();get('completion').close();pendingCompletion=null;
     status('本章已确认完成；修改正文后将退回待核对。');
   }
+  // TODO(挂起·编写模块): 技术规范书**关键要求（★标星 / mandatory）**需在「本章编制依据」里
+  // 置顶并标星、给出计数。业务口径：挂载是"编写时的参考依据"，不参与目录生成。
+  // 详见 docs/design/原型到代码-落点对照.md 「四、【挂起·待办】编写模块：技术规范书关键要求」。
   const paintAside = () => {
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
