@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v281';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v281';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v281';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v283';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v283';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v283';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -415,7 +415,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-cp-top-main">
             <h4>${esc(data.title || '')} ${isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
             <p class="cs-cp-top-line">${esc(headline)}</p>
-            ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
+            ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}
+              ${isParent ? '<button type="button" class="cs-cp-link" data-cp-condense>精简为总述</button>' : ''}</p>` : ''}
           </div>
           <button type="button" class="mw-btn primary cs-cp-main-btn" data-cp-generate>${esc(mainAction)}</button>
         </div>
@@ -436,7 +437,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${points.map((point) => `<p class="cs-cp-line"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
           ${data.grade_band ? `<p class="cs-cp-band">满分档：${esc(data.grade_band.slice(0, 200))}…</p>` : ''}
           ${clauses.length ? clauses.map((clause) => `<p class="cs-cp-clause">${clause.mandatory ? '<span class="cs-cp-must">强制</span>' : ''}${esc(clause.title)}</p>`).join('')
-            : '<p class="cs-cp-empty">本章只对评分点负责（无对应招标条款）</p>'}
+            : `<p class="cs-cp-empty">本章只对评分点负责（无对应招标条款）
+                <button type="button" class="cs-cp-link" data-cp-match-clauses>用 AI 匹配条款</button></p>`}
           ${(guidance.pitfalls || []).length ? `<p class="cs-cp-pitfall">失分点：${esc(guidance.pitfalls.join('；'))}</p>` : ''}
         </details>
 
@@ -486,6 +488,52 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         row.addEventListener('keydown', (event) => {
           if (event.key === 'Enter') { dialog.close(); void openChapterPlan(String(row.dataset.cpKid)); }
         });
+      });
+      body.querySelector('[data-cp-condense]')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (!globalThis.confirm('把本章现有正文压缩为 300–500 字的总述？\n原稿会存入版本记录，可回滚。')) return;
+        button.disabled = true;
+        button.textContent = '正在精简…';
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockId)}/condense`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({threadId}), signal: AbortSignal.timeout(180000),
+          });
+          const payload = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+          status(`已精简为 ${payload.words} 字总述（原 ${payload.previous_words} 字已存档）`);
+          data = await load();
+          await render();
+          void select(blockId);
+        } catch (err) {
+          status(`精简失败：${String(err.message || err)}`);
+          button.disabled = false;
+          button.textContent = '精简为总述';
+        }
+      });
+      body.querySelector('[data-cp-match-clauses]')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const unit = unitOf.get(String(blockId));
+        button.disabled = true;
+        button.textContent = '匹配中…';
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/match-clauses`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({threadId, root_block_id: String(unit || blockId)}),
+            signal: AbortSignal.timeout(180000),
+          });
+          const payload = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+          status(payload.source === 'llm'
+            ? `AI 已把条款匹配到 ${payload.chapters} 个章节`
+            : `已用关键词匹配 ${payload.chapters} 个章节（AI 未返回有效结果）`);
+          data = await load();
+          await render();
+        } catch (err) {
+          status(`匹配失败：${String(err.message || err)}`);
+          button.disabled = false;
+          button.textContent = '用 AI 匹配条款';
+        }
       });
       body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
         globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',

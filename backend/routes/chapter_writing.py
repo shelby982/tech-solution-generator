@@ -130,8 +130,39 @@ async def read_chapter_plan(project_id: int, block_id: str, threadId: str):
         return data
 
 
+class CondenseBody(BaseModel):
+    threadId: str = Field(min_length=1)
+
+
+class MatchClausesBody(BaseModel):
+    threadId: str = Field(min_length=1)
+    root_block_id: str = Field(min_length=1)
+
+
 class ConfirmChapterBody(BaseModel):
     block_id: str = ""
+
+
+@router.post('/projects/{project_id}/chapters/{block_id}/condense')
+async def condense_chapter(project_id: int, block_id: str, body: "CondenseBody"):
+    """把父章正文精简为总述（300–500 字），旧稿写入版本记录可回滚。"""
+    from services.plan_ai import condense_to_summary
+    async with get_db() as db:
+        try:
+            return await condense_to_summary(db, project_id, body.threadId, block_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+
+@router.post('/projects/{project_id}/match-clauses')
+async def match_clauses(project_id: int, body: "MatchClausesBody"):
+    """跨语义条款匹配：用模型判断每条招标条款应由哪一章响应（失败退回关键词）。"""
+    from services.plan_ai import llm_match_clauses
+    async with get_db() as db:
+        try:
+            return await llm_match_clauses(db, project_id, body.threadId, body.root_block_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
 
 
 @router.post('/projects/{project_id}/writing-plans/{plan_id}/confirm-chapter')

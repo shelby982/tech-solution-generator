@@ -153,3 +153,31 @@ async def test_requirement_coverage_counts_responded(db):
     chapter_cov = next(c for c in coverage["chapters"] if c["block_id"] == chapter["block_id"])
     assert chapter_cov["total"] == 2 and chapter_cov["responded"] == 2
     assert coverage["percent"] == 100
+
+
+async def test_condense_to_summary_falls_back_and_archives(db, monkeypatch):
+    """父章精简为总述：模型不可用时走兜底模板，且旧稿进版本记录（可回滚）。"""
+    from services import plan_ai
+    from services.writing_plans import _leaves
+
+    await db.execute("INSERT OR IGNORE INTO workflow_runs (thread_id, project_id, stage) VALUES ('t1', 1, 'outline_review')")
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status) "
+        "VALUES (1, 's1.2', '对项目的理解', 3, ?, 0, 't1', 'done')",
+        ("很长的父章正文。" * 300,))
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status) "
+        "VALUES (1, 's1.2.1', '项目背景', 4, '', 1, 't1', 'draft')")
+    await db.commit()
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("模型不可用")
+
+    monkeypatch.setattr(plan_ai, "_call_model", boom)
+    result = await plan_ai.condense_to_summary(db, 1, "t1", "s1.2")
+    assert result["words"] < 700 and result["previous_words"] > 2000
+    assert result["children"] >= 1
+    revisions = await (await db.execute(
+        "SELECT COUNT(*) AS n FROM block_revisions WHERE block_id IN "
+        "(SELECT id FROM blocks WHERE block_id='s1.2')")).fetchone()
+    assert int(revisions["n"]) >= 1

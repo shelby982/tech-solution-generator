@@ -439,7 +439,8 @@ async def basis_coverage(db, project_id: int, thread_id: str, block_id: str) -> 
             f"SELECT requirement_id, title, text, mandatory_level FROM spec_requirements "
             f"WHERE run_thread_id=? AND requirement_id IN ({placeholders})", (thread_id, *clause_ids),
         )).fetchall():
-            label = str(clause["title"] or clause["text"] or "")
+            raw_label = str(clause["title"] or clause["text"] or "")
+            label = raw_label.split(" > ")[-1] or raw_label
             clauses.append({"requirement_id": clause["requirement_id"], "label": label,
                             "mandatory_level": clause["mandatory_level"],
                             "responded": _responds(label, 3)})
