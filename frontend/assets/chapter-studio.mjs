@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v273';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v273';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v273';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v275';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v275';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v275';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -424,7 +424,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             ${data.plan_changed_after_content ? '<span class="cs-cp-badge warn">计划在正文之后有更新</span>' : ''}
           </h4>
           <span class="cs-cp-facts">计划 ${planPages || '—'} 页 · 已写 ${writtenPages} 页${over ? ` <b class="cs-cp-over">超 ${Math.round((writtenPages - planPages) * 10) / 10} 页</b>` : ''}
-            · 要求 ${stats.requirements || 0} 条（已回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
+            · 要求 ${stats.requirements || 0} 条（疑似回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
           ${basisLabel ? `<span class="cs-cp-basis">依据：${esc(basisLabel)}</span>` : ''}
           ${(data.confirmed || !branchUnconfirmed) ? ''
             : `<span class="cs-cp-branchwarn">所属《${esc(unitInfo.title)}》的目录计划还未确认（共 ${unitInfo.leaves} 节）
@@ -432,13 +432,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
 
         <details class="cs-cp-sec" data-cp-sec="a" open>
-          <summary><b>A · 要写什么</b><em>要求 ${requirements.length} 条 · 已回应 ${stats.responded || 0}</em>
+          <summary><b>A · 要写什么</b><em>要求 ${requirements.length} 条 · 疑似回应 ${stats.responded || 0}</em>
             <button type="button" class="cs-cp-mini" data-cp-edit-req>编辑要求</button></summary>
           <div data-cp-req-view>
           ${requirements.length ? requirements.map((requirement) => `<div class="cs-cp-req">
               <div class="cs-cp-req-line"><span class="cs-plan-task ${esc(requirement.type || 'text')}">${planType[requirement.type] || '要求'}</span>
                 <b>${esc(requirement.text)}</b>
-                <em class="${requirement.responded ? 'ok' : ''}">${requirement.responded ? '正文已回应' : '正文未回应'}</em></div>
+                ${requirement.source_label ? `<span class="cs-cp-src ${esc(requirement.source || '')}">${esc(requirement.source_label)}</span>` : ''}
+                <em class="${requirement.responded ? 'ok' : ''}">${requirement.responded ? '正文疑似回应' : '正文未见回应'}</em></div>
              </div>`).join('') : '<p class="cs-dim">本章还没有编写要求。</p>'}
           </div>
           <div data-cp-req-edit hidden></div>
@@ -504,7 +505,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-plan-actions">
           <button type="button" class="mw-btn" data-cp-close>关闭</button>
           ${data.plan_changed_after_content ? '<button type="button" class="mw-btn" data-cp-refresh>按新计划重新生成</button>' : ''}
-          ${data.confirmed ? '' : '<button type="button" class="mw-btn" data-cp-confirm>确认本章计划</button>'}
+          ${data.confirmed ? '' : '<button type="button" class="mw-btn" data-cp-confirm>我已备齐，可以生成</button>'}
           <button type="button" class="mw-btn primary" data-cp-generate>AI 编制本章</button>
         </div>
         <p class="cs-cp-hint">未达完成也可生成（正文会写【待补充】），修复后可重新生成。</p>`;
@@ -1067,10 +1068,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     };
   }
 
+  /** 目录级编写计划（C1：降级为"汇总 + 批量"）——只看工作量与状态；编辑与确认都在章计划里。 */
   async function openWritingPlan(unitBlockId) {
     if (!unitBlockId) return;
     const dialog = globalThis.document.createElement('dialog');
-    dialog.className = 'cs-plan-dialog';
+    dialog.className = 'cs-plan-dialog cs-branch-dialog';
     dialog.innerHTML = `<header><h3>编写计划</h3><button type="button" aria-label="关闭">×</button></header>
       <div class="cs-plan-body"><p class="cs-muted">正在生成计划…</p></div>`;
     (host.ownerDocument?.body || globalThis.document.body).append(dialog);
@@ -1091,197 +1093,72 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       body.innerHTML = `<p class="cs-warning">计划生成失败：${esc(String(err.message || err))}</p>`;
       return;
     }
-
-  const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
-    // 要求回应率（进度的"标准维度"）
-    let coverage = null;
-    let needsData = null;
-    try {
-      const [coverageResp, needsResp] = await Promise.all([
-        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/coverage?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
-        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
-      ]);
-      if (coverageResp.ok) coverage = await coverageResp.json();
-      if (needsResp.ok) needsData = await needsResp.json();
-    } catch (e) { /* 拿不到不影响浏览计划 */ }
-    const needsOf = (blockId) => (needsData?.chapters || []).find((c) => String(c.block_id) === String(blockId));
-    const coverageOf = (blockId) => (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId));
-    const requirementHtml = (chapter) => {
-      const cov = coverageOf(chapter.block_id);
-      const typeLabel = {text: '文字', table: '表格', figure: '图示', material: '素材'};
-      const rows = (chapter.requirements || []).map((requirement, index) => `<div class="cs-req-row" data-req-row="${index}">
-          <select data-req-type>${['text', 'table', 'figure', 'material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${typeLabel[kind]}</option>`).join('')}</select>
-          <input type="text" data-req-text value="${esc(requirement.text)}" />
-          <em class="${cov?.requirements?.[index]?.responded ? 'ok' : ''}">${cov ? (cov.requirements?.[index]?.responded ? '已回应' : '未回应') : '—'}</em>
-          <button type="button" class="cs-req-need ${(needsOf(chapter.block_id)?.needs || [])[index]?.snippets ? 'ok' : ''}"
-            data-req-need data-plan="${esc(plan.id)}" data-block="${esc(String(chapter.block_id))}"
-            data-req-id="${esc(String(requirement.id))}">${(needsOf(chapter.block_id)?.needs || [])[index]?.snippets ? `素材 ${(needsOf(chapter.block_id)?.needs || [])[index].snippets}` : '未补素材'}</button>
-          <button type="button" class="cs-req-del" data-req-del>×</button>
-        </div>`).join('');
-      return `<div class="cs-req-block" data-req-block data-plan-id="${esc(plan.id)}">
-          <div class="cs-req-head"><b>编写要求</b>
-            <span class="cs-dim">${cov ? `已回应 ${cov.responded}/${cov.total}` : '尚无正文'}</span>
-            <button type="button" class="cs-req-add" data-req-add>＋ 添加</button>
-            <button type="button" class="cs-req-save" data-req-save>保存要求</button></div>
-          ${rows || '<p class="cs-dim">还没有要求：点「＋ 添加」写一条（例：说明政策依据）</p>'}
-          <p class="cs-dim cs-req-msg" data-req-msg></p>
-        </div>`;
-    };
-    body.innerHTML = `<p class="cs-muted">《${esc(plan.root_title)}》共 ${plan.chapters.length} 个章节。确认后按章节并发生成；
-       主编会按此计划执行（不再重新规划）。</p>`
-      + plan.chapters.map((c) => `<section class="cs-plan-chapter" data-plan-chapter="${esc(String(c.block_id))}">
-          <h4>${esc(c.title)} <em>${esc(c.layout_label)}${c.pages ? ` · ${c.pages} 页` : ''}</em></h4>
-          ${requirementHtml(c)}
-          <p>${c.tasks.map((t) => `<span class="cs-plan-task ${esc(t.kind)}">${kindLabel[t.kind] || t.kind} · ${esc(t.title)}</span>`).join('')}</p>
-          ${c.gaps.length ? `<div class="cs-plan-gap"><p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>
-            <div class="cs-plan-gap-actions"><label class="mw-btn cs-plan-upload">上传素材
-              <input type="file" hidden data-plan-upload="${esc(String(c.id || ''))}" /></label>
-              <button type="button" class="mw-btn" data-plan-goto="${esc(String(c.block_id))}">去本章编写</button>
-              <button type="button" class="mw-btn" data-plan-cite="${esc(String(c.block_id))}"
-                data-plan-cite-query="${esc((c.gaps || []).join('；'))}">检索官方来源</button></div>
-            <p class="cs-dim" data-plan-upload-msg></p></div>` : ''}
-        </section>`).join('')
-      + `${plan.gaps.length ? `<p class="cs-muted">全章素材缺口 ${plan.gaps.length} 项</p>` : ''}`
-      + `<div class="cs-plan-actions"><button type="button" class="mw-btn" data-plan-cancel>取消</button>
-           <button type="button" class="mw-btn primary" data-plan-confirm>确认并开始编制</button></div>`;
-    body.querySelector('[data-plan-cancel]').onclick = () => dialog.close();
-    body.querySelectorAll('[data-plan-chapter]').forEach((host) => {
-      const blockId = host.dataset.planChapter;
-      const block = host.querySelector('[data-req-block]');
-      if (!block) return;
-      const collect = () => [...block.querySelectorAll('[data-req-row]')].map((row) => ({
-        text: (row.querySelector('[data-req-text]') || {}).value?.trim() || '',
-        type: (row.querySelector('[data-req-type]') || {}).value || 'text',
-      })).filter((item) => item.text);
-      block.querySelector('[data-req-add]')?.addEventListener('click', () => {
-        block.insertAdjacentHTML('beforeend', `<div class="cs-req-row" data-req-row>
-            <select data-req-type><option value="text">文字</option><option value="table">表格</option><option value="figure">图示</option><option value="material">素材</option></select>
-            <input type="text" data-req-text placeholder="例：说明政策依据（至少两个部委文件）" />
-            <em>未回应</em><button type="button" class="cs-req-del" data-req-del>×</button></div>`);
-        block.querySelector('[data-req-row]:last-of-type [data-req-text]')?.focus();
-      });
-      block.addEventListener('click', (event) => {
-        if (event.target.closest('[data-req-del]')) event.target.closest('[data-req-row]').remove();
-      });
-      block.addEventListener('click', (event) => {
-        const needButton = event.target.closest('[data-req-need]');
-        if (!needButton) return;
-        const blockId = needButton.dataset.block;
-        const requirementId = needButton.dataset.reqId;
-        const chapter = plan.chapters.find((c) => String(c.block_id) === String(blockId));
-        const requirement = (chapter?.requirements || []).find((r) => String(r.id) === String(requirementId));
-        if (!requirement) return;
-        const linked = citationInfo.rows.filter((c) => (c.links || []).includes(String(blockId)) || !c.block_id);
-        const picker = globalThis.document.createElement('dialog');
-        picker.className = 'cs-plan-dialog';
-        const segRows = linked.map((citation) => ((citation.segments) || []).map((segment, index) => ({citation, segment, index})))
-          .flat().slice(0, 60);
-        picker.innerHTML = `<header><h3>给「${esc(String(requirement.text).slice(0, 16))}」补充素材</h3><button type="button" aria-label="关闭">×</button></header>
-          <div class="cs-plan-body"><p class="cs-muted">从本章已接受的来源里勾选可用片段，绑定到这条要求。生成时会先给这一段要求对应的材料。</p>
-            ${segRows.length ? segRows.map(({citation, segment, index}) => `<label class="cs-seg-row">
-                <input type="checkbox" data-bind-citation="${esc(citation.id)}" data-bind-index="${index}" />
-                <div><span class="cs-seg-kind ${esc(segment.kind)}">${{text:'段落',table:'表格',image:'图片'}[segment.kind] || '内容'}</span>
-                  <b>${esc(String(citation.title || '').slice(0, 22))}</b>
-                  <p>${esc(String(segment.content || '').slice(0, 200))}</p></div></label>`).join('')
-              : '<p class="cs-warning">本章还没有可用的来源片段：先在「素材」页签添加官方来源并提取片段。</p>'}
-            <div class="cs-plan-actions"><button type="button" class="mw-btn" data-bind-cancel>取消</button>
-              ${segRows.length ? '<button type="button" class="mw-btn primary" data-bind-save>绑定到这条要求</button>' : ''}</div>
-            <p class="cs-dim" data-bind-msg></p></div>`;
-        globalThis.document.body.append(picker);
-        picker.querySelector('header button').onclick = () => picker.close();
-        picker.addEventListener('close', () => picker.remove());
-        picker.querySelector('[data-bind-cancel]').onclick = () => picker.close();
-        picker.querySelector('[data-bind-save]')?.addEventListener('click', async () => {
-          const checked = [...picker.querySelectorAll('[data-bind-citation]:checked')];
-          if (!checked.length) { picker.querySelector('[data-bind-msg]').textContent = '先勾选至少一个片段'; return; }
-          try {
-            for (const input of checked) {
-              await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs/bind`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({block_id: blockId, requirement_id: requirementId,
-                                      citation_id: input.dataset.bindCitation,
-                                      indices: [Number(input.dataset.bindIndex)]}),
-                signal: AbortSignal.timeout(30000),
-              });
-            }
-            status(`已绑定 ${checked.length} 个片段到要求「${String(requirement.text).slice(0, 12)}」`);
-            needsData = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs?threadId=${encodeURIComponent(threadId)}`).then((r) => r.json()).catch(() => needsData);
-            picker.close();
-            await refreshPlanRequirements(host, block);
-          } catch (err) {
-            picker.querySelector('[data-bind-msg]').textContent = `绑定失败：${String(err.message || err)}`;
-          }
-        });
-        picker.showModal();
-      });
-      block.querySelector('[data-req-save]')?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/requirements`, {
-            method: 'PUT', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({block_id: blockId, requirements: collect()}),
-            signal: AbortSignal.timeout(30000),
-          });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-          const chapterInPlan = plan.chapters.find((c) => String(c.block_id) === String(blockId));
-          if (chapterInPlan) chapterInPlan.requirements = data.requirements;
-          status(`已保存本章 ${data.requirements.length} 条编写要求`);
-          block.querySelector('[data-req-msg]').textContent = `已保存 ${data.requirements.length} 条要求（重新生成后会按它核回应率）`;
-        } catch (err) {
-          block.querySelector('[data-req-msg]').textContent = `保存失败：${String(err.message || err)}`;
-        } finally {
-          button.disabled = false;
-        }
-      });
-    });
-    body.querySelectorAll('[data-plan-upload]').forEach((input) => input.addEventListener('change', async () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      const card = input.closest('.cs-plan-gap');
-      const msg = card ? card.querySelector('[data-plan-upload-msg]') : null;
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const resp = await fetch(`/api/blocks/${input.dataset.planUpload}/studio/materials`, {
-          method: 'POST', body: form, signal: AbortSignal.timeout(180000),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        if (msg) { msg.textContent = `已上传《${file.name}》并关联到本章`; msg.classList.remove('cs-warning'); }
-      } catch (err) {
-        if (msg) { msg.textContent = `上传失败：${String(err.message || err)}`; msg.classList.add('cs-warning'); }
-      }
-    }));
-    body.querySelectorAll('[data-plan-cite]').forEach((button) => button.addEventListener('click', () => {
-      openCitationDialog(button.dataset.planCite, button.dataset.planCiteQuery || '');
-    }));
-    body.querySelectorAll('[data-plan-goto]').forEach((button) => button.addEventListener('click', async () => {
-      dialog.close();
-      await select(button.dataset.planGoto);
-    }));
-    body.querySelector('[data-plan-confirm]').onclick = async (event) => {
-      const button = event.currentTarget;
+    const confirmAll = async (button) => {
+      const chapters = plan.chapters || [];
+      const lines = chapters.map((chapter, index) => `${index + 1}. ${chapter.title}（要求 ${(chapter.requirements || []).length} 条）`).join('\n');
+      if (!globalThis.confirm(`将把本目录 ${chapters.length} 章都标记为"计划已确认"：\n\n${lines}\n\n确认前请确保你已看过各章要点。继续？`)) return;
       button.disabled = true;
-      button.textContent = '启动中…';
       try {
-        const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/confirm`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({leaf_block_ids: []}),
-          signal: AbortSignal.timeout(60000),
+        const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/confirm-chapter`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({block_id: ''}), signal: AbortSignal.timeout(30000),
         });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        dialog.close();
-        status(`已启动 ${data.chapters} 个章节的编制，可在右栏查看进度`);
-        team?.refresh();
+        const payload = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+        status(`已批量确认本目录 ${chapters.length} 章的计划`);
+        for (const chapter of chapters) chapter.confirmed = true;
+        plan.status = 'confirmed';
+        render();
       } catch (err) {
+        status(`批量确认失败：${String(err.message || err)}`);
+      } finally {
         button.disabled = false;
-        button.textContent = '确认并开始编制';
-        body.insertAdjacentHTML('afterbegin', `<p class="cs-warning">启动失败：${esc(String(err.message || err))}</p>`);
       }
     };
+    const render = () => {
+      const chapters = plan.chapters || [];
+      const totalPages = chapters.reduce((sum, chapter) => sum + (Number(chapter.pages) || 0), 0);
+      const totalRequirements = chapters.reduce((sum, chapter) => sum + ((chapter.requirements || []).length), 0);
+      const totalTables = chapters.reduce((sum, chapter) => sum + (chapter.tasks || []).filter((task) => task.kind === 'table').length, 0);
+      const totalFigures = chapters.reduce((sum, chapter) => sum + (chapter.tasks || []).filter((task) => task.kind === 'diagram').length, 0);
+      const blocksByKey = {};
+      for (const block of blocks) blocksByKey[String(block.block_id)] = block;
+      body.innerHTML = `<h4>《${esc(plan.root_title || '')}》共 ${chapters.length} 章</h4>
+        <p class="cs-dim">目录级只做汇总与批量；要求编辑与"我能写"的确认都在每一章自己的计划里。</p>
+        <p class="cs-branch-stats">工作量：计划 ${totalPages || '—'} 页 · 要求 ${totalRequirements} 条 · 表 ${totalTables} 张 · 图 ${totalFigures} 张</p>
+        <div class="cs-branch-table">
+          <div class="cs-branch-row cs-branch-head"><span>章</span><span>页数</span><span>要求</span><span>素材</span><span>正文</span><span>计划</span><span></span></div>
+          ${chapters.map((chapter) => {
+            const block = blocksByKey[String(chapter.block_id)] || {};
+            const requirements = chapter.requirements || [];
+            const gaps = chapter.gaps || [];
+            const words = String(block.content || '').replace(/\s+/g, '').length;
+            return `<div class="cs-branch-row">
+                <span class="cs-branch-title">${esc(chapter.title)}</span>
+                <span>${chapter.pages || '—'}</span>
+                <span>${requirements.length} 条</span>
+                <span class="${gaps.length ? 'cs-cp-bad' : ''}">${gaps.length ? `缺口 ${gaps.length}` : '—'}</span>
+                <span>${words ? `${Math.round(words / 250 * 10) / 10} 页` : '未开始'}</span>
+                <span class="${chapter.confirmed || plan.status === 'confirmed' ? 'cs-cite-used' : 'cs-cite-unused'}">${chapter.confirmed || plan.status === 'confirmed' ? '已确认' : '未确认'}</span>
+                <span><button type="button" class="cs-cp-mini" data-branch-open="${esc(String(chapter.block_id))}">打开本章计划</button></span>
+              </div>`;
+          }).join('')}
+        </div>
+        <div class="cs-plan-actions">
+          <button type="button" class="mw-btn" data-branch-close>关闭</button>
+          <button type="button" class="mw-btn" data-branch-confirm>批量确认本目录 ${chapters.length} 章</button>
+        </div>
+        <p class="cs-dim">生成只卡"本章是否确认"，不要求整目录确认；批量确认只是省事的一次操作。</p>`;
+      body.querySelector('[data-branch-close]').onclick = () => dialog.close();
+      body.querySelectorAll('[data-branch-open]').forEach((button) => button.addEventListener('click', () => {
+        dialog.close();
+        void openChapterPlan(button.dataset.branchOpen);
+      }));
+      body.querySelector('[data-branch-confirm]').addEventListener('click', (event) => void confirmAll(event.currentTarget));
+    };
+    render();
   }
+
   async function loadPageBudget() {
     const tid = threadId;                 // mountChapterStudio 的参数，不猜 URL
     if (!tid) return;
@@ -1623,10 +1500,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             return !!payload.confirmed;
           } catch (e) { return false; }
         })()) : false;
-        if (unit && info && !chapterConfirmed && !(info.plan && info.plan.status === 'confirmed')) {
-          status('本章属于《' + info.title + '》：请先确认编写计划，再开始编制。');
+        // C2：生成只卡"本章"，不再要求整个目录确认
+        if (unit && info && !chapterConfirmed) {
+          status('本章计划还未确认：打开本章计划确认后即可生成（未确认也可生成，正文写【待补充】）。');
           showPanel('ai');
-          await openWritingPlan(unit);
+          await openChapterPlan(String(active.block_id));
           return;
         }
         paintView(false);status('');showPanel('ai');await team.start();

@@ -286,3 +286,15 @@
 .cs-cp-branchwarn { font-size: 11.5px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 5px 9px; display: inline-flex; align-items: center; gap: 6px; }
 .cs-cp-hint { margin: 6px 0 0; font-size: 11px; color: #94a3b8; }
 .cs-cp-ok { color: #15803d; font-size: 12px; }
+
+/* C1：目录级计划 = 汇总表 */
+.cs-branch-stats { margin: 4px 0 10px; font-size: 12px; color: #334155; }
+.cs-branch-table { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.cs-branch-row { display: grid; grid-template-columns: 1.6fr 56px 60px 72px 80px 62px 104px; gap: 8px; align-items: center; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid #eef2f7; }
+.cs-branch-row:last-child { border-bottom: 0; }
+.cs-branch-head { background: #f8fafc; color: #475569; font-size: 11px; }
+.cs-branch-title { font-weight: 600; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* C5：要求来源徽标 */
+.cs-cp-src { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #eef2ff; color: #4338ca; }
+.cs-cp-src.template { background: #f1f5f9; color: #64748b; }

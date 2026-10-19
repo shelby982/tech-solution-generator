@@ -92,7 +92,35 @@ def _template_tasks(leaf: dict) -> list[dict] | None:
 REQUIREMENT_PREFIX = {"text": "写明", "table": "用表格呈现", "figure": "配图说明", "material": "引用"}
 
 
-def _requirements_for(leaf: dict, recipe: dict) -> list[dict]:
+def _criterion_aspects(criterion: str) -> list[str]:
+    """从评分点的"满分档"里取出**要求要素**（不取评分档位本身）。
+
+    评分点 criterion 通常是「（1）满分档 … 得 8-10分。（2）基本档 … 得 4-7分…」，
+    我们要的是**第一档里要求写清楚的东西**，例如「项目背景、现状、目标、建设范围、
+    建设内容、项目重难点」「业务需求及特点」「难点和痛点」「解决措施」。
+    """
+    text = str(criterion or "").strip()
+    if not text:
+        return []
+    match = re.search(r"[（(]\d[）)](.*?)(?=[（(]\d[）)]|$)", text, re.S)
+    band = (match.group(1) if match else text).strip()
+    band = re.sub(r"[，。；]?得\s*[\d.\-]+\s*分.*$", "", band).strip()   # 去掉"得 8-10 分…"
+    band = re.sub(r"^[，。；、\s]+", "", band)
+    tokens, seen = [], set()
+    for token in re.split(r"[、，,；;。]", band):
+        token = token.strip()
+        # 去掉"深刻理解/能较好的分析/本项目建设的…"这类引导词，留下要素名
+        for _ in range(6):
+            token = re.sub(r"^(深刻|基本|不完全|较好|的|能|并|以及|且|和|分析|理解|提出|本项目|本项目建设的|相关|对|建设|项目)", "", token).strip()
+        token = re.sub(r"^[的并和与及]+", "", token)
+        token = re.sub(r"等$", "", token).strip(" 。，、；")
+        if 2 <= len(token) <= 20 and token not in seen:
+            seen.add(token)
+            tokens.append(token)
+    return tokens[:12]
+
+
+def _requirements_for(leaf: dict, recipe: dict, points: list[dict] | None = None) -> list[dict]:
     """按配方骨架 + 必表 + 必图 + 素材缺口，起草本章的**逐条编写要求**。
 
     产品口径：要求由主编写人员输出/确认，系统只做**初稿**（确定性、不调模型、可逐条编辑）。
@@ -108,19 +136,43 @@ def _requirements_for(leaf: dict, recipe: dict) -> list[dict]:
     tables = [name for name in (recipe.get("tables") or []) if _relevant(name)]
     figures = [name for name in (recipe.get("figures") or []) if _relevant(name)]
     items: list[dict] = []
-    # 优先用 8 类章名模板（本来就是按"背景/范围/内容/重难点/需求/痛点/措施"设计的，最贴合本章）
+    # ① 评分点要素优先，且**按章名挑出本章该写的那几项**
+    #    （同一评分点覆盖 7 章：背景/现状/目标/范围/内容/重难点/需求/痛点/措施）
+    for point in points or []:
+        label = str(point.get("item") or point.get("factor") or "").strip()
+        for element in _criterion_aspects(str(point.get("criterion") or "")):
+            # 严格匹配：要素名必须是章名的子串（或反之），避免"项目背景现状目标"混进"重难点"
+            hits = element in title or (len(title) >= 3 and title in element)
+            if not hits:
+                continue
+            items.append({"text": f"写清楚「{element}」", "type": "text", "source": "point",
+                          "source_label": f"评分点·{label[:10]}"})
+    if not items:
+        # 章名匹配不上时，退到"满分档的整体要求"一句
+        for point in points or []:
+            label = str(point.get("item") or point.get("factor") or "").strip()
+            aspects = _criterion_aspects(str(point.get("criterion") or ""))
+            if aspects:
+                items.append({"text": f"写清楚：{'、'.join(aspects[:4])}", "type": "text",
+                              "source": "point", "source_label": f"评分点·{label[:10]}"})
+                break
+    # ② 产出要求（表/图）用 8 类章名模板兜底，保证"该出的表图"不缺
     templated = _template_tasks(leaf)
-    if templated:
-        kind_map = {"text": "text", "table": "table", "diagram": "figure"}
-        for task in templated:
-            items.append({"text": task["title"], "type": kind_map.get(task["kind"], "text")})
-    else:
+    kind_map = {"text": "text", "table": "table", "diagram": "figure"}
+    for task in (templated or []):
+        if task.get("kind") == "text":
+            continue
+        items.append({"text": task["title"], "type": kind_map.get(task["kind"], "table"),
+                      "source": "template", "source_label": "模板兜底"})
+    # ③ 模板也没有 -> 用配方骨架/必表/必图
+    if not items:
         for text in (skeleton or (recipe.get("skeleton") or [])[:2])[:4]:
-            items.append({"text": f"{text}（要给出结论与依据）", "type": "text"})
+            items.append({"text": f"{text}（要给出结论与依据）", "type": "text",
+                          "source": "template", "source_label": "模板兜底"})
         for name in (tables or [])[:3]:
-            items.append({"text": f"{name}", "type": "table"})
+            items.append({"text": f"{name}", "type": "table", "source": "template", "source_label": "模板兜底"})
         for name in (figures or [])[:2]:
-            items.append({"text": f"{name}", "type": "figure"})
+            items.append({"text": f"{name}", "type": "figure", "source": "template", "source_label": "模板兜底"})
     evidence = str(leaf.get("evidence_required") or "").strip()
     if evidence:
         items.append({"text": evidence, "type": "material"})
@@ -248,6 +300,20 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
         return recommend_layout(leaf, {})
 
     chapters, gaps = [], []
+    # 本章承接的评分点（要求来源的第一优先级）
+    points_by_block: dict[str, list[dict]] = {}
+    for leaf in leaves:
+        ids = []
+        try:
+            ids = [str(x) for x in json.loads(leaf.get("review_point_ids") or "[]")]
+        except ValueError:
+            ids = []
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            points_by_block[str(leaf.get("block_id"))] = [dict(row) for row in await (await db.execute(
+                f"SELECT point_id, factor, item, criterion, points FROM review_points "
+                f"WHERE run_thread_id=? AND point_id IN ({placeholders})", (thread_id, *ids),
+            )).fetchall()]
     for leaf in leaves:
         layout = layout_for(leaf)
         recipe = (specs.get(layout) or {}).get("structured") or {}
@@ -265,7 +331,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             "layout": layout, "layout_label": LAYOUTS[layout]["label"],
             "pages": int(leaf.get("page_budget") or 0),
             "objective": plan["objective"], "tasks": plan["tasks"], "gaps": chapter_gaps,
-            "requirements": _requirements_for(leaf, recipe),
+            "requirements": _requirements_for(leaf, recipe, points_by_block.get(str(leaf.get("block_id")))),
         })
     plan_row = {
         "id": uuid.uuid4().hex,
