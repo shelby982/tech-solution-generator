@@ -160,6 +160,29 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
             citation_count = int(cites["n"]) if cites else 0
             row["stats"]["materials"] = material_count
             row["stats"]["citations"] = citation_count
+            if citation_count:
+                # 有来源但正文没提：多半是"来源接受晚于正文"，需要重新生成才会引用
+                cited = await (await db.execute(
+                    "SELECT title, publisher, url FROM citations c WHERE c.project_id=? AND c.status='accepted' AND ("
+                    "  c.block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = c.id AND l.block_id = ?))",
+                    (project_id, key, key),
+                )).fetchall()
+                body = str(unit.get("content") or "")
+                from services.citations import normalize_title
+
+                def _used(citation) -> bool:
+                    key = normalize_title(citation["title"] or "")
+                    # 标题要够长才算"指名道姓地引用"（前 10 字会和别的文件撞车，实测误判过）
+                    if len(key) >= 12 and key in body.replace(" ", ""):
+                        return True
+                    return bool(citation["url"] and citation["url"] in body)
+
+                used = any(_used(c) for c in cited)
+                if not used:
+                    row["issues"].append({"code": "citation_unused", "level": "medium",
+                                          "message": f"本章已接受 {citation_count} 条来源，但正文里没有引用它们（"
+                                                     "来源晚于正文时需要重新生成本章）"})
+                    row["ok"] = False
             if material_count + citation_count == 0 and row["stats"]["chars"] > 200:
                 row["issues"].append({"code": "material", "level": "medium",
                                       "message": "素材不足：本章没有关联材料或官方来源，正文容易大量【待补充】"})

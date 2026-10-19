@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v255';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v255';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v255';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v257';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v257';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v257';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -777,12 +777,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <section data-pane="basis"><h4>编排建议</h4><label>章节类型 <select data-cs="layout">${Object.entries(context.layouts).map(([id,l])=>`<option value="${id}" ${id===context.profile.layout?'selected':''}>${esc(l.label)}</option>`).join('')}</select></label><p>${layout.blocks.map(esc).join(' → ')}</p><p class="cs-muted">${context.materials.some(m=>m.confirmed)?'生成仅引用已核对素材，并结合本章评分及规范要求。':'无已核对素材：可先写项目分析与拟实施方案；人员、业绩、证书、实测参数等保留待补充。'}</p>${context.missing.map(m=>`<p class="cs-warning">${esc(m)}</p>`).join('')}</section>
       <section data-pane="materials">${(() => {
         const key = String(active.block_id);
+        const body = String(active.content || '');
+        // 来源"有没有被正文用到"：完整标题（去掉站点后缀、≥12 字）或 URL 出现在正文里
+        // 不能用标题前 10 字判断：不同文件的标题前缀常常相同（实测误判过）
+        const norm = (text) => String(text || '').split('_')[0].replace(/\s+/g, '');
+        const usedOf = (c) => {
+          const key = norm(c.title);
+          if (key.length >= 12 && norm(body).includes(key)) return true;
+          return !!(c.url && body.includes(String(c.url)));
+        };
         const linked = citationInfo.rows.filter((c) => (c.links || []).includes(key) || !c.block_id);
-        return `<div class="cs-material-head"><h4>外部依据 ${linked.length}</h4>
+        const unused = linked.filter((c) => !usedOf(c));
+        return `<div class="cs-material-head"><h4>外部依据 ${linked.length}${linked.length ? ` <small>已引用 ${linked.length - unused.length} / 未引用 ${unused.length}</small>` : ''}</h4>
           <button type="button" class="mw-btn" data-add-citation="${esc(key)}">添加官方来源</button></div>
           ${linked.map((c) => `<p class="cs-cite-line">${esc(c.title || c.url)}
-            <small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章</small></p>`).join('')
-            || '<p class="cs-muted">本章还没有关联的官方依据。外部信息必须可核验，二手内容不采。</p>'}`;
+            <small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章
+              · <b class="${usedOf(c) ? 'cs-cite-used' : 'cs-cite-unused'}">${usedOf(c) ? '正文已引用' : '正文未引用'}</b></small></p>`).join('')
+            || '<p class="cs-muted">本章还没有关联的官方依据。外部信息必须可核验，二手内容不采。</p>'}
+          ${unused.length ? `<p class="cs-material-hint">未引用的来源晚于正文：点上方「AI 编制本章」重新生成本章，引用才会写进正文。</p>` : ''}`;
       })()}</section>
       <section data-pane="materials"><div class="cs-material-head"><h4>本章素材 ${context.materials.length}</h4><label class="cs-upload">上传素材<input data-cs="upload" type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"></label></div><p class="cs-muted">PDF／Word 提取原文与页码；图片保留原图，需人工核对含义。</p><button data-action="library">从项目素材库关联</button><button data-action="refresh-materials">刷新解析状态</button><div data-cs="library"></div>${context.materials.map(m=>`<article class="cs-material"><strong>${esc(m.filename)}</strong><small>${esc(m.parse_status==='done'?'已解析':m.parse_status==='failed'?'解析失败，可移除后重传':'解析中，请稍后刷新')} · ${m.confirmed?'已核对':'待核对'}${m.adopted?' · 正文已引用':''}</small>${m.image_url?`<img src="${esc(m.image_url)}" alt="${esc(m.filename)}">`:''}<details><summary>提炼摘录与映射依据（${m.excerpts.length} 段）</summary><p class="cs-muted">${esc(m.mapping_reason)}</p>${(m.key_points||[]).length?`<h5>规则提炼的原文要点</h5>${m.key_points.map(p=>`<p><b>${esc(p.category)}</b>：${esc(p.quote)}<small>${p.page?`第 ${p.page} 页`:`片段 ${p.chunk_id}`}</small></p>`).join('')}<h5>完整原文片段</h5>`:''}${m.excerpts.map(x=>`<p>${esc(x.text)}<small>${x.page?`第 ${x.page} 页`:`片段 ${x.chunk_id}`}</small></p>`).join('') || '<p>图片不自动推断事实；文档解析中或暂无可提取原文。</p>'}</details><button data-material="confirm" data-id="${m.id}" ${m.parse_status!=='done'?'disabled':''}>${m.confirmed?'撤销核对':'核对适用于本章'}</button>${m.confirmed?`<button data-material="insert" data-id="${m.id}">${m.image_url?'插入图片':'引用原文摘录'}</button>`:''}<button data-material="unlink" data-id="${m.id}">移除关联</button></article>`).join('')}</section>`;
     get('layout').onchange = async event => {

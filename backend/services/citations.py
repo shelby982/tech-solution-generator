@@ -37,6 +37,12 @@ MAX_BYTES = 2_000_000
 EXCERPT_LIMIT = 200
 
 
+def normalize_title(title: str) -> str:
+    """规范化标题：去掉站点后缀（"_最新政策_中国政府网"这类）与空白，用于"是否同一篇原文"的判断。"""
+    text = str(title or "").split("_")[0]
+    return re.sub(r"\s+", "", text)
+
+
 def domain_of(url: str) -> str:
     match = re.match(r"^https?://([^/]+)", str(url or "").strip(), re.I)
     return (match.group(1) if match else "").lower()
@@ -338,6 +344,20 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
         raise ValueError("非官方来源需要你确认内容真实可靠后才能引用")
     if trust != "official":
         trust = "confirmed"
+    # 同一章不重复接受同一篇原文：URL 相同，或**域名 + 规范化标题**相同
+    # （同一篇原文常有两种路径顺序，只比 URL 会漏，实测漏过一次）
+    title_key = normalize_title(payload.get("title") or "")
+    existing = await (await db.execute(
+        "SELECT id, url, domain, title FROM citations WHERE project_id=? AND status='accepted' AND ("
+        "  block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?))",
+        (project_id, str(block_id), str(block_id)),
+    )).fetchall()
+    for row in existing:
+        same_url = row["url"] == url
+        same_doc = (title_key and normalize_title(row["title"]) == title_key
+                    and (row["domain"] or domain_of(row["url"])) == (domain_of(url) or ""))
+        if same_url or same_doc:
+            raise ValueError("该来源已关联本章，无需重复接受")
     citation_id = uuid.uuid4().hex
     await db.execute(
         "INSERT INTO citations (id, project_id, thread_id, block_id, query, url, domain, title, "
@@ -443,4 +463,4 @@ __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", 
            "OFFICIAL_PORTALS", "discover_candidates",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
            "citation_line", "domain_of", "link_citation", "unlink_citation", "suggest_query",
-           "remember_search", "search_history"]
+           "remember_search", "search_history", "normalize_title"]

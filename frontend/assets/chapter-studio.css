@@ -153,3 +153,9 @@
 .cs-cite-history-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f1f5f9; }
 .cs-cite-history-row span { display: flex; flex-direction: column; gap: 2px; }
 .cs-cite-history-row small { color: #94a3b8; }
+
+/* 外部依据的"是否被正文引用"状态 */
+.cs-material-head h4 small { font-weight: 400; font-size: 11px; color: #64748b; margin-left: 6px; }
+.cs-cite-used { color: #15803d; font-weight: 600; }
+.cs-cite-unused { color: #b45309; font-weight: 600; }
+.cs-material-hint { margin: 6px 0 0; font-size: 11px; color: #b45309; line-height: 1.6; }
