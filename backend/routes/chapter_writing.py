@@ -102,8 +102,11 @@ async def read_chapter_plan(project_id: int, block_id: str, threadId: str):
     from services.quality_check import check_thread
     from services.writing_plans import build_plan, chapter_completion, chapter_plan, plan_units
     async with get_db() as db:
-        data = await chapter_plan(db, project_id, threadId, block_id)
-        # 自愈：本章在计划里没有条目（例如计划是旧版本生成的、或父章此前被漏掉）→ 自动补建再取
+        try:
+            data = await chapter_plan(db, project_id, threadId, block_id)
+        except Exception:
+            data = {}
+        # 自愈：本章没有计划条目（旧计划未覆盖/父章此前被漏掉/分支还没生成过计划）→ 自动补建再取
         if not (data.get("requirements") or data.get("plan_id")):
             units = (await plan_units(db, project_id, threadId)).get("units") or []
             unit = next((item for item in units

@@ -818,6 +818,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     found = await plan_of_block(db, project_id, thread_id, str(block_id))
     chapter = None
     plan_id = ""
+    plan: dict = {}
     if found:
         plan_id, plan = found
         chapter = next((item for item in plan.get("chapters") or []
@@ -982,7 +983,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                 continue
             child_content = str(child.get("content") or "").replace(" ", "")
             plan_pages = {str(item.get("block_id")): item.get("pages")
-                          for item in (plan.get("chapters") or [])}
+                          for item in ((plan or {}).get("chapters") or [])}
             children.append({
                 "block_id": child_key, "title": child.get("title"),
                 "pages": int(plan_pages.get(child_key) or child.get("page_budget") or 0),
