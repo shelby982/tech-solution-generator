@@ -237,6 +237,16 @@ async def get_response_drafts(project_id: int,
     return JSONResponse(content=result)
 
 
+@router.post("/projects/{project_id}/quality/findings/{finding_id}/ignore")
+async def ignore_quality_finding(project_id: int, finding_id: str):
+    """把一条质检发现标为"已处理"（不再出现在待修清单）。"""
+    from services.quality_check import ignore_finding
+    async with get_db() as db:
+        if not await ignore_finding(db, project_id, finding_id):
+            raise HTTPException(status_code=404, detail="质检发现不存在")
+        return {"ignored": True}
+
+
 @router.get("/projects/{project_id}/quality")
 async def project_quality_route(
     project_id: int,
@@ -248,7 +258,9 @@ async def project_quality_route(
         project = await get_project(db, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-        return JSONResponse(content=await check_thread(db, project_id, thread_id))
+        from services.quality_check import sync_findings
+        data = await check_thread(db, project_id, thread_id)
+        return JSONResponse(content=await sync_findings(db, project_id, thread_id, data))
 
 
 @router.get("/projects/{project_id}/progress")

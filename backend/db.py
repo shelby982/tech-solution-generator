@@ -62,6 +62,23 @@ CREATE TABLE IF NOT EXISTS citations (
 );
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
 
+-- 质检发现（落库用于待办/趋势/已处理标记；实时计算仍保留为"当前状态"）
+CREATE TABLE IF NOT EXISTS quality_findings (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    block_id TEXT NOT NULL DEFAULT '',
+    check_code TEXT NOT NULL DEFAULT '',
+    "group" TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL DEFAULT 'medium',
+    message TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(thread_id, block_id, check_code, message)
+);
+CREATE INDEX IF NOT EXISTS idx_quality_findings_open ON quality_findings(project_id, status);
+
 -- 检索历史（P5）：同一章下次打开时可看"上次找到的候选"，避免重复搜
 CREATE TABLE IF NOT EXISTS citation_searches (
     id TEXT PRIMARY KEY,

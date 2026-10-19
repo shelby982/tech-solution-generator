@@ -12,6 +12,29 @@ from __future__ import annotations
 import re
 
 WPP = 250                      # 1 页 ≈ 250 字（与编写页一致）
+
+# 检查项元数据：分组（规范/计划/依据/素材）+ 一句话 + 可执行动作
+CHECK_META = {
+    "skeleton": {"group": "规范", "label": "骨架落点", "actions": ["regenerate", "open_spec"]},
+    "table": {"group": "规范", "label": "必表", "actions": ["regenerate"]},
+    "figure": {"group": "规范", "label": "必图", "actions": ["regenerate"]},
+    "vague": {"group": "规范", "label": "空词", "actions": ["regenerate"]},
+    "source_mark": {"group": "规范", "label": "来源标注", "actions": ["find_material"]},
+    "budget": {"group": "规范", "label": "篇幅", "actions": ["open_budget"]},
+    "requirement": {"group": "计划", "label": "要求回应", "actions": ["find_material", "regenerate"]},
+    "score_point": {"group": "依据", "label": "评分点覆盖", "actions": ["regenerate"]},
+    "spec_clause": {"group": "依据", "label": "规范条款承接", "actions": ["regenerate"]},
+    "material": {"group": "素材", "label": "素材不足", "actions": ["find_material"]},
+    "citation_unused": {"group": "素材", "label": "来源未引用", "actions": ["regenerate", "find_material"]},
+    "pending": {"group": "素材", "label": "待补充", "actions": ["find_material"]},
+}
+
+
+def _issue(code: str, level: str, message: str, **extra) -> dict:
+    meta = CHECK_META.get(code, {"group": "规范", "label": code, "actions": []})
+    return {"code": code, "level": level, "message": message,
+            "group": meta["group"], "check": meta["label"],
+            "actions": list(meta["actions"]), **extra}
 TABLE_SEP = re.compile(r"^\s*\|[\s:|-]+\|\s*$", re.M)
 VAGUE_WORDS = ("非常", "极大", "极大提升", "显著提升", "大幅提升")
 
@@ -52,30 +75,23 @@ def check_chapter(content: str, recipe: dict | None = None, budget_pages: int = 
     for item in recipe.get("skeleton") or []:
         keys = _skeleton_keywords(item)
         if keys and not any(key in text for key in keys):
-            issues.append({"code": "skeleton", "level": "medium",
-                           "message": f"骨架项「{item}」在正文里没有落点"})
+            issues.append(_issue("skeleton", "medium", f"骨架项「{item}」在正文里没有落点"))
     if not stats["tables"]:
-        issues.append({"code": "table", "level": "high",
-                       "message": "本章没有表格（规范要求每节至少 1 张）"})
+        issues.append(_issue("table", "high", "本章没有表格（规范要求每节至少 1 张）"))
     if (recipe.get("figures") or []) and stats["figures"] == 0:
-        issues.append({"code": "figure", "level": "high",
-                       "message": "本章没有图示（配方要求至少 1 张）"})
+        issues.append(_issue("figure", "high", "本章没有图示（配方要求至少 1 张）"))
     if stats["pending"]:
-        issues.append({"code": "pending", "level": "info",
-                       "message": f"还有 {stats['pending']} 处【待补充】"})
+        issues.append(_issue("pending", "info", f"还有 {stats['pending']} 处【待补充】"))
     for word in VAGUE_WORDS:
         if word in text:
-            issues.append({"code": "vague", "level": "low",
-                           "message": f"出现空词「{word}」，建议改成量化表述"})
+            issues.append(_issue("vague", "low", f"出现空词「{word}」，建议改成量化表述"))
             break
     if budget_pages and stats["pages"]:
         ratio = stats["pages"] / budget_pages
         if ratio > 1.3:
-            issues.append({"code": "budget", "level": "medium",
-                           "message": f"已写 {stats['pages']} 页，超出分配 {budget_pages} 页的 30%"})
+            issues.append(_issue("budget", "medium", f"已写 {stats['pages']} 页，超出分配 {budget_pages} 页的 30%"))
         elif ratio < 0.4:
-            issues.append({"code": "budget", "level": "medium",
-                           "message": f"已写 {stats['pages']} 页，不足分配 {budget_pages} 页的 40%"})
+            issues.append(_issue("budget", "medium", f"已写 {stats['pages']} 页，不足分配 {budget_pages} 页的 40%"))
     order = {"high": 0, "medium": 1, "low": 2, "info": 3}
     issues.sort(key=lambda issue: order.get(issue["level"], 9))
     return {"stats": stats, "issues": issues,
@@ -142,18 +158,23 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
     children = {str(b["block_id"]) for b in blocks}
     # 计划里的逐条要求（一次读出，循环里对齐各章）
     plan_requirements: dict[str, list] = {}
-    branch_plan = await (await db.execute(
-        "SELECT plan FROM writing_plans WHERE project_id=? AND thread_id=? "
-        "ORDER BY created_at DESC LIMIT 1", (project_id, thread_id),
-    )).fetchone()
-    if branch_plan:
-        import json as _json
+    # 取该线程所有计划（新→旧）：同一章若被多个计划覆盖，后写的（requirements 非空）优先
+    plan_rows = await (await db.execute(
+        "SELECT plan, created_at, rowid FROM writing_plans WHERE project_id=? AND thread_id=? "
+        "ORDER BY created_at DESC, rowid DESC", (project_id, thread_id),
+    )).fetchall()
+    import json as _json
+    for plan_row in plan_rows:
         try:
-            plan_data = _json.loads(branch_plan["plan"] or "{}")
+            plan_data = _json.loads(plan_row["plan"] or "{}")
         except ValueError:
-            plan_data = {}
+            continue
         for chapter in plan_data.get("chapters") or []:
-            plan_requirements[str(chapter.get("block_id"))] = chapter.get("requirements") or []
+            key = str(chapter.get("block_id"))
+            if plan_requirements.get(key):
+                continue
+            if chapter.get("requirements"):
+                plan_requirements[key] = chapter["requirements"]
     results = []
     for unit in units:
         key = str(unit["block_id"])
@@ -173,11 +194,46 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
         # 结构（骨架）是**整章**的要求：叶子节只查图表/占位/篇幅，骨架在章级聚合里查
         leaf_recipe = {"skeleton": [], "figures": recipe.get("figures") or []}
         row = check_chapter(unit.get("content"), leaf_recipe, int(unit.get("page_budget") or 0))
+        content_text = str(unit.get("content") or "")
+        # A5 来源标注：正文提到政策/标准/数据，但没有任何【来源】标注
+        if written and re.search(r"(政策|标准|规范|指标|数据|报告)", content_text) and "【来源" not in content_text:
+            row["issues"].append(_issue("source_mark", "medium",
+                "正文引用了政策/标准/数据类信息，但没有【来源】标注"))
+            row["ok"] = False
+        # C1 评分点覆盖：本章承接的评分点要素在正文里是否有着落
+        point_ids = [str(x) for x in (unit.get("review_point_ids") or []) if str(x)]
+        if written and point_ids:
+            placeholders = ",".join("?" * len(point_ids))
+            for point in await (await db.execute(
+                f"SELECT point_id, factor, item, criterion FROM review_points "
+                f"WHERE run_thread_id=? AND point_id IN ({placeholders})", (thread_id, *point_ids),
+            )).fetchall():
+                label = str(point["item"] or point["factor"] or "")
+                keys = [part for part in re.split(r"[\s、，,；;/（）()【】]+", label) if len(part) >= 2][:3]
+                if keys and not any(key in content_text for key in keys):
+                    row["issues"].append(_issue("score_point", "high",
+                        f"评分点「{label}」在正文里没有落点（该点得分为 0 的风险）"))
+                    row["ok"] = False
+        # C2 规范条款承接：本章承接的规范条款是否各有落点（最多核 5 条）
+        spec_ids = [str(x) for x in (unit.get("spec_requirement_ids") or []) if str(x)][:5]
+        if written and spec_ids:
+            placeholders = ",".join("?" * len(spec_ids))
+            missing = 0
+            for requirement in await (await db.execute(
+                f"SELECT title, text FROM spec_requirements WHERE run_thread_id=? AND requirement_id IN ({placeholders})",
+                (thread_id, *spec_ids),
+            )).fetchall():
+                label = str(requirement["title"] or requirement["text"] or "")
+                keys = [part for part in re.split(r"[\s、，,；;/（）()【】]+", label) if len(part) >= 3][:3]
+                if keys and not any(key in content_text for key in keys):
+                    missing += 1
+            if missing:
+                row["issues"].append(_issue("spec_clause", "medium",
+                    f"承接的规范条款里有 {missing} 条在正文没有落点"))
         # B1 要求回应：按计划里本章的要求逐条核（要求是主线的准绳）
         for requirement in plan_requirements.get(key, []):
             if not _content_responds_requirement(unit.get("content"), requirement):
-                row["issues"].append({"code": "requirement", "level": "high",
-                                      "message": f"计划要求未回应：{str(requirement.get('text'))[:40]}"})
+                row["issues"].append(_issue("requirement", "high", f"计划要求未回应：{str(requirement.get('text'))[:40]}"))
                 row["ok"] = False
         # 素材充足度：有正文但没有任何关联材料/引用来源 → 写作必然大量【待补充】
         if written:
@@ -213,13 +269,10 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
 
                 used = any(_used(c) for c in cited)
                 if not used:
-                    row["issues"].append({"code": "citation_unused", "level": "medium",
-                                          "message": f"本章已接受 {citation_count} 条来源，但正文里没有引用它们（"
-                                                     "来源晚于正文时需要重新生成本章）"})
+                    row["issues"].append(_issue("citation_unused", "medium", f"本章已接受 {citation_count} 条来源，但正文里没有引用它们（来源晚于正文时需要重新生成本章）"))
                     row["ok"] = False
             if material_count + citation_count == 0 and row["stats"]["chars"] > 200:
-                row["issues"].append({"code": "material", "level": "medium",
-                                      "message": "素材不足：本章没有关联材料或官方来源，正文容易大量【待补充】"})
+                row["issues"].append(_issue("material", "medium", "素材不足：本章没有关联材料或官方来源，正文容易大量【待补充】"))
                 row["ok"] = False
         # 父节点的骨架/图表由子节承担，不做硬性拦截，只做提示
         if has_children:
@@ -262,10 +315,54 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
         "clean": sum(1 for r in started if r["ok"]),
         "high": sum(1 for r in started for i in r["issues"] if i["level"] == "high"),
         "medium": sum(1 for r in started for i in r["issues"] if i["level"] == "medium"),
+        "groups": {group: sum(1 for r in started for i in r["issues"] if i.get("group") == group)
+                   for group in ("规范", "计划", "依据", "素材")},
     }
     summary["units"] = len(units)
     summary["unit_issues"] = sum(1 for u in units for i in u["issues"] if i["level"] in ("high", "medium"))
     return {"thread_id": thread_id, "summary": summary, "chapters": results, "units": units}
 
 
-__all__ = ["check_chapter", "check_thread"]
+async def sync_findings(db, project_id: int, thread_id: str, data: dict) -> dict:
+    """把本次结论落库（同一问题只存一条），并用库里的状态过滤/标注。"""
+    import uuid as _uuid
+
+    status_map = {}
+    for chapter in data.get("chapters") or []:
+        for issue in chapter.get("issues") or []:
+            message = str(issue.get("message") or "")[:400]
+            finding_id = _uuid.uuid4().hex
+            await db.execute(
+                "INSERT OR IGNORE INTO quality_findings (id, project_id, thread_id, block_id, check_code, "
+                "'group', level, message) VALUES (?,?,?,?,?,?,?,?)",
+                (finding_id, project_id, thread_id, str(chapter.get("block_id")),
+                 str(issue.get("code")), str(issue.get("group")), str(issue.get("level")), message),
+            )
+            row = await (await db.execute(
+                "SELECT id, status FROM quality_findings WHERE thread_id=? AND block_id=? AND check_code=? AND message=?",
+                (thread_id, str(chapter.get("block_id")), str(issue.get("code")), message),
+            )).fetchone()
+            if row:
+                issue["finding_id"] = row["id"]
+                issue["status"] = row["status"]
+                status_map[row["id"]] = row["status"]
+    await db.commit()
+    # 已标记"已处理"的不再出现在待修清单里
+    for chapter in data.get("chapters") or []:
+        chapter["issues"] = [issue for issue in chapter.get("issues") or []
+                             if issue.get("status") != "ignored"]
+        chapter["ok"] = not any(issue["level"] in ("high", "medium") for issue in chapter["issues"])
+    data["summary"]["ignored"] = sum(1 for status in status_map.values() if status == "ignored")
+    return data
+
+
+async def ignore_finding(db, project_id: int, finding_id: str) -> bool:
+    cursor = await db.execute(
+        "UPDATE quality_findings SET status='ignored', updated_at=CURRENT_TIMESTAMP "
+        "WHERE id=? AND project_id=?", (finding_id, project_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+__all__ = ["check_chapter", "check_thread", "sync_findings", "ignore_finding", "CHECK_META"]

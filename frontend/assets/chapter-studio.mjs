@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v261';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v261';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v261';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v262';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v262';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v262';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -203,42 +203,87 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
   /** 质检清单：结构完整性 / 图表数量 / 占位与空词 / 篇幅偏差（确定性检查，不阻断保存）。 */
+  /** 质检清单（分组版）：规范 / 计划 / 依据 / 素材 四组，每条带一键动作。 */
   async function openQualityDialog() {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog';
     dialog.innerHTML = `<header><h3>质检清单</h3><button type="button" aria-label="关闭">×</button></header>
-      <div class="cs-plan-body"><p class="cs-muted">正在检查…</p></div>`;
+      <div class="cs-plan-body"><p class="cs-muted">正在体检…</p></div>`;
     globalThis.document.body.append(dialog);
     dialog.querySelector('header button').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove());
     dialog.showModal();
     const body = dialog.querySelector('.cs-plan-body');
+    const ACTION_LABEL = {find_material: '去补素材', regenerate: '重新生成', open_spec: '打开规范', open_budget: '去看篇幅'};
+    const render = (data) => {
+      const started = (data.chapters || []).filter((row) => row.started);
+      const groups = ['规范', '计划', '依据', '素材'];
+      const groupCounts = data.summary?.groups || {};
+      const issuesOf = (group) => started.flatMap((row) => (row.issues || [])
+        .filter((issue) => (issue.group || '规范') === group)
+        .map((issue) => ({...issue, block_id: row.block_id, title: row.title})));
+      const groupHtml = groups.map((group) => {
+        const items = issuesOf(group);
+        if (!items.length) return '';
+        return `<section class="cs-qc-group"><h4>${group} <em>${groupCounts[group] ?? items.length}</em></h4>
+          ${items.map((issue) => `<div class="cs-qc-issue ${esc(issue.level)}" data-finding="${esc(issue.finding_id || '')}" data-block="${esc(String(issue.block_id))}">
+              <div class="cs-qc-issue-main"><b>${esc(issue.check || '')}</b>
+                <span>${esc(issue.message)}</span>
+                <small>${esc(String(issue.title || '').slice(0, 16))}</small></div>
+              <div class="cs-qc-issue-acts">
+                ${(issue.actions || []).map((action) => `<button type="button" class="mw-btn" data-qc-action="${esc(action)}" data-block="${esc(String(issue.block_id))}" data-finding="${esc(issue.finding_id || '')}">${ACTION_LABEL[action] || action}</button>`).join('')}
+                ${issue.finding_id ? `<button type="button" class="mw-btn" data-qc-ignore="${esc(issue.finding_id)}">标为已处理</button>` : ''}
+              </div>
+            </div>`).join('')}</section>`;
+      }).join('');
+      body.innerHTML = `<p class="cs-muted">待修 ${data.summary.high + data.summary.medium} 条（高优 ${data.summary.high} · 中优 ${data.summary.medium}）
+        · 已开始 ${data.summary.started} 章 · 通过 ${data.summary.clean} 章${data.summary.ignored ? ` · 已忽略 ${data.summary.ignored}` : ''}
+        <br><span class="cs-dim">按"规范 / 计划 / 依据 / 素材"四组；每条可一键处理，不阻断保存。</span></p>
+        ${groupHtml || '<p class="cs-dim">没有待修问题。</p>'}`;
+      body.querySelectorAll('[data-qc-ignore]').forEach((button) => button.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/quality/findings/${encodeURIComponent(button.dataset.qcIgnore)}/ignore`, {method: 'POST', signal: AbortSignal.timeout(20000)});
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          button.closest('.cs-qc-issue')?.remove();
+          status('已标记为已处理');
+        } catch (err) {
+          status(`标记失败：${String(err.message || err)}`);
+        }
+      }));
+      body.querySelectorAll('[data-qc-action]').forEach((button) => button.addEventListener('click', async () => {
+        const action = button.dataset.qcAction;
+        const blockKey = button.dataset.block;
+        if (action === 'open_spec') {
+          globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open', {detail: {layout: active?.layout || 'global'}}));
+          return;
+        }
+        if (action === 'open_budget') {
+          dialog.close();
+          globalThis.document.querySelector('.sr-rail-item[data-stage="2"]')?.click();
+          return;
+        }
+        if (action === 'regenerate') {
+          dialog.close();
+          await select(blockKey);
+          status('已定位到本章：点「AI 编制本章」重新生成');
+          return;
+        }
+        // find_material：打开官方来源抽屉（带当前章的上下文）
+        dialog.close();
+        await select(blockKey);
+        openCitationDialog(blockKey);
+      }));
+    };
     try {
       const resp = await fetch(`/api/projects/${projectId}/quality?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(60000)});
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-      const rows = (data.chapters || []).map((row) => `<section class="cs-qc-row ${row.ok ? 'ok' : 'issue'}" data-qc-block="${esc(String(row.block_id))}">
-          <header><b>${esc(row.title)}</b><span class="cs-dim">${esc(row.layout || '')} · ${row.stats.tables} 表 · ${row.stats.figures} 图 · ${row.stats.pages} 页</span></header>
-          ${row.issues.length ? `<ul>${row.issues.map((issue) => `<li class="${esc(issue.level)}">${esc(issue.message)}</li>`).join('')}</ul>` : '<p class="cs-dim">通过</p>'}
-        </section>`).join('');
-      const unitRows = (data.units || []).map((unit) => `<section class="cs-qc-row ${unit.ok ? 'ok' : 'issue'}" data-qc-block="${esc(String(unit.block_id))}">
-          <header><b>【章】${esc(unit.title)}</b><span class="cs-dim">${esc(unit.layout || '')} · ${unit.chapters} 节 · ${unit.stats.tables} 表 · ${unit.stats.figures} 图 · ${unit.stats.pages} 页</span></header>
-          ${unit.issues.length ? `<ul>${unit.issues.map((issue) => `<li class="${esc(issue.level)}">${esc(issue.message)}</li>`).join('')}</ul>` : '<p class="cs-dim">结构通过</p>'}
-        </section>`).join('');
-      body.innerHTML = `<p class="cs-muted">共 ${data.summary.chapters} 个编写单元（已开始 ${data.summary.started || 0}）· 通过 ${data.summary.clean} · 高优 ${data.summary.high} · 中优 ${data.summary.medium}
-        ${data.summary.units ? `· 章级 ${data.summary.units} 个（问题 ${data.summary.unit_issues || 0}）` : ''}
-        （只出清单，不阻断保存；点击一行跳到该章节处理）</p>${unitRows}${rows || '<p class="cs-dim">还没有可检查的章节</p>'}`;
-      body.querySelectorAll('[data-qc-block]').forEach((section) => section.addEventListener('click', async () => {
-        dialog.close();
-        await select(section.dataset.qcBlock);
-      }));
+      render(data);
     } catch (err) {
       body.innerHTML = `<p class="cs-warning">质检失败：${esc(String(err.message || err))}</p>`;
     }
   }
 
-  /** 官方来源（V2）：一个输入框搞定 —— 输入检索词→自动找；粘贴链接→直接核验。
-   *  操作上的取舍：合并两个入口、候选行内预览+接受、说明折叠、入口常驻、接受后有回执。 */
   /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
   function openCitationSegments(citationId) {
     const citation = citationInfo.rows.find((row) => String(row.id) === String(citationId));

@@ -194,3 +194,15 @@
 .cs-req-row em.ok { color: #15803d; }
 .cs-req-del { font: inherit; font-size: 12px; border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
 .cs-req-msg { margin: 4px 0 0; font-size: 11px; }
+
+/* 质检清单（分组版） */
+.cs-qc-group { margin-bottom: 12px; }
+.cs-qc-group h4 { margin: 10px 0 6px; font-size: 12px; color: #334155; }
+.cs-qc-group h4 em { font-style: normal; font-size: 11px; color: #94a3b8; margin-left: 4px; }
+.cs-qc-issue { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; border: 1px solid #e2e8f0; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; font-size: 12px; }
+.cs-qc-issue.high { border-left-color: #dc2626; }
+.cs-qc-issue.low, .cs-qc-issue.info { border-left-color: #94a3b8; }
+.cs-qc-issue-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cs-qc-issue-main b { font-size: 11px; color: #475569; }
+.cs-qc-issue-main small { color: #94a3b8; }
+.cs-qc-issue-acts { display: flex; gap: 6px; flex-shrink: 0; }
