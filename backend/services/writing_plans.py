@@ -50,6 +50,23 @@ def _direct_children(blocks: list[dict], root: dict) -> list[dict]:
     return [b for b in blocks if _depth(str(b["block_id"])) == wanted and _inside(str(b["block_id"]), root_id)]
 
 
+def _writable_nodes(blocks: list[dict], root: dict) -> list[dict]:
+    """可写节点 = 子节点里"有正文的" 或 "没有子节点的"。
+
+    背景：p29 的「对项目的理解」父章自己有 7000 多字，下面还有 7 个子节。
+    计划必须给**每个可写节点**建条目 —— 否则用户打开父章会看到"要求 0 条"（实测 bug）。
+    """
+    root_id = str(root["block_id"])
+    descendants = [b for b in blocks if _inside(str(b["block_id"]), root_id)]
+    writable = []
+    for block in descendants:
+        has_children = any(_inside(str(other["block_id"]), str(block["block_id"])) for other in descendants)
+        if has_children and not str(block.get("content") or "").strip():
+            continue
+        writable.append(block)
+    return writable or ([root] if not descendants else [])
+
+
 def _leaves(blocks: list[dict], root: dict) -> list[dict]:
     root_id = str(root["block_id"])
     descendants = [b for b in blocks if _inside(str(b["block_id"]), root_id)]
@@ -263,7 +280,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     root = next((b for b in blocks if str(b["block_id"]) == str(root_block_id)), None)
     if root is None:
         raise ValueError("找不到该一级目录")
-    leaves = _leaves(blocks, root)
+    leaves = _writable_nodes(blocks, root)
     if not leaves:
         raise ValueError("该目录下没有可编写的章节")
     materials = await _material_counts(db, project_id)
@@ -374,8 +391,18 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             "pages": int(leaf.get("page_budget") or 0) or auto_pages.get(str(leaf.get("block_id")), 0),
             "objective": plan["objective"], "tasks": plan["tasks"], "gaps": chapter_gaps,
             "requirements": _requirements_for(leaf, recipe, points_by_block.get(str(leaf.get("block_id")))),
+            "has_children": any(str(x.get("block_id") or "").startswith(str(leaf.get("block_id")) + ".")
+                                for x in leaves),
             "confirmed": True,   # 系统统筹生成即生效；用户可改，改完仍生效
         })
+        # 父章（自己写正文、又有子节）追加"总述"要求 —— 避免与子节内容重复
+        if chapters[-1]["has_children"] and str(leaf.get("content") or "").strip():
+            children_count = sum(1 for x in leaves
+                                 if str(x.get("block_id") or "").startswith(str(leaf.get("block_id")) + "."))
+            chapters[-1]["requirements"].insert(0, {
+                "text": f"本章只写总述，概述下列 {children_count} 节要点，不重复各节细节",
+                "type": "text", "source": "system", "source_label": "父章总述",
+            })
     plan_row = {
         "id": uuid.uuid4().hex,
         "project_id": project_id,
@@ -508,7 +535,8 @@ def chapter_completion(chapter_plan_data: dict, issues: list[dict]) -> dict:
     if missing_material:
         reasons.append(f"{len(missing_material)} 条要求素材未满足")
     figures = chapter_plan_data.get("figures_plan") or {}
-    if not (figures.get("tables") or figures.get("figures")):
+    is_parent = bool(chapter_plan_data.get("has_children"))
+    if not (figures.get("tables") or figures.get("figures")) and not is_parent:
         reasons.append("没有可执行的图表计划")
     high = [issue for issue in issues if issue.get("level") in ("high", "medium")]
     if high:
@@ -705,8 +733,10 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     plan_version = int(plan_row["version"] or 1) if plan_row else 0
     plan_updated = (plan_row["updated_at"] or "") if plan_row else ""
     block_updated = str(block.get("updated_at") or "")
+    has_children = any(key.startswith(str(block_id) + ".") for key in blocks)
     return {
         "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
+        "has_children": has_children,
         "confirmed": bool((chapter or {}).get("confirmed")) or ((plan_row["status"] == "confirmed") if plan_row else False),
         "plan_version": plan_version,
         "plan_changed_after_content": bool(plan_updated and block_updated and plan_updated > block_updated),
@@ -851,7 +881,7 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
     return {"plan_id": plan_id, "jobs": created, "chapters": len(created)}
 
 
-__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
+__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan", "_writable_nodes",
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
            "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan",
            "confirm_chapter_plan", "chapter_completion"]
