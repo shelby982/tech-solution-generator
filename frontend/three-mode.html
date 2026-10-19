@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v246" />
-    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v246" />
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v246" />
+    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v249" />
+    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v249" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v249" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -3350,22 +3350,27 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v246" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v246" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v249" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v249" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
       <main class="workspace-main-shell">
         <header class="project-header">
-          <a class="project-name" id="header-project-name" href="/projects">加载中…</a>
-          <a class="package-context" id="package-context" href="#">标包加载中…</a>
-          <a id="switch-package" class="package-context" href="#">切换标包</a>
+          <!-- 身份带：项目（小）› 标包（主）▾ 切换；信息在左、动作在右，视线不走回头路 -->
+          <nav class="ph-crumbs" aria-label="当前位置">
+            <a class="ph-project" id="header-project-name" href="/projects">加载中…</a>
+            <span class="ph-sep" aria-hidden="true">›</span>
+            <a class="ph-package" id="package-context" href="#">标包加载中…</a>
+            <a class="ph-switch" id="switch-package" href="#" title="切换标包">切换 ▾</a>
+          </nav>
           <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <div class="header-tools">
               <!-- 三个并列入口收敛为一个「进度中心」：一行摘要 + 抽屉（进度/待办/记录）。
                    见 workspace.js::openProgressHub / updateProgressBadge -->
               <button type="button" id="ws-progress-hub" title="编写进度 · 待办 · 记录">编写 — · 待办 —</button>
+              <span class="ph-divider" aria-hidden="true"></span>
               <button type="button" id="ws-specs" title="编写规范：全局纪律 + 模块配方（可编辑、多版本）">编写规范</button>
               <button type="button" id="ws-materials" title="素材：我方材料 / 官方依据">素材</button>
             </div>
@@ -3423,7 +3428,9 @@ body[data-view="matching"] .match-detail { display: block; }
   <!-- 材料条（原左侧整列搬到顶部，释放宽度给内容） -->
   <section class="init-materials-panel" id="materials-panel">
     <div class="mrow1">
-      <span class="mat-k">当前标包依据 <b id="mat-total">0</b></span>
+      <!-- 计数由 gsum（"2 份文件 · 共 5.3 MB"）承担；mat-total 保留给 JS 更新但不再重复显示 -->
+      <span class="mat-k">依据</span>
+      <b id="mat-total" hidden>0</b>
       <span class="gsum" id="mat-gsum"></span>
       <span class="mat-actions">
         <button hidden class="btn-add-mat" id="btn-add-req" type="button"
@@ -3433,7 +3440,7 @@ body[data-view="matching"] .match-detail { display: block; }
         <button class="mat-more-btn" id="mat-desk-toggle" type="button" aria-expanded="true"
           title="收起文件台面（状态不会丢）">收起台面 ▴</button>
       </span>
-      <span class="hint" id="mat-hint">多选 · 类型按文件名建议，可在「明细」里改</span>
+      <span class="hint ph-info" id="mat-hint" role="img" aria-label="标包归属说明">多选 · 类型按文件名建议，可在「明细」里改</span>
       <!-- 兼容节点：上传类型改为按文件名推断（inferRoleFromFilename），
            这个下拉不再出现在界面，但既有代码仍引用它，保留在 DOM 里。 -->
       <select id="req-role-select" class="role-select" hidden>
@@ -4055,16 +4062,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v246"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v246"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v249"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v249"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v246',
-                        './assets/mode-editor.js?v=20261016-v246']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v249',
+                        './assets/mode-editor.js?v=20261016-v249']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v246"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v249"></script>
   </body>
 </html>

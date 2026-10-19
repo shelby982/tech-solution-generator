@@ -152,3 +152,27 @@ body:has(#workspace-nav) #generation-done-banner,body:has(#workspace-nav) #btn-g
 .ws-mat-main { padding: 4px 0 4px 16px; max-height: 68vh; overflow: auto; }
 .ws-mat-main h4 { margin: 4px 0 8px; font-size: 13px; }
 .ws-mat-main .ws-mat-sub { margin-top: 14px; font-size: 12px; color: #64748b; }
+
+/* ── 顶部重设计（信息左 / 动作右；项目小、标包主；低频配置靠右）───────── */
+body .project-header { display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e8eef6; }
+body .project-header .ph-crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; }
+body .project-header .ph-project { font-size: 12px; color: #94a3b8; font-weight: 400; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body .project-header .ph-project:hover { color: #475569; }
+body .project-header .ph-sep { color: #cbd5e1; font-size: 13px; }
+body .project-header .ph-package { font-size: 14px; font-weight: 600; color: #0f172a; max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body .project-header .ph-switch { font-size: 11px; color: #475569; border: 1px solid #dbe3ef; border-radius: 999px; padding: 3px 9px; text-decoration: none; white-space: nowrap; }
+body .project-header .ph-switch:hover { background: #f1f5f9; }
+body .project-header .project-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+body .project-header .header-tools { display: flex; align-items: center; gap: 4px; }
+body .project-header .ph-divider { width: 1px; height: 18px; background: #e2e8f0; margin: 0 6px; }
+body .project-header #ws-specs, body .project-header #ws-materials { font: inherit; font-size: 12px; color: #475569; background: transparent; border: 0; padding: 6px 9px; border-radius: 8px; cursor: pointer; }
+body .project-header #ws-specs:hover, body .project-header #ws-materials:hover { background: #f1f5f9; }
+body .project-header .model-selector-wrap { margin-left: 4px; }
+/* 材料条：紧凑一行（依据份数 · 大小 · 视图开关 ⓘ） */
+body .init-materials-panel .mrow1 { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 4px 16px; }
+body .init-materials-panel .mat-k { font-size: 12px; color: #475569; }
+body .init-materials-panel .mat-k b { font-variant-numeric: tabular-nums; color: #0f172a; }
+body .init-materials-panel .gsum { font-size: 12px; color: #64748b; }
+body .init-materials-panel #mat-hint.ph-info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 2px; border-radius: 50%; background: #f1f5f9; color: #94a3b8; font-size: 11px; cursor: help; text-indent: -9999px; overflow: hidden; position: relative; }
+body .init-materials-panel #mat-hint.ph-info::after { content: "i"; position: absolute; left: 0; right: 0; text-align: center; text-indent: 0; font-style: italic; }
+body .init-materials-panel .mat-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
