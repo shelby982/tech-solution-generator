@@ -36,6 +36,25 @@ CREATE TABLE IF NOT EXISTS chapter_writing_jobs (
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+-- 引用条目（P2）：外部官方来源的溯源记录（不进素材库 —— 素材库只放我方材料）。
+-- 每条必须带：机构 · 文号/日期 · 标题 · URL · 摘录；status: pending|accepted|rejected
+CREATE TABLE IF NOT EXISTS citations (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    block_id TEXT NOT NULL DEFAULT '',
+    query TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    publisher TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    excerpt TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
+
 -- 编写规范（P0.5）：L0 全局纪律 + L1 模块配方，多版本、可回滚、生成留痕。
 -- key：'global' 或 layout_key（understanding/solution/implementation/evidence/point_to_point）
 CREATE TABLE IF NOT EXISTS writing_specs (

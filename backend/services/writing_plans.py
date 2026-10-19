@@ -298,7 +298,9 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
         _, prompt = build_writing_prompt(block, reqs, points, materials, chapter["layout"], source)
         package = json.loads(prompt) | {"block_id": block["block_id"], "layout": chapter["layout"]}
         from services.writing_specs import spec_for
+        from services.citations import citations_for_prompt, citation_line
         package["writing_spec"] = await spec_for(db, chapter["layout"])
+        package["citations"] = [citation_line(c) for c in await citations_for_prompt(db, project_id, chapter["block_id"])]
         job_id = await create_job(db, block, package, settings, auto_save=True)   # 返回 job id
         # 预置主编计划：run_job 看到 artifacts.chief 就不再调主编重新规划
         spec = package.get("writing_spec") or {}

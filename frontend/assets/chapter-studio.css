@@ -75,3 +75,13 @@
 .cs-plan-gap { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #fde68a; }
 .cs-plan-gap-actions { display: flex; gap: 8px; margin-top: 6px; }
 .cs-plan-upload { display: inline-flex; align-items: center; cursor: pointer; }
+
+/* 官方源引用：输入框与候选卡片 */
+.cs-plan-body [data-cite-url] { width: 100%; font: inherit; font-size: 12px; padding: 8px 10px; border: 1px solid #dbe3ef; border-radius: 8px; box-sizing: border-box; margin-bottom: 8px; }
+.cs-cite-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
+.cs-cite-card h4 { margin: 0 0 4px; font-size: 14px; }
+.cs-cite-card p { margin: 0 0 4px; }
+
+/* 依据栏：官方来源列表 */
+.cs-cite-line { margin: 0 0 6px; font-size: 12px; color: #334155; }
+.cs-cite-line small { display: block; font-size: 11px; color: #94a3b8; }

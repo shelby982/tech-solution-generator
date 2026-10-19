@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v238';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v238';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v238';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v240';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v240';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v240';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -152,6 +152,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // ── 编写计划（P0）：单位 = 技术评分点的一级目录（评分根的直接子目录）──
   // 只在这一层出「编写计划」入口（一页 7 次确认，而不是每节一次）。
   const specInfo = { specs: {} };    // 编写规范（L0/L1）版本，右栏显示 + 就近打开
+  const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
+  async function loadCitations() {
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/citations?status=accepted`, {signal: AbortSignal.timeout(12000)});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      citationInfo.rows = data.citations || [];
+      if (active) paintAside();
+    } catch (e) { /* 引用拿不到不影响编写 */ }
+  }
   async function loadSpecs() {
     try {
       const resp = await fetch('/api/writing-specs', {signal: AbortSignal.timeout(12000)});
@@ -192,6 +202,69 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const recipeLabel = (key) => RECIPE_LABELS[key] || key;
 
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
+  /** 官方源引用：只采可核验的官方原文（政府/南方电网/标准/招标平台），二手一律不采。 */
+  function openCitationDialog(blockKey) {
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>检索官方来源</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">外部信息必须可核验：只接受政府、南方电网/广东电网、标准发布机构、
+          招标方与公共资源交易平台的<strong>原文</strong>。二手转载、公众号、百科不采；
+          找不到官方源时正文写【待补充：需官方来源】。</p>
+        <p class="cs-dim">粘贴官方原文链接，由系统抓取并抽取机构/日期/标题/摘录：</p>
+        <input type="url" data-cite-url placeholder="https://www.gov.cn/… 或 https://www.csg.cn/…" />
+        <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cite-cancel>取消</button>
+          <button type="button" class="mw-btn primary" data-cite-fetch>抓取核验</button></div>
+        <div data-cite-result></div></div>`;
+    globalThis.document.body.append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    dialog.querySelector('[data-cite-cancel]').onclick = () => dialog.close();
+    const result = dialog.querySelector('[data-cite-result]');
+    const post = async (url, body) => {
+      const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body), signal: AbortSignal.timeout(120000)});
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+      return data;
+    };
+    dialog.querySelector('[data-cite-fetch]').onclick = async (event) => {
+      const button = event.currentTarget;
+      const url = dialog.querySelector('[data-cite-url]').value.trim();
+      if (url.length < 8) { result.innerHTML = '<p class="cs-warning">请先粘贴官方原文链接。</p>'; return; }
+      button.disabled = true;
+      button.textContent = '抓取中…';
+      try {
+        const candidate = await post(`/api/projects/${projectId}/citations/fetch`, {url});
+        result.innerHTML = `<section class="cs-cite-card">
+            <h4>${esc(candidate.title)}</h4>
+            <p class="cs-muted">${esc(candidate.publisher || candidate.domain)} · ${esc(candidate.published_at || '日期待补')} · ${esc(candidate.domain)}</p>
+            <p>${esc(candidate.excerpt || '')}</p>
+            <p class="cs-dim">${esc(candidate.url)}</p>
+            <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-cite-accept>接受为引用</button></div>
+            <p class="cs-dim" data-cite-msg></p></section>`;
+        result.querySelector('[data-cite-accept]').onclick = async (acceptEvent) => {
+          const acceptButton = acceptEvent.currentTarget;
+          acceptButton.disabled = true;
+          try {
+            await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId});
+            result.querySelector('[data-cite-msg]').textContent = '已接受：该来源将进入本章编写依据';
+            status('已接受 1 条官方来源');
+          } catch (err) {
+            result.querySelector('[data-cite-msg]').textContent = `接受失败：${String(err.message || err)}`;
+            acceptButton.disabled = false;
+          }
+        };
+      } catch (err) {
+        result.innerHTML = `<p class="cs-warning">抓取失败：${esc(String(err.message || err))}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = '抓取核验';
+      }
+    };
+  }
+
   /** 文字生成图：用户粘贴一段描述 → 抽成关系链图（:::diagram）→ 插入正文。 */
   function openDiagramDialog() {
     if (!active) return;
@@ -274,7 +347,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${c.gaps.length ? `<div class="cs-plan-gap"><p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>
             <div class="cs-plan-gap-actions"><label class="mw-btn cs-plan-upload">上传素材
               <input type="file" hidden data-plan-upload="${esc(String(c.id || ''))}" /></label>
-              <button type="button" class="mw-btn" data-plan-goto="${esc(String(c.block_id))}">去本章编写</button></div>
+              <button type="button" class="mw-btn" data-plan-goto="${esc(String(c.block_id))}">去本章编写</button>
+              <button type="button" class="mw-btn" data-plan-cite="${esc(String(c.block_id))}">检索官方来源</button></div>
             <p class="cs-dim" data-plan-upload-msg></p></div>` : ''}
         </section>`).join('')
       + `${plan.gaps.length ? `<p class="cs-muted">全章素材缺口 ${plan.gaps.length} 项</p>` : ''}`
@@ -298,6 +372,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       } catch (err) {
         if (msg) { msg.textContent = `上传失败：${String(err.message || err)}`; msg.classList.add('cs-warning'); }
       }
+    }));
+    body.querySelectorAll('[data-plan-cite]').forEach((button) => button.addEventListener('click', () => {
+      openCitationDialog(button.dataset.planCite);
     }));
     body.querySelectorAll('[data-plan-goto]').forEach((button) => button.addEventListener('click', async () => {
       dialog.close();
@@ -379,6 +456,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   loadPageBudget().then(() => { if (active) paintTree(); });
   void loadPlanUnits();          // 一级目录上挂「编写计划」入口
   void loadSpecs();              // 编写规范版本（右栏就近入口）
+  void loadCitations();          // 已接受的官方来源
   // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
   // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
   const asideHost = host.querySelector('[data-cs="aside"]');
@@ -493,6 +571,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
     get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据</h4>${context.points.map(p=>`<details><summary>${esc(p.item||p.factor)} · ${p.points ?? '—'} 分</summary><p>${esc(p.criterion)}</p></details>`).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
+      ${(() => {
+        const mine = citationInfo.rows.filter((c) => !c.block_id || c.block_id === String(active.block_id));
+        const rows = mine.slice(0, 5).map((c) => `<p class="cs-cite-line">${esc(c.title || c.url)}<small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')}</small></p>`).join('');
+        return `<section data-pane="basis"><h4>官方来源 ${mine.length ? `<small>${mine.length} 条</small>` : ''}</h4>
+          ${rows || '<p class="cs-muted">本章还没有可引用的官方来源。外部信息必须可核验，二手内容不采。</p>'}
+          <button type="button" class="mw-btn" data-add-citation="${esc(String(active.block_id))}">添加官方来源</button>
+          </section>`;
+      })()}
       ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
         return recipe ? `<section data-pane="basis"><h4>编写规范</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
       ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
@@ -579,6 +665,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
+    const citeButton=event.target.closest('[data-add-citation]');
+    if(citeButton){openCitationDialog(citeButton.dataset.addCitation);return;}
     const specLink=event.target.closest('[data-spec]');
     if(specLink){globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',{detail:{layout:specLink.dataset.spec}}));return;}
     const planButton=event.target.closest('[data-plan]');

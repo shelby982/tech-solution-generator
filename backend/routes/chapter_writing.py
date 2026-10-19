@@ -88,7 +88,9 @@ async def start_team(project_id:int,body:TeamRequest):
             package=json.loads(prompt)|{'block_id':block['block_id'],'layout':layout,'document_outline':outlines}
             # 编写规范（L0 全局 + L1 模块配方）注入生成上下文，并把版本记进 job（留痕）
             from services.writing_specs import spec_for
+            from services.citations import citations_for_prompt, citation_line
             package['writing_spec']=await spec_for(db,layout)
+            package['citations']=[citation_line(c) for c in await citations_for_prompt(db,project_id,block['block_id'])]
             if len(json.dumps(package,ensure_ascii=False))>160000:raise HTTPException(413,'章节依据过多，需分拆任务后编制')
             prepared.append((block,package))
         jobs=[]
