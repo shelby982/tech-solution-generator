@@ -131,3 +131,11 @@ body:has(#workspace-nav) #generation-done-banner,body:has(#workspace-nav) #btn-g
 .ws-specs-history { margin-top: 14px; border-top: 1px dashed #e2e8f0; padding-top: 10px; font-size: 12px; }
 .ws-spec-version { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #f1f5f9; }
 .ws-spec-version span { display: flex; gap: 8px; align-items: baseline; }
+
+/* 素材中心：两个分区（我方材料 / 外部依据） */
+.ws-mat-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; font-size: 12px; }
+.ws-mat-row span { display: flex; flex-direction: column; gap: 2px; }
+.ws-mat-row small { color: #94a3b8; }
+.ws-mat-row .ws-mat-url { word-break: break-all; }
+.ws-mat-row em { font-style: normal; font-size: 11px; color: #475569; white-space: nowrap; }
+.ws-mat-row + h4 { margin-top: 12px; }

@@ -143,21 +143,63 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
          str(payload.get("title") or ""), str(payload.get("publisher") or ""),
          str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted"),
     )
+    if block_id:
+        await db.execute("INSERT OR IGNORE INTO citation_links (citation_id, block_id) VALUES (?, ?)",
+                         (citation_id, block_id))
     await db.commit()
     return {"id": citation_id, **{k: payload.get(k) for k in
                                   ("url", "domain", "title", "publisher", "published_at", "excerpt")},
-            "status": "accepted"}
+            "status": "accepted", "links": [block_id] if block_id else []}
 
 
-async def list_citations(db, project_id: int, status: str | None = None) -> list[dict]:
+async def list_citations(db, project_id: int, status: str | None = None,
+                          block_id: str | None = None) -> list[dict]:
+    """引用列表（含多章关联）。block_id 过滤 = 关联到该章的引用。"""
     where, args = "project_id = ?", [project_id]
     if status:
         where += " AND status = ?"
         args.append(status)
+    if block_id:
+        where += (" AND (block_id = ? OR id IN (SELECT citation_id FROM citation_links WHERE block_id = ?))"
+                  if False else " AND EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?)")
+        args.append(block_id)
     rows = await (await db.execute(
         f"SELECT * FROM citations WHERE {where} ORDER BY created_at DESC LIMIT 200", tuple(args),
     )).fetchall()
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        item = dict(row)
+        links = await (await db.execute(
+            "SELECT block_id FROM citation_links WHERE citation_id=?", (item["id"],),
+        )).fetchall()
+        item["links"] = [link["block_id"] for link in links] or ([item["block_id"]] if item.get("block_id") else [])
+        result.append(item)
+    return result
+
+
+async def link_citation(db, project_id: int, citation_id: str, block_id: str) -> dict:
+    """把一条已接受的依据关联到某章（多对多；可复用）。"""
+    row = await (await db.execute(
+        "SELECT id, status FROM citations WHERE id=? AND project_id=?", (citation_id, project_id),
+    )).fetchone()
+    if not row:
+        raise ValueError("引用不存在")
+    if row["status"] != "accepted":
+        raise ValueError("只有已接受的引用才能关联章节")
+    await db.execute("INSERT OR IGNORE INTO citation_links (citation_id, block_id) VALUES (?, ?)",
+                     (citation_id, block_id))
+    await db.commit()
+    return {"citation_id": citation_id, "block_id": block_id, "linked": True}
+
+
+async def unlink_citation(db, project_id: int, citation_id: str, block_id: str) -> dict:
+    cursor = await db.execute(
+        "DELETE FROM citation_links WHERE citation_id=? AND block_id=? "
+        "AND citation_id IN (SELECT id FROM citations WHERE project_id=?)",
+        (citation_id, block_id, project_id),
+    )
+    await db.commit()
+    return {"removed": cursor.rowcount > 0}
 
 
 async def reject_citation(db, project_id: int, citation_id: str) -> bool:
@@ -172,9 +214,11 @@ async def citations_for_prompt(db, project_id: int, block_id: str, limit: int = 
     """编写上下文用的引用（只要 accepted；章级优先，含项目级）。"""
     rows = await (await db.execute(
         "SELECT url, domain, title, publisher, published_at, excerpt FROM citations "
-        "WHERE project_id=? AND status='accepted' AND (block_id=? OR block_id='') "
+        "WHERE project_id=? AND status='accepted' AND ("
+        "  block_id='' OR block_id=? OR EXISTS ("
+        "    SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?)) "
         "ORDER BY created_at DESC LIMIT ?",
-        (project_id, block_id, limit),
+        (project_id, block_id, block_id, limit),
     )).fetchall()
     return [dict(row) for row in rows]
 
@@ -189,4 +233,4 @@ def citation_line(citation: dict) -> str:
 
 __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", "search_configured",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
-           "citation_line", "domain_of"]
+           "citation_line", "domain_of", "link_citation", "unlink_citation"]

@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from db import get_db
-from services.citations import (fetch_candidate, list_citations, reject_citation,
-                                save_citation, search_official, search_configured)
+from services.citations import (fetch_candidate, link_citation, list_citations, reject_citation,
+                                save_citation, search_official, search_configured, unlink_citation)
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -29,11 +29,32 @@ class SaveBody(BaseModel):
     block_id: str = ""
 
 
+class LinkBody(BaseModel):
+    block_id: str = Field(min_length=1, max_length=120)
+
+
 @router.get("")
-async def read_citations(project_id: int, status: str | None = Query(default=None)):
+async def read_citations(project_id: int, status: str | None = Query(default=None),
+                         blockId: str | None = Query(default=None)):
     async with get_db() as db:
-        return {"citations": await list_citations(db, project_id, status),
+        return {"citations": await list_citations(db, project_id, status, block_id=blockId),
                 "search_configured": search_configured()}
+
+
+@router.post("/{citation_id}/link")
+async def link(project_id: int, citation_id: str, body: LinkBody):
+    """把一条已接受的官方依据关联到某章（多对多，可复用）。"""
+    async with get_db() as db:
+        try:
+            return await link_citation(db, project_id, citation_id, body.block_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+
+@router.delete("/{citation_id}/link/{block_id}")
+async def unlink(project_id: int, citation_id: str, block_id: str):
+    async with get_db() as db:
+        return await unlink_citation(db, project_id, citation_id, block_id)
 
 
 @router.get("/search")

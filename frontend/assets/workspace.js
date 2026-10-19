@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v243';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v244';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v243';
+} from './material-roles.mjs?v=20261016-v244';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -100,6 +100,7 @@ function renderChrome() {
     workspace._toolsBound = true;
     document.getElementById('ws-progress-hub')?.addEventListener('click', () => openProgressHub());
     document.getElementById('ws-specs')?.addEventListener('click', () => openWritingSpecs());
+    document.getElementById('ws-materials')?.addEventListener('click', () => openMaterialsHub());
     document.addEventListener('writing-specs:open', (event) => openWritingSpecs(event.detail?.layout));
   }
   const state = workspace.state;
@@ -459,6 +460,55 @@ export async function openWritingSpecs(layoutKey) {
   };
 
   paint();
+}
+
+/** 素材中心：一个入口、两个分区 —— 我方材料（证据）/ 外部依据（官方来源）。
+ *  为什么分区：混排会把"外部依据"当成"我方证明材料"，投标审计是硬错误。 */
+export async function openMaterialsHub() {
+  const dialog = openDialog('素材', '<p class="ws-dim">加载中…</p>');
+  const body = dialog.querySelector('.ws-dialog-body');
+  let materials = [];
+  let citations = [];
+  try {
+    const [m, c] = await Promise.all([
+      request(`/api/projects/${workspace.projectId}/materials`),
+      request(`/api/projects/${workspace.projectId}/citations`),
+    ]);
+    materials = Array.isArray(m) ? m : (m.materials || []);
+    citations = c.citations || [];
+  } catch (err) {
+    body.innerHTML = `<p class="ws-error">素材加载失败：${esc(String(err?.message || err))}</p>`;
+    return;
+  }
+  const activeCitations = citations.filter((c) => c.status !== 'rejected');
+  const accepted = activeCitations.filter((c) => c.status === 'accepted');
+  const pending = activeCitations.filter((c) => c.status !== 'accepted');
+  const size = (bytes) => (Number(bytes) >= 1024 * 1024
+    ? `${(Number(bytes) / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(Number(bytes || 0) / 1024))} KB`);
+  const materialRows = materials.map((m) => `<div class="ws-mat-row">
+      <span><b>${esc(m.filename || m.name || '')}</b><small>${esc(String(m.type || '').toUpperCase())} · ${size(m.file_size || m.size_bytes)} · ${esc(m.parse_status || '')}</small></span>
+      <em>${m.confirmed ? '已确认' : '待确认'}</em></div>`).join('')
+    || '<p class="ws-dim">还没有上传我方材料。</p>';
+  const citationRows = (list, empty) => (list.map((c) => `<div class="ws-mat-row">
+      <span><b>${esc(c.title || c.url)}</b><small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章</small>
+      <small class="ws-mat-url">${esc(c.url)}</small></span>
+      <em>${c.status === 'accepted' ? '已接受' : '待处理'}</em></div>`).join('') || `<p class="ws-dim">${empty}</p>`);
+  body.innerHTML = `<nav class="ws-hub-tabs">
+      <button type="button" data-mat="mine" class="on">我方材料 ${materials.length}</button>
+      <button type="button" data-mat="cite">外部依据 ${activeCitations.length}</button>
+    </nav>
+    <section data-mat-pane="mine">${materialRows}</section>
+    <section data-mat-pane="cite" hidden>
+      <p class="ws-dim">外部依据必须可核验（官方原文）；二手转载、公众号、百科不采。引用不占"我方材料"名额。</p>
+      <h4>已接受（${accepted.length}）</h4>${citationRows(accepted, '还没有已接受的官方依据：在编写页「素材」页签点「添加官方来源」')}
+      ${pending.length ? `<h4>待处理（${pending.length}）</h4>${citationRows(pending, '')}` : ''}
+    </section>`;
+  body.querySelectorAll('[data-mat]').forEach((button) => button.addEventListener('click', () => {
+    body.querySelectorAll('[data-mat]').forEach((x) => x.classList.toggle('on', x === button));
+    body.querySelectorAll('[data-mat-pane]').forEach((pane) => {
+      pane.hidden = pane.dataset.matPane !== button.dataset.mat;
+    });
+  }));
 }
 
 export async function openProgressHub() {

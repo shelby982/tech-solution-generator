@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS citations (
 );
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
 
+-- 引用 → 章节 的多对多关联（一条官方依据常被多章引用；citations.block_id 保留为"首个关联"）
+CREATE TABLE IF NOT EXISTS citation_links (
+    citation_id TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (citation_id, block_id)
+);
+
 -- 编写规范（P0.5）：L0 全局纪律 + L1 模块配方，多版本、可回滚、生成留痕。
 -- key：'global' 或 layout_key（understanding/solution/implementation/evidence/point_to_point）
 CREATE TABLE IF NOT EXISTS writing_specs (
