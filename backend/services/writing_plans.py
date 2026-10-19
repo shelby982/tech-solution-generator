@@ -109,6 +109,50 @@ def _template_tasks(leaf: dict) -> list[dict] | None:
 REQUIREMENT_PREFIX = {"text": "写明", "table": "用表格呈现", "figure": "配图说明", "material": "引用"}
 
 
+async def _bind_clauses_to_chapters(db, project_id: int, thread_id: str,
+                                    chapters: list[dict]) -> dict[str, int]:
+    """D1：把招标技术条款按关键词挂到可写章节（写回 blocks.spec_requirement_ids）。
+
+    背景：153 条技术规范条款原本一条都没绑到章节，"对内要求是什么"无从体现。
+    规则：章名与条款主题/标题的字符重合 ≥2 → 命中；强制性条款优先；每章最多 5 条；
+          已有人工绑定的章节不覆盖。
+    """
+    rows = await (await db.execute(
+        "SELECT requirement_id, topic, title, text, mandatory_level, order_idx "
+        "FROM spec_requirements WHERE run_thread_id=? ORDER BY order_idx", (thread_id,),
+    )).fetchall()
+    clauses = [dict(row) for row in rows]
+    if not clauses:
+        return {}
+    bound: dict[str, int] = {}
+    for chapter in chapters:
+        block_id = str(chapter.get("block_id"))
+        try:
+            existing = json.loads(chapter.get("spec_requirement_ids") or "[]")
+        except ValueError:
+            existing = []
+        if existing:
+            bound[block_id] = len(existing)
+            continue
+        title_chars = set(str(chapter.get("title") or ""))
+        scored = []
+        for clause in clauses:
+            hay = set(str(clause.get("topic") or "") + str(clause.get("title") or ""))
+            score = len(title_chars & hay)
+            if score >= 2:
+                mandatory = str(clause.get("mandatory_level") or "") in ("mandatory", "required")
+                scored.append((-score, 0 if mandatory else 1, str(clause.get("requirement_id"))))
+        picked = [item[2] for item in sorted(scored)[:5]]
+        if not picked:
+            continue
+        await db.execute("UPDATE blocks SET spec_requirement_ids=? WHERE project_id=? AND run_thread_id=? AND block_id=?",
+                         (json.dumps(picked), project_id, thread_id, block_id))
+        chapter["spec_requirement_ids"] = json.dumps(picked)
+        bound[block_id] = len(picked)
+    await db.commit()
+    return bound
+
+
 def _criterion_aspects(criterion: str) -> list[str]:
     """从评分点的"满分档"里取出**要求要素**（不取评分档位本身）。
 
@@ -373,6 +417,12 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             assigned = [(block_id, pages + (diff if block_id == biggest[0] else 0)) for block_id, pages in assigned]
         auto_pages = dict(assigned)
 
+    # D1：招标条款 → 章节匹配（一次写入，人工改过的不会被覆盖）
+    try:
+        await _bind_clauses_to_chapters(db, project_id, thread_id, leaves)
+    except Exception:
+        pass
+
     for leaf in leaves:
         layout = layout_for(leaf)
         recipe = (specs.get(layout) or {}).get("structured") or {}
@@ -619,6 +669,142 @@ async def bind_snippets(db, project_id: int, plan_id: str, block_id: str, requir
             "bound": len(indices)}
 
 
+# ── 可执行计划的六个块（D1~D4）─────────────────────────────────────────────
+# 应答人员真正要的：这一段写什么、答哪几点、多少字、用什么料、写完怎么验。
+# 数据来源：评分点满分档（对内要求）+ 招标条款（本章承接）+ 参考骨架（必答点）
+#          + 交付物（段落/表/图）+ 字数分配 + 素材清单 + 自检。
+
+DELIVERABLE_KIND_LABEL = {"text": "文字", "table": "表格", "figure": "图示"}
+TABLE_WORDS, FIGURE_WORDS = 300, 200          # 表/图折算字数
+
+
+def _content_segments(content: str) -> list[tuple[str, int]]:
+    """按标题把正文切成段，返回 [(标题, 字数)]，用于"每块交付物已写多少"。"""
+    text = str(content or "")
+    if not text.strip():
+        return []
+    lines = text.splitlines()
+    segments, current_title, buffer = [], "（开头）", []
+    for line in lines:
+        match = re.match(r"^\s*(#{2,4}\s*|[一二三四五六七八九十]+[、.]|\(?\d+[）)]\s*)", line)
+        if match and len(line.strip()) <= 60:
+            if buffer:
+                segments.append((current_title, len("".join(buffer).replace(" ", ""))))
+            current_title, buffer = line.strip("# 　").strip(), []
+        else:
+            buffer.append(line)
+    if buffer:
+        segments.append((current_title, len("".join(buffer).replace(" ", ""))))
+    return [(title, words) for title, words in segments if words > 0]
+
+
+def _deliverables(requirements: list[dict], content: str) -> list[dict]:
+    """交付物清单：每条要求 → 一个交付物（文字/表/图），带必答点、目标字数、已写字数。"""
+    segments = _content_segments(content)
+    written_total = sum(words for _, words in segments)
+
+    def _written(title_hint: str) -> int:
+        keys = [part for part in re.split(r"[「」()（）\s]+", title_hint) if len(part) >= 2][:3]
+        for segment_title, words in segments:
+            if any(key in segment_title for key in keys):
+                return words
+        return 0
+
+    result = []
+    for requirement in requirements:
+        kind = requirement.get("type") or "text"
+        title = str(requirement.get("text") or "")
+        result.append({
+            "kind": kind,
+            "kind_label": DELIVERABLE_KIND_LABEL.get(kind, "文字"),
+            "title": title,
+            "brief": [requirement.get("source_label") or ""],
+            "written_words": _written(title) if kind == "text" else 0,
+            "source": requirement.get("source"),
+        })
+    return result, written_total, segments
+
+
+def _word_plan(pages: int, deliverables: list[dict], written_total: int) -> dict:
+    """字数分配：总字数 = 页数 × 250；表格/图示按折算字数扣掉，余下按文字条目均分。"""
+    total = int(pages or 0) * 250
+    fixed = sum(TABLE_WORDS if item["kind"] == "table" else FIGURE_WORDS if item["kind"] == "figure" else 0
+                for item in deliverables)
+    text_items = [item for item in deliverables if item["kind"] == "text"]
+    remaining = max(0, total - fixed)
+    per_text = round(remaining / len(text_items)) if text_items else 0
+    for item in deliverables:
+        item["target_words"] = (TABLE_WORDS if item["kind"] == "table"
+                                else FIGURE_WORDS if item["kind"] == "figure" else per_text)
+        target = item["target_words"]
+        written = item.get("written_words") or 0
+        item["status"] = ("未写" if not written else
+                          "不足" if written < target * 0.6 else
+                          "超额" if written > target * 1.5 else "达标")
+        item["gap_words"] = written - target
+    return {"total": total, "written": written_total,
+            "percent": round(written_total / total * 100) if total else 0,
+            "over": bool(total and written_total > total * 1.3)}
+
+
+def _key_points_from_title(title: str) -> list[str]:
+    """参考文档 8 类骨架 → 本章"必须回答的几点"（必答点）。"""
+    table = {
+        "背景": ["项目由来与建设动因", "政策依据（引用文件与要求）", "现状基础与存在问题"],
+        "现状": ["现状能力与数据", "主要问题与风险", "与建设目标的差距"],
+        "目标": ["总体目标与分项目标", "可量化指标", "承诺边界（不承诺什么）"],
+        "范围": ["纳入范围", "不纳入范围与理由", "边界接口说明"],
+        "内容": ["建设内容清单", "交付物与验收方式", "与既有系统的关系"],
+        "重难点": ["关键难点识别", "影响与风险等级", "应对思路"],
+        "需求": ["业务需求及特点", "性能/可靠性需求", "与其他业务的关系"],
+        "痛点": ["痛点表现", "影响范围与紧迫度", "已有缓解措施"],
+        "措施": ["解决措施与落地路径", "所需资源", "预期成效与验证方式"],
+    }
+    for keyword, points in table.items():
+        if keyword in str(title or ""):
+            return points
+    return []
+
+
+def _self_check(deliverables: list[dict], word_plan: dict, clauses: list[dict],
+                content: str, figures_plan: dict) -> list[dict]:
+    """写完自检（可直接勾）。"""
+    body = str(content or "")
+    items = [{"text": f"交付物齐全（{len(deliverables)} 项）",
+              "ok": all((item.get("written_words") or 0) > 0 or item["kind"] != "text" for item in deliverables)}]
+    items.append({"text": f"字数在计划区间（计划 {word_plan['total']} 字，已写 {word_plan['written']} 字）",
+                  "ok": bool(word_plan["total"]) and 0.6 <= (word_plan["written"] / word_plan["total"]) <= 1.5})
+    if clauses:
+        items.append({"text": f"承接的 {len(clauses)} 条招标条款都有落点",
+                      "ok": all(str(clause.get("title") or "")[:6] in body or str(clause.get("topic") or "")[:6] in body
+                                for clause in clauses)})
+    items.append({"text": "引用政策/标准/数据处带【来源】",
+                  "ok": "【来源" in body or not re.search(r"(政策|标准|指标|数据)", body)})
+    tables = len((figures_plan or {}).get("tables") or [])
+    figures = len((figures_plan or {}).get("figures") or [])
+    if tables or figures:
+        items.append({"text": f"表 {tables} 张 / 图 {figures} 张已产出",
+                      "ok": body.count("| ---") >= tables and (":::diagram" in body or "![" in body or not figures)})
+    return items
+
+
+def _materials_plan(requirements: list[dict], bound_kinds: dict[str, int],
+                    clause_count: int) -> list[dict]:
+    """素材清单：需要什么料、已有多少、缺多少。"""
+    plan = []
+    if any(item.get("type") == "text" for item in requirements):
+        plan.append({"kind": "政策/制度原文", "purpose": "支撑政策依据类表述", "need": 2,
+                     "have": bound_kinds.get("官方来源", 0), "where": "官方来源"})
+    if clause_count:
+        plan.append({"kind": "招标条款原文", "purpose": "逐条响应对内要求", "need": clause_count,
+                     "have": clause_count, "where": "已解析（技术规范书）"})
+    plan.append({"kind": "我方材料（数据/案例/业绩）", "purpose": "提供现状数据与佐证", "need": 1,
+                 "have": bound_kinds.get("我方材料", 0), "where": "素材池上传/关联"})
+    for item in plan:
+        item["status"] = "已齐" if item["have"] >= item["need"] else f"缺 {item['need'] - item['have']}"
+    return plan
+
+
 async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> dict:
     """**本章编写计划**（用户口径：计划是针对每一个章节的，不是按大章节设计）。
 
@@ -733,8 +919,82 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     plan_version = int(plan_row["version"] or 1) if plan_row else 0
     plan_updated = (plan_row["updated_at"] or "") if plan_row else ""
     block_updated = str(block.get("updated_at") or "")
+    # ── 可执行计划（D1~D4）──
+    deliverables, written_total, segments = _deliverables(requirements, content)
+    is_parent_chapter = any(key.startswith(str(block_id) + ".") for key in blocks)
+    if is_parent_chapter:
+        # 父章只写总述（300–500 字），子节在各自章节里写，不在这里叠加
+        for item in deliverables:
+            # "总述"那条给 400 字，其余（评分点继承来的要素）在子节里写
+            item["target_words"] = 400 if item.get("source") == "system" else 0
+            if not item["target_words"] and any(other.get("source") == "system" for other in deliverables):
+                item["target_words"] = 0
+        word_plan = {"total": 400, "written": written_total,
+                     "percent": round(written_total / 400 * 100) if written_total else 0,
+                     "over": written_total > 600,
+                     "note": f"父章只写总述 300–500 字；子节共 {len(deliverables)} 项另计"}
+        for item in deliverables:
+            if item["kind"] != "text":
+                item["target_words"] = 0
+            target = item.get("target_words") or 0
+            written = item.get("written_words") or 0
+            item["status"] = ("未写" if not written else
+                              "不足" if target and written < target * 0.6 else
+                              "超额" if target and written > target * 1.5 else "达标")
+            item["gap_words"] = written - target
+    else:
+        word_plan = _word_plan(pages_of_block or (chapter or {}).get("pages") or 0, deliverables, written_total)
+    key_points = _key_points_from_title(block.get("title") or "")
+    bound_kinds = {"官方来源": 0, "我方材料": 0}
+    try:
+        cite_rows = await (await db.execute(
+            "SELECT COUNT(*) AS n FROM citations WHERE project_id=? AND status='accepted' AND ("
+            "  block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?))",
+            (project_id, str(block_id), str(block_id)),
+        )).fetchone()
+        bound_kinds["官方来源"] = int(cite_rows["n"] if cite_rows else 0)
+        mat_rows = await (await db.execute(
+            "SELECT COUNT(*) AS n FROM chapter_materials cm JOIN blocks b ON b.id=cm.block_id "
+            "WHERE b.project_id=? AND b.run_thread_id=? AND b.block_id=?", (project_id, thread_id, str(block_id)),
+        )).fetchone()
+        bound_kinds["我方材料"] = int(mat_rows["n"] if mat_rows else 0)
+    except Exception:
+        pass
+    grade_band = ""
+    if basis.get("points"):
+        stmt = "SELECT criterion FROM review_points WHERE run_thread_id=? AND point_id=?"
+        row = await (await db.execute(stmt, (thread_id, basis["points"][0]["point_id"]))).fetchone()
+        if row:
+            first = re.search(r"[（(]1[）)](.*?)(?=[（(]2[）)]|$)", str(row["criterion"] or ""), re.S)
+            grade_band = (first.group(1) if first else str(row["criterion"] or "")).strip()[:600]
+    clauses = [{"requirement_id": item["requirement_id"], "title": item["label"],
+                "mandatory": item.get("mandatory_level") in ("mandatory", "required")}
+               for item in (basis.get("clauses") or [])]
     has_children = any(key.startswith(str(block_id) + ".") for key in blocks)
+    children = []
+    if has_children:
+        for child_key, child in blocks.items():
+            if not child_key.startswith(str(block_id) + ".") or child_key.count(".") != str(block_id).count(".") + 1:
+                continue
+            child_content = str(child.get("content") or "").replace(" ", "")
+            plan_pages = {str(item.get("block_id")): item.get("pages")
+                          for item in (plan.get("chapters") or [])}
+            children.append({
+                "block_id": child_key, "title": child.get("title"),
+                "pages": int(plan_pages.get(child_key) or child.get("page_budget") or 0),
+                "written_pages": round(len(child_content) / 250, 1),
+                "has_content": bool(child_content),
+            })
     return {
+        "grade_band": grade_band,
+        "clauses": clauses,
+        "deliverables": deliverables,
+        "word_plan": word_plan,
+        "key_points": key_points,
+        "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
+        "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
+        "children": children,
+        "has_children": has_children,
         "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
         "has_children": has_children,
         "confirmed": bool((chapter or {}).get("confirmed")) or ((plan_row["status"] == "confirmed") if plan_row else False),
@@ -881,7 +1141,7 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
     return {"plan_id": plan_id, "jobs": created, "chapters": len(created)}
 
 
-__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan", "_writable_nodes",
+__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan", "_writable_nodes", "_bind_clauses_to_chapters",
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
            "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan",
            "confirm_chapter_plan", "chapter_completion"]

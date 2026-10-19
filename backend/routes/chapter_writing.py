@@ -100,9 +100,21 @@ async def update_plan_requirements(project_id: int, plan_id: str, body: Requirem
 async def read_chapter_plan(project_id: int, block_id: str, threadId: str):
     """**本章编写计划**：只包含这一章的要求依据 + 缺失素材（计划按章，不按大章节）。"""
     from services.quality_check import check_thread
-    from services.writing_plans import chapter_completion, chapter_plan
+    from services.writing_plans import build_plan, chapter_completion, chapter_plan, plan_units
     async with get_db() as db:
         data = await chapter_plan(db, project_id, threadId, block_id)
+        # 自愈：本章在计划里没有条目（例如计划是旧版本生成的、或父章此前被漏掉）→ 自动补建再取
+        if not (data.get("requirements") or data.get("plan_id")):
+            units = (await plan_units(db, project_id, threadId)).get("units") or []
+            unit = next((item for item in units
+                         if str(block_id) == str(item["block_id"])
+                         or str(block_id).startswith(str(item["block_id"]) + ".")), None)
+            if unit:
+                try:
+                    await build_plan(db, project_id, threadId, str(unit["block_id"]))
+                    data = await chapter_plan(db, project_id, threadId, block_id)
+                except ValueError:
+                    pass
         try:
             quality = await check_thread(db, project_id, threadId)
             row = next((item for item in quality.get("chapters") or []
