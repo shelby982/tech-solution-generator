@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v269';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v269';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v269';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v270';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v270';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v270';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -131,7 +131,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
         <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="basis"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="basis" aria-pressed="true">依据</button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">编制进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="basis"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="basis" aria-pressed="true">计划</button><button data-panel="materials" aria-pressed="false">素材池</button><button data-panel="ai" aria-pressed="false">编制进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -250,7 +250,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function openQualityDialog() {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog';
-    dialog.innerHTML = `<header><h3>质检清单</h3><button type="button" aria-label="关闭">×</button></header>
+    dialog.innerHTML = `<header><h3>质检汇总（按章处理请用「本章编写计划」）</h3><button type="button" aria-label="关闭">×</button></header>
       <div class="cs-plan-body"><p class="cs-muted">正在体检…</p></div>`;
     globalThis.document.body.append(dialog);
     dialog.querySelector('header button').onclick = () => dialog.close();
@@ -421,8 +421,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <section class="cs-cp-sec" data-cp-sec="f">
           <h5>F · 还差什么（验收清单）</h5>
           ${issues.length ? issues.map((issue) => `<div class="cs-cp-issue ${esc(issue.level)}">
-              <b>${esc(issue.check || '')}</b><span>${esc(issue.message)}</span></div>`).join('') : '<p class="cs-muted">没有待处理项。</p>'}
-          ${(!issues.length && !(data.stats.material_pending)) ? '' : '<p class="cs-dim">处理入口见右侧素材页签 / 「更多 › 质检清单」。</p>'}
+              <div class="cs-cp-issue-main"><b>${esc(issue.check || '')}</b><span>${esc(issue.message)}</span></div>
+              <div class="cs-cp-issue-acts">
+                ${(issue.actions || []).includes('find_material') ? `<button type="button" class="cs-cp-mini" data-cp-fix="find_material">去补素材</button>` : ''}
+                ${(issue.actions || []).includes('regenerate') ? `<button type="button" class="cs-cp-mini" data-cp-fix="regenerate">重新生成</button>` : ''}
+                ${(issue.actions || []).includes('open_spec') ? `<button type="button" class="cs-cp-mini" data-cp-fix="open_spec">看规范</button>` : ''}
+                ${issue.finding_id ? `<button type="button" class="cs-cp-mini" data-cp-fix="ignore" data-finding="${esc(issue.finding_id)}">标为已处理</button>` : ''}
+              </div></div>`).join('') : '<p class="cs-muted">没有待处理项。</p>'}
         </section>
         <div class="cs-plan-actions">
           <button type="button" class="mw-btn" data-cp-close>关闭</button>
@@ -434,6 +439,30 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         dialog.close();
         if (unit) void openWritingPlan(unit);
       });
+      // F 段：一键动作
+      body.querySelectorAll('[data-cp-fix]').forEach((button) => button.addEventListener('click', async () => {
+        const kind = button.dataset.cpFix;
+        if (kind === 'find_material') { dialog.close(); openCitationDialog(blockId); return; }
+        if (kind === 'regenerate') {
+          dialog.close();
+          await select(blockId);
+          globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
+          return;
+        }
+        if (kind === 'open_spec') {
+          globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
+            {detail: {layout: (data.guidance && data.guidance.layout) || 'global'}}));
+          return;
+        }
+        if (kind === 'ignore') {
+          try {
+            const resp = await fetch(`/api/projects/${projectId}/quality/findings/${encodeURIComponent(button.dataset.finding)}/ignore`, {method: 'POST', signal: AbortSignal.timeout(20000)});
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            button.closest('.cs-cp-issue')?.remove();
+            status('已标记为已处理');
+          } catch (err) { status(`标记失败：${String(err.message || err)}`); }
+        }
+      }));
       // 写法要点 → 打开本章类型的编写规范（草稿区可改，影响后续生成）
       body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
         globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
@@ -1359,7 +1388,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const layout = context.layouts[context.profile.layout];
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
-    get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据${basisCovered ? ` <small>正文已回应 ${basisCovered.responded}/${basisCovered.total}</small>` : ''}</h4>${context.points.map((p, index) => {
+    get('aside').innerHTML = `<section data-pane="basis">
+      <div class="cs-plan-summary"><b>本章编写计划</b>
+        <small>要求 ${basisCovered ? `${basisCovered.responded}/${basisCovered.total}` : '—'} 条已落点</small>
+        <button type="button" class="mw-btn" data-aside-open-plan="${esc(String(active.block_id))}">打开本章计划</button></div>
+      <h4>本章编制依据${basisCovered ? ` <small>正文已回应 ${basisCovered.responded}/${basisCovered.total}</small>` : ''}</h4>${context.points.map((p, index) => {
         const cov = basisCovered?.points?.[index];
         return `<details><summary>${esc(p.item || p.factor)} · ${p.points ?? '—'} 分
           <b class="${cov?.responded ? 'cs-cite-used' : 'cs-cite-unused'}">${cov ? (cov.responded ? '正文已回应' : '正文未回应') : ''}</b></summary><p>${esc(p.criterion)}</p></details>`;
@@ -1479,6 +1512,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
+    const asidePlan=event.target.closest('[data-aside-open-plan]');
+    if(asidePlan){await openChapterPlan(asidePlan.dataset.asideOpenPlan);return;}
     const segButton=event.target.closest('[data-cite-segments]');
     if(segButton){openCitationSegments(segButton.dataset.citeSegments);return;}
     const citeButton=event.target.closest('[data-add-citation]');

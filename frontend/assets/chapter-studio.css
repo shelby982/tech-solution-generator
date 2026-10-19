@@ -257,3 +257,11 @@
 .cs-cp-figrow { display: grid; grid-template-columns: 1.2fr 1fr 1fr 22px; gap: 6px; margin-bottom: 4px; }
 .cs-cp-figrow input { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #dbe3ef; border-radius: 6px; }
 .cs-cp-sub { margin: 10px 0 6px; font-size: 12px; color: #334155; }
+
+/* 右栏"计划"页签顶部摘要 */
+.cs-plan-summary { display: flex; align-items: center; gap: 8px; border: 1px solid #dbe3ef; background: #f8fafc; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; }
+.cs-plan-summary b { color: #0f172a; }
+.cs-plan-summary small { flex: 1; color: #64748b; }
+/* F 段：动作按钮 */
+.cs-cp-issue-main { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
+.cs-cp-issue-acts { display: flex; gap: 4px; flex-shrink: 0; }
