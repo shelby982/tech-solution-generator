@@ -181,6 +181,71 @@ async def discover_candidates(query: str) -> dict:
                         "请点开官方入口自己查找，或粘贴官方原文链接。配置检索 API 后可自动按关键词找原文。")}
 
 
+def _html_table_to_markdown(table_html: str) -> str:
+    """HTML 表格 → Markdown 表格（来源里的表格常常就是可直接沿用的素材）。"""
+    rows = re.findall(r"(?is)<tr[^>]*>(.*?)</tr>", table_html or "")
+    parsed = []
+    for row in rows:
+        cells = [_strip_html(cell) for cell in re.findall(r"(?is)<t[hd][^>]*>(.*?)</t[hd]>", row)]
+        cells = [cell.replace("|", "／").strip() for cell in cells]
+        if any(cells):
+            parsed.append(cells)
+    if len(parsed) < 2:
+        return ""
+    width = max(len(row) for row in parsed)
+    lines = []
+    for index, row in enumerate(parsed):
+        cells = row + [""] * (width - len(row))
+        lines.append("| " + " | ".join(cells) + " |")
+        if index == 0:
+            lines.append("| " + " | ".join(["---"] * width) + " |")
+    return "\n".join(lines)
+
+
+NAV_HINTS = ("ICP备", "公网安备", "网站标识码", "无障碍", "返回顶部", "版权所有", "关注我们", "扫码")
+SKIP_IMAGE_HINTS = ("logo", "icon", "qrcode", "banner", "btn", "arrow", "weixin", "wx_", "avatar",
+                    "newsearch", "shouqi", "footer", "header", "bg", "sprite", "spacer")
+
+
+def extract_segments(html: str, url: str, limit: int = 40) -> list[dict]:
+    """把来源页面拆成**可用片段**：段落 / 表格 / 图片（带所在章节标题）。
+
+    用户的需求不是"有条来源"，而是"这篇来源里哪一段、哪张表、哪张图能直接用"。
+    """
+    segments: list[dict] = []
+    heading = ""
+    # 按文档顺序扫标题/段落/表格/图片
+    pattern = re.compile(r"(?is)<h([1-3])[^>]*>(.*?)</h\1>|<p[^>]*>(.*?)</p>|<table[^>]*>(.*?)</table>|<img[^>]+src=[\"']([^\"'>]+)[\"'][^>]*>")
+    for match in pattern.finditer(html or ""):
+        if len(segments) >= limit:
+            break
+        level, heading_text, paragraph, table, image = match.groups()
+        if heading_text:
+            heading = _strip_html(heading_text)[:60]
+            continue
+        if table:
+            markdown = _html_table_to_markdown(table)
+            if markdown:
+                segments.append({"kind": "table", "heading": heading, "content": markdown[:2000]})
+            continue
+        if image:
+            from urllib.parse import urljoin
+            src = urljoin(url, image.strip())
+            low = src.lower()
+            if any(hint in low for hint in SKIP_IMAGE_HINTS):
+                continue                     # 站点 logo / 图标 / 二维码不是可用素材
+            if is_official(src) or domain_of(src) == domain_of(url):
+                segments.append({"kind": "image", "heading": heading, "content": src})
+            continue
+        text = _strip_html(paragraph or "")
+        if len(text) < 30 or text.count("|") >= 3:
+            continue
+        if any(hint in text for hint in NAV_HINTS) and len(text) < 160:
+            continue                          # 页脚/导航文字
+        segments.append({"kind": "text", "heading": heading, "content": text[:1200]})
+    return segments
+
+
 def search_configured() -> bool:
     return bool(os.environ.get("SERPER_API_KEY"))
 
@@ -265,6 +330,7 @@ async def fetch_candidate(url: str, whitelist_additions: list[str] | None = None
     if re.search(r"(ICP备|公网安备|网站标识码)", excerpt):
         raise ValueError("抓到的是站点页脚（可能是 404 或重定向页），请换原文链接")
     candidate["status"] = "pending"
+    candidate["segments"] = extract_segments(resp.text, url)
     candidate["trust"] = "official" if official else "unverified"
     if not official:
         candidate["warning"] = ("非官方渠道：内容可能真实，但引用时必须标注来源并由你确认；"
@@ -359,14 +425,17 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
         if same_url or same_doc:
             raise ValueError("该来源已关联本章，无需重复接受")
     citation_id = uuid.uuid4().hex
+    segments = payload.get("segments") or []
     await db.execute(
         "INSERT INTO citations (id, project_id, thread_id, block_id, query, url, domain, title, "
-        "publisher, published_at, excerpt, status, trust, gap) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "publisher, published_at, excerpt, status, trust, gap, segments, selected) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (citation_id, project_id, thread_id, block_id, str(payload.get("query") or ""),
          url, str(payload.get("domain") or domain_of(url)),
          str(payload.get("title") or ""), str(payload.get("publisher") or ""),
          str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted", trust,
-         str(payload.get("gap") or "")),
+         str(payload.get("gap") or ""), json.dumps(segments[:40], ensure_ascii=False),
+         json.dumps(list(payload.get("selected") or []))),
     )
     if block_id:
         await db.execute("INSERT OR IGNORE INTO citation_links (citation_id, block_id) VALUES (?, ?)",
@@ -375,6 +444,41 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
     return {"id": citation_id, **{k: payload.get(k) for k in
                                   ("url", "domain", "title", "publisher", "published_at", "excerpt")},
             "status": "accepted", "trust": trust, "links": [block_id] if block_id else []}
+
+
+async def refresh_segments(db, project_id: int, citation_id: str) -> dict:
+    """重新抓取该来源并更新可用片段（老引用接受时还没有片段，需要补一次）。"""
+    row = await (await db.execute(
+        "SELECT url FROM citations WHERE id=? AND project_id=?", (citation_id, project_id),
+    )).fetchone()
+    if not row:
+        raise ValueError("引用不存在")
+    try:
+        candidate = await fetch_candidate(row["url"])
+    except ValueError as exc:
+        raise ValueError(str(exc))
+    segments = candidate.get("segments") or []
+    await db.execute("UPDATE citations SET segments=?, selected='[]' WHERE id=?",
+                     (json.dumps(segments, ensure_ascii=False), citation_id))
+    await db.commit()
+    return {"citation_id": citation_id, "segments": segments, "selected": []}
+
+
+async def select_segments(db, project_id: int, citation_id: str, indices: list[int]) -> dict:
+    """选用/取消选用片段：只有选中的片段会进入本章编写上下文。"""
+    row = await (await db.execute(
+        "SELECT segments FROM citations WHERE id=? AND project_id=?", (citation_id, project_id),
+    )).fetchone()
+    if not row:
+        raise ValueError("引用不存在")
+    try:
+        segments = json.loads(row["segments"] or "[]")
+    except ValueError:
+        segments = []
+    valid = sorted({int(index) for index in indices if 0 <= int(index) < len(segments)})
+    await db.execute("UPDATE citations SET selected=? WHERE id=?", (json.dumps(valid), citation_id))
+    await db.commit()
+    return {"citation_id": citation_id, "selected": valid}
 
 
 async def list_citations(db, project_id: int, status: str | None = None,
@@ -394,6 +498,11 @@ async def list_citations(db, project_id: int, status: str | None = None,
     result = []
     for row in rows:
         item = dict(row)
+        for key in ("segments", "selected"):
+            try:
+                item[key] = json.loads(item.get(key) or "[]")
+            except ValueError:
+                item[key] = []
         links = await (await db.execute(
             "SELECT block_id FROM citation_links WHERE citation_id=?", (item["id"],),
         )).fetchall()
@@ -438,29 +547,51 @@ async def reject_citation(db, project_id: int, citation_id: str) -> bool:
 async def citations_for_prompt(db, project_id: int, block_id: str, limit: int = 12) -> list[dict]:
     """编写上下文用的引用（只要 accepted；章级优先，含项目级）。"""
     rows = await (await db.execute(
-        "SELECT url, domain, title, publisher, published_at, excerpt, trust FROM citations "
+        "SELECT url, domain, title, publisher, published_at, excerpt, trust, segments, selected FROM citations "
         "WHERE project_id=? AND status='accepted' AND ("
         "  block_id='' OR block_id=? OR EXISTS ("
         "    SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?)) "
         "ORDER BY created_at DESC LIMIT ?",
         (project_id, block_id, block_id, limit),
     )).fetchall()
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            segments = json.loads(item.pop("segments", None) or "[]")
+            selected = json.loads(item.pop("selected", None) or "[]")
+        except ValueError:
+            segments, selected = [], []
+        item["snippets"] = [segments[index] for index in selected
+                            if isinstance(index, int) and 0 <= index < len(segments)]
+        result.append(item)
+    return result
 
 
 def citation_line(citation: dict) -> str:
     trust = citation.get("trust") or "official"
     label = "【来源】" if trust == "official" else "【来源·非官方，用户已确认】"
-    return "{} {} · {} · {} · {} · {}".format(
+    line = "{} {} · {} · {} · {} · {}".format(
         label,
         citation.get("publisher") or citation.get("domain") or "",
         citation.get("published_at") or "日期待补", citation.get("title") or "",
         citation.get("url") or "", (citation.get("excerpt") or "")[:EXCERPT_LIMIT],
     )
+    snippets = citation.get("snippets") or []
+    if snippets:
+        # 用户选中的片段才是"可沿用的素材"：段落可改写、表格可整表沿用、图需另行下载上传
+        parts = []
+        for index, snippet in enumerate(snippets[:4], 1):
+            kind = {"table": "表格", "image": "图片", "text": "段落"}.get(snippet.get("kind"), "内容")
+            heading = snippet.get("heading") or ""
+            content = str(snippet.get("content") or "")[:700]
+            parts.append(f"  [{index}] {kind}{('《' + heading + '》') if heading else ''}：{content}")
+        line += "\n  可参考片段（改写须保留来源标注）：\n" + "\n".join(parts)
+    return line
 
 
 __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", "search_configured",
            "OFFICIAL_PORTALS", "discover_candidates",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
            "citation_line", "domain_of", "link_citation", "unlink_citation", "suggest_query",
-           "remember_search", "search_history", "normalize_title"]
+           "remember_search", "search_history", "normalize_title", "extract_segments", "select_segments", "refresh_segments"]

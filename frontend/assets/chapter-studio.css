@@ -159,3 +159,16 @@
 .cs-cite-used { color: #15803d; font-weight: 600; }
 .cs-cite-unused { color: #b45309; font-weight: 600; }
 .cs-material-hint { margin: 6px 0 0; font-size: 11px; color: #b45309; line-height: 1.6; }
+
+/* 来源可用片段：入口按钮 + 片段列表 */
+.cs-cite-seg-btn { font: inherit; font-size: 11px; padding: 1px 7px; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; cursor: pointer; color: #1d4ed8; }
+.cs-cite-seg-btn:hover { background: #eff6ff; }
+.cs-seg-row { display: flex; gap: 8px; align-items: flex-start; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; font-size: 12px; cursor: pointer; }
+.cs-seg-row.on { border-color: #86efac; background: #f0fdf4; }
+.cs-seg-row input { margin-top: 2px; }
+.cs-seg-row > div { min-width: 0; }
+.cs-seg-row b { display: block; font-size: 12px; color: #0f172a; }
+.cs-seg-row p { margin: 2px 0 0; color: #475569; line-height: 1.6; }
+.cs-seg-kind { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #f1f5f9; color: #475569; margin-bottom: 2px; }
+.cs-seg-kind.table { background: #ecfdf5; color: #047857; }
+.cs-seg-kind.image { background: #fef3c7; color: #92400e; }

@@ -175,3 +175,39 @@ async def test_search_history_roundtrip(db):
     history = await search_history(db, 1, "t1", "s1.1")
     assert [item["query"] for item in history] == ["行业数据", "政策依据"]
     assert history[0]["results"][0]["title"] == "B"
+
+
+def test_extract_segments_pulls_text_table_image_with_heading():
+    from services.citations import extract_segments
+    html = """<html><body>
+      <h2>一、政策背景</h2>
+      <p>为深入贯彻落实党中央、国务院决策部署，加快推进数字化转型，现提出如下意见。</p>
+      <table><tr><th>指标</th><th>目标</th></tr><tr><td>数字化率</td><td>80%</td></tr></table>
+      <img src="/images/a.png" />
+    </body></html>"""
+    segments = extract_segments(html, "https://www.gov.cn/a.html")
+    kinds = [segment["kind"] for segment in segments]
+    assert kinds.count("text") == 1 and "table" in kinds and "image" in kinds
+    table = next(segment for segment in segments if segment["kind"] == "table")
+    assert table["content"].startswith("| 指标 | 目标 |")
+    assert table["heading"] == "一、政策背景"
+    image = next(segment for segment in segments if segment["kind"] == "image")
+    assert image["content"] == "https://www.gov.cn/images/a.png"
+
+
+async def test_select_segments_roundtrip_and_prompt_snippets(db):
+    from services.citations import (citations_for_prompt, citation_line, save_citation,
+                                    select_segments)
+
+    saved = await save_citation(db, 1, {
+        "url": "https://www.gov.cn/a.html", "title": "指导意见", "excerpt": "摘录",
+        "segments": [{"kind": "text", "heading": "政策背景", "content": "原文段落可以改写沿用"},
+                     {"kind": "table", "heading": "指标", "content": "| a | b |\\n| --- | --- |"}],
+        "selected": [1],
+    }, block_id="s1.1")
+    result = await select_segments(db, 1, saved["id"], [0])
+    assert result["selected"] == [0]
+    rows = await citations_for_prompt(db, 1, "s1.1")
+    assert rows and rows[0]["snippets"][0]["content"] == "原文段落可以改写沿用"
+    line = citation_line(rows[0])
+    assert "可参考片段" in line and "原文段落可以改写沿用" in line

@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from db import get_db
 from services.citations import (OFFICIAL_PORTALS, discover_candidates, fetch_candidate, link_citation,
                                 list_citations, reject_citation, remember_search, save_citation,
-                                search_history, search_official, search_configured, suggest_query,
-                                unlink_citation)
+                                refresh_segments, search_history, search_official, search_configured,
+                                select_segments, suggest_query, unlink_citation)
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -41,6 +41,30 @@ async def read_citations(project_id: int, status: str | None = Query(default=Non
     async with get_db() as db:
         return {"citations": await list_citations(db, project_id, status, block_id=blockId),
                 "search_configured": search_configured()}
+
+
+class SelectBody(BaseModel):
+    indices: list[int] = Field(default_factory=list)
+
+
+@router.post("/{citation_id}/select")
+async def select(project_id: int, citation_id: str, body: SelectBody):
+    """选用来源里的片段：只有选中的段落/表格/图会进入本章编写上下文。"""
+    async with get_db() as db:
+        try:
+            return await select_segments(db, project_id, citation_id, body.indices)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+
+
+@router.post("/{citation_id}/refresh")
+async def refresh(project_id: int, citation_id: str):
+    """重新抓取该来源并提取可用片段（老引用补片段用）。"""
+    async with get_db() as db:
+        try:
+            return await refresh_segments(db, project_id, citation_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
 
 
 @router.post("/{citation_id}/link")

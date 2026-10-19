@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v257';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v257';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v257';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v259';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v259';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v259';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -239,6 +239,71 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 官方来源（V2）：一个输入框搞定 —— 输入检索词→自动找；粘贴链接→直接核验。
    *  操作上的取舍：合并两个入口、候选行内预览+接受、说明折叠、入口常驻、接受后有回执。 */
+  /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
+  function openCitationSegments(citationId) {
+    const citation = citationInfo.rows.find((row) => String(row.id) === String(citationId));
+    if (!citation) return;
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog';
+    const render = (segments, selected) => {
+      const kindLabel = {text: '段落', table: '表格', image: '图片'};
+      const rows = (segments || []).map((segment, index) => `<label class="cs-seg-row${(selected || []).includes(index) ? ' on' : ''}">
+          <input type="checkbox" data-seg-index="${index}" ${(selected || []).includes(index) ? 'checked' : ''} />
+          <div><span class="cs-seg-kind ${esc(segment.kind)}">${kindLabel[segment.kind] || '内容'}</span>
+            ${segment.heading ? `<b>${esc(segment.heading)}</b>` : ''}
+            <p>${esc(String(segment.content || '').slice(0, 260))}</p></div>
+        </label>`).join('');
+      dialog.querySelector('.cs-plan-body').innerHTML = `<p class="cs-muted">《${esc(citation.title || citation.url)}》
+          里可以直接沿用的内容。勾选后进入本章编写上下文：AI 会基于所选片段改写，并保留来源标注。</p>
+        ${segments && segments.length ? rows : '<p class="cs-warning">这条来源还没有提取到片段。</p>'}
+        <div class="cs-plan-actions">
+          ${segments && segments.length ? '' : '<button type="button" class="mw-btn" data-seg-refresh>重新抓取并提取片段</button>'}
+          <button type="button" class="mw-btn" data-seg-cancel>取消</button>
+          ${segments && segments.length ? '<button type="button" class="mw-btn primary" data-seg-save>保存选用</button>' : ''}
+        </div>`;
+      dialog.querySelector('[data-seg-cancel]').onclick = () => dialog.close();
+      dialog.querySelector('[data-seg-refresh]')?.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/citations/${encodeURIComponent(citation.id)}/refresh`, {
+            method: 'POST', signal: AbortSignal.timeout(120000),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          citation.segments = data.segments || [];
+          citation.selected = data.selected || [];
+          render(citation.segments, citation.selected);
+        } catch (err) {
+          status(`提取失败：${String(err.message || err)}`);
+        }
+      });
+      dialog.querySelector('[data-seg-save]')?.addEventListener('click', async () => {
+        const indices = [...dialog.querySelectorAll('[data-seg-index]:checked')]
+          .map((input) => Number(input.dataset.segIndex));
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/citations/${encodeURIComponent(citation.id)}/select`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({indices}), signal: AbortSignal.timeout(30000),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          citation.selected = data.selected || [];
+          status(`已选用 ${citation.selected.length} 个片段：编写本章时会基于它们改写`);
+          dialog.close();
+          if (active) paintAside();
+        } catch (err) {
+          status(`保存失败：${String(err.message || err)}`);
+        }
+      });
+    };
+    dialog.innerHTML = `<header><h3>可用片段</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body"><p class="cs-dim">加载中…</p></div>`;
+    globalThis.document.body.append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    render(citation.segments || [], citation.selected || []);
+  }
+
   function openCitationDialog(blockKey, initialQuery = '') {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog cs-cite-dialog';
@@ -790,9 +855,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const unused = linked.filter((c) => !usedOf(c));
         return `<div class="cs-material-head"><h4>外部依据 ${linked.length}${linked.length ? ` <small>已引用 ${linked.length - unused.length} / 未引用 ${unused.length}</small>` : ''}</h4>
           <button type="button" class="mw-btn" data-add-citation="${esc(key)}">添加官方来源</button></div>
-          ${linked.map((c) => `<p class="cs-cite-line">${esc(c.title || c.url)}
-            <small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章
-              · <b class="${usedOf(c) ? 'cs-cite-used' : 'cs-cite-unused'}">${usedOf(c) ? '正文已引用' : '正文未引用'}</b></small></p>`).join('')
+          ${linked.map((c) => {
+            const segmentCount = (c.segments || []).length;
+            const selectedCount = (c.selected || []).length;
+            return `<p class="cs-cite-line">${esc(c.title || c.url)}
+              <small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章
+                · <b class="${usedOf(c) ? 'cs-cite-used' : 'cs-cite-unused'}">${usedOf(c) ? '正文已引用' : '正文未引用'}</b>
+                · <button type="button" class="cs-cite-seg-btn" data-cite-segments="${esc(c.id)}">可用片段 ${segmentCount}${selectedCount ? `（已选 ${selectedCount}）` : ''}</button></small></p>`;
+          }).join('')
             || '<p class="cs-muted">本章还没有关联的官方依据。外部信息必须可核验，二手内容不采。</p>'}
           ${unused.length ? `<p class="cs-material-hint">未引用的来源晚于正文：点上方「AI 编制本章」重新生成本章，引用才会写进正文。</p>` : ''}`;
       })()}</section>
@@ -877,6 +947,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
+    const segButton=event.target.closest('[data-cite-segments]');
+    if(segButton){openCitationSegments(segButton.dataset.citeSegments);return;}
     const citeButton=event.target.closest('[data-add-citation]');
     if(citeButton){openCitationDialog(citeButton.dataset.addCitation);return;}
     const specLink=event.target.closest('[data-spec]');

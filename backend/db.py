@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS citations (
     trust TEXT NOT NULL DEFAULT 'official',
     -- gap: 该来源是为了补哪个素材缺口（按缺口逐条检索时记录，便于回看"还差什么"）
     gap TEXT NOT NULL DEFAULT '',
+    -- segments: 抓到的可用片段（段落/表格/图片）JSON；selected: 用户选中的片段下标 JSON
+    segments TEXT NOT NULL DEFAULT '[]',
+    selected TEXT NOT NULL DEFAULT '[]',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
@@ -435,7 +438,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     citation_columns = {r[1] for r in await (await conn.execute("PRAGMA table_info(citations)")).fetchall()}
     if citation_columns:
         for name, kind in (("trust", "TEXT NOT NULL DEFAULT 'official'"),
-                           ("gap", "TEXT NOT NULL DEFAULT ''")):
+                           ("gap", "TEXT NOT NULL DEFAULT ''"),
+                           ("segments", "TEXT NOT NULL DEFAULT '[]'"),
+                           ("selected", "TEXT NOT NULL DEFAULT '[]'")):
             if name not in citation_columns:
                 await conn.execute(f"ALTER TABLE citations ADD COLUMN {name} {kind}")
 
