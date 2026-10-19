@@ -461,6 +461,15 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     # 来源链（2026-10-13，用户确定的核心数据关系）：
     #   招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
+    # 编写计划版本与更新时间（"计划已变更，建议重新生成"的判断依据）
+    plan_columns = {r[1] for r in await (await conn.execute("PRAGMA table_info(writing_plans)")).fetchall()}
+    if plan_columns:
+        for name, kind in (("version", "INTEGER NOT NULL DEFAULT 1"),
+                           ("updated_at", "TEXT NOT NULL DEFAULT ''")):
+            if name not in plan_columns:
+                await conn.execute(f"ALTER TABLE writing_plans ADD COLUMN {name} {kind}")
+        await conn.execute("UPDATE writing_plans SET updated_at=created_at WHERE updated_at=''")
+
     # citations 的 trust / gap 是后加的列：老库里的 citations 表早已建好，
     # 光改 CREATE TABLE 不会补列（实测：接受引用时报 500 no such column: gap）。
     citation_columns = {r[1] for r in await (await conn.execute("PRAGMA table_info(citations)")).fetchall()}

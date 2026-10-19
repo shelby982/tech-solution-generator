@@ -265,3 +265,10 @@
 /* F 段：动作按钮 */
 .cs-cp-issue-main { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 .cs-cp-issue-acts { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* 章计划：状态徽标与未达完成原因 */
+.cs-cp-head h4 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cs-cp-badge { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: #f1f5f9; color: #475569; }
+.cs-cp-badge.ok { background: #dcfce7; color: #166534; }
+.cs-cp-badge.warn { background: #fef3c7; color: #92400e; }
+.cs-cp-reasons { font-size: 11.5px; color: #b45309; margin-top: 2px; }

@@ -286,7 +286,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     if existing:
         plan_row["id"] = existing["id"]
         payload = json.dumps(plan_row, ensure_ascii=False)
-        await db.execute("UPDATE writing_plans SET plan=? WHERE id=?", (payload, plan_row["id"]))
+        await db.execute("UPDATE writing_plans SET plan=?, version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (payload, plan_row["id"]))
     else:
         await db.execute(
             "INSERT INTO writing_plans (id, project_id, thread_id, root_block_id, status, plan) "
@@ -314,7 +314,7 @@ async def update_requirements(db, project_id: int, plan_id: str, block_id: str,
         cleaned.append({"id": f"r{index}", "text": text[:300],
                         "type": str((item or {}).get("type") or "text")})
     chapter["requirements"] = cleaned
-    await db.execute("UPDATE writing_plans SET plan=? WHERE id=?",
+    await db.execute("UPDATE writing_plans SET plan=?, version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                      (json.dumps(plan, ensure_ascii=False), plan_id))
     await db.commit()
     return {"plan_id": plan_id, "block_id": block_id, "requirements": cleaned}
@@ -359,6 +359,56 @@ async def requirement_coverage(db, project_id: int, plan_id: str, thread_id: str
             "percent": round(responded / total * 100) if total else 0}
 
 
+async def confirm_chapter_plan(db, project_id: int, plan_id: str, block_id: str = "") -> dict:
+    """确认计划：block_id 为空 = 整份目录计划（批量，其下所有章一起确认）。"""
+    loaded = await load_plan(db, project_id, plan_id)
+    plan = loaded["plan"]
+    chapters = plan.get("chapters") or []
+    if not chapters:
+        raise ValueError("计划里没有章节")
+    if block_id:
+        if not any(str(item.get("block_id")) == str(block_id) for item in chapters):
+            raise ValueError("计划里没有这一章")
+        for item in chapters:
+            if str(item.get("block_id")) == str(block_id):
+                item["confirmed"] = True
+        await db.execute(
+            "UPDATE writing_plans SET plan=?, version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=?", (json.dumps(plan, ensure_ascii=False), plan_id))
+        await db.commit()
+        return {"plan_id": plan_id, "block_id": str(block_id), "confirmed": True,
+                "all_confirmed": all(item.get("confirmed") for item in chapters)}
+    for item in chapters:
+        item["confirmed"] = True
+    await db.execute(
+        "UPDATE writing_plans SET plan=?, status='confirmed', confirmed_at=CURRENT_TIMESTAMP, "
+        "version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (json.dumps(plan, ensure_ascii=False), plan_id))
+    await db.commit()
+    return {"plan_id": plan_id, "block_id": "", "confirmed": True, "all_confirmed": True}
+
+
+def chapter_completion(chapter_plan_data: dict, issues: list[dict]) -> dict:
+    """完成判定：要求全落点 + 素材全满足 + 图表齐 + 无高/中优问题。可人工覆盖（另行留痕）。"""
+    reasons = []
+    requirements = chapter_plan_data.get("requirements") or []
+    missing_responded = [item["text"] for item in requirements if not item.get("responded")]
+    if missing_responded:
+        reasons.append(f"{len(missing_responded)} 条要求正文未回应")
+    missing_material = [item["text"] for item in requirements if item.get("material") != "已满足"]
+    if missing_material:
+        reasons.append(f"{len(missing_material)} 条要求素材未满足")
+    figures = chapter_plan_data.get("figures_plan") or {}
+    if not (figures.get("tables") or figures.get("figures")):
+        reasons.append("没有可执行的图表计划")
+    high = [issue for issue in issues if issue.get("level") in ("high", "medium")]
+    if high:
+        reasons.append(f"{len(high)} 条待修问题")
+    if not (chapter_plan_data.get("words") or 0):
+        reasons.append("还没有正文")
+    return {"ok": not reasons, "reasons": reasons}
+
+
 async def update_figures_plan(db, project_id: int, plan_id: str, block_id: str,
                                tables: list[dict], figures: list[dict]) -> dict:
     """编辑本章的图表计划（每张表/图的用途与来源）。"""
@@ -381,7 +431,7 @@ async def update_figures_plan(db, project_id: int, plan_id: str, block_id: str,
         return result
 
     chapter["figures_plan"] = {"tables": _clean(tables), "figures": _clean(figures)}
-    await db.execute("UPDATE writing_plans SET plan=? WHERE id=?",
+    await db.execute("UPDATE writing_plans SET plan=?, version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                      (json.dumps(plan, ensure_ascii=False), plan_id))
     await db.commit()
     return {"plan_id": plan_id, "block_id": block_id, "figures_plan": chapter["figures_plan"]}
@@ -540,8 +590,17 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     }
     gaps = [item for item in (chapter or {}).get("gaps") or []]
     pending = sum(1 for requirement in requirements if requirement["material"] != "已满足")
+    plan_row = await (await db.execute(
+        "SELECT version, updated_at, status FROM writing_plans WHERE id=?", (plan_id,),
+    )).fetchone() if plan_id else None
+    plan_version = int(plan_row["version"] or 1) if plan_row else 0
+    plan_updated = (plan_row["updated_at"] or "") if plan_row else ""
+    block_updated = str(block.get("updated_at") or "")
     return {
         "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
+        "confirmed": bool((chapter or {}).get("confirmed")) or ((plan_row["status"] == "confirmed") if plan_row else False),
+        "plan_version": plan_version,
+        "plan_changed_after_content": bool(plan_updated and block_updated and plan_updated > block_updated),
         "layout": block.get("design_layout") or (chapter or {}).get("layout"),
         "pages": pages_of_block or (chapter or {}).get("pages") or 0,
         "words": len(content.replace(" ", "")),
@@ -685,4 +744,5 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
 
 __all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
-           "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan"]
+           "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan",
+           "confirm_chapter_plan", "chapter_completion"]
