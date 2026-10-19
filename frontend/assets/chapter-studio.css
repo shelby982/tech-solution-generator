@@ -245,3 +245,7 @@
 .cs-cp-issue { display: flex; gap: 8px; padding: 5px 0; font-size: 12px; border-bottom: 1px dashed #eef2f7; }
 .cs-cp-issue b { flex-shrink: 0; font-size: 11px; color: #475569; }
 .cs-cp-issue.high b { color: #b91c1c; }
+
+/* 本章计划：内联小按钮 */
+.cs-cp-mini { font: inherit; font-size: 10.5px; padding: 2px 8px; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; cursor: pointer; color: #1d4ed8; margin-left: 6px; }
+.cs-cp-sec h5 { display: flex; align-items: center; }

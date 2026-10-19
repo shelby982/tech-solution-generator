@@ -424,6 +424,12 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     blocks = {str(b.get("block_id")): dict(b) for b in await list_blocks(db, project_id, thread_id)}
     block = blocks.get(str(block_id)) or {}
     content = str(block.get("content") or "")
+    # 页数：自身有预算用它；否则继承最近的祖先（子节不单独占页）
+    pages_of_block = int(block.get("page_budget") or 0)
+    ancestor_id = str(block_id)
+    while not pages_of_block and "." in ancestor_id:
+        ancestor_id = ancestor_id.rsplit(".", 1)[0]
+        pages_of_block = int((blocks.get(ancestor_id) or {}).get("page_budget") or 0)
 
     # 依据：本章承接的评分点/规范条款
     try:
@@ -500,7 +506,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     return {
         "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
         "layout": block.get("design_layout") or (chapter or {}).get("layout"),
-        "pages": (chapter or {}).get("pages") or 0,
+        "pages": pages_of_block or (chapter or {}).get("pages") or 0,
         "words": len(content.replace(" ", "")),
         "requirements": requirements,
         "basis": basis,
