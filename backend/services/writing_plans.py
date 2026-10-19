@@ -147,11 +147,18 @@ async def plan_units(db, project_id: int, thread_id: str) -> dict:
         return {"root": None, "units": []}
     units = _direct_children(blocks, root)
     leaves = _leaves(blocks, root)
+    # 每个一级目录的最新计划（status: draft|confirmed）—— 前端用它做"生成闸"
+    plans = {}
+    for row in await (await db.execute(
+        "SELECT root_block_id, id, status FROM writing_plans WHERE project_id=? AND thread_id=? "
+        "ORDER BY created_at DESC", (project_id, thread_id))).fetchall():
+        plans.setdefault(row["root_block_id"], {"id": row["id"], "status": row["status"]})
     return {
         "root": {"block_id": root["block_id"], "title": root["title"]},
         "units": [{
             "block_id": b["block_id"], "title": b["title"], "level": b.get("level"),
             "leaves": len(_leaves(blocks, b)),
+            "plan": plans.get(str(b["block_id"])),
         } for b in units],
         "total_leaves": len(leaves),
     }
@@ -223,12 +230,23 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
         "chapters": chapters,
         "gaps": gaps[:30],
     }
-    await db.execute(
-        "INSERT INTO writing_plans (id, project_id, thread_id, root_block_id, status, plan) "
-        "VALUES (?, ?, ?, ?, 'draft', ?)",
-        (plan_row["id"], project_id, thread_id, str(root["block_id"]),
-         json.dumps(plan_row, ensure_ascii=False)),
-    )
+    payload = json.dumps(plan_row, ensure_ascii=False)
+    # 同一线程、同一一级目录还有未确认的 draft → 原地更新，避免每次点开都堆一份
+    existing = await (await db.execute(
+        "SELECT id FROM writing_plans WHERE project_id=? AND thread_id=? AND root_block_id=? "
+        "AND status='draft' ORDER BY created_at DESC LIMIT 1",
+        (project_id, thread_id, str(root["block_id"])),
+    )).fetchone()
+    if existing:
+        plan_row["id"] = existing["id"]
+        payload = json.dumps(plan_row, ensure_ascii=False)
+        await db.execute("UPDATE writing_plans SET plan=? WHERE id=?", (payload, plan_row["id"]))
+    else:
+        await db.execute(
+            "INSERT INTO writing_plans (id, project_id, thread_id, root_block_id, status, plan) "
+            "VALUES (?, ?, ?, ?, 'draft', ?)",
+            (plan_row["id"], project_id, thread_id, str(root["block_id"]), payload),
+        )
     await db.commit()
     return plan_row
 

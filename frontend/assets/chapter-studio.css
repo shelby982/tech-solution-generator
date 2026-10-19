@@ -55,3 +55,12 @@
 .cs-plan-task.table { background: #ecfdf5; color: #047857; }
 .cs-plan-task.diagram { background: #fef3c7; color: #92400e; }
 .cs-plan-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* 工具栏「编写计划」：与「AI 编制本章」成对（先看计划、再动手），次级样式 */
+.cs-toolbar [data-action="plan"] { font: inherit; font-size: 12px; padding: 6px 12px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 8px; cursor: pointer; }
+.cs-toolbar [data-action="plan"]:hover { background: #dbeafe; }
+
+/* 章头右上角的「编写计划」入口（与「未开始」/篇幅同一行；一级目录级动作） */
+.cs-plan-slot { display: inline-flex; align-items: center; }
+.cs-plan-slot .cs-plan-btn { margin-left: auto; font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.cs-plan-slot .cs-plan-btn:hover { background: #dbeafe; }

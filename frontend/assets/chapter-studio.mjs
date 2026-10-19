@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v231';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v231';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v231';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v234';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v234';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v234';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -161,13 +161,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const data = await resp.json();
       planUnits.clear(); unitOf.clear();
       (data.units || []).forEach((unit) => {
-        planUnits.set(String(unit.block_id), { title: unit.title, leaves: unit.leaves });
+        planUnits.set(String(unit.block_id), { title: unit.title, leaves: unit.leaves, plan: unit.plan || null });
         (blocks || []).forEach((b) => {
           const key = String(b.block_id || b.id);
           if (key === String(unit.block_id) || key.startsWith(`${unit.block_id}.`)) unitOf.set(key, String(unit.block_id));
         });
       });
       paintTree();
+      try { if (active) paintPlanAction(active); } catch (e) { /* active 尚未初始化 */ }
     } catch (e) { /* 计划单元拿不到不影响编写 */ }
   }
   const WPP = 250;                    // 1 页 ≈ 250 字（与策划页分配口径一致）
@@ -330,13 +331,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tips = [b.title, st,
         bs.target ? `预算 ${bs.target} 页 · 已写 ${bs.pages.toFixed(1)} 页 · ${bs.gapText}${bs.isParent ? '（子树合计）' : ''}` : '',
       ].filter(Boolean).join(' · ');
-      const unit = planUnits.get(String(b.block_id));
-      const planButton = unit
-        ? `<button class="cs-plan-btn" data-plan="${esc(String(b.block_id))}" title="先出编写计划，确认后再开始编制">编写计划${unit.leaves ? ` · ${unit.leaves} 节` : ''}</button>`
-        : '';
       return `<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
         ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
-        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>${planButton}`;
+        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
     }).join('');
   };
   async function save() {
@@ -427,6 +424,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       status('素材已关联本章；文档后台解析后，核对摘录即可用于编写。');
     };
   };
+  /** 工具栏「编写计划」：只在当前章属于某个一级目录时出现（动作与树无关，树只看结构）。 */
+  function paintPlanAction(block) {
+    const slot = host.querySelector('[data-plan-slot]');
+    if (!slot) return;
+    const unit = block ? unitOf.get(String(block.block_id)) : null;
+    const info = unit ? planUnits.get(unit) : null;
+    if (!info) { slot.innerHTML = ''; return; }
+    slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
+      + `title="《${esc(info.title)}》共 ${info.leaves} 节：先确认计划，再按章并发生成">`
+      + `《${esc(info.title)}》编写计划 · ${info.leaves} 节</button>`;
+  }
+
   async function select(id) {
     if(live.active&&live.pending){live.reset();dirty=false;}
     if (!await save()) return;
@@ -444,7 +453,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span>${budgetLineHtml(block)}`;
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
+      paintPlanAction(block);
       host.querySelector('[data-action="save"]').disabled=true;
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
@@ -500,7 +510,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     host.querySelector('.cs-more').removeAttribute('open');
     try {
       if(action==='save') await save();
-      if(action==='ai'){paintView(false);status('');showPanel('ai');await team.start();}
+      if(action==='ai'){
+        // 生成闸：本章所属一级目录还没有"已确认"的编写计划 → 先看计划、确认后再生成。
+        // 否则「AI 编制本章」会先跑起来，计划闸形同虚设（产品评审结论）。
+        const unit = active ? unitOf.get(String(active.block_id)) : null;
+        const info = unit ? planUnits.get(unit) : null;
+        if (unit && info && !(info.plan && info.plan.status === 'confirmed')) {
+          status('本章属于《' + info.title + '》：请先确认编写计划，再开始编制。');
+          showPanel('ai');
+          await openWritingPlan(unit);
+          return;
+        }
+        paintView(false);status('');showPanel('ai');await team.start();
+      }
       if(action==='edit'){
         paintView(false);get('preview').hidden=true;
         if(live.active)live.show();else editor.hidden=false;

@@ -48,6 +48,8 @@ async def test_plan_units_are_direct_children_of_scoring_root(db):
     assert [u["block_id"] for u in data["units"]] == ["s1.1", "s1.2"]
     assert data["units"][0]["leaves"] == 2      # 子目录收到底层两个叶子
     assert data["total_leaves"] == 3
+    # 还没有计划 → plan 为 None（前端据此做"生成闸"）
+    assert data["units"][0]["plan"] is None
 
 
 async def test_build_plan_covers_leaves_with_tasks_and_gaps(db):
