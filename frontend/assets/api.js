@@ -1,5 +1,5 @@
 // frontend/assets/api.js
-// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v245' 使用
+// ES Module — 统一 API 封装层，供各页面 import { api } from './api.js?v=20261016-v246' 使用
 
 // workflow 动作的统一调用：非 2xx 时抛出**带 code 的** Error。
 // code 来自后端响应头 X-Error-Code（如 workflow_aborted）—— 前端据此决定
