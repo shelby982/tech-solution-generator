@@ -67,3 +67,26 @@ def test_citation_line_format():
     line = citation_line({"publisher": "国家发改委", "published_at": "2024-03-15",
                           "title": "指导意见", "url": "https://www.gov.cn/a.html", "excerpt": "摘录"})
     assert line.startswith("【来源】国家发改委 · 2024-03-15 · 指导意见 · https://www.gov.cn/a.html")
+
+
+def test_link_candidates_only_official_and_keyword_matched():
+    """官方入口扫描：只保留官方域名内、标题命中关键词的链接。"""
+    from services.citations import _link_candidates
+    html = """
+    <a href="/zhengce/content/2024-03/15/content_1.htm">关于加快推进数字化转型的指导意见</a>
+    <a href="https://weibo.com/123">数字化转型 微博</a>
+    <a href="/about.html">关于本站</a>
+    """
+    items = _link_candidates(html, "https://www.gov.cn/zhengce/", ["数字化"])
+    assert len(items) == 1
+    assert items[0]["url"].startswith("https://www.gov.cn/")
+    assert "数字化" in items[0]["title"]
+
+
+def test_official_portals_shape():
+    from services.citations import OFFICIAL_PORTALS
+    assert len(OFFICIAL_PORTALS) >= 4
+    for portal in OFFICIAL_PORTALS:
+        assert portal["url"].startswith("http")
+        assert portal["domain"] in portal["url"]
+        assert portal["name"] and portal["hint"]

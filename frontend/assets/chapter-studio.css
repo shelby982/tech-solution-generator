@@ -100,3 +100,16 @@
 .cs-plan-dialog .cs-plan-body textarea { width: 100%; box-sizing: border-box; min-height: 132px; font: inherit; font-size: 13px; line-height: 1.7; padding: 10px 12px; border: 1px solid #dbe3ef; border-radius: 10px; resize: vertical; }
 .cs-plan-dialog .cs-plan-body textarea:focus { outline: none; border-color: #93b4f5; box-shadow: 0 0 0 3px rgba(147, 180, 245, .18); }
 .cs-plan-dialog .cs-plan-body > p { margin: 0 0 8px; }
+
+/* 官方来源抽屉：先找 → 候选 → 抓取 → 接受 */
+.cs-cite-label { display: block; margin: 10px 0 4px; font-size: 12px; color: #334155; font-weight: 600; }
+.cs-cite-row { display: flex; gap: 8px; align-items: center; }
+.cs-cite-row input { flex: 1; font: inherit; font-size: 12px; padding: 8px 10px; border: 1px solid #dbe3ef; border-radius: 8px; box-sizing: border-box; }
+.cs-cite-cand { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; margin-top: 6px; font-size: 12px; }
+.cs-cite-cand span { display: flex; flex-direction: column; gap: 2px; }
+.cs-cite-cand small { color: #94a3b8; }
+.cs-cite-portals { margin: 10px 0; font-size: 12px; }
+.cs-cite-portals summary { cursor: pointer; color: #475569; }
+.cs-cite-portal { margin: 6px 0; }
+.cs-cite-portal a { color: #1d4ed8; text-decoration: none; }
+.cs-cite-portal small { display: block; color: #94a3b8; }

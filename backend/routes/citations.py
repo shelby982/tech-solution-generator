@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from db import get_db
-from services.citations import (fetch_candidate, link_citation, list_citations, reject_citation,
-                                save_citation, search_official, search_configured, unlink_citation)
+from services.citations import (OFFICIAL_PORTALS, discover_candidates, fetch_candidate, link_citation,
+                                list_citations, reject_citation, save_citation, search_official,
+                                search_configured, unlink_citation)
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -55,6 +56,29 @@ async def link(project_id: int, citation_id: str, body: LinkBody):
 async def unlink(project_id: int, citation_id: str, block_id: str):
     async with get_db() as db:
         return await unlink_citation(db, project_id, citation_id, block_id)
+
+
+class DiscoverBody(BaseModel):
+    query: str = Field(min_length=2, max_length=200)
+
+
+@router.get("/portals")
+async def read_portals(project_id: int):
+    """官方入口目录：没有检索 API 时，先给官方站点（用户可点开、也可让系统扫描）。"""
+    return {"portals": OFFICIAL_PORTALS, "search_configured": search_configured()}
+
+
+@router.post("/discover")
+async def discover(project_id: int, body: DiscoverBody):
+    """先找官方来源：配置了检索 API 就真检索；否则扫描官方入口页按关键词挑候选链接。
+
+    候选都带 source（search / portal），用户点其中一个再「抓取核验」；也可以自己粘贴链接。
+    """
+    try:
+        return await discover_candidates(body.query)
+    except Exception as exc:
+        return {"configured": search_configured(), "results": [], "portals": OFFICIAL_PORTALS,
+                "message": f"自动找来源失败：{exc}"}
 
 
 @router.get("/search")

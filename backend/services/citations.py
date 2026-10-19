@@ -87,6 +87,88 @@ def extract_page(html: str, url: str) -> dict:
             "publisher": publisher, "published_at": date, "excerpt": excerpt}
 
 
+# 官方入口目录：没有检索 API 时的兜底"先找来源"——只列官方站点，用户可点开、也可让系统扫描
+OFFICIAL_PORTALS = [
+    {"name": "中国政府网 · 政策文件库", "url": "https://www.gov.cn/zhengce/", "domain": "www.gov.cn",
+     "hint": "国务院/部委政策、指导意见、规划"},
+    {"name": "国家标准全文公开系统", "url": "https://openstd.samr.gov.cn/bzgk/gb/index", "domain": "openstd.samr.gov.cn",
+     "hint": "GB/GB-T 标准原文与状态"},
+    {"name": "中国南方电网", "url": "https://www.csg.cn/", "domain": "www.csg.cn",
+     "hint": "集团战略、部署、新闻稿"},
+    {"name": "广东电网", "url": "https://www.gd.csg.cn/", "domain": "gd.csg.cn",
+     "hint": "省公司实践、招标与公告"},
+    {"name": "全国公共资源交易平台", "url": "https://www.ggzy.gov.cn/", "domain": "www.ggzy.gov.cn",
+     "hint": "招标公告、中标结果原文"},
+    {"name": "中国招标投标公共服务平台", "url": "http://www.cebpubservice.com/", "domain": "www.cebpubservice.com",
+     "hint": "公告与公示原文"},
+]
+_PORTAL_SCAN_LIMIT = 8
+
+
+DOC_TITLE_HINTS = ("政策", "意见", "通知", "办法", "规划", "标准", "公告", "公示", "指南", "规定", "纲要")
+
+
+def _link_candidates(html: str, base_url: str, keywords: list[str], limit: int = _PORTAL_SCAN_LIMIT) -> list[dict]:
+    """从官方页面里挑链接。
+
+    两档：① 标题命中检索词（最相关）；② 标题像"文档"（政策/意见/通知/标准/公告…）的兜底，
+    因为官方入口首页的链接标题通常不含检索词 —— 只给导航，不给候选等于没帮上忙。
+    """
+    from urllib.parse import urljoin
+
+    matched, docs, seen = [], [], set()
+    for match in re.finditer(r"<a[^>]+href=[\"']([^\"'>]+)[\"'][^>]*>(.*?)</a>", html or "", re.I | re.S):
+        href = match.group(1).strip()
+        title = _strip_html(match.group(2))
+        if not title or len(title) < 6:
+            continue
+        url = urljoin(base_url, href)
+        if not is_official(url) or (url, title) in seen:
+            continue
+        seen.add((url, title))
+        item = {"url": url, "title": title[:80], "domain": domain_of(url)}
+        if keywords and any(keyword in title for keyword in keywords):
+            matched.append(item)
+        elif any(hint in title for hint in DOC_TITLE_HINTS):
+            docs.append(item)
+        if len(matched) >= limit:
+            break
+    return (matched + docs)[:limit]
+
+
+async def discover_candidates(query: str) -> dict:
+    """先找官方来源：配置了检索 API 就真检索；否则扫描官方入口页，按关键词挑链接。
+
+    返回的候选都标 ``source``：``search``（检索 API）/ ``portal``（官方入口扫描）/ ``portal-list``（仅入口）。
+    用户仍可自己粘贴链接补充来源。
+    """
+    keywords = [part for part in re.split(r"[\s，,、；;]+", str(query or "")) if len(part) >= 2][:4]
+    if search_configured():
+        data = await search_official(query)
+        for item in data.get("results") or []:
+            item["source"] = "search"
+        return {**data, "portals": OFFICIAL_PORTALS}
+    candidates: list[dict] = []
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        for portal in OFFICIAL_PORTALS:
+            try:
+                resp = await client.get(portal["url"], headers={"User-Agent": "Mozilla/5.0 (compatible; bid-assistant)"})
+                if resp.status_code >= 400:
+                    continue
+                candidates.extend(_link_candidates(resp.text, portal["url"], keywords))
+            except Exception:
+                continue
+            if len(candidates) >= _PORTAL_SCAN_LIMIT:
+                break
+    return {"configured": False, "results": candidates[: _PORTAL_SCAN_LIMIT],
+            "portals": OFFICIAL_PORTALS,
+            "message": ("未配置检索源（SERPER_API_KEY）：已扫描官方入口页并挑出候选（标题命中检索词优先，"
+                        "其次是有文档特征的链接），点一个用它「抓取核验」，或直接粘贴官方原文链接。"
+                        if candidates else
+                        "未配置检索源（SERPER_API_KEY），官方入口页也没有可推荐链接；"
+                        "请点开官方入口自己查找，或粘贴官方原文链接。配置检索 API 后可自动按关键词找原文。")}
+
+
 def search_configured() -> bool:
     return bool(os.environ.get("SERPER_API_KEY"))
 
@@ -232,5 +314,6 @@ def citation_line(citation: dict) -> str:
 
 
 __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", "search_configured",
+           "OFFICIAL_PORTALS", "discover_candidates",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
            "citation_line", "domain_of", "link_citation", "unlink_citation"]

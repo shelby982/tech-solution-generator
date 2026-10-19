@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v249';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v249';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v249';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v251';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v251';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v251';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -237,26 +237,31 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
   }
 
-  /** 官方源引用：只采可核验的官方原文（政府/南方电网/标准/招标平台），二手一律不采。 */
-  function openCitationDialog(blockKey) {
+  /** 官方源引用：先自动找官方来源（检索 API / 官方入口扫描），再由用户确认或自己补链接。 */
+  function openCitationDialog(blockKey, initialQuery = '') {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog';
-    dialog.innerHTML = `<header><h3>检索官方来源</h3><button type="button" aria-label="关闭">×</button></header>
+    dialog.innerHTML = `<header><h3>官方来源</h3><button type="button" aria-label="关闭">×</button></header>
       <div class="cs-plan-body">
         <p class="cs-muted">外部信息必须可核验：只接受政府、南方电网/广东电网、标准发布机构、
           招标方与公共资源交易平台的<strong>原文</strong>。二手转载、公众号、百科不采；
           找不到官方源时正文写【待补充：需官方来源】。</p>
-        <p class="cs-dim">粘贴官方原文链接，由系统抓取并抽取机构/日期/标题/摘录：</p>
-        <input type="url" data-cite-url placeholder="https://www.gov.cn/… 或 https://www.csg.cn/…" />
-        <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cite-cancel>取消</button>
-          <button type="button" class="mw-btn primary" data-cite-fetch>抓取核验</button></div>
-        <div data-cite-result></div></div>`;
+        <label class="cs-cite-label">① 先找：</label>
+        <div class="cs-cite-row"><input type="text" data-cite-query value="${esc(initialQuery)}"
+            placeholder="要查什么？例：数字化转型 指导意见" /><button type="button" class="mw-btn primary" data-cite-discover>自动找来源</button></div>
+        <div data-cite-candidates></div>
+        <details class="cs-cite-portals"><summary>官方入口（自己找也行）</summary><div data-cite-portals></div></details>
+        <label class="cs-cite-label">② 或用官方原文链接：</label>
+        <div class="cs-cite-row"><input type="url" data-cite-url placeholder="https://www.gov.cn/… 或 https://www.csg.cn/…" /><button type="button" class="mw-btn" data-cite-fetch>抓取核验</button></div>
+        <div data-cite-result></div>
+      </div>`;
     globalThis.document.body.append(dialog);
     dialog.querySelector('header button').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove());
     dialog.showModal();
-    dialog.querySelector('[data-cite-cancel]').onclick = () => dialog.close();
     const result = dialog.querySelector('[data-cite-result]');
+    const candidates = dialog.querySelector('[data-cite-candidates]');
+    const portalsHost = dialog.querySelector('[data-cite-portals]');
     const post = async (url, body) => {
       const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body), signal: AbortSignal.timeout(120000)});
@@ -264,12 +269,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
       return data;
     };
-    dialog.querySelector('[data-cite-fetch]').onclick = async (event) => {
-      const button = event.currentTarget;
-      const url = dialog.querySelector('[data-cite-url]').value.trim();
-      if (url.length < 8) { result.innerHTML = '<p class="cs-warning">请先粘贴官方原文链接。</p>'; return; }
-      button.disabled = true;
-      button.textContent = '抓取中…';
+    const renderPortals = (list) => {
+      portalsHost.innerHTML = (list || []).map((portal) => `<p class="cs-cite-portal">
+          <a href="${esc(portal.url)}" target="_blank" rel="noreferrer">${esc(portal.name)}</a>
+          <small>${esc(portal.hint)}</small></p>`).join('');
+    };
+    const verify = async (url, button) => {
+      if (!url || url.length < 8) { result.innerHTML = '<p class="cs-warning">请先选一个候选或粘贴官方原文链接。</p>'; return; }
+      if (button) { button.disabled = true; button.textContent = '抓取中…'; }
       try {
         const candidate = await post(`/api/projects/${projectId}/citations/fetch`, {url});
         result.innerHTML = `<section class="cs-cite-card">
@@ -279,8 +286,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <p class="cs-dim">${esc(candidate.url)}</p>
             <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-cite-accept>接受为引用</button></div>
             <p class="cs-dim" data-cite-msg></p></section>`;
-        result.querySelector('[data-cite-accept]').onclick = async (acceptEvent) => {
-          const acceptButton = acceptEvent.currentTarget;
+        result.querySelector('[data-cite-accept]').onclick = async (event) => {
+          const acceptButton = event.currentTarget;
           acceptButton.disabled = true;
           try {
             await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId});
@@ -294,10 +301,39 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       } catch (err) {
         result.innerHTML = `<p class="cs-warning">抓取失败：${esc(String(err.message || err))}</p>`;
       } finally {
-        button.disabled = false;
-        button.textContent = '抓取核验';
+        if (button) { button.disabled = false; button.textContent = '抓取核验'; }
       }
     };
+    dialog.querySelector('[data-cite-discover]').onclick = async (event) => {
+      const button = event.currentTarget;
+      const query = dialog.querySelector('[data-cite-query]').value.trim();
+      if (query.length < 2) { candidates.innerHTML = '<p class="cs-warning">先写要查什么（≥2 字）。</p>'; return; }
+      button.disabled = true;
+      button.textContent = '查找中…';
+      try {
+        const data = await post(`/api/projects/${projectId}/citations/discover`, {query});
+        renderPortals(data.portals);
+        const rows = (data.results || []).map((item, index) => `<div class="cs-cite-cand">
+            <span><b>${esc(item.title || item.url)}</b><small>${esc(item.domain || '')}${item.source === 'search' ? ' · 检索结果' : ' · 官方入口扫描'}</small></span>
+            <button type="button" class="mw-btn" data-cite-pick="${index}">抓取核验</button></div>`).join('');
+        candidates.innerHTML = `<p class="cs-dim">${esc(data.message || '')}</p>${rows || '<p class="cs-dim">没找到候选：可以点开官方入口自己找，或粘贴原文链接。</p>'}`;
+        candidates.querySelectorAll('[data-cite-pick]').forEach((pick) => pick.addEventListener('click', () => {
+          const item = (data.results || [])[Number(pick.dataset.citePick)];
+          if (item) { dialog.querySelector('[data-cite-url]').value = item.url; void verify(item.url, pick); }
+        }));
+      } catch (err) {
+        candidates.innerHTML = `<p class="cs-warning">查找失败：${esc(String(err.message || err))}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = '自动找来源';
+      }
+    };
+    dialog.querySelector('[data-cite-fetch]').onclick = (event) => verify(dialog.querySelector('[data-cite-url]').value.trim(), event.currentTarget);
+    renderPortals([]);
+    fetch(`/api/projects/${projectId}/citations/portals`, {signal: AbortSignal.timeout(15000)})
+      .then((resp) => resp.json())
+      .then((data) => { if (dialog.isConnected) renderPortals(data.portals); })
+      .catch(() => {});
   }
 
   /** 文字生成图：用户粘贴一段描述 → 抽成关系链图（:::diagram）→ 插入正文。 */
@@ -383,7 +419,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <div class="cs-plan-gap-actions"><label class="mw-btn cs-plan-upload">上传素材
               <input type="file" hidden data-plan-upload="${esc(String(c.id || ''))}" /></label>
               <button type="button" class="mw-btn" data-plan-goto="${esc(String(c.block_id))}">去本章编写</button>
-              <button type="button" class="mw-btn" data-plan-cite="${esc(String(c.block_id))}">检索官方来源</button></div>
+              <button type="button" class="mw-btn" data-plan-cite="${esc(String(c.block_id))}"
+                data-plan-cite-query="${esc((c.gaps || []).join('；'))}">检索官方来源</button></div>
             <p class="cs-dim" data-plan-upload-msg></p></div>` : ''}
         </section>`).join('')
       + `${plan.gaps.length ? `<p class="cs-muted">全章素材缺口 ${plan.gaps.length} 项</p>` : ''}`
@@ -409,7 +446,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
     }));
     body.querySelectorAll('[data-plan-cite]').forEach((button) => button.addEventListener('click', () => {
-      openCitationDialog(button.dataset.planCite);
+      openCitationDialog(button.dataset.planCite, button.dataset.planCiteQuery || '');
     }));
     body.querySelectorAll('[data-plan-goto]').forEach((button) => button.addEventListener('click', async () => {
       dialog.close();
