@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v240';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v240';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v240';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v243';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v243';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v243';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -122,7 +122,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
-        <div class="cs-toolbar"><button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button><button data-action="save" disabled>保存</button><div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div><button type="button" data-action="diagram" title="把一段文字抽成结构图，插入正文">文字生成图</button><details class="cs-more"><summary>更多</summary><div class="cs-more-menu"><details data-add-menu><summary>添加内容</summary><button data-action="text">文字说明</button><button data-action="table">手动表格</button><button data-action="diagram">手动关系图</button></details><button data-action="complete">确认本章完成</button><button data-action="export-chapter">导出本章 Word</button><button data-action="export-group">导出本组 Word</button></div></details></div>
+        <div class="cs-toolbar"><button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button><button data-action="save" disabled>保存</button><div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div><button type="button" data-action="diagram" title="把一段文字抽成结构图，插入正文">文字生成图</button><details class="cs-more"><summary>更多</summary><div class="cs-more-menu"><details data-add-menu><summary>添加内容</summary><button data-action="text">文字说明</button><button data-action="table">手动表格</button><button data-action="diagram">手动关系图</button></details><button data-action="complete">确认本章完成</button><button data-action="export-chapter">导出本章 Word</button><button data-action="quality">质检清单</button><button data-action="export-group">导出本组 Word</button></div></details></div>
         <div data-cs="status" role="status" aria-live="polite"></div>
         <div data-cs="recovery" hidden></div>
         <textarea class="cs-editor" data-cs="editor" aria-label="本章正文" placeholder="点击上方「AI 编制」生成本章内容，也可直接在此编写。生成结果将显示在这里；核对后点击「保存正文」。"></textarea>
@@ -202,6 +202,41 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const recipeLabel = (key) => RECIPE_LABELS[key] || key;
 
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
+  /** 质检清单：结构完整性 / 图表数量 / 占位与空词 / 篇幅偏差（确定性检查，不阻断保存）。 */
+  async function openQualityDialog() {
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>质检清单</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body"><p class="cs-muted">正在检查…</p></div>`;
+    globalThis.document.body.append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    const body = dialog.querySelector('.cs-plan-body');
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/quality?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(60000)});
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+      const rows = (data.chapters || []).map((row) => `<section class="cs-qc-row ${row.ok ? 'ok' : 'issue'}" data-qc-block="${esc(String(row.block_id))}">
+          <header><b>${esc(row.title)}</b><span class="cs-dim">${esc(row.layout || '')} · ${row.stats.tables} 表 · ${row.stats.figures} 图 · ${row.stats.pages} 页</span></header>
+          ${row.issues.length ? `<ul>${row.issues.map((issue) => `<li class="${esc(issue.level)}">${esc(issue.message)}</li>`).join('')}</ul>` : '<p class="cs-dim">通过</p>'}
+        </section>`).join('');
+      const unitRows = (data.units || []).map((unit) => `<section class="cs-qc-row ${unit.ok ? 'ok' : 'issue'}" data-qc-block="${esc(String(unit.block_id))}">
+          <header><b>【章】${esc(unit.title)}</b><span class="cs-dim">${esc(unit.layout || '')} · ${unit.chapters} 节 · ${unit.stats.tables} 表 · ${unit.stats.figures} 图 · ${unit.stats.pages} 页</span></header>
+          ${unit.issues.length ? `<ul>${unit.issues.map((issue) => `<li class="${esc(issue.level)}">${esc(issue.message)}</li>`).join('')}</ul>` : '<p class="cs-dim">结构通过</p>'}
+        </section>`).join('');
+      body.innerHTML = `<p class="cs-muted">共 ${data.summary.chapters} 个编写单元（已开始 ${data.summary.started || 0}）· 通过 ${data.summary.clean} · 高优 ${data.summary.high} · 中优 ${data.summary.medium}
+        ${data.summary.units ? `· 章级 ${data.summary.units} 个（问题 ${data.summary.unit_issues || 0}）` : ''}
+        （只出清单，不阻断保存；点击一行跳到该章节处理）</p>${unitRows}${rows || '<p class="cs-dim">还没有可检查的章节</p>'}`;
+      body.querySelectorAll('[data-qc-block]').forEach((section) => section.addEventListener('click', async () => {
+        dialog.close();
+        await select(section.dataset.qcBlock);
+      }));
+    } catch (err) {
+      body.innerHTML = `<p class="cs-warning">质检失败：${esc(String(err.message || err))}</p>`;
+    }
+  }
+
   /** 官方源引用：只采可核验的官方原文（政府/南方电网/标准/招标平台），二手一律不采。 */
   function openCitationDialog(blockKey) {
     const dialog = globalThis.document.createElement('dialog');
@@ -693,6 +728,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     host.querySelector('.cs-more').removeAttribute('open');
     try {
       if(action==='save') await save();
+      if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
         // 生成闸：本章所属一级目录还没有"已确认"的编写计划 → 先看计划、确认后再生成。

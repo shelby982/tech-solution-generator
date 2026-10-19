@@ -1,0 +1,195 @@
+"""章节质检（P3）：结构完整性 / 图表数量 / 占位与空词 / 篇幅偏差。
+
+确定性检查（不调模型），对照两份东西：
+- **L1 模块配方**：骨架项是否在正文里有着落、必图是否出现（必表按 L0"每节≥1 张"）
+- **篇幅分配**：已写页数 vs 分配页数（偏差超过 ±30%/低于 40% 提醒）
+
+输出是**清单**，不阻断保存（用户口径：只出清单，不卡手工修正）。
+"""
+
+from __future__ import annotations
+
+import re
+
+WPP = 250                      # 1 页 ≈ 250 字（与编写页一致）
+TABLE_SEP = re.compile(r"^\s*\|[\s:|-]+\|\s*$", re.M)
+VAGUE_WORDS = ("非常", "极大", "极大提升", "显著提升", "大幅提升")
+
+
+def _skeleton_keywords(item: str) -> list[str]:
+    """骨架项 → 关键词（按分隔符切开，取前 2~4 字做存在性判断）。"""
+    parts = [part for part in re.split(r"[\s/、，,和与及→\-]+", str(item or "").strip()) if len(part) >= 2]
+    return [part[:4] for part in parts[:3]]
+
+
+def check_chapter(content: str, recipe: dict | None = None, budget_pages: int = 0) -> dict:
+    text = str(content or "")
+    recipe = recipe or {}
+    stats = {
+        "chars": len(text.replace(" ", "").replace("\n", "")),
+        "tables": len(TABLE_SEP.findall(text)),
+        "diagrams": text.count(":::diagram"),
+        "images": len(re.findall(r"!\[[^\]]*\]\(", text)),
+        "pending": len(re.findall(r"【待补充", text)),
+    }
+    stats["pages"] = round(stats["chars"] / WPP, 1)
+    stats["figures"] = stats["diagrams"] + stats["images"]
+    issues = []
+    for item in recipe.get("skeleton") or []:
+        keys = _skeleton_keywords(item)
+        if keys and not any(key in text for key in keys):
+            issues.append({"code": "skeleton", "level": "medium",
+                           "message": f"骨架项「{item}」在正文里没有落点"})
+    if not stats["tables"]:
+        issues.append({"code": "table", "level": "high",
+                       "message": "本章没有表格（规范要求每节至少 1 张）"})
+    if (recipe.get("figures") or []) and stats["figures"] == 0:
+        issues.append({"code": "figure", "level": "high",
+                       "message": "本章没有图示（配方要求至少 1 张）"})
+    if stats["pending"]:
+        issues.append({"code": "pending", "level": "info",
+                       "message": f"还有 {stats['pending']} 处【待补充】"})
+    for word in VAGUE_WORDS:
+        if word in text:
+            issues.append({"code": "vague", "level": "low",
+                           "message": f"出现空词「{word}」，建议改成量化表述"})
+            break
+    if budget_pages and stats["pages"]:
+        ratio = stats["pages"] / budget_pages
+        if ratio > 1.3:
+            issues.append({"code": "budget", "level": "medium",
+                           "message": f"已写 {stats['pages']} 页，超出分配 {budget_pages} 页的 30%"})
+        elif ratio < 0.4:
+            issues.append({"code": "budget", "level": "medium",
+                           "message": f"已写 {stats['pages']} 页，不足分配 {budget_pages} 页的 40%"})
+    order = {"high": 0, "medium": 1, "low": 2, "info": 3}
+    issues.sort(key=lambda issue: order.get(issue["level"], 9))
+    return {"stats": stats, "issues": issues,
+            "ok": not any(issue["level"] in ("high", "medium") for issue in issues)}
+
+
+TITLE_HINTS = [("项目理解", "understanding"), ("对项目的理解", "understanding"),
+               ("技术方案", "solution"), ("技术实现方案", "solution"),
+               ("实施", "implementation"), ("进度", "implementation"),
+               ("人员", "evidence"), ("业绩", "evidence"), ("团队", "evidence"),
+               ("点对点", "point_to_point")]
+
+
+def infer_layout(block: dict, blocks: list[dict], stored: dict) -> str:
+    """章节类型：计划/设置 > 祖先标题 > 本章推荐（与编写计划同一口径）。"""
+    from services.chapter_studio import recommend_layout
+    key = str(block["block_id"])
+    while key:
+        if stored.get(key):
+            return stored[key]
+        title = next((str(b.get("title") or "") for b in blocks if str(b["block_id"]) == key), "")
+        for hint, layout in TITLE_HINTS:
+            if hint in title:
+                return layout
+        key = key.rsplit(".", 1)[0] if "." in key else ""
+    return recommend_layout(block, {})
+
+
+async def _layouts(db, project_id: int, thread_id: str) -> dict:
+    """block_id → 章节类型：优先用本项目计划里认定的类型，其次用 chapter_studio 设置。"""
+    from services.writing_plans import plan_units  # noqa: F401  (保持依赖清晰)
+    layouts = {}
+    row = await (await db.execute(
+        "SELECT plan FROM writing_plans WHERE project_id=? AND thread_id=? ORDER BY created_at DESC LIMIT 1",
+        (project_id, thread_id),
+    )).fetchone()
+    if row:
+        import json
+        try:
+            plan = json.loads(row["plan"] or "{}")
+        except ValueError:
+            plan = {}
+        for chapter in plan.get("chapters") or []:
+            if chapter.get("block_id"):
+                layouts[chapter["block_id"]] = chapter.get("layout") or ""
+    for stored in await (await db.execute(
+        "SELECT b.block_id, cs.layout FROM chapter_studio cs JOIN blocks b ON b.id=cs.block_id "
+        "WHERE b.project_id=? AND b.run_thread_id=?", (project_id, thread_id),
+    )).fetchall():
+        layouts[stored["block_id"]] = stored["layout"] or ""
+    return layouts
+
+
+async def check_thread(db, project_id: int, thread_id: str) -> dict:
+    """整章的质检清单：每个可编写章节一份结果 + 汇总。"""
+    from services.block_store import list_blocks
+    from services.chapter_studio import recommend_layout, writing_units
+    from services.writing_specs import list_specs
+
+    blocks = [dict(b) for b in await list_blocks(db, project_id, thread_id)]
+    units = writing_units(blocks)
+    specs = (await list_specs(db)).get("specs") or {}
+    layouts = await _layouts(db, project_id, thread_id)
+    children = {str(b["block_id"]) for b in blocks}
+    results = []
+    for unit in units:
+        key = str(unit["block_id"])
+        has_children = any(other.startswith(key + ".") for other in children if other != key)
+        if has_children and not str(unit.get("content") or "").strip():
+            continue                       # 纯目录节点不检查
+        layout = infer_layout(unit, blocks, layouts)
+        recipe = (specs.get(layout) or {}).get("structured") or {}
+        written = bool(str(unit.get("content") or "").strip())
+        if not written:
+            # 还没写正文的章节不算"问题"（否则每个未开始的章节都会报缺表缺图）
+            results.append({"block_id": key, "title": unit.get("title"), "layout": layout,
+                            "level": unit.get("level"), "started": False,
+                            "stats": {"chars": 0, "tables": 0, "figures": 0, "pages": 0.0, "pending": 0},
+                            "issues": [], "ok": True})
+            continue
+        # 结构（骨架）是**整章**的要求：叶子节只查图表/占位/篇幅，骨架在章级聚合里查
+        leaf_recipe = {"skeleton": [], "figures": recipe.get("figures") or []}
+        row = check_chapter(unit.get("content"), leaf_recipe, int(unit.get("page_budget") or 0))
+        # 父节点的骨架/图表由子节承担，不做硬性拦截，只做提示
+        if has_children:
+            row["issues"] = [i for i in row["issues"] if i["code"] == "pending"]
+            row["ok"] = True
+        results.append({"block_id": key, "title": unit.get("title"), "layout": layout,
+                        "level": unit.get("level"), "started": True, **row})
+    # 章级：按一级目录（技术评分点）聚合一整棵子树的正文，核骨架与图表
+    units = []
+    try:
+        from services.writing_plans import plan_units as _plan_units
+        unit_info = await _plan_units(db, project_id, thread_id)
+        subtree = {}
+        for block in blocks:
+            key = str(block["block_id"])
+            for unit in unit_info.get("units") or []:
+                uid = str(unit["block_id"])
+                if key == uid or key.startswith(uid + "."):
+                    subtree.setdefault(uid, []).append(block)
+        for unit in unit_info.get("units") or []:
+            uid = str(unit["block_id"])
+            rows = subtree.get(uid) or []
+            content = "\n".join(str(b.get("content") or "") for b in rows if str(b.get("content") or "").strip())
+            if not content.strip():
+                continue
+            base = next((b for b in blocks if str(b["block_id"]) == uid), {})
+            layout = infer_layout(base, blocks, layouts)
+            recipe = (specs.get(layout) or {}).get("structured") or {}
+            budget = sum(int(b.get("page_budget") or 0) for b in rows)
+            row = check_chapter(content, recipe, budget)
+            units.append({"block_id": uid, "title": unit.get("title"), "layout": layout,
+                          "chapters": len(rows), "stats": row["stats"], "issues": row["issues"],
+                          "ok": row["ok"]})
+    except Exception:
+        pass
+    started = [r for r in results if r.get("started")]
+    summary = {
+        "chapters": len(results),
+        "started": len(started),
+        "clean": sum(1 for r in started if r["ok"]),
+        "high": sum(1 for r in started for i in r["issues"] if i["level"] == "high"),
+        "medium": sum(1 for r in started for i in r["issues"] if i["level"] == "medium"),
+    }
+    summary["units"] = len(units)
+    summary["unit_issues"] = sum(1 for u in units for i in u["issues"] if i["level"] in ("high", "medium"))
+    return {"thread_id": thread_id, "summary": summary, "chapters": results, "units": units}
+
+
+__all__ = ["check_chapter", "check_thread"]

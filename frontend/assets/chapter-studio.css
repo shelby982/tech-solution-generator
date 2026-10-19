@@ -85,3 +85,13 @@
 /* 依据栏：官方来源列表 */
 .cs-cite-line { margin: 0 0 6px; font-size: 12px; color: #334155; }
 .cs-cite-line small { display: block; font-size: 11px; color: #94a3b8; }
+
+/* 质检清单 */
+.cs-qc-row { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+.cs-qc-row.issue { border-left: 3px solid #f59e0b; }
+.cs-qc-row.ok { border-left: 3px solid #22c55e; }
+.cs-qc-row header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
+.cs-qc-row ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
+.cs-qc-row li.high { color: #b91c1c; }
+.cs-qc-row li.medium { color: #b45309; }
+.cs-qc-row li.low, .cs-qc-row li.info { color: #64748b; }

@@ -194,6 +194,22 @@ async def project_todos(db, project_id: int, package_id: int | None = None) -> d
             "detail": "；".join(gaps)[:240],
             "action": {"label": "去编写页处理"},
         })
+    # 质检：只报 high/medium（确定性检查结果，不阻塞）
+    try:
+        from services.quality_check import check_thread
+        for draft in (await list_response_drafts(db, project_id, package_id)).get("drafts") or [] if package_id else []:
+            if not draft.get("has_outline"):
+                continue
+            quality = await check_thread(db, project_id, draft["thread_id"])
+            if quality["summary"]["high"] or quality["summary"]["medium"]:
+                todos.append({
+                    "kind": "quality", "severity": "medium", "stage": "3",
+                    "title": f"{TYPE_LABEL.get(draft.get('type'), '')}章节质检 {quality['summary']['high'] + quality['summary']['medium']} 项",
+                    "detail": f"高优 {quality['summary']['high']} · 中优 {quality['summary']['medium']}（结构/图表/篇幅）",
+                    "action": {"label": "看质检清单", "thread_id": draft["thread_id"]},
+                })
+    except Exception:
+        pass
     if progress["findings"]:
         todos.append({
             "kind": "review", "severity": "low", "stage": "4",

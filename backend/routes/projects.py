@@ -237,6 +237,20 @@ async def get_response_drafts(project_id: int,
     return JSONResponse(content=result)
 
 
+@router.get("/projects/{project_id}/quality")
+async def project_quality_route(
+    project_id: int,
+    thread_id: str = Query(alias="threadId", min_length=1),
+):
+    """章节质检清单：结构完整性 / 图表数量 / 占位与空词 / 篇幅偏差（确定性检查，不调模型）。"""
+    from services.quality_check import check_thread
+    async with get_db() as db:
+        project = await get_project(db, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
+        return JSONResponse(content=await check_thread(db, project_id, thread_id))
+
+
 @router.get("/projects/{project_id}/progress")
 async def project_progress_route(
     project_id: int,
