@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v236';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v237';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v236';
+} from './material-roles.mjs?v=20261016-v237';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -320,80 +320,145 @@ const SPEC_LABELS = {
   global: '全局纪律（L0）', understanding: '项目理解', solution: '技术方案',
   implementation: '实施计划', evidence: '人员／业绩', point_to_point: '点对点应答',
 };
+const SPEC_SECTIONS = [
+  ['skeleton', '骨架', '章节的论证顺序，每行一项（按顺序执行）'],
+  ['tables', '必表', '必须出现的表格，每行一张（写清表名与列）'],
+  ['figures', '必图', '必须出现的图示，每行一张'],
+  ['pitfalls', '失分点', '评审容易扣分的写法，每行一条'],
+  ['notes', '备注 / 硬约束', '来源与合规、篇幅与语言等补充要求'],
+];
 
-/** 编写规范抽屉：L0 全局纪律 + 各模块配方；可编辑（保存即新版本）、可查历史、可回滚。 */
+/** 编写规范抽屉（IA 重构版）：
+ * 左 = 规范库（L0 全局 + L1 模块配方，带版本与影响面）；右 = 结构化编辑。
+ * 为什么结构化：规范本身就是"骨架/必表/必图/失分点"四类内容，一整块裸文本既改不动也校验不了。
+ */
 export async function openWritingSpecs(layoutKey) {
   const dialog = openDialog('编写规范', '<p class="ws-dim">加载中…</p>');
+  dialog.classList.add('ws-specs-dialog');
   const body = dialog.querySelector('.ws-dialog-body');
-  let data;
+  let specsData;
   try {
-    data = await request('/api/writing-specs');
+    specsData = await request('/api/writing-specs');
   } catch (err) {
     body.innerHTML = `<p class="ws-error">规范加载失败：${esc(String(err?.message || err))}</p>`;
     return;
   }
-  const specs = data.specs || {};
-  const keys = Object.keys(specs).sort((a, b) => (a === 'global' ? -1 : b === 'global' ? 1 : 0));
+  const specs = specsData.specs || {};
+  const keys = Object.keys(specs);
   let selected = layoutKey && specs[layoutKey] ? layoutKey : (specs.global ? 'global' : keys[0]);
-  if (!selected) {
-    body.innerHTML = '<p class="ws-dim">还没有规范数据。</p>';
-    return;
-  }
-  const paint = async () => {
+  if (!selected) { body.innerHTML = '<p class="ws-dim">还没有规范数据。</p>'; return; }
+  let draft = null;            // 当前编辑中的结构化内容
+  let savedVersion = null;
+
+  const structuredToLines = (value) => (value || []).join('\n');
+  const linesToItems = (text) => String(text || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const sameAsSaved = () => JSON.stringify(draft) === JSON.stringify(savedVersion);
+
+  const paint = () => {
     const spec = specs[selected] || {};
-    const hist = await request(`/api/writing-specs/${encodeURIComponent(selected)}/history`).catch(() => ({ versions: [] }));
-    body.innerHTML = `<div class="ws-specs">
-      <nav class="ws-specs-list">${keys.map((key) => `<button type="button" data-spec-key="${esc(key)}" class="${key === selected ? 'on' : ''}">`
-        + `${esc(SPEC_LABELS[key] || key)}${specs[key] ? ` <em>v${specs[key].version}</em>` : ''}</button>`).join('')}
-        <p class="ws-specs-note">迭代建议（来自你的人工修改与审校意见）在 P2 接入。</p>
-      </nav>
-      <section class="ws-specs-editor">
-        <h4>${esc(SPEC_LABELS[selected] || selected)} · 当前 v${spec.version ?? '—'}</h4>
-        <textarea rows="14" spellcheck="false" data-spec-body>${esc(spec.body || '')}</textarea>
-        <div class="ws-specs-actions"><button type="button" data-spec-save>保存为新版本</button><span class="ws-dim" data-spec-msg></span></div>
-        <details${hist.versions.length > 1 ? '' : ''}>
-          <summary>历史版本（${hist.versions.length}）</summary>
-          ${hist.versions.map((v) => `<div class="ws-specs-version"><span>v${v.version} · ${esc(String(v.created_at || '').slice(0, 16))}</span>`
-            + `<button type="button" data-spec-rollback="${v.version}">回滚到此版</button></div>`).join('') || '<p class="ws-dim">暂无历史</p>'}
-        </details>
-        <p class="ws-micro">保存即生成新版本（历史只增不改）。已生成的成稿记录了各自使用的版本；同一标包建议锁定版本，避免前后写法不一致。</p>
+    savedVersion = JSON.parse(JSON.stringify(spec.structured || {}));
+    draft = JSON.parse(JSON.stringify(spec.structured || {}));
+    const isGlobal = selected === 'global';
+    const item = (key, label, hint) => `<section class="ws-spec-section">
+        <header><b>${label}</b><span class="ws-dim">${hint}</span></header>
+        <textarea rows="${key === 'notes' ? 4 : 3}" data-spec-section="${key}" spellcheck="false"
+          placeholder="${key === 'notes' ? '补充要求…' : '每行一项…'}">${esc(key === 'notes' ? (draft.notes || '') : structuredToLines(draft[key]))}</textarea>
+      </section>`;
+    body.innerHTML = `<div class="ws-specs-layout">
+      <aside class="ws-specs-nav">
+        <h4>规范库</h4>
+        <button type="button" class="ws-spec-item${isGlobal ? ' on' : ''}" data-spec-key="global">
+          <span>全局纪律<span class="ws-spec-l0">L0 · 全部章节</span></span>
+          <em>v${specs.global ? specs.global.version : '—'}</em>
+        </button>
+        <h4>模块配方 <span class="ws-dim">L1</span></h4>
+        ${keys.filter((key) => key !== 'global').map((key) => `
+          <button type="button" class="ws-spec-item${key === selected ? ' on' : ''}" data-spec-key="${esc(key)}">
+            <span>${esc(SPEC_LABELS[key] || key)}${specs[key]?.impact ? `<span class="ws-spec-impact">${specs[key].impact} 章在用</span>` : ''}</span>
+            <em>v${specs[key]?.version ?? '—'}</em>
+          </button>`).join('')}
+        <p class="ws-specs-note">迭代建议（来自人工修改与审校意见）在 P2 接入。</p>
+      </aside>
+      <section class="ws-specs-main">
+        <header class="ws-specs-head">
+          <div><h4>${esc(SPEC_LABELS[selected] || selected)}</h4>
+            <p class="ws-dim">当前 <b>v${spec.version ?? '—'}</b>${spec.updated_at ? ` · 修改于 ${esc(String(spec.updated_at).slice(0, 16))}` : ''}${spec.impact ? ` · 影响本项目 ${spec.impact} 个章节` : ''}</p></div>
+          <div class="ws-specs-state"><span data-spec-dirty class="ws-spec-dirty" hidden>未保存修改</span></div>
+        </header>
+        ${SPEC_SECTIONS.map(([key, label, hint]) => item(key, label, hint)).join('')}
+        <footer class="ws-specs-actions">
+          <button type="button" class="ws-spec-save" data-spec-save>保存为新版本</button>
+          <button type="button" data-spec-reset>放弃修改</button>
+          <span class="ws-dim" data-spec-msg></span>
+        </footer>
+        <details class="ws-specs-history"><summary>历史版本 <span data-spec-history-count></span></summary>
+          <div data-spec-history></div></details>
       </section>
     </div>`;
+
+    const refreshDirty = () => {
+      const dirty = !sameAsSaved();
+      const badge = body.querySelector('[data-spec-dirty]');
+      if (badge) badge.hidden = !dirty;
+    };
     body.querySelectorAll('[data-spec-key]').forEach((button) => button.addEventListener('click', () => {
       selected = button.dataset.specKey;
-      void paint();
+      paint();
     }));
+    body.querySelectorAll('[data-spec-section]').forEach((textarea) => textarea.addEventListener('input', () => {
+      const key = textarea.dataset.specSection;
+      if (key === 'notes') draft.notes = textarea.value;
+      else draft[key] = linesToItems(textarea.value);
+      refreshDirty();
+    }));
+    body.querySelector('[data-spec-reset]')?.addEventListener('click', () => paint());
     body.querySelector('[data-spec-save]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
-      const text = body.querySelector('[data-spec-body]').value;
       button.disabled = true;
       try {
         const saved = await request(`/api/writing-specs/${encodeURIComponent(selected)}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: text }),
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: draft }),
         });
-        specs[selected] = { ...(specs[selected] || {}), version: saved.version, body: saved.body };
-        await paint();
+        specs[selected] = { ...(specs[selected] || {}), version: saved.version, structured: saved.structured, text: saved.text };
+        paint();
         body.querySelector('[data-spec-msg]').textContent = `已保存为 v${saved.version}`;
       } catch (err) {
         button.disabled = false;
         body.querySelector('[data-spec-msg]').textContent = `保存失败：${String(err?.message || err)}`;
       }
     });
-    body.querySelectorAll('[data-spec-rollback]').forEach((button) => button.addEventListener('click', async () => {
+    void fillHistory();
+  };
+
+  const fillHistory = async () => {
+    const host = body.querySelector('[data-spec-history]');
+    const countHost = body.querySelector('[data-spec-history-count]');
+    if (!host) return;
+    const hist = await request(`/api/writing-specs/${encodeURIComponent(selected)}/history`).catch(() => ({ versions: [] }));
+    const versions = hist.versions || [];
+    if (countHost) countHost.textContent = `（${versions.length}）`;
+    host.innerHTML = versions.map((version) => `<div class="ws-spec-version">
+        <span><b>v${version.version}</b><span class="ws-dim">${esc(String(version.created_at || '').slice(0, 16))}</span></span>
+        <button type="button" data-spec-rollback="${version.version}">回滚到此版</button>
+      </div>`).join('') || '<p class="ws-dim">暂无历史版本</p>';
+    host.querySelectorAll('[data-spec-rollback]').forEach((button) => button.addEventListener('click', async () => {
+      const version = Number(button.dataset.specRollback);
+      if (!globalThis.confirm(`回滚到 v${version}？会生成一个新版本（历史不丢）。`)) return;
       try {
         await request(`/api/writing-specs/${encodeURIComponent(selected)}/rollback`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ version: Number(button.dataset.specRollback) }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }),
         });
         const fresh = await request('/api/writing-specs');
         Object.assign(specs, fresh.specs || {});
-        await paint();
+        paint();
       } catch (err) {
         body.querySelector('[data-spec-msg]').textContent = `回滚失败：${String(err?.message || err)}`;
       }
     }));
   };
-  await paint();
+
+  paint();
 }
 
 export async function openProgressHub() {

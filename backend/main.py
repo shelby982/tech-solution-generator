@@ -156,6 +156,8 @@ async def lifespan(app: FastAPI):
     from db import get_db, init_db
     async with get_db() as conn:
         await init_db(conn)
+        from services.writing_specs import migrate_legacy_specs
+        await migrate_legacy_specs(conn)
     logger.info("SQLite 数据库已初始化")
     # 启动对账：把"进程中途死掉、却看起来像在等用户"的运行标记出来（见 services/run_recovery.py）
     try:

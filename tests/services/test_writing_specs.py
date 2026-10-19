@@ -23,8 +23,10 @@ async def test_seeds_global_and_all_recipes(db):
     keys = set(data["specs"])
     assert {"global", "understanding", "solution", "implementation", "evidence", "point_to_point"} <= keys
     assert data["specs"]["global"]["version"] == 1
-    assert "图表" in data["specs"]["global"]["body"]
-    assert "必表" in data["specs"]["understanding"]["body"]
+    assert "必图" in data["specs"]["global"]["text"] and "来源" in data["specs"]["global"]["text"]
+    assert "【必表】" in data["specs"]["understanding"]["text"]
+    # 结构化：骨架/必表/必图/失分点都可逐项编辑
+    assert data["specs"]["understanding"]["structured"]["skeleton"][0] == "政策依据"
 
 
 async def test_save_creates_new_version_and_history(db):
@@ -34,7 +36,7 @@ async def test_save_creates_new_version_and_history(db):
     hist = await history(db, "understanding")
     assert [row["version"] for row in hist["versions"]] == [2, 1]
     # 历史只增不改：旧版本正文仍在
-    assert any("必表" in row["body"] for row in hist["versions"])
+    assert any("【必表】" in (row["text"] or "") for row in hist["versions"])
 
 
 async def test_rollback_writes_old_body_as_new_version(db):
@@ -42,7 +44,7 @@ async def test_rollback_writes_old_body_as_new_version(db):
     await save_spec(db, "solution", "临时改动")
     restored = await rollback(db, "solution", 1)
     assert restored["version"] == 3
-    assert "必图" in restored["body"]      # 回到 v1 的正文
+    assert "【必图】" in restored["text"]    # 回到 v1 的正文
 
 
 async def test_spec_for_returns_global_plus_recipe_with_versions(db):

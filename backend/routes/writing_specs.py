@@ -11,7 +11,8 @@ router = APIRouter(prefix="/writing-specs", tags=["writing-specs"])
 
 
 class SpecBody(BaseModel):
-    body: str = Field(min_length=1)
+    # 兼容两种写法：结构化（skeleton/tables/figures/pitfalls/notes）或纯文本
+    body: object = Field()
 
 
 class RollbackBody(BaseModel):
