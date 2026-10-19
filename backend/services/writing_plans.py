@@ -359,6 +359,34 @@ async def requirement_coverage(db, project_id: int, plan_id: str, thread_id: str
             "percent": round(responded / total * 100) if total else 0}
 
 
+async def update_figures_plan(db, project_id: int, plan_id: str, block_id: str,
+                               tables: list[dict], figures: list[dict]) -> dict:
+    """编辑本章的图表计划（每张表/图的用途与来源）。"""
+    loaded = await load_plan(db, project_id, plan_id)
+    plan = loaded["plan"]
+    chapter = next((item for item in plan.get("chapters") or []
+                    if str(item.get("block_id")) == str(block_id)), None)
+    if chapter is None:
+        raise ValueError("计划里没有这一章")
+
+    def _clean(items: list[dict]) -> list[dict]:
+        result = []
+        for item in items or []:
+            name = str((item or {}).get("name") or "").strip()
+            if not name:
+                continue
+            result.append({"name": name[:60],
+                           "purpose": str((item or {}).get("purpose") or "").strip()[:120],
+                           "source": str((item or {}).get("source") or "").strip()[:120]})
+        return result
+
+    chapter["figures_plan"] = {"tables": _clean(tables), "figures": _clean(figures)}
+    await db.execute("UPDATE writing_plans SET plan=? WHERE id=?",
+                     (json.dumps(plan, ensure_ascii=False), plan_id))
+    await db.commit()
+    return {"plan_id": plan_id, "block_id": block_id, "figures_plan": chapter["figures_plan"]}
+
+
 async def chapter_needs(db, project_id: int, plan_id: str, thread_id: str) -> dict:
     """需求级充足度：每条要求 → 素材需求（已补 N 片段 / 待补）。"""
     loaded = await load_plan(db, project_id, plan_id)
@@ -501,13 +529,14 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     plan_requirements = (chapter or {}).get("requirements") or []
     table_items = [item for item in plan_requirements if (item.get("type") or "") == "table"]
     figure_items = [item for item in plan_requirements if (item.get("type") or "") == "figure"]
+    stored_figures = (chapter or {}).get("figures_plan") or {}
     figures_plan = {
-        "tables": [{"name": str(item.get("text") or "")[:40],
-                    "purpose": str(item.get("text") or ""),
-                    "source": "外部来源片段 / 我方材料"} for item in table_items],
-        "figures": [{"name": str(item.get("text") or "")[:40],
-                     "purpose": str(item.get("text") or ""),
-                     "source": "外部来源图片 / 生成示意图"} for item in figure_items],
+        "tables": stored_figures.get("tables") or [
+            {"name": str(item.get("text") or "")[:40], "purpose": str(item.get("text") or ""),
+             "source": "外部来源片段 / 我方材料"} for item in table_items],
+        "figures": stored_figures.get("figures") or [
+            {"name": str(item.get("text") or "")[:40], "purpose": str(item.get("text") or ""),
+             "source": "外部来源图片 / 生成示意图"} for item in figure_items],
     }
     gaps = [item for item in (chapter or {}).get("gaps") or []]
     pending = sum(1 for requirement in requirements if requirement["material"] != "已满足")
@@ -656,4 +685,4 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
 
 __all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
-           "needs_for_prompt", "plan_of_block", "chapter_plan"]
+           "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan"]

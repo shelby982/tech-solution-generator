@@ -31,6 +31,18 @@ class RequirementsBody(BaseModel):
     requirements: list[RequirementItem] = Field(default_factory=list)
 
 
+class FigureItem(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    purpose: str = ""
+    source: str = ""
+
+
+class FiguresPlanBody(BaseModel):
+    block_id: str = Field(min_length=1)
+    tables: list[FigureItem] = Field(default_factory=list)
+    figures: list[FigureItem] = Field(default_factory=list)
+
+
 class BindBody(BaseModel):
     block_id: str = Field(min_length=1)
     requirement_id: str = Field(min_length=1)
@@ -90,6 +102,19 @@ async def read_chapter_plan(project_id: int, block_id: str, threadId: str):
     from services.writing_plans import chapter_plan
     async with get_db() as db:
         return await chapter_plan(db, project_id, threadId, block_id)
+
+
+@router.put('/projects/{project_id}/writing-plans/{plan_id}/figures-plan')
+async def put_figures_plan(project_id: int, plan_id: str, body: FiguresPlanBody):
+    """编辑本章图表计划（每张表/图的用途与来源）。"""
+    from services.writing_plans import update_figures_plan
+    async with get_db() as db:
+        try:
+            return await update_figures_plan(db, project_id, plan_id, body.block_id,
+                                             [item.model_dump() for item in body.tables],
+                                             [item.model_dump() for item in body.figures])
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
 
 
 @router.get('/projects/{project_id}/writing-plans/{plan_id}/needs')

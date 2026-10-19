@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v268';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v268';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v268';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v269';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v269';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v269';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -394,7 +394,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             ${pages ? '' : '<span class="cs-dim">本章尚未分到页数，可到「应答策划」调整篇幅分配。</span>'}</p>
         </section>
         <section class="cs-cp-sec" data-cp-sec="c">
-          <h5>C · 怎么写更好（本章写法）</h5>
+          <h5>C · 怎么写更好（本章写法）<button type="button" class="cs-cp-mini" data-cp-open-spec>查看 / 修改写作规范</button></h5>
           <div class="cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
             ${(guidance.tables || []).length ? `<p><b>建议表格</b>：${esc(guidance.tables.join('；'))}</p>` : ''}
@@ -412,7 +412,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${(data.gaps || []).length ? `<p class="cs-warning">正文素材缺口：${esc(data.gaps.join('；'))}</p>` : ''}
         </section>
         <section class="cs-cp-sec" data-cp-sec="e">
-          <h5>E · 体现哪些图表</h5>
+          <h5>E · 体现哪些图表<button type="button" class="cs-cp-mini" data-cp-edit-fig>编辑图表</button></h5>
           <p class="cs-cp-line">表格 <b>${figures.tables.length}</b> 张 · 图示 <b>${figures.figures.length}</b> 张</p>
           ${(figures.tables || []).map((item) => `<p class="cs-cp-fig">▤ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
           ${(figures.figures || []).map((item) => `<p class="cs-cp-fig">▦ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
@@ -433,6 +433,65 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       body.querySelector('[data-cp-open-branch]')?.addEventListener('click', () => {
         dialog.close();
         if (unit) void openWritingPlan(unit);
+      });
+      // 写法要点 → 打开本章类型的编写规范（草稿区可改，影响后续生成）
+      body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
+        globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
+          {detail: {layout: (data.guidance && data.guidance.layout) || 'global'}}));
+      });
+      // 图表计划编辑（内联）
+      body.querySelector('[data-cp-edit-fig]')?.addEventListener('click', () => {
+        const figures = data.figures_plan || {tables: [], figures: []};
+        const rowHtml = (item, kind, index) => `<div class="cs-cp-figrow" data-fig-row data-kind="${kind}">
+            <input type="text" data-fig-name value="${esc(item.name || '')}" placeholder="名称（如：政策依据映射表）" />
+            <input type="text" data-fig-purpose value="${esc(item.purpose || '')}" placeholder="用途" />
+            <input type="text" data-fig-source value="${esc(item.source || '')}" placeholder="来源（我方材料/外部来源/生成）" />
+            <button type="button" class="cs-req-del" data-fig-del>×</button></div>`;
+        const editor = globalThis.document.createElement('dialog');
+        editor.className = 'cs-plan-dialog';
+        editor.innerHTML = `<header><h3>编辑图表计划</h3><button type="button" aria-label="关闭">×</button></header>
+          <div class="cs-plan-body"><p class="cs-muted">说清"这一章要出哪些表、哪些图，分别干什么用、从哪来"。</p>
+            <h5 class="cs-cp-sub">表格</h5><div data-fig-tables>${(figures.tables || []).map((item, index) => rowHtml(item, 'table', index)).join('')}</div>
+            <button type="button" class="cs-cp-mini" data-fig-add="table">＋ 添加表格</button>
+            <h5 class="cs-cp-sub">图示</h5><div data-fig-figures>${(figures.figures || []).map((item, index) => rowHtml(item, 'figure', index)).join('')}</div>
+            <button type="button" class="cs-cp-mini" data-fig-add="figure">＋ 添加图示</button>
+            <div class="cs-plan-actions"><button type="button" class="mw-btn" data-fig-cancel>取消</button>
+              <button type="button" class="mw-btn primary" data-fig-save>保存图表计划</button></div>
+            <p class="cs-dim" data-fig-msg></p></div>`;
+        globalThis.document.body.append(editor);
+        editor.querySelector('header button').onclick = () => editor.close();
+        editor.querySelector('[data-fig-cancel]').onclick = () => editor.close();
+        editor.addEventListener('close', () => editor.remove());
+        editor.querySelectorAll('[data-fig-add]').forEach((button) => button.addEventListener('click', () => {
+          const kind = button.dataset.figAdd;
+          const host2 = editor.querySelector(kind === 'table' ? '[data-fig-tables]' : '[data-fig-figures]');
+          host2.insertAdjacentHTML('beforeend', rowHtml({}, kind, 0));
+        }));
+        editor.addEventListener('click', (event) => {
+          if (event.target.closest('[data-fig-del]')) event.target.closest('[data-fig-row]').remove();
+        });
+        editor.querySelector('[data-fig-save]').onclick = async () => {
+          const collect = (selector) => [...editor.querySelectorAll(`${selector} [data-fig-row]`)].map((row) => ({
+            name: (row.querySelector('[data-fig-name]') || {}).value?.trim() || '',
+            purpose: (row.querySelector('[data-fig-purpose]') || {}).value?.trim() || '',
+            source: (row.querySelector('[data-fig-source]') || {}).value?.trim() || '',
+          })).filter((item) => item.name);
+          if (!data.plan_id) { editor.querySelector('[data-fig-msg]').textContent = '本章还没有计划'; return; }
+          try {
+            const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/figures-plan`, {
+              method: 'PUT', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({block_id: blockId, tables: collect('[data-fig-tables]'), figures: collect('[data-fig-figures]')}),
+              signal: AbortSignal.timeout(30000),
+            });
+            const payload = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+            status('图表计划已保存');
+            editor.close();
+            data = await load();
+            await render();
+          } catch (err) { editor.querySelector('[data-fig-msg]').textContent = `保存失败：${String(err.message || err)}`; }
+        };
+        editor.showModal();
       });
       // 要求编辑（内联）
       body.querySelector('[data-cp-edit-req]')?.addEventListener('click', () => {
