@@ -139,3 +139,16 @@ body:has(#workspace-nav) #generation-done-banner,body:has(#workspace-nav) #btn-g
 .ws-mat-row .ws-mat-url { word-break: break-all; }
 .ws-mat-row em { font-style: normal; font-size: 11px; color: #475569; white-space: nowrap; }
 .ws-mat-row + h4 { margin-top: 12px; }
+
+/* 素材中心：左右布局（左侧分区导航 + 右侧列表），不再上下堆叠 */
+.ws-mat-layout { display: grid; grid-template-columns: 196px 1fr; min-height: 420px; }
+.ws-mat-nav { border-right: 1px solid #e2e8f0; padding: 4px 10px 4px 0; }
+.ws-mat-nav h4 { margin: 4px 0 8px; font-size: 12px; color: #64748b; letter-spacing: .04em; }
+.ws-mat-nav button { display: flex; width: 100%; justify-content: space-between; align-items: center; font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid transparent; background: transparent; border-radius: 8px; cursor: pointer; color: #334155; text-align: left; }
+.ws-mat-nav button:hover { background: #eef2f7; }
+.ws-mat-nav button.on { background: #fff; border-color: #bfdbfe; box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
+.ws-mat-nav button em { font-style: normal; font-size: 11px; color: #64748b; }
+.ws-mat-note { margin-top: 14px; font-size: 11px; color: #94a3b8; line-height: 1.6; }
+.ws-mat-main { padding: 4px 0 4px 16px; max-height: 68vh; overflow: auto; }
+.ws-mat-main h4 { margin: 4px 0 8px; font-size: 13px; }
+.ws-mat-main .ws-mat-sub { margin-top: 14px; font-size: 12px; color: #64748b; }

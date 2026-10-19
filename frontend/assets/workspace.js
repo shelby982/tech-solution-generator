@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v244';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v245';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v244';
+} from './material-roles.mjs?v=20261016-v245';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -493,16 +493,26 @@ export async function openMaterialsHub() {
       <span><b>${esc(c.title || c.url)}</b><small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')} · 关联 ${(c.links || []).length} 章</small>
       <small class="ws-mat-url">${esc(c.url)}</small></span>
       <em>${c.status === 'accepted' ? '已接受' : '待处理'}</em></div>`).join('') || `<p class="ws-dim">${empty}</p>`);
-  body.innerHTML = `<nav class="ws-hub-tabs">
-      <button type="button" data-mat="mine" class="on">我方材料 ${materials.length}</button>
-      <button type="button" data-mat="cite">外部依据 ${activeCitations.length}</button>
-    </nav>
-    <section data-mat-pane="mine">${materialRows}</section>
-    <section data-mat-pane="cite" hidden>
-      <p class="ws-dim">外部依据必须可核验（官方原文）；二手转载、公众号、百科不采。引用不占"我方材料"名额。</p>
-      <h4>已接受（${accepted.length}）</h4>${citationRows(accepted, '还没有已接受的官方依据：在编写页「素材」页签点「添加官方来源」')}
-      ${pending.length ? `<h4>待处理（${pending.length}）</h4>${citationRows(pending, '')}` : ''}
-    </section>`;
+  body.innerHTML = `<div class="ws-mat-layout">
+      <nav class="ws-mat-nav" aria-label="素材分区">
+        <h4>素材</h4>
+        <button type="button" data-mat="mine" class="on">我方材料 <em>${materials.length}</em></button>
+        <button type="button" data-mat="cite">外部依据 <em>${activeCitations.length}</em></button>
+        <p class="ws-mat-note">我方材料＝证据；外部依据＝官方来源。两者分开，生成时也分开注入。</p>
+      </nav>
+      <section class="ws-mat-main">
+        <div data-mat-pane="mine">
+          <h4>我方材料 ${materials.length}</h4>
+          ${materialRows}
+        </div>
+        <div data-mat-pane="cite" hidden>
+          <h4>外部依据 ${activeCitations.length}</h4>
+          <p class="ws-dim">外部依据必须可核验（官方原文）；二手转载、公众号、百科不采。引用不占"我方材料"名额。</p>
+          <h4 class="ws-mat-sub">已接受（${accepted.length}）</h4>${citationRows(accepted, '还没有已接受的官方依据：在编写页「素材」页签点「添加官方来源」')}
+          ${pending.length ? `<h4 class="ws-mat-sub">待处理（${pending.length}）</h4>${citationRows(pending, '')}` : ''}
+        </div>
+      </section>
+    </div>`;
   body.querySelectorAll('[data-mat]').forEach((button) => button.addEventListener('click', () => {
     body.querySelectorAll('[data-mat]').forEach((x) => x.classList.toggle('on', x === button));
     body.querySelectorAll('[data-mat-pane]').forEach((pane) => {
