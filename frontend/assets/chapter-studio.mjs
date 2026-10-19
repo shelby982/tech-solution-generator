@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v251';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v251';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v251';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v252';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v252';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v252';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -237,31 +237,39 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
   }
 
-  /** 官方源引用：先自动找官方来源（检索 API / 官方入口扫描），再由用户确认或自己补链接。 */
+  /** 官方来源（V2）：一个输入框搞定 —— 输入检索词→自动找；粘贴链接→直接核验。
+   *  操作上的取舍：合并两个入口、候选行内预览+接受、说明折叠、入口常驻、接受后有回执。 */
   function openCitationDialog(blockKey, initialQuery = '') {
     const dialog = globalThis.document.createElement('dialog');
-    dialog.className = 'cs-plan-dialog';
-    dialog.innerHTML = `<header><h3>官方来源</h3><button type="button" aria-label="关闭">×</button></header>
+    dialog.className = 'cs-plan-dialog cs-cite-dialog';
+    dialog.innerHTML = `<header><h3>官方来源<small data-cite-count></small></h3><button type="button" aria-label="关闭">×</button></header>
       <div class="cs-plan-body">
-        <p class="cs-muted">外部信息必须可核验：只接受政府、南方电网/广东电网、标准发布机构、
-          招标方与公共资源交易平台的<strong>原文</strong>。二手转载、公众号、百科不采；
-          找不到官方源时正文写【待补充：需官方来源】。</p>
-        <label class="cs-cite-label">① 先找：</label>
-        <div class="cs-cite-row"><input type="text" data-cite-query value="${esc(initialQuery)}"
-            placeholder="要查什么？例：数字化转型 指导意见" /><button type="button" class="mw-btn primary" data-cite-discover>自动找来源</button></div>
-        <div data-cite-candidates></div>
-        <details class="cs-cite-portals"><summary>官方入口（自己找也行）</summary><div data-cite-portals></div></details>
-        <label class="cs-cite-label">② 或用官方原文链接：</label>
-        <div class="cs-cite-row"><input type="url" data-cite-url placeholder="https://www.gov.cn/… 或 https://www.csg.cn/…" /><button type="button" class="mw-btn" data-cite-fetch>抓取核验</button></div>
-        <div data-cite-result></div>
+        <div class="cs-cite-search">
+          <input type="text" data-cite-input value="${esc(initialQuery)}"
+            placeholder="输入检索词自动找官方原文；或直接粘贴 https:// 链接核验" />
+          <button type="button" class="mw-btn primary" data-cite-go>自动找来源</button>
+        </div>
+        <div class="cs-cite-quick">
+          <span class="cs-dim">官方入口</span>
+          <span data-cite-portals class="cs-cite-chips"></span>
+        </div>
+        <details class="cs-cite-rule"><summary>来源规则</summary>
+          只采政府、南方电网/广东电网、标准发布机构、招标方与公共资源交易平台的<strong>原文</strong>；
+          二手转载、公众号、百科不采；找不到官方源时正文写【待补充：需官方来源】。
+        </details>
+        <div data-cite-panel></div>
       </div>`;
     globalThis.document.body.append(dialog);
     dialog.querySelector('header button').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove());
     dialog.showModal();
-    const result = dialog.querySelector('[data-cite-result]');
-    const candidates = dialog.querySelector('[data-cite-candidates]');
-    const portalsHost = dialog.querySelector('[data-cite-portals]');
+    const panel = dialog.querySelector('[data-cite-panel]');
+    const input = dialog.querySelector('[data-cite-input]');
+    const goButton = dialog.querySelector('[data-cite-go]');
+    const countHost = dialog.querySelector('[data-cite-count]');
+    let accepted = 0;
+    const markAccepted = () => { countHost.textContent = accepted ? `已接受 ${accepted} 条` : ''; };
+    const isUrl = (value) => /^https?:\/\//i.test(String(value || '').trim());
     const post = async (url, body) => {
       const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body), signal: AbortSignal.timeout(120000)});
@@ -270,70 +278,97 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return data;
     };
     const renderPortals = (list) => {
-      portalsHost.innerHTML = (list || []).map((portal) => `<p class="cs-cite-portal">
-          <a href="${esc(portal.url)}" target="_blank" rel="noreferrer">${esc(portal.name)}</a>
-          <small>${esc(portal.hint)}</small></p>`).join('');
+      const host = dialog.querySelector('[data-cite-portals]');
+      host.innerHTML = (list || []).map((portal) => `<a href="${esc(portal.url)}" target="_blank" rel="noreferrer" title="${esc(portal.hint)}">${esc(portal.name.replace(' · ', ' '))}</a>`).join('');
     };
-    const verify = async (url, button) => {
-      if (!url || url.length < 8) { result.innerHTML = '<p class="cs-warning">请先选一个候选或粘贴官方原文链接。</p>'; return; }
+    const accept = async (candidate, row) => {
+      const button = row.querySelector('[data-cite-accept]');
+      button.disabled = true;
+      try {
+        await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId});
+        accepted += 1;
+        markAccepted();
+        row.classList.add('accepted');
+        if (button) { button.textContent = '已接受 ✓'; button.disabled = true; }
+        status('已接受 1 条官方来源');
+      } catch (err) {
+        row.querySelector('[data-cite-msg]').textContent = `接受失败：${String(err.message || err)}`;
+        button.disabled = false;
+      }
+    };
+    const verifyInto = async (url, row, button) => {
+      if (!url || url.length < 8) { panel.innerHTML = '<p class="cs-warning">请先输入检索词或粘贴官方原文链接。</p>'; return; }
+      const preview = row ? row.querySelector('[data-cite-preview]') : null;
       if (button) { button.disabled = true; button.textContent = '抓取中…'; }
+      if (preview) preview.innerHTML = '<p class="cs-dim">正在抓取并抽取机构/日期/摘录…</p>';
       try {
         const candidate = await post(`/api/projects/${projectId}/citations/fetch`, {url});
-        result.innerHTML = `<section class="cs-cite-card">
+        const html = `<div class="cs-cite-card">
             <h4>${esc(candidate.title)}</h4>
-            <p class="cs-muted">${esc(candidate.publisher || candidate.domain)} · ${esc(candidate.published_at || '日期待补')} · ${esc(candidate.domain)}</p>
+            <p class="cs-muted">${esc(candidate.publisher || candidate.domain)} · ${esc(candidate.published_at || '日期待补')}</p>
             <p>${esc(candidate.excerpt || '')}</p>
             <p class="cs-dim">${esc(candidate.url)}</p>
             <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-cite-accept>接受为引用</button></div>
-            <p class="cs-dim" data-cite-msg></p></section>`;
-        result.querySelector('[data-cite-accept]').onclick = async (event) => {
-          const acceptButton = event.currentTarget;
-          acceptButton.disabled = true;
-          try {
-            await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId});
-            result.querySelector('[data-cite-msg]').textContent = '已接受：该来源将进入本章编写依据';
-            status('已接受 1 条官方来源');
-          } catch (err) {
-            result.querySelector('[data-cite-msg]').textContent = `接受失败：${String(err.message || err)}`;
-            acceptButton.disabled = false;
-          }
-        };
+            <p class="cs-dim" data-cite-msg></p></div>`;
+        if (preview) { preview.innerHTML = html; preview.querySelector('[data-cite-accept]').onclick = () => void accept(candidate, row); }
+        else { panel.innerHTML = html; panel.querySelector('[data-cite-accept]').onclick = (event) => void accept(candidate, panel); }
       } catch (err) {
-        result.innerHTML = `<p class="cs-warning">抓取失败：${esc(String(err.message || err))}</p>`;
+        const message = `<p class="cs-warning">抓取失败：${esc(String(err.message || err))}</p>`;
+        if (preview) preview.innerHTML = message; else panel.innerHTML = message;
       } finally {
         if (button) { button.disabled = false; button.textContent = '抓取核验'; }
       }
     };
-    dialog.querySelector('[data-cite-discover]').onclick = async (event) => {
-      const button = event.currentTarget;
-      const query = dialog.querySelector('[data-cite-query]').value.trim();
-      if (query.length < 2) { candidates.innerHTML = '<p class="cs-warning">先写要查什么（≥2 字）。</p>'; return; }
-      button.disabled = true;
-      button.textContent = '查找中…';
+    const discover = async () => {
+      const query = input.value.trim();
+      if (query.length < 2) { panel.innerHTML = '<p class="cs-warning">先输入要查什么（≥2 字）。</p>'; return; }
+      goButton.disabled = true;
+      goButton.textContent = '查找中…';
+      panel.innerHTML = '<p class="cs-dim">正在官方入口里查找…</p>';
       try {
         const data = await post(`/api/projects/${projectId}/citations/discover`, {query});
         renderPortals(data.portals);
-        const rows = (data.results || []).map((item, index) => `<div class="cs-cite-cand">
-            <span><b>${esc(item.title || item.url)}</b><small>${esc(item.domain || '')}${item.source === 'search' ? ' · 检索结果' : ' · 官方入口扫描'}</small></span>
-            <button type="button" class="mw-btn" data-cite-pick="${index}">抓取核验</button></div>`).join('');
-        candidates.innerHTML = `<p class="cs-dim">${esc(data.message || '')}</p>${rows || '<p class="cs-dim">没找到候选：可以点开官方入口自己找，或粘贴原文链接。</p>'}`;
-        candidates.querySelectorAll('[data-cite-pick]').forEach((pick) => pick.addEventListener('click', () => {
-          const item = (data.results || [])[Number(pick.dataset.citePick)];
-          if (item) { dialog.querySelector('[data-cite-url]').value = item.url; void verify(item.url, pick); }
+        const results = data.results || [];
+        const rows = results.map((item, index) => `<div class="cs-cite-cand${item.matched ? ' hit' : ''}" data-cite-row="${index}">
+            <div class="cs-cite-cand-main">
+              <b>${esc(item.title || item.url)}</b>
+              <small>${esc(item.domain)}${item.matched ? ' · 命中检索词' : ' · 未命中检索词，建议打开原文自查'}</small>
+            </div>
+            <div class="cs-cite-cand-acts">
+              <a href="${esc(item.url)}" target="_blank" rel="noreferrer">打开</a>
+              <button type="button" class="mw-btn" data-cite-verify="${index}">抓取核验</button>
+            </div>
+            <div data-cite-preview></div>
+          </div>`).join('');
+        panel.innerHTML = `<p class="cs-dim">${esc(data.message || '')}</p>${rows
+          || '<p class="cs-dim">没有候选。<button type="button" class="mw-btn" data-cite-open-portals>打开官方入口自己找</button></p>'}`;
+        const rowsHost = panel;
+        rowsHost.querySelectorAll('[data-cite-verify]').forEach((button) => button.addEventListener('click', () => {
+          const row = button.closest('[data-cite-row]');
+          const item = results[Number(button.dataset.citeVerify)];
+          if (item) { input.value = item.url; goButton.textContent = '核验链接'; void verifyInto(item.url, row, button); }
         }));
+        rowsHost.querySelector('[data-cite-open-portals]')?.addEventListener('click', () => {
+          const first = (data.portals || [])[0];
+          if (first) globalThis.open(first.url, '_blank', 'noreferrer');
+        });
       } catch (err) {
-        candidates.innerHTML = `<p class="cs-warning">查找失败：${esc(String(err.message || err))}</p>`;
+        panel.innerHTML = `<p class="cs-warning">查找失败：${esc(String(err.message || err))}</p>`;
       } finally {
-        button.disabled = false;
-        button.textContent = '自动找来源';
+        goButton.disabled = false;
+        if (!isUrl(input.value)) goButton.textContent = '自动找来源';
       }
     };
-    dialog.querySelector('[data-cite-fetch]').onclick = (event) => verify(dialog.querySelector('[data-cite-url]').value.trim(), event.currentTarget);
+    input.addEventListener('input', () => { goButton.textContent = isUrl(input.value) ? '核验链接' : '自动找来源'; });
+    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void discover(); } });
+    goButton.onclick = () => (isUrl(input.value) ? verifyInto(input.value.trim(), null, goButton) : discover());
     renderPortals([]);
     fetch(`/api/projects/${projectId}/citations/portals`, {signal: AbortSignal.timeout(15000)})
       .then((resp) => resp.json())
       .then((data) => { if (dialog.isConnected) renderPortals(data.portals); })
       .catch(() => {});
+    markAccepted();
+    if (initialQuery && !isUrl(initialQuery)) void discover();
   }
 
   /** 文字生成图：用户粘贴一段描述 → 抽成关系链图（:::diagram）→ 插入正文。 */

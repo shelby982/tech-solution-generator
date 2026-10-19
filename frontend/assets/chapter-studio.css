@@ -113,3 +113,23 @@
 .cs-cite-portal { margin: 6px 0; }
 .cs-cite-portal a { color: #1d4ed8; text-decoration: none; }
 .cs-cite-portal small { display: block; color: #94a3b8; }
+
+/* 官方来源 V2：单输入框 + 官方入口 chips + 候选行内预览 */
+.cs-cite-dialog header h3 small { margin-left: 8px; font-size: 12px; font-weight: 400; color: #15803d; }
+.cs-cite-search { display: flex; gap: 8px; align-items: center; }
+.cs-cite-search input { flex: 1; font: inherit; font-size: 13px; padding: 9px 12px; border: 1px solid #dbe3ef; border-radius: 10px; box-sizing: border-box; }
+.cs-cite-quick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; font-size: 12px; }
+.cs-cite-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cs-cite-chips a { font-size: 11px; color: #475569; background: #f1f5f9; border-radius: 999px; padding: 3px 9px; text-decoration: none; }
+.cs-cite-chips a:hover { background: #e2e8f0; }
+.cs-cite-rule { margin: 8px 0; font-size: 12px; color: #64748b; }
+.cs-cite-rule summary { cursor: pointer; }
+.cs-cite-cand { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; margin-top: 6px; font-size: 12px; }
+.cs-cite-cand.hit { border-color: #bbf7d0; background: #f7fdf9; }
+.cs-cite-cand.accepted { border-color: #86efac; background: #f0fdf4; }
+.cs-cite-cand-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cs-cite-cand-main b { font-weight: 600; color: #0f172a; }
+.cs-cite-cand-main small { color: #94a3b8; }
+.cs-cite-cand-acts { display: flex; align-items: center; gap: 8px; }
+.cs-cite-cand-acts a { font-size: 11px; color: #1d4ed8; text-decoration: none; }
+.cs-cite-cand [data-cite-preview] { grid-column: 1 / -1; }

@@ -79,10 +79,15 @@ def extract_page(html: str, url: str) -> dict:
     match = re.search(r"(20\d{2})[-年/.](\d{1,2})[-月/.](\d{1,2})", html or "")
     if match:
         date = f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
-    text = _strip_html(html or "")
-    if title and text.startswith(title):
-        text = text[len(title):]
-    excerpt = text[:EXCERPT_LIMIT].strip()
+    # 摘录优先取**最长的正文段落**：直接截 HTML 会把"首页 | 简 | 繁 | 登录…"这类导航带进来
+    paragraphs = [_strip_html(match.group(1)) for match in
+                  re.finditer(r"(?is)<p[^>]*>(.*?)</p>", html or "")]
+    body = max((p for p in paragraphs if len(p) >= 24), key=len, default="")
+    if not body:
+        body = _strip_html(html or "")
+        if title and body.startswith(title):
+            body = body[len(title):]
+    excerpt = re.sub(r"\s+", " ", body).strip()[:EXCERPT_LIMIT]
     return {"url": url, "domain": domain_of(url), "title": title or "(无标题)",
             "publisher": publisher, "published_at": date, "excerpt": excerpt}
 
@@ -126,8 +131,9 @@ def _link_candidates(html: str, base_url: str, keywords: list[str], limit: int =
         if not is_official(url) or (url, title) in seen:
             continue
         seen.add((url, title))
-        item = {"url": url, "title": title[:80], "domain": domain_of(url)}
-        if keywords and any(keyword in title for keyword in keywords):
+        hit = bool(keywords) and any(keyword in title for keyword in keywords)
+        item = {"url": url, "title": title[:80], "domain": domain_of(url), "matched": hit}
+        if hit:
             matched.append(item)
         elif any(hint in title for hint in DOC_TITLE_HINTS):
             docs.append(item)
