@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v280';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v280';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v280';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v281';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v281';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v281';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -401,12 +401,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const points = data.basis?.points || [];
       const pages = data.pages || 0;
       const missingDeliverables = deliverables.filter((item) => item.status === '未写' || item.status === '不足');
-      const isParent = children.length > 0;
+      const isCatalog = !!data.catalog;
+      const isParent = children.length > 0 && !isCatalog;
       // 结论卡：一眼看到的 3 个数字 + 1 个主操作
-      const headline = isParent
+      const headline = isCatalog
+        ? `目录节点 · 下辖 ${children.length} 节（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
+        : isParent
         ? `总述 ${wordPlan.written || 0} / ${wordPlan.total} 字 · 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
         : `计划 ${pages || '—'} 页 ≈ ${wordPlan.total || '—'} 字 · 已写 ${wordPlan.written || 0} 字（${wordPlan.percent || 0}%）`;
-      const mainAction = isParent ? '去写总述' : (missingDeliverables.length ? '去补齐缺项' : '去生成正文');
+      const mainAction = isCatalog ? '看子节进度' : (isParent ? '去写总述' : (missingDeliverables.length ? '去补齐缺项' : '去生成正文'));
       body.innerHTML = `
         <div class="cs-cp-top">
           <div class="cs-cp-top-main">
@@ -417,7 +420,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <button type="button" class="mw-btn primary cs-cp-main-btn" data-cp-generate>${esc(mainAction)}</button>
         </div>
 
-        <section class="cs-cp-block" data-cp-sec="deliverables">
+        ${isCatalog ? '' : `<section class="cs-cp-block" data-cp-sec="deliverables">
           <header><b>要交什么</b><em>${deliverables.length} 项${missingDeliverables.length ? ` · 待补 ${missingDeliverables.length}` : ' · 齐'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></header>
           ${deliverables.length ? deliverables.map((item) => `<div class="cs-cp-del ${esc(item.status)}">
@@ -426,7 +429,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 <small>${item.target_words ? `目标 ${item.target_words} 字` : '不单独计字'} · 已写 ${item.written_words || 0} 字${item.status !== '达标' ? ` · <i>${esc(item.status)}</i>` : ''}</small></div>
             </div>`).join('') : '<p class="cs-cp-empty">本章还没有交付物</p>'}
           ${(data.key_points || []).length ? `<p class="cs-cp-brief">这几项必须答到：${esc((data.key_points || []).join(' / '))}</p>` : ''}
-        </section>
+        </section>`}
 
         <details class="cs-cp-block" data-cp-sec="standard">
           <summary><b>按什么标准</b><em>${points.length ? `评分点 ${points.length} 个` : ''}${clauses.length ? ` · 招标条款 ${clauses.length} 条` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length} 条` : ''}</em></summary>

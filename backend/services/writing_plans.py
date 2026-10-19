@@ -923,7 +923,13 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     # ── 可执行计划（D1~D4）──
     deliverables, written_total, segments = _deliverables(requirements, content)
     is_parent_chapter = any(key.startswith(str(block_id) + ".") for key in blocks)
-    if is_parent_chapter:
+    # 纯目录节点（有子节、自己没正文）→ 不单独写正文，只做子节汇总
+    is_catalog = is_parent_chapter and not str(content or "").strip()
+    if is_catalog:
+        deliverables = []
+        word_plan = {"total": 0, "written": 0, "percent": 0, "over": False,
+                     "advice": "本章是目录节点：不单独写正文，正文在下列各节里写"}
+    elif is_parent_chapter:
         # 父章只写总述（300–500 字），子节在各自章节里写，不在这里叠加
         for item in deliverables:
             # "总述"那条给 400 字，其余（评分点继承来的要素）在子节里写
@@ -999,6 +1005,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "children": children,
+        "catalog": is_catalog,
         "has_children": has_children,
         "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
         "has_children": has_children,
