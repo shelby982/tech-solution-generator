@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from db import get_db
+from infra.llm.json_utils import extract_json_object
 from services.block_store import get_block, list_blocks, create_material
 from services.chapter_studio import (LAYOUTS, TEMPLATES, ids, content_hash, writing_units,
                                     recommend_layout, extract_material, material_key_points, build_writing_prompt)
@@ -187,6 +188,51 @@ async def unlink_material(block_id: int, material_id: int):
         await db.execute("UPDATE chapter_studio SET writing_status='review' WHERE block_id=? AND writing_status='complete'", (block_id,))
         await db.commit()
     return {'unlinked': True}
+
+
+class DiagramBody(BaseModel):
+    text: str = Field(min_length=10, max_length=8000)
+    title: str = Field(default='', max_length=80)
+
+
+def normalize_diagram_nodes(raw) -> list[str]:
+    """把模型给的关系链节点规整：去空、去重、去箭头、截断到 60 字，3~8 个。"""
+    nodes = []
+    for item in raw or []:
+        text = str(item or '').replace('->', ' ').replace('→', ' ').strip()
+        if not text:
+            continue
+        text = text[:60].strip()
+        if text not in nodes:
+            nodes.append(text)
+    return nodes[:8]
+
+
+@router.post('/blocks/{block_id}/studio/diagram')
+async def generate_diagram(block_id: int, body: DiagramBody):
+    """用户粘贴文字 → 生成一幅结构/关系图（`:::diagram`）。
+
+    产品口径：不生成 Visio 级位图架构图（不可审计），只把**文字里的结构**抽成
+    关系链图，插进正文由用户核对。作者=图示 Agent，提示词与它保持一致。
+    """
+    from agents.chapter_team import call_role
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+    system = ('你是图示 Agent。把用户提供的文字抽成 3~8 个节点的**关系链**（单向箭头连接），'
+              '节点是短语而不是整段句子，每个节点不超过 60 字，不要出现箭头符号本身。'
+              '只输出 JSON：{"nodes":["节点1","节点2","节点3"]}')
+    try:
+        raw, model = await call_role('diagram', system, {'text': body.text}, {})
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    parsed = extract_json_object(raw) if isinstance(raw, str) else (raw or {})
+    nodes = normalize_diagram_nodes((parsed or {}).get('nodes'))
+    if len(nodes) < 2:
+        raise HTTPException(422, '这段文字抽不出结构，建议补充层级或流程信息')
+    title = (body.title or block.get('title') or '结构关系图').strip()[:80]
+    markdown = f':::diagram {title}\n' + ' -> '.join(nodes) + '\n:::'
+    return {'nodes': nodes, 'markdown': markdown, 'title': title, 'model': model}
 
 
 @router.post('/blocks/{block_id}/studio/materials')

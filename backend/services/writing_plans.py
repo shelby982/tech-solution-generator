@@ -216,6 +216,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
         plan = Plan(objective=f"{leaf.get('title')}：按《{LAYOUTS[layout]['label']}》结构编制",
                     tasks=tasks, gaps=chapter_gaps).model_dump()
         chapters.append({
+            "id": leaf.get("id"),
             "block_id": leaf["block_id"], "title": leaf.get("title"), "level": leaf.get("level"),
             "layout": layout, "layout_label": LAYOUTS[layout]["label"],
             "pages": int(leaf.get("page_budget") or 0),

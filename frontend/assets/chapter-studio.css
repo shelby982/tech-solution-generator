@@ -67,3 +67,11 @@
 
 /* 编写页右栏：编写规范块（版本 + 就近入口） */
 [data-pane="basis"][data-spec-pane] , [data-pane="basis"] .cs-spec-line { font-size: 12px; }
+
+/* 文字生成图：工具栏按钮 + 预览 + 计划里的素材缺口卡 */
+.cs-toolbar [data-action="diagram"] { font: inherit; font-size: 12px; padding: 6px 10px; border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 8px; cursor: pointer; }
+.cs-toolbar [data-action="diagram"]:hover { background: #f1f5f9; }
+.cs-diagram-preview { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; font-size: 12px; white-space: pre-wrap; margin: 8px 0; }
+.cs-plan-gap { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #fde68a; }
+.cs-plan-gap-actions { display: flex; gap: 8px; margin-top: 6px; }
+.cs-plan-upload { display: inline-flex; align-items: center; cursor: pointer; }

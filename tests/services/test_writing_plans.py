@@ -99,3 +99,13 @@ async def test_confirm_plan_presets_chief_plan_and_creates_jobs(db, monkeypatch)
     # 重复确认要拒绝
     with pytest.raises(ValueError):
         await confirm_plan(db, 1, plan["id"])
+
+
+def test_normalize_diagram_nodes_filters_and_caps():
+    """文字生成图：节点规整（去箭头/去重/截断 60 字/最多 8 个）——不调模型也能断言。"""
+    from routes.chapter_studio import normalize_diagram_nodes
+    nodes = normalize_diagram_nodes(["采集层 -> 存储层", "存储层", "存储层", "", "分析层→展示层", "x" * 80])
+    assert nodes[0] == "采集层   存储层"
+    assert nodes.count("存储层") == 1
+    assert len(nodes[-1]) == 60
+    assert len(normalize_diagram_nodes([f"n{i}" for i in range(20)])) == 8

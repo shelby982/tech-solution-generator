@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v237';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v237';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v237';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v238';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v238';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v238';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -122,7 +122,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
-        <div class="cs-toolbar"><button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button><button data-action="save" disabled>保存</button><div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div><details class="cs-more"><summary>更多</summary><div class="cs-more-menu"><details data-add-menu><summary>添加内容</summary><button data-action="text">文字说明</button><button data-action="table">手动表格</button><button data-action="diagram">手动关系图</button></details><button data-action="complete">确认本章完成</button><button data-action="export-chapter">导出本章 Word</button><button data-action="export-group">导出本组 Word</button></div></details></div>
+        <div class="cs-toolbar"><button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button><button data-action="save" disabled>保存</button><div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div><button type="button" data-action="diagram" title="把一段文字抽成结构图，插入正文">文字生成图</button><details class="cs-more"><summary>更多</summary><div class="cs-more-menu"><details data-add-menu><summary>添加内容</summary><button data-action="text">文字说明</button><button data-action="table">手动表格</button><button data-action="diagram">手动关系图</button></details><button data-action="complete">确认本章完成</button><button data-action="export-chapter">导出本章 Word</button><button data-action="export-group">导出本组 Word</button></div></details></div>
         <div data-cs="status" role="status" aria-live="polite"></div>
         <div data-cs="recovery" hidden></div>
         <textarea class="cs-editor" data-cs="editor" aria-label="本章正文" placeholder="点击上方「AI 编制」生成本章内容，也可直接在此编写。生成结果将显示在这里；核对后点击「保存正文」。"></textarea>
@@ -192,6 +192,54 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const recipeLabel = (key) => RECIPE_LABELS[key] || key;
 
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
+  /** 文字生成图：用户粘贴一段描述 → 抽成关系链图（:::diagram）→ 插入正文。 */
+  function openDiagramDialog() {
+    if (!active) return;
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>文字生成图</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body"><p class="cs-muted">粘贴一段描述层级、流程或因果关系的文字（≥10 字），
+        抽成关系链图后插入本章正文，可再手动修改。复杂架构图建议上传素材图。</p>
+        <textarea data-diagram-text rows="6" placeholder="例：监控平台由采集层、存储层、分析层、展示层组成，采集层上报到存储层…"></textarea>
+        <div class="cs-plan-actions"><button type="button" class="mw-btn" data-diagram-cancel>取消</button>
+          <button type="button" class="mw-btn primary" data-diagram-run>生成图示</button></div>
+        <div data-diagram-result></div></div>`;
+    (globalThis.document.body).append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    dialog.querySelector('[data-diagram-cancel]').onclick = () => dialog.close();
+    dialog.querySelector('[data-diagram-run]').onclick = async (event) => {
+      const button = event.currentTarget;
+      const text = dialog.querySelector('[data-diagram-text]').value.trim();
+      const result = dialog.querySelector('[data-diagram-result]');
+      if (text.length < 10) { result.innerHTML = '<p class="cs-warning">请至少粘贴 10 个字。</p>'; return; }
+      button.disabled = true;
+      button.textContent = '生成中…';
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/studio/diagram`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text, title: active.title}), signal: AbortSignal.timeout(120000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        result.innerHTML = `<p class="cs-muted">节点 ${data.nodes.length} 个 · 模型 ${esc(data.model || '')}</p>
+          <pre class="cs-diagram-preview">${esc(data.markdown)}</pre>
+          <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-diagram-insert>插入正文</button></div>`;
+        result.querySelector('[data-diagram-insert]').onclick = () => {
+          insert(data.markdown, '');
+          dialog.close();
+          status('已插入图示，请核对关系是否准确');
+        };
+      } catch (err) {
+        result.innerHTML = `<p class="cs-warning">生成失败：${esc(String(err.message || err))}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = '生成图示';
+      }
+    };
+  }
+
   async function openWritingPlan(unitBlockId) {
     if (!unitBlockId) return;
     const dialog = globalThis.document.createElement('dialog');
@@ -223,12 +271,38 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       + plan.chapters.map((c) => `<section class="cs-plan-chapter">
           <h4>${esc(c.title)} <em>${esc(c.layout_label)}${c.pages ? ` · ${c.pages} 页` : ''}</em></h4>
           <p>${c.tasks.map((t) => `<span class="cs-plan-task ${esc(t.kind)}">${kindLabel[t.kind] || t.kind} · ${esc(t.title)}</span>`).join('')}</p>
-          ${c.gaps.length ? `<p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>` : ''}
+          ${c.gaps.length ? `<div class="cs-plan-gap"><p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>
+            <div class="cs-plan-gap-actions"><label class="mw-btn cs-plan-upload">上传素材
+              <input type="file" hidden data-plan-upload="${esc(String(c.id || ''))}" /></label>
+              <button type="button" class="mw-btn" data-plan-goto="${esc(String(c.block_id))}">去本章编写</button></div>
+            <p class="cs-dim" data-plan-upload-msg></p></div>` : ''}
         </section>`).join('')
       + `${plan.gaps.length ? `<p class="cs-muted">全章素材缺口 ${plan.gaps.length} 项</p>` : ''}`
       + `<div class="cs-plan-actions"><button type="button" class="mw-btn" data-plan-cancel>取消</button>
            <button type="button" class="mw-btn primary" data-plan-confirm>确认并开始编制</button></div>`;
     body.querySelector('[data-plan-cancel]').onclick = () => dialog.close();
+    body.querySelectorAll('[data-plan-upload]').forEach((input) => input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const card = input.closest('.cs-plan-gap');
+      const msg = card ? card.querySelector('[data-plan-upload-msg]') : null;
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const resp = await fetch(`/api/blocks/${input.dataset.planUpload}/studio/materials`, {
+          method: 'POST', body: form, signal: AbortSignal.timeout(180000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        if (msg) { msg.textContent = `已上传《${file.name}》并关联到本章`; msg.classList.remove('cs-warning'); }
+      } catch (err) {
+        if (msg) { msg.textContent = `上传失败：${String(err.message || err)}`; msg.classList.add('cs-warning'); }
+      }
+    }));
+    body.querySelectorAll('[data-plan-goto]').forEach((button) => button.addEventListener('click', async () => {
+      dialog.close();
+      await select(button.dataset.planGoto);
+    }));
     body.querySelector('[data-plan-confirm]').onclick = async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -531,6 +605,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     host.querySelector('.cs-more').removeAttribute('open');
     try {
       if(action==='save') await save();
+      if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
         // 生成闸：本章所属一级目录还没有"已确认"的编写计划 → 先看计划、确认后再生成。
         // 否则「AI 编制本章」会先跑起来，计划闸形同虚设（产品评审结论）。
