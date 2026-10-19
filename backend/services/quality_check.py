@@ -380,4 +380,57 @@ async def ignore_finding(db, project_id: int, finding_id: str) -> bool:
     return cursor.rowcount > 0
 
 
-__all__ = ["check_chapter", "check_thread", "sync_findings", "ignore_finding", "CHECK_META"]
+async def basis_coverage(db, project_id: int, thread_id: str, block_id: str) -> dict:
+    """依据 ↔ 正文对应：本章承接的评分点 / 规范条款是否已在正文里有着落。"""
+    import json as _json
+    import re as _re
+
+    row = await (await db.execute(
+        "SELECT review_point_ids, spec_requirement_ids, content FROM blocks "
+        "WHERE project_id=? AND run_thread_id=? AND block_id=?", (project_id, thread_id, str(block_id)),
+    )).fetchone()
+    if not row:
+        raise ValueError("找不到该章节")
+    content = str(row["content"] or "")
+
+    def _load(raw: str) -> list[str]:
+        try:
+            value = _json.loads(raw or "[]")
+        except ValueError:
+            return []
+        return [str(item) for item in value if str(item)]
+
+    def _responds(label: str, min_len: int = 2) -> bool:
+        keys = [part for part in _re.split(r"[\s、，,；;/（）()【】]+", label) if len(part) >= min_len][:4]
+        return bool(keys) and any(key in content for key in keys)
+
+    points = []
+    point_ids = _load(row["review_point_ids"])
+    if point_ids:
+        placeholders = ",".join("?" * len(point_ids))
+        for point in await (await db.execute(
+            f"SELECT point_id, factor, item, criterion, points FROM review_points "
+            f"WHERE run_thread_id=? AND point_id IN ({placeholders})", (thread_id, *point_ids),
+        )).fetchall():
+            label = str(point["item"] or point["factor"] or "")
+            points.append({"point_id": point["point_id"], "label": label,
+                           "factor": point["factor"], "criterion": point["criterion"],
+                           "points": point["points"], "responded": _responds(label)})
+    clauses = []
+    clause_ids = _load(row["spec_requirement_ids"])
+    if clause_ids:
+        placeholders = ",".join("?" * len(clause_ids))
+        for clause in await (await db.execute(
+            f"SELECT requirement_id, title, text, mandatory_level FROM spec_requirements "
+            f"WHERE run_thread_id=? AND requirement_id IN ({placeholders})", (thread_id, *clause_ids),
+        )).fetchall():
+            label = str(clause["title"] or clause["text"] or "")
+            clauses.append({"requirement_id": clause["requirement_id"], "label": label,
+                            "mandatory_level": clause["mandatory_level"],
+                            "responded": _responds(label, 3)})
+    return {"block_id": str(block_id), "points": points, "clauses": clauses,
+            "responded": sum(1 for item in points + clauses if item["responded"]),
+            "total": len(points) + len(clauses)}
+
+
+__all__ = ["check_chapter", "check_thread", "sync_findings", "ignore_finding", "basis_coverage", "CHECK_META"]

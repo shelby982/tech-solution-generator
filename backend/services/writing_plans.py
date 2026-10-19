@@ -404,6 +404,116 @@ async def bind_snippets(db, project_id: int, plan_id: str, block_id: str, requir
             "bound": len(indices)}
 
 
+async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> dict:
+    """**本章编写计划**（用户口径：计划是针对每一个章节的，不是按大章节设计）。
+
+    只返回这一章自己该知道的东西：
+      ① 要求依据：每条要求 + 依据（评分点/规范条款）+ 是否已回应
+      ② 缺失素材：每条要求对应的素材需求（已补片段 / 待补）+ 正文素材缺口
+    """
+    from services.block_store import list_blocks
+    from services.quality_check import basis_coverage
+
+    found = await plan_of_block(db, project_id, thread_id, str(block_id))
+    chapter = None
+    plan_id = ""
+    if found:
+        plan_id, plan = found
+        chapter = next((item for item in plan.get("chapters") or []
+                        if str(item.get("block_id")) == str(block_id)), None)
+    blocks = {str(b.get("block_id")): dict(b) for b in await list_blocks(db, project_id, thread_id)}
+    block = blocks.get(str(block_id)) or {}
+    content = str(block.get("content") or "")
+
+    # 依据：本章承接的评分点/规范条款
+    try:
+        basis = await basis_coverage(db, project_id, thread_id, str(block_id))
+    except ValueError:
+        basis = {"points": [], "clauses": [], "responded": 0, "total": 0}
+    basis_labels = [item["label"] for item in (basis.get("points") or []) + (basis.get("clauses") or [])]
+
+    bound_rows = await (await db.execute(
+        "SELECT requirement_id, citation_id, segment_index FROM need_snippets WHERE block_id=?", (str(block_id),),
+    )).fetchall()
+    # 素材状态按"门槛"判定：不同类型的需求要看是否绑到了**对应类型**的片段
+    need_kind = {"text": {"text", "table"}, "table": {"table"}, "figure": {"image"}, "material": {"text", "table", "image"}}
+    bound_by_req: dict[str, list[dict]] = {}
+    for row in bound_rows:
+        citation = await (await db.execute(
+            "SELECT title, segments, trust FROM citations WHERE id=?", (row["citation_id"],),
+        )).fetchone()
+        if not citation:
+            continue
+        try:
+            segments = json.loads(citation["segments"] or "[]")
+        except ValueError:
+            segments = []
+        index = int(row["segment_index"])
+        segment = segments[index] if 0 <= index < len(segments) else {}
+        bound_by_req.setdefault(str(row["requirement_id"]), []).append({
+            "kind": segment.get("kind"), "heading": segment.get("heading"),
+            "source": citation["title"], "trust": citation["trust"],
+            "excerpt": str(segment.get("content") or "")[:120],
+        })
+
+    requirements = []
+    for requirement in (chapter or {}).get("requirements") or []:
+        rid = str(requirement.get("id"))
+        kind = requirement.get("type") or "text"
+        wanted = need_kind.get(kind, {"text"})
+        matched = [item for item in bound_by_req.get(rid, []) if item.get("kind") in wanted]
+        status = "已满足" if matched else ("已补不足" if bound_by_req.get(rid) else "待补")
+        requirements.append({
+            **requirement,
+            "basis": basis_labels,                       # 这条要求服务的依据（评分点/条款）
+            "responded": _content_responds(content, requirement),
+            "material": status,
+            "bound": bound_by_req.get(rid, []),
+        })
+    # C 怎么写更好：读配方（骨架/必表/必图/失分点），只读展示
+    layout = block.get("design_layout") or (chapter or {}).get("layout") or "generic"
+    from services.writing_specs import list_specs
+    specs = (await list_specs(db)).get("specs") or {}
+    recipe = (specs.get(layout) or {}).get("structured") or {}
+    guidance = {
+        "layout": layout,
+        "skeleton": (recipe.get("skeleton") or [])[:6],
+        "tables": (recipe.get("tables") or [])[:6],
+        "figures": (recipe.get("figures") or [])[:4],
+        "pitfalls": (recipe.get("pitfalls") or [])[:4],
+        "notes": (recipe.get("notes") or [])[:4],
+    }
+    # E 图表清单：计划要求几张表/几张图 + 用途与来源
+    plan_requirements = (chapter or {}).get("requirements") or []
+    table_items = [item for item in plan_requirements if (item.get("type") or "") == "table"]
+    figure_items = [item for item in plan_requirements if (item.get("type") or "") == "figure"]
+    figures_plan = {
+        "tables": [{"name": str(item.get("text") or "")[:40],
+                    "purpose": str(item.get("text") or ""),
+                    "source": "外部来源片段 / 我方材料"} for item in table_items],
+        "figures": [{"name": str(item.get("text") or "")[:40],
+                     "purpose": str(item.get("text") or ""),
+                     "source": "外部来源图片 / 生成示意图"} for item in figure_items],
+    }
+    gaps = [item for item in (chapter or {}).get("gaps") or []]
+    pending = sum(1 for requirement in requirements if requirement["material"] != "已满足")
+    return {
+        "plan_id": plan_id, "block_id": str(block_id), "title": block.get("title") or (chapter or {}).get("title"),
+        "layout": block.get("design_layout") or (chapter or {}).get("layout"),
+        "pages": (chapter or {}).get("pages") or 0,
+        "words": len(content.replace(" ", "")),
+        "requirements": requirements,
+        "basis": basis,
+        "guidance": guidance,
+        "figures_plan": figures_plan,
+        "gaps": gaps,
+        "stats": {"requirements": len(requirements),
+                  "responded": sum(1 for requirement in requirements if requirement["responded"]),
+                  "material_pending": pending,
+                  "material_short": sum(1 for requirement in requirements if requirement["material"] == "已补不足")},
+    }
+
+
 async def plan_of_block(db, project_id: int, thread_id: str, block_id: str) -> tuple[str, dict] | None:
     """找到**包含该章**的计划（计划按一级目录分开，不能简单取"最新一份"）。"""
     rows = await (await db.execute(
@@ -532,4 +642,4 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
 
 __all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
-           "needs_for_prompt", "plan_of_block"]
+           "needs_for_prompt", "plan_of_block", "chapter_plan"]

@@ -237,6 +237,17 @@ async def get_response_drafts(project_id: int,
     return JSONResponse(content=result)
 
 
+@router.get("/projects/{project_id}/basis")
+async def project_basis(project_id: int, threadId: str, blockId: str):
+    """依据 ↔ 正文对应：本章承接的评分点 / 规范条款是否已落在正文里。"""
+    from services.quality_check import basis_coverage
+    async with get_db() as db:
+        try:
+            return await basis_coverage(db, project_id, threadId, blockId)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.post("/projects/{project_id}/quality/findings/{finding_id}/ignore")
 async def ignore_quality_finding(project_id: int, finding_id: str):
     """把一条质检发现标为"已处理"（不再出现在待修清单）。"""

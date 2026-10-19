@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v263';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v263';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v263';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v265';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v265';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v265';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -153,6 +153,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 只在这一层出「编写计划」入口（一页 7 次确认，而不是每节一次）。
   const specInfo = { specs: {} };    // 编写规范（L0/L1）版本，右栏显示 + 就近打开
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
+  let basisInfo = null;
+
+  /** 依据 ↔ 正文对应（评分点/规范条款是否已落在正文）。 */
+  async function loadBasis(blockKey) {
+    if (!blockKey) { basisInfo = null; return; }
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)});
+      basisInfo = resp.ok ? await resp.json() : null;
+    } catch (e) {
+      basisInfo = null;
+    }
+  }
+
   async function loadCitations() {
     try {
       const resp = await fetch(`/api/projects/${projectId}/citations?status=accepted`, {signal: AbortSignal.timeout(12000)});
@@ -314,7 +327,113 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
   }
 
-  /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
+  /** 本章编写计划（S1a 只读）：要写什么 / 写多少 / 怎么写更好 / 要哪些素材 / 哪些图表 / 还差什么。 */
+  async function openChapterPlan(blockId) {
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog cs-cp-dialog';
+    dialog.innerHTML = `<header><h3>本章编写计划</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body"><p class="cs-muted">正在加载本章要求与素材…</p></div>`;
+    globalThis.document.body.append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    const body = dialog.querySelector('.cs-plan-body');
+    let data = null;
+    const typeLabel = {text: '文字', table: '表格', figure: '图示', material: '素材'};
+    const materialTone = (status) => status === '已满足' ? 'ok' : status === '已补不足' ? 'warn' : 'bad';
+    const load = async () => {
+      const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockId)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+      return payload;
+    };
+    const loadChapterIssues = async () => {
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/quality?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(60000)});
+        const payload = await resp.json().catch(() => ({}));
+        const row = (payload.chapters || []).find((item) => String(item.block_id) === String(blockId));
+        return (row?.issues || []).filter((issue) => issue.level !== 'info');
+      } catch (e) { return []; }
+    };
+    const render = async () => {
+      const issues = await loadChapterIssues();
+      const requirements = data.requirements || [];
+      const pages = data.pages || 0;
+      const writtenPages = Math.round((data.words || 0) / 250 * 10) / 10;
+      const stats = data.stats || {};
+      const guidance = data.guidance || {};
+      const figures = data.figures_plan || {tables: [], figures: []};
+      body.innerHTML = `
+        <div class="cs-cp-head"><h4>${esc(data.title || '')}</h4>
+          <span class="cs-cp-facts">计划 ${pages || '—'} 页 · 要求 ${stats.requirements || 0} 条（已回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
+        </div>
+        <section class="cs-cp-sec" data-cp-sec="a">
+          <h5>A · 要写什么（要求与依据）</h5>
+          ${requirements.length ? requirements.map((requirement) => `<div class="cs-cp-req">
+              <div class="cs-cp-req-line"><span class="cs-plan-task ${esc(requirement.type || 'text')}">${typeLabel[requirement.type] || '要求'}</span>
+                <b>${esc(requirement.text)}</b>
+                <em class="${requirement.responded ? 'ok' : ''}">${requirement.responded ? '正文已回应' : '正文未回应'}</em></div>
+              <div class="cs-cp-req-meta">
+                <span class="cs-cp-mat ${materialTone(requirement.material)}">素材${requirement.material}</span>
+                <small>依据：${esc((requirement.basis || []).join('；').slice(0, 40) || '（未绑定评分点/条款）')}</small>
+              </div></div>`).join('') : '<p class="cs-dim">本章还没有编写要求。</p>'}
+        </section>
+        <section class="cs-cp-sec" data-cp-sec="b">
+          <h5>B · 写多少（篇幅）</h5>
+          <p class="cs-cp-line">计划 ${pages || '—'} 页 · 正文已写 ${writtenPages} 页（${data.words || 0} 字）<span class="cs-dim">（篇幅在「应答策划」分配；"已写"以进度为准）</span></p>
+        </section>
+        <section class="cs-cp-sec" data-cp-sec="c">
+          <h5>C · 怎么写更好（本章写法）</h5>
+          <div class="cs-cp-write">
+            ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
+            ${(guidance.tables || []).length ? `<p><b>建议表格</b>：${esc(guidance.tables.join('；'))}</p>` : ''}
+            ${(guidance.figures || []).length ? `<p><b>建议图示</b>：${esc(guidance.figures.join('；'))}</p>` : ''}
+            ${(guidance.pitfalls || []).length ? `<p class="cs-cp-pitfall"><b>易失分</b>：${esc(guidance.pitfalls.join('；'))}</p>` : ''}
+          </div>
+        </section>
+        <section class="cs-cp-sec" data-cp-sec="d">
+          <h5>D · 要哪些素材（素材需求）</h5>
+          ${requirements.length ? requirements.map((requirement) => `<div class="cs-cp-need">
+              <span class="cs-cp-mat ${materialTone(requirement.material)}">${requirement.material}</span>
+              <span class="cs-cp-need-text">${esc(requirement.text)}</span>
+              ${(requirement.bound || []).length ? `<small>已绑 ${(requirement.bound || []).length} 个片段：${esc((requirement.bound || []).slice(0, 2).map((b) => b.heading || b.kind || '').join('、'))}</small>` : '<small class="cs-cp-bad">尚未绑定片段</small>'}
+            </div>`).join('') : '<p class="cs-dim">没有素材需求。</p>'}
+          ${(data.gaps || []).length ? `<p class="cs-warning">正文素材缺口：${esc(data.gaps.join('；'))}</p>` : ''}
+        </section>
+        <section class="cs-cp-sec" data-cp-sec="e">
+          <h5>E · 体现哪些图表</h5>
+          <p class="cs-cp-line">表格 <b>${figures.tables.length}</b> 张 · 图示 <b>${figures.figures.length}</b> 张</p>
+          ${(figures.tables || []).map((item) => `<p class="cs-cp-fig">▤ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
+          ${(figures.figures || []).map((item) => `<p class="cs-cp-fig">▦ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
+          ${(!figures.tables.length && !figures.figures.length) ? '<p class="cs-dim">本章计划未要求图表。</p>' : ''}
+        </section>
+        <section class="cs-cp-sec" data-cp-sec="f">
+          <h5>F · 还差什么（验收清单）</h5>
+          ${issues.length ? issues.map((issue) => `<div class="cs-cp-issue ${esc(issue.level)}">
+              <b>${esc(issue.check || '')}</b><span>${esc(issue.message)}</span></div>`).join('') : '<p class="cs-muted">没有待处理项。</p>'}
+          ${(!issues.length && !(data.stats.material_pending)) ? '' : '<p class="cs-dim">处理入口见右侧素材页签 / 「更多 › 质检清单」。</p>'}
+        </section>
+        <div class="cs-plan-actions">
+          <button type="button" class="mw-btn" data-cp-close>关闭</button>
+          <button type="button" class="mw-btn primary" data-cp-generate>AI 编制本章</button>
+        </div>
+        <p class="cs-dim" data-cp-msg></p>`;
+      body.querySelector('[data-cp-close]').onclick = () => dialog.close();
+      body.querySelector('[data-cp-generate]').onclick = () => {
+        dialog.close();
+        void select(blockId);
+        globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
+      };
+    };
+    try {
+      data = await load();
+      await render();
+    } catch (err) {
+      body.innerHTML = `<p class="cs-warning">加载失败：${esc(String(err.message || err))}</p>`;
+    }
+  }
+
+  /** 来源的可用片段  /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
   function openCitationSegments(citationId) {
     const citation = citationInfo.rows.find((row) => String(row.id) === String(citationId));
     if (!citation) return;
@@ -1072,7 +1191,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const paintAside = () => {
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
-    get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据</h4>${context.points.map(p=>`<details><summary>${esc(p.item||p.factor)} · ${p.points ?? '—'} 分</summary><p>${esc(p.criterion)}</p></details>`).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
+    const basisKey = String(active.block_id);
+    const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
+    get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据${basisCovered ? ` <small>正文已回应 ${basisCovered.responded}/${basisCovered.total}</small>` : ''}</h4>${context.points.map((p, index) => {
+        const cov = basisCovered?.points?.[index];
+        return `<details><summary>${esc(p.item || p.factor)} · ${p.points ?? '—'} 分
+          <b class="${cov?.responded ? 'cs-cite-used' : 'cs-cite-unused'}">${cov ? (cov.responded ? '正文已回应' : '正文未回应') : ''}</b></summary><p>${esc(p.criterion)}</p></details>`;
+      }).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
       ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
         return recipe ? `<section data-pane="basis"><h4>编写规范</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
       ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
@@ -1133,8 +1258,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const info = unit ? planUnits.get(unit) : null;
     if (!info) { slot.innerHTML = ''; return; }
     slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
-      + `title="《${esc(info.title)}》共 ${info.leaves} 节：先确认计划，再按章并发生成">`
-      + `《${esc(info.title)}》编写计划 · ${info.leaves} 节</button>`;
+      + `title="本章的计划（要求依据/素材/图表/还差什么）；目录下 ${info.leaves} 节的批量确认在左树一级目录上">`
+      + `本章编写计划</button>`;
   }
 
   async function select(id) {
@@ -1151,6 +1276,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       live.reset();previewVisible=false;
       active=block;context=data;dirty=false;
       profile[block.id]=data.profile;
+      await loadBasis(block.block_id);   // 依据 ↔ 正文对应（评分点/条款是否已回应）
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
@@ -1194,7 +1320,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const specLink=event.target.closest('[data-spec]');
     if(specLink){globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',{detail:{layout:specLink.dataset.spec}}));return;}
     const planButton=event.target.closest('[data-plan]');
-    if(planButton){await openWritingPlan(planButton.dataset.plan);return;}
+    if(planButton){await openChapterPlan(String(active?.block_id || ''));return;}
     const chapter=event.target.closest('[data-chapter]');
     if(chapter) {await select(chapter.dataset.chapter);return;}
     const material=event.target.closest('[data-material]');

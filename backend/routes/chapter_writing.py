@@ -84,6 +84,14 @@ async def update_plan_requirements(project_id: int, plan_id: str, body: Requirem
             raise HTTPException(404, str(exc))
 
 
+@router.get('/projects/{project_id}/chapters/{block_id}/plan')
+async def read_chapter_plan(project_id: int, block_id: str, threadId: str):
+    """**本章编写计划**：只包含这一章的要求依据 + 缺失素材（计划按章，不按大章节）。"""
+    from services.writing_plans import chapter_plan
+    async with get_db() as db:
+        return await chapter_plan(db, project_id, threadId, block_id)
+
+
 @router.get('/projects/{project_id}/writing-plans/{plan_id}/needs')
 async def plan_needs(project_id: int, plan_id: str, threadId: str):
     """需求级充足度：每条要求 → 素材需求（已补 N 片段 / 待补）。"""
