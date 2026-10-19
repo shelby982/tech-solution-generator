@@ -90,3 +90,40 @@ def test_official_portals_shape():
         assert portal["url"].startswith("http")
         assert portal["domain"] in portal["url"]
         assert portal["name"] and portal["hint"]
+
+
+def test_404_footer_page_rejected_by_fetch_guard():
+    """抓取校验：页脚（ICP/备案）不当成候选 —— 404/重定向页容易抓到这种内容。"""
+    import asyncio
+    from unittest.mock import patch
+
+    from services import citations as module
+
+    class FakeResponse:
+        status_code = 200
+        text = "<html><head><title>站点</title></head><body><p>网站标识码bm01000001 京ICP备05070218号</p></body></html>"
+        content = text.encode("utf-8")
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    with patch.object(module.httpx, "AsyncClient", FakeClient):
+        try:
+            asyncio.get_event_loop().run_until_complete(module.fetch_candidate("https://www.gov.cn/zhengce/"))
+        except ValueError as exc:
+            assert "页脚" in str(exc)
+        else:
+            raise AssertionError("页脚页应被拒绝")

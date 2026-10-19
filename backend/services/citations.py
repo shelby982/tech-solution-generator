@@ -214,8 +214,12 @@ async def fetch_candidate(url: str, whitelist_additions: list[str] | None = None
     if len(resp.content) > MAX_BYTES:
         raise ValueError("页面过大，请换更具体的原文页")
     candidate = extract_page(resp.text, url)
-    if not candidate["excerpt"]:
+    excerpt = candidate["excerpt"] or ""
+    if len(excerpt) < 30:
         raise ValueError("页面没有可读正文（可能是登录页或脚本渲染）")
+    # 404/重定向页常被抓成站点页脚：ICP/备案号出现即视为无效原文
+    if re.search(r"(ICP备|公网安备|网站标识码)", excerpt):
+        raise ValueError("抓到的是站点页脚（可能是 404 或重定向页），请换原文链接")
     candidate["status"] = "pending"
     return candidate
 
