@@ -269,6 +269,16 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     materials = await _material_counts(db, project_id)
     from services.writing_specs import list_specs
     specs = (await list_specs(db)).get("specs") or {}
+    # 总篇幅（「应答策划」确认过的总页数）——系统据此统筹分配
+    total_pages = 0
+    budget_row = await (await db.execute(
+        "SELECT value FROM split_answers WHERE thread_id=? AND key='page_budget'", (thread_id,),
+    )).fetchone()
+    if budget_row:
+        try:
+            total_pages = int((json.loads(budget_row["value"]) or {}).get("total") or 0)
+        except ValueError:
+            total_pages = 0
     # 章节类型优先用**用户在编写页选过的**（chapter_studio.layout），没选过才按标题推荐
     stored = {int(r["block_id"] if hasattr(r, "keys") else r[0]):
               str((r["layout"] if hasattr(r, "keys") else r[1]) or "")
@@ -314,6 +324,38 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
                 f"SELECT point_id, factor, item, criterion, points FROM review_points "
                 f"WHERE run_thread_id=? AND point_id IN ({placeholders})", (thread_id, *ids),
             )).fetchall()]
+    # 系统统筹分配篇幅：评分点分值 × 关键项 × 已有正文 加权，一次分到各章
+    weights = []
+    for leaf in leaves:
+        weight = 1.0
+        ids = []
+        try:
+            ids = [str(x) for x in json.loads(leaf.get("review_point_ids") or "[]")]
+        except ValueError:
+            ids = []
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            row = await (await db.execute(
+                f"SELECT COALESCE(SUM(points),0) AS p FROM review_points "
+                f"WHERE run_thread_id=? AND point_id IN ({placeholders})", (thread_id, *ids),
+            )).fetchone()
+            if row and float(row["p"] or 0) > 0:
+                weight = float(row["p"])
+        if str(leaf.get("mandatory") or "") in ("1", "true", "True"):
+            weight *= 1.5
+        if str(leaf.get("content") or "").strip():
+            weight *= 1.2
+        weights.append(weight)
+    auto_pages: dict[str, int] = {}
+    if total_pages > 0 and weights:
+        scale = total_pages / sum(weights)
+        assigned = [(str(leaf.get("block_id")), max(1, round(weight * scale))) for leaf, weight in zip(leaves, weights)]
+        diff = total_pages - sum(pages for _, pages in assigned)
+        if assigned and diff:
+            biggest = max(assigned, key=lambda item: item[1])
+            assigned = [(block_id, pages + (diff if block_id == biggest[0] else 0)) for block_id, pages in assigned]
+        auto_pages = dict(assigned)
+
     for leaf in leaves:
         layout = layout_for(leaf)
         recipe = (specs.get(layout) or {}).get("structured") or {}
@@ -329,9 +371,10 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             "id": leaf.get("id"),
             "block_id": leaf["block_id"], "title": leaf.get("title"), "level": leaf.get("level"),
             "layout": layout, "layout_label": LAYOUTS[layout]["label"],
-            "pages": int(leaf.get("page_budget") or 0),
+            "pages": int(leaf.get("page_budget") or 0) or auto_pages.get(str(leaf.get("block_id")), 0),
             "objective": plan["objective"], "tasks": plan["tasks"], "gaps": chapter_gaps,
             "requirements": _requirements_for(leaf, recipe, points_by_block.get(str(leaf.get("block_id")))),
+            "confirmed": True,   # 系统统筹生成即生效；用户可改，改完仍生效
         })
     plan_row = {
         "id": uuid.uuid4().hex,
@@ -346,7 +389,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     # 同一线程、同一一级目录还有未确认的 draft → 原地更新，避免每次点开都堆一份
     existing = await (await db.execute(
         "SELECT id FROM writing_plans WHERE project_id=? AND thread_id=? AND root_block_id=? "
-        "AND status='draft' ORDER BY created_at DESC LIMIT 1",
+        "ORDER BY created_at DESC LIMIT 1",
         (project_id, thread_id, str(root["block_id"])),
     )).fetchone()
     if existing:
@@ -356,7 +399,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     else:
         await db.execute(
             "INSERT INTO writing_plans (id, project_id, thread_id, root_block_id, status, plan) "
-            "VALUES (?, ?, ?, ?, 'draft', ?)",
+            "VALUES (?, ?, ?, ?, 'confirmed', ?)",
             (plan_row["id"], project_id, thread_id, str(root["block_id"]), payload),
         )
     await db.commit()
@@ -753,8 +796,8 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
     from services.chapter_writing import create_job, queue_job
 
     loaded = await load_plan(db, project_id, plan_id)
-    if loaded["status"] == "confirmed":
-        raise ValueError("该计划已确认，不能重复启动")
+    # 计划现在由系统统筹生成即生效（不再有"未确认"态），所以这里不再拦"已确认"；
+    # 重复启动由 job 的去重逻辑保证（同一章已在进行中会复用原 job）。
     plan_row = loaded["plan"]
     wanted = {str(x) for x in leaf_block_ids or []}
     chapters = [c for c in plan_row.get("chapters") or []

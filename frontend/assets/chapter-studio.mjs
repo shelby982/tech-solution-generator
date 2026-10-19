@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v275';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v275';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v275';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v277';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v277';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v277';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -415,20 +415,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const completion = data.completion || {ok: false, reasons: []};
       const unit = unitOf.get(String(blockId));
       const unitInfo = unit ? planUnits.get(unit) : null;
-      const branchUnconfirmed = unitInfo && !(unitInfo.plan && unitInfo.plan.status === 'confirmed');
       const basisLabel = (data.basis?.points || []).map((p) => `${p.label}（${p.points ?? '—'} 分）`).join('；');
       body.innerHTML = `
         <div class="cs-cp-head">
           <h4>${esc(data.title || '')}
-            <span class="cs-cp-badge ${data.confirmed ? 'ok' : ''}">${data.confirmed ? '本章计划已确认' : '本章计划未确认'}</span>
+            <span class="cs-cp-badge ok">系统已统筹</span>
             ${data.plan_changed_after_content ? '<span class="cs-cp-badge warn">计划在正文之后有更新</span>' : ''}
           </h4>
           <span class="cs-cp-facts">计划 ${planPages || '—'} 页 · 已写 ${writtenPages} 页${over ? ` <b class="cs-cp-over">超 ${Math.round((writtenPages - planPages) * 10) / 10} 页</b>` : ''}
             · 要求 ${stats.requirements || 0} 条（疑似回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
           ${basisLabel ? `<span class="cs-cp-basis">依据：${esc(basisLabel)}</span>` : ''}
-          ${(data.confirmed || !branchUnconfirmed) ? ''
-            : `<span class="cs-cp-branchwarn">所属《${esc(unitInfo.title)}》的目录计划还未确认（共 ${unitInfo.leaves} 节）
-                <button type="button" class="cs-cp-mini" data-cp-open-branch>去看目录计划</button></span>`}
         </div>
 
         <details class="cs-cp-sec" data-cp-sec="a" open>
@@ -505,7 +501,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-plan-actions">
           <button type="button" class="mw-btn" data-cp-close>关闭</button>
           ${data.plan_changed_after_content ? '<button type="button" class="mw-btn" data-cp-refresh>按新计划重新生成</button>' : ''}
-          ${data.confirmed ? '' : '<button type="button" class="mw-btn" data-cp-confirm>我已备齐，可以生成</button>'}
           <button type="button" class="mw-btn primary" data-cp-generate>AI 编制本章</button>
         </div>
         <p class="cs-cp-hint">未达完成也可生成（正文会写【待补充】），修复后可重新生成。</p>`;
@@ -535,20 +530,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         dialog.close();
         void select(blockId);
         globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
-      });
-      body.querySelector('[data-cp-confirm]')?.addEventListener('click', async () => {
-        if (!data.plan_id) { status('本章还没有计划'); return; }
-        try {
-          const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/confirm-chapter`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({block_id: blockId}), signal: AbortSignal.timeout(30000),
-          });
-          const payload = await resp.json().catch(() => ({}));
-          if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
-          status('本章计划已确认，可以开始编制');
-          data = await load();
-          await render();
-        } catch (err) { status(`确认失败：${String(err.message || err)}`); }
       });
       // D 段：找素材 / 选片段
       body.querySelectorAll('[data-cp-find]').forEach((button) => button.addEventListener('click', () => {
@@ -1093,28 +1074,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       body.innerHTML = `<p class="cs-warning">计划生成失败：${esc(String(err.message || err))}</p>`;
       return;
     }
-    const confirmAll = async (button) => {
-      const chapters = plan.chapters || [];
-      const lines = chapters.map((chapter, index) => `${index + 1}. ${chapter.title}（要求 ${(chapter.requirements || []).length} 条）`).join('\n');
-      if (!globalThis.confirm(`将把本目录 ${chapters.length} 章都标记为"计划已确认"：\n\n${lines}\n\n确认前请确保你已看过各章要点。继续？`)) return;
-      button.disabled = true;
-      try {
-        const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/confirm-chapter`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({block_id: ''}), signal: AbortSignal.timeout(30000),
-        });
-        const payload = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
-        status(`已批量确认本目录 ${chapters.length} 章的计划`);
-        for (const chapter of chapters) chapter.confirmed = true;
-        plan.status = 'confirmed';
-        render();
-      } catch (err) {
-        status(`批量确认失败：${String(err.message || err)}`);
-      } finally {
-        button.disabled = false;
-      }
-    };
     const render = () => {
       const chapters = plan.chapters || [];
       const totalPages = chapters.reduce((sum, chapter) => sum + (Number(chapter.pages) || 0), 0);
@@ -1146,15 +1105,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
         <div class="cs-plan-actions">
           <button type="button" class="mw-btn" data-branch-close>关闭</button>
-          <button type="button" class="mw-btn" data-branch-confirm>批量确认本目录 ${chapters.length} 章</button>
         </div>
-        <p class="cs-dim">生成只卡"本章是否确认"，不要求整目录确认；批量确认只是省事的一次操作。</p>`;
+        <p class="cs-dim">计划由系统按评分点与总篇幅统筹生成、自动生效；要调整就进各章的「本章编写计划」。</p>`;
       body.querySelector('[data-branch-close]').onclick = () => dialog.close();
       body.querySelectorAll('[data-branch-open]').forEach((button) => button.addEventListener('click', () => {
         dialog.close();
         void openChapterPlan(button.dataset.branchOpen);
       }));
-      body.querySelector('[data-branch-confirm]').addEventListener('click', (event) => void confirmAll(event.currentTarget));
     };
     render();
   }
@@ -1493,20 +1450,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         // 否则「AI 编制本章」会先跑起来，计划闸形同虚设（产品评审结论）。
         const unit = active ? unitOf.get(String(active.block_id)) : null;
         const info = unit ? planUnits.get(unit) : null;
-        const chapterConfirmed = active ? (await (async () => {
-          try {
-            const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(String(active.block_id))}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(20000)});
-            const payload = resp.ok ? await resp.json() : {};
-            return !!payload.confirmed;
-          } catch (e) { return false; }
-        })()) : false;
-        // C2：生成只卡"本章"，不再要求整个目录确认
-        if (unit && info && !chapterConfirmed) {
-          status('本章计划还未确认：打开本章计划确认后即可生成（未确认也可生成，正文写【待补充】）。');
-          showPanel('ai');
-          await openChapterPlan(String(active.block_id));
-          return;
-        }
         paintView(false);status('');showPanel('ai');await team.start();
       }
       if(action==='edit'){

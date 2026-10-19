@@ -97,8 +97,9 @@ async def test_confirm_plan_presets_chief_plan_and_creates_jobs(db, monkeypatch)
     plan_json = json.loads(row["artifacts"])["chief"]["plan"]
     assert plan_json["tasks"] and plan_json["tasks"][0]["kind"] in ("text", "table", "diagram")
     # 重复确认要拒绝
-    with pytest.raises(ValueError):
-        await confirm_plan(db, 1, plan["id"])
+    # 计划现在生成即生效（无"未确认"态）→ 重复启动不报错，而是幂等地复用已有 job
+    again = await confirm_plan(db, 1, plan["id"])
+    assert again["chapters"] == 2 and len(again["jobs"]) == 2
 
 
 def test_normalize_diagram_nodes_filters_and_caps():
