@@ -145,6 +145,25 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
         # 结构（骨架）是**整章**的要求：叶子节只查图表/占位/篇幅，骨架在章级聚合里查
         leaf_recipe = {"skeleton": [], "figures": recipe.get("figures") or []}
         row = check_chapter(unit.get("content"), leaf_recipe, int(unit.get("page_budget") or 0))
+        # 素材充足度：有正文但没有任何关联材料/引用来源 → 写作必然大量【待补充】
+        if written:
+            mats = await (await db.execute(
+                "SELECT COUNT(*) AS n FROM chapter_materials cm JOIN blocks b ON b.id=cm.block_id "
+                "WHERE b.project_id=? AND b.run_thread_id=? AND b.block_id=?", (project_id, thread_id, key),
+            )).fetchone()
+            cites = await (await db.execute(
+                "SELECT COUNT(*) AS n FROM citations c WHERE c.project_id=? AND c.status='accepted' AND ("
+                "  c.block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = c.id AND l.block_id = ?))",
+                (project_id, key, key),
+            )).fetchone()
+            material_count = int(mats["n"]) if mats else 0
+            citation_count = int(cites["n"]) if cites else 0
+            row["stats"]["materials"] = material_count
+            row["stats"]["citations"] = citation_count
+            if material_count + citation_count == 0 and row["stats"]["chars"] > 200:
+                row["issues"].append({"code": "material", "level": "medium",
+                                      "message": "素材不足：本章没有关联材料或官方来源，正文容易大量【待补充】"})
+                row["ok"] = False
         # 父节点的骨架/图表由子节承担，不做硬性拦截，只做提示
         if has_children:
             row["issues"] = [i for i in row["issues"] if i["code"] == "pending"]

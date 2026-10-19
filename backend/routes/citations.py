@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 
 from db import get_db
 from services.citations import (OFFICIAL_PORTALS, discover_candidates, fetch_candidate, link_citation,
-                                list_citations, reject_citation, save_citation, search_official,
-                                search_configured, suggest_query, unlink_citation)
+                                list_citations, reject_citation, remember_search, save_citation,
+                                search_history, search_official, search_configured, suggest_query,
+                                unlink_citation)
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -60,6 +61,8 @@ async def unlink(project_id: int, citation_id: str, block_id: str):
 
 class DiscoverBody(BaseModel):
     query: str = Field(min_length=2, max_length=200)
+    thread_id: str = ""
+    block_id: str = ""
 
 
 @router.get("/suggest")
@@ -75,6 +78,13 @@ async def suggest(project_id: int, threadId: str = Query(min_length=1), blockId:
             raise HTTPException(404, str(exc))
 
 
+@router.get("/history")
+async def read_history(project_id: int, threadId: str = Query(min_length=1), blockId: str = Query(min_length=1)):
+    """本章的检索历史（上次找到的候选），避免重复搜。"""
+    async with get_db() as db:
+        return {"history": await search_history(db, project_id, threadId, blockId)}
+
+
 @router.get("/portals")
 async def read_portals(project_id: int):
     """官方入口目录：没有检索 API 时，先给官方站点（用户可点开、也可让系统扫描）。"""
@@ -88,7 +98,10 @@ async def discover(project_id: int, body: DiscoverBody):
     候选都带 source（search / portal），用户点其中一个再「抓取核验」；也可以自己粘贴链接。
     """
     try:
-        return await discover_candidates(body.query)
+        data = await discover_candidates(body.query)
+        async with get_db() as db:
+            await remember_search(db, project_id, body.thread_id, body.block_id, body.query, data.get("results") or [])
+        return data
     except Exception as exc:
         return {"configured": search_configured(), "results": [], "portals": OFFICIAL_PORTALS,
                 "message": f"自动找来源失败：{exc}"}

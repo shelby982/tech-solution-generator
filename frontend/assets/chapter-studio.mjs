@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v253';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v253';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v253';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v255';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v255';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v255';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -253,10 +253,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <span class="cs-dim">官方入口</span>
           <span data-cite-portals class="cs-cite-chips"></span>
         </div>
+        <div data-cite-needs></div>
         <details class="cs-cite-rule"><summary>来源规则</summary>
-          只采政府、南方电网/广东电网、标准发布机构、招标方与公共资源交易平台的<strong>原文</strong>；
-          二手转载、公众号、百科不采；找不到官方源时正文写【待补充：需官方来源】。
+          官方原文最优；非官方渠道内容可能真实，但必须标注来源并由你确认后才能引用。
+          涉政/标准/指标等硬信息建议用官方原文；找不到来源时正文写【待补充】。
         </details>
+        <details class="cs-cite-history" data-cite-history hidden><summary data-cite-history-label>上次查找</summary>
+          <div data-cite-history-list></div></details>
         <div data-cite-panel></div>
       </div>`;
     globalThis.document.body.append(dialog);
@@ -268,6 +271,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const goButton = dialog.querySelector('[data-cite-go]');
     const countHost = dialog.querySelector('[data-cite-count]');
     let accepted = 0;
+    let activeGap = '';                       // 当前在补哪个素材缺口（接受引用时记下）
     const markAccepted = () => { countHost.textContent = accepted ? `已接受 ${accepted} 条` : ''; };
     const isUrl = (value) => /^https?:\/\//i.test(String(value || '').trim());
     const post = async (url, body) => {
@@ -288,7 +292,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         : !!(row && row.querySelector('[data-cite-confirm]')?.checked)
           || !!(panel.querySelector('[data-cite-confirm]')?.checked);
       try {
-        await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId, confirmed});
+        await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId, confirmed, gap: activeGap});
         accepted += 1;
         markAccepted();
         row.classList.add('accepted');
@@ -338,7 +342,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       goButton.textContent = '查找中…';
       panel.innerHTML = '<p class="cs-dim">正在官方入口里查找…</p>';
       try {
-        const data = await post(`/api/projects/${projectId}/citations/discover`, {query});
+        const data = await post(`/api/projects/${projectId}/citations/discover`,
+          {query, thread_id: threadId, block_id: blockKey});
         renderPortals(data.portals);
         const results = data.results || [];
         const rows = results.map((item, index) => `<div class="cs-cite-cand${item.matched ? ' hit' : ''}" data-cite-row="${index}">
@@ -379,7 +384,57 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       .then((resp) => resp.json())
       .then((data) => { if (dialog.isConnected) renderPortals(data.portals); })
       .catch(() => {});
+    const renderNeeds = (needs) => {
+      const host = dialog.querySelector('[data-cite-needs]');
+      if (!host) return;
+      if (!needs.length) { host.innerHTML = ''; return; }
+      host.innerHTML = `<div class="cs-cite-needs-head">素材缺口（逐条补，补上会标记）</div>`
+        + needs.map((need) => `<div class="cs-cite-need${need.covered ? ' done' : ''}">
+            <span>${esc(need.text)}</span>
+            <em>${need.covered ? `已补 ${need.covered} 条` : '未补'}</em>
+            <button type="button" class="mw-btn" data-need-query="${esc(need.query)}" data-need-gap="${esc(need.text)}">检索</button>
+          </div>`).join('');
+      host.querySelectorAll('[data-need-query]').forEach((button) => button.addEventListener('click', () => {
+        activeGap = button.dataset.needGap || '';
+        input.value = button.dataset.needQuery || '';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        void discover();
+      }));
+    };
+    const renderHistory = (history) => {
+      const box = dialog.querySelector('[data-cite-history]');
+      const list = dialog.querySelector('[data-cite-history-list]');
+      const label = dialog.querySelector('[data-cite-history-label]');
+      if (!box || !list || !history.length) return;
+      box.hidden = false;
+      if (label) label.textContent = `上次查找（${history.length}）`;
+      list.innerHTML = history.map((item, index) => `<div class="cs-cite-history-row">
+          <span><b>${esc(item.query)}</b><small>${esc(String(item.created_at || '').slice(0, 16))} · ${item.results.length} 条候选</small></span>
+          <button type="button" class="mw-btn" data-history-restore="${index}">看上次候选</button>
+        </div>`).join('');
+      list.querySelectorAll('[data-history-restore]').forEach((button) => button.addEventListener('click', () => {
+        const item = history[Number(button.dataset.historyRestore)];
+        if (!item) return;
+        input.value = item.query;
+        const rows = (item.results || []).map((candidate, index) => `<div class="cs-cite-cand${candidate.matched ? ' hit' : ''}" data-cite-row="${index}">
+            <div class="cs-cite-cand-main"><b>${esc(candidate.title || candidate.url)}</b>
+              <small>${esc(candidate.domain || '')} · 历史结果</small></div>
+            <div class="cs-cite-cand-acts"><a href="${esc(candidate.url)}" target="_blank" rel="noreferrer">打开</a>
+              <button type="button" class="mw-btn" data-cite-verify="${index}">抓取核验</button></div>
+            <div data-cite-preview></div></div>`).join('');
+        panel.innerHTML = `<p class="cs-dim">历史检索「${esc(item.query)}」的候选（${(item.results || []).length} 条）</p>${rows}`;
+        panel.querySelectorAll('[data-cite-verify]').forEach((verifyButton) => verifyButton.addEventListener('click', () => {
+          const row = verifyButton.closest('[data-cite-row]');
+          const candidate = (item.results || [])[Number(verifyButton.dataset.citeVerify)];
+          if (candidate) { input.value = candidate.url; void verifyInto(candidate.url, row, verifyButton); }
+        }));
+      }));
+    };
     markAccepted();
+    fetch(`/api/projects/${projectId}/citations/history?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(15000)})
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data) => { if (dialog.isConnected && data) renderHistory(data.history || []); })
+      .catch(() => {});
     if (initialQuery && !isUrl(initialQuery)) void discover();
     // 按当前章节推导检索词（标题 + 素材缺口 + 配方骨架），并自动检索一次 —— 用户不需要盲搜
     if (blockKey) {
@@ -393,6 +448,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           context.textContent = `本章《${data.chapter.title}》 · 已有 ${data.have.citations} 条来源 / ${data.have.materials} 份材料`
             + (data.gaps.length ? ` · 素材缺口：${data.gaps.join('、')}` : '');
           dialog.querySelector('.cs-cite-search').insertAdjacentElement('afterend', context);
+          renderNeeds(data.needs || []);
           if (!initialQuery) void discover();
         })
         .catch(() => {});

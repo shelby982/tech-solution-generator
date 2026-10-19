@@ -53,9 +53,23 @@ CREATE TABLE IF NOT EXISTS citations (
     status TEXT NOT NULL DEFAULT 'pending',
     -- trust: official（官方原文）/ unverified（非官方，需用户确认）/ confirmed（非官方但用户已确认可靠）
     trust TEXT NOT NULL DEFAULT 'official',
+    -- gap: 该来源是为了补哪个素材缺口（按缺口逐条检索时记录，便于回看"还差什么"）
+    gap TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
+
+-- 检索历史（P5）：同一章下次打开时可看"上次找到的候选"，避免重复搜
+CREATE TABLE IF NOT EXISTS citation_searches (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    block_id TEXT NOT NULL DEFAULT '',
+    query TEXT NOT NULL DEFAULT '',
+    results TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_citation_searches_block ON citation_searches(project_id, block_id, created_at);
 
 -- 引用 → 章节 的多对多关联（一条官方依据常被多章引用；citations.block_id 保留为"首个关联"）
 CREATE TABLE IF NOT EXISTS citation_links (

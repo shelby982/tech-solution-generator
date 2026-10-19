@@ -147,3 +147,31 @@ async def test_suggest_query_derives_from_chapter_and_reports_coverage(db):
     assert data["gaps"] == ["近三年行业数据", "政策依据"]
     assert data["query"] and "项目背景现状目标" in data["query"]
     assert data["have"] == {"citations": 0, "materials": 0}
+
+
+async def test_needs_per_gap_with_covered_count(db):
+    """缺口逐条：每个 evidence_required 一条检索建议；接受过引用的缺口标"已补 N 条"。"""
+    from services.citations import save_citation, suggest_query
+
+    await db.execute("INSERT INTO workflow_runs (thread_id, project_id, stage) VALUES ('t1', 1, 'outline_review')")
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status, evidence_required) "
+        "VALUES (1, 's1.1', '建设范围', 3, '正文', 0, 't1', 'draft', '边界说明；同类项目业绩')")
+    await db.commit()
+    await save_citation(db, 1, {"url": "https://www.gov.cn/a.html", "title": "边界说明依据",
+                                "excerpt": "x", "gap": "边界说明"}, block_id="s1.1")
+    data = await suggest_query(db, 1, "t1", "s1.1")
+    needs = {need["text"]: need["covered"] for need in data["needs"]}
+    assert needs["边界说明"] == 1
+    assert needs["同类项目业绩"] == 0
+    assert all(need["query"] for need in data["needs"])
+
+
+async def test_search_history_roundtrip(db):
+    from services.citations import remember_search, search_history
+
+    await remember_search(db, 1, "t1", "s1.1", "政策依据", [{"url": "https://www.gov.cn/a", "title": "A"}])
+    await remember_search(db, 1, "t1", "s1.1", "行业数据", [{"url": "https://www.gov.cn/b", "title": "B"}])
+    history = await search_history(db, 1, "t1", "s1.1")
+    assert [item["query"] for item in history] == ["行业数据", "政策依据"]
+    assert history[0]["results"][0]["title"] == "B"

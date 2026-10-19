@@ -204,6 +204,39 @@ async def search_official(query: str, limit: int = 5) -> dict:
     return {"configured": True, "results": results}
 
 
+async def remember_search(db, project_id: int, thread_id: str, block_id: str, query: str, results: list[dict]) -> None:
+    """记一次检索（供同一章下次打开时复用候选，避免重复搜）。"""
+    if not block_id:
+        return
+    await db.execute(
+        "INSERT INTO citation_searches (id, project_id, thread_id, block_id, query, results) "
+        "VALUES (?,?,?,?,?,?)",
+        (uuid.uuid4().hex, project_id, thread_id, block_id, str(query)[:200],
+         json.dumps(results[:8], ensure_ascii=False)),
+    )
+    await db.commit()
+
+
+async def search_history(db, project_id: int, thread_id: str, block_id: str, limit: int = 5) -> list[dict]:
+    rows = await (await db.execute(
+        "SELECT query, results, created_at FROM citation_searches "
+        "WHERE project_id=? AND block_id=? ORDER BY created_at DESC LIMIT ?",
+        (project_id, str(block_id), limit),
+    )).fetchall()
+    history, seen = [], set()
+    for row in rows:
+        query = row["query"]
+        if query in seen:            # 同一个检索词只留最近一次，避免历史里全是重复项
+            continue
+        seen.add(query)
+        try:
+            results = json.loads(row["results"] or "[]")
+        except ValueError:
+            results = []
+        history.append({"query": query, "results": results, "created_at": row["created_at"]})
+    return history
+
+
 async def fetch_candidate(url: str, whitelist_additions: list[str] | None = None) -> dict:
     """抓取并核验一个链接，返回待接受的引用候选（不落库）。
 
@@ -266,6 +299,18 @@ async def suggest_query(db, project_id: int, thread_id: str, block_id: str) -> d
             if len(part) >= 2 and part not in keywords:
                 keywords.append(part)
     query = " ".join(keywords[:3])[:60]
+    # 缺口逐条：每条给一个可检索的 query + 已补数量（引用时记录 gap）
+    need_rows = []
+    for gap_text in gaps[:5]:
+        covered_row = await (await db.execute(
+            "SELECT COUNT(*) AS n FROM citations WHERE project_id=? AND status='accepted' AND gap=? AND ("
+            "  block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?))",
+            (project_id, gap_text, str(block_id), str(block_id)),
+        )).fetchone()
+        need_rows.append({"text": gap_text, "query": f"{title} {gap_text}"[:60],
+                          "covered": int(covered_row["n"])})
+    if not need_rows:
+        need_rows.append({"text": "本章依据", "query": query, "covered": 0})
     have_citations = await (await db.execute(
         "SELECT COUNT(*) AS n FROM citations WHERE project_id=? AND status='accepted' AND ("
         "  block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?))",
@@ -280,6 +325,7 @@ async def suggest_query(db, project_id: int, thread_id: str, block_id: str) -> d
         "keywords": keywords[:6],
         "chapter": {"block_id": str(block_id), "title": title, "layout": layout},
         "gaps": gaps[:5],
+        "needs": need_rows,
         "have": {"citations": int(have_citations["n"]), "materials": int(have_materials["n"])},
     }
 
@@ -295,11 +341,12 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
     citation_id = uuid.uuid4().hex
     await db.execute(
         "INSERT INTO citations (id, project_id, thread_id, block_id, query, url, domain, title, "
-        "publisher, published_at, excerpt, status, trust) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "publisher, published_at, excerpt, status, trust, gap) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (citation_id, project_id, thread_id, block_id, str(payload.get("query") or ""),
          url, str(payload.get("domain") or domain_of(url)),
          str(payload.get("title") or ""), str(payload.get("publisher") or ""),
-         str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted", trust),
+         str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted", trust,
+         str(payload.get("gap") or "")),
     )
     if block_id:
         await db.execute("INSERT OR IGNORE INTO citation_links (citation_id, block_id) VALUES (?, ?)",
@@ -395,4 +442,5 @@ def citation_line(citation: dict) -> str:
 __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", "search_configured",
            "OFFICIAL_PORTALS", "discover_candidates",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
-           "citation_line", "domain_of", "link_citation", "unlink_citation", "suggest_query"]
+           "citation_line", "domain_of", "link_citation", "unlink_citation", "suggest_query",
+           "remember_search", "search_history"]
