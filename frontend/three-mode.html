@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v228" />
-    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v228" />
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v228" />
+    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v230" />
+    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v230" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v230" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -3350,8 +3350,8 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v228" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v228" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v230" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v230" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -3363,9 +3363,9 @@ body[data-view="matching"] .match-detail { display: block; }
           <nav id="workspace-nav" aria-label="项目工作区"></nav>
           <div class="project-actions">
             <div class="header-tools">
-              <a id="ws-todo-link" href="/review">处理待办</a>
-              <button type="button" id="ws-history">版本记录</button>
-              <button type="button" id="ws-run">运行详情</button>
+              <!-- 三个并列入口收敛为一个「进度中心」：一行摘要 + 抽屉（进度/待办/记录）。
+                   见 workspace.js::openProgressHub / updateProgressBadge -->
+              <button type="button" id="ws-progress-hub" title="编写进度 · 待办 · 记录">编写 — · 待办 —</button>
             </div>
             <!-- 编辑器模式的「进入评审」：由 mode-editor.js 控制 disabled。
                  合并前它在 workbench 的 header 里，这里并入同一处 actions。 -->
@@ -4053,16 +4053,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v228"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v228"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v230"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v230"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v228',
-                        './assets/mode-editor.js?v=20261016-v228']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v230',
+                        './assets/mode-editor.js?v=20261016-v230']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v228"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v230"></script>
   </body>
 </html>

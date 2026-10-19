@@ -237,6 +237,40 @@ async def get_response_drafts(project_id: int,
     return JSONResponse(content=result)
 
 
+@router.get("/projects/{project_id}/progress")
+async def project_progress_route(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
+    """编写进度聚合：编写单元 / 篇幅 / 四阶段（状态行「进度中心」用）。
+
+    口径与编写页一致（单元定义、250 字/页、篇幅取 page_budget 的 total/allocated）。
+    """
+    from services.project_progress import project_progress
+    async with get_db() as db:
+        project = await get_project(db, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
+        return JSONResponse(content=await project_progress(db, project_id, package_id))
+
+
+@router.get("/projects/{project_id}/todos")
+async def project_todos_route(
+    project_id: int,
+    package_id: int | None = Query(default=None, alias="packageId"),
+):
+    """待办聚合：目录未确认 / 篇幅未确认 / 素材缺口 / 评审意见 / 运行中断。
+
+    只列"需要用户动手"的事；排序按严重度（high → low）。
+    """
+    from services.project_progress import project_todos
+    async with get_db() as db:
+        project = await get_project(db, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
+        return JSONResponse(content=await project_todos(db, project_id, package_id))
+
+
 @router.get("/projects/{project_id}/workflow-runs")
 async def list_project_workflow_runs(
     project_id: int,

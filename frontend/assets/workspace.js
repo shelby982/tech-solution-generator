@@ -1,11 +1,11 @@
-import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v228';
+import {projectChapters, summarize, statusLabels, stageLabels, activeStages, runtimeStages, isOrphanedRun, isExtractDone, diffHtml, escapeHtml as esc} from './workspace-model.mjs?v=20261016-v230';
 export {statusLabels, esc};
 // 材料角色体系再导出：project-init 的角色下拉与"分类纠错提示"都从这里取
 export {
   REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
   ROLE_LABEL as ROLE_LABEL_SHARED, ROLE_HINT as ROLE_HINT_SHARED,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
-} from './material-roles.mjs?v=20261016-v228';
+} from './material-roles.mjs?v=20261016-v230';
 export async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -98,10 +98,7 @@ function renderChrome() {
   const bar = null;
   if (!workspace._toolsBound) {
     workspace._toolsBound = true;
-    const todo = document.getElementById('ws-todo-link');
-    if (todo) todo.setAttribute('href', workspaceUrl('review'));
-    document.getElementById('ws-history')?.addEventListener('click', () => showHistory());
-    document.getElementById('ws-run')?.addEventListener('click', () => showRun());
+    document.getElementById('ws-progress-hub')?.addEventListener('click', () => openProgressHub());
   }
   const state = workspace.state;
   // 运行期阶段（extracting/matching）以 workflow_runs 为准：这期间 checkpoint 还停在
@@ -161,6 +158,7 @@ export async function refreshWorkspace() {
     workspace.chapters = projectChapters(state, rows);
     workspace.ready = true;
     renderChrome();
+    void updateProgressBadge();
     const projection = JSON.stringify([workspace.state,workspace.chapters]);
     if (projection !== lastProjection) {
       lastProjection = projection;
@@ -274,6 +272,114 @@ async function fillRunRecords() {
   } catch (err) {
     if (host.isConnected) host.innerHTML = `<p class="ws-dim">记录加载失败：${esc(String(err?.message || err))}</p>`;
   }
+}
+
+/** 跳到一个工作台阶段（在合并页里原地切，不整页跳转）。 */
+function jumpStage(stageId) {
+  const rail = document.querySelector(`.sr-rail-item[data-stage="${stageId}"]`);
+  if (rail) { rail.click(); return true; }
+  return false;
+}
+
+function openThread(tid) {
+  if (!tid) return;
+  const u = new URL(location.href);
+  u.searchParams.set('threadId', tid);
+  u.searchParams.set('planning', '1');
+  location.href = u.toString();
+}
+
+/** 状态行摘要：编写 % · 待办 N（节流 15s，避免每次轮询都打两个聚合接口）。 */
+let progressBadgeAt = 0;
+async function updateProgressBadge(force = false) {
+  const button = document.getElementById('ws-progress-hub');
+  if (!button || !workspace.projectId) return;
+  if (!force && Date.now() - progressBadgeAt < 15000) return;
+  progressBadgeAt = Date.now();
+  const scope = workspace.packageId ? `?packageId=${encodeURIComponent(workspace.packageId)}` : '';
+  try {
+    const [progress, todo] = await Promise.all([
+      request(`/api/projects/${workspace.projectId}/progress${scope}`),
+      request(`/api/projects/${workspace.projectId}/todos${scope}`),
+    ]);
+    const percent = progress?.units?.percent ?? 0;
+    const total = (todo?.todos || []).length;
+    const high = todo?.counts?.high || 0;
+    button.textContent = `编写 ${percent}% · 待办 ${total}`;
+    button.classList.toggle('is-warn', high > 0);
+    button.title = `当前阶段：${progress?.current?.label || '—'}；待办 ${total} 条（高优 ${high}）`;
+  } catch {
+    button.textContent = '编写 — · 待办 —';
+  }
+}
+
+/** 进度中心：进度 / 待办 / 记录（合并原「处理待办 / 版本记录 / 运行详情」三个入口）。 */
+export async function openProgressHub() {
+  const dialog = openDialog('进度中心', '<p class="ws-dim">加载中…</p>');
+  const body = dialog.querySelector('.ws-dialog-body');
+  const scope = workspace.packageId ? `?packageId=${encodeURIComponent(workspace.packageId)}` : '';
+  let progress; let todo;
+  try {
+    [progress, todo] = await Promise.all([
+      request(`/api/projects/${workspace.projectId}/progress${scope}`),
+      request(`/api/projects/${workspace.projectId}/todos${scope}`),
+    ]);
+  } catch (err) {
+    body.innerHTML = `<p class="ws-error">进度加载失败：${esc(String(err?.message || err))}</p>`;
+    return;
+  }
+  if (!dialog.isConnected) return;
+  const stateText = { done: '已完成', active: '进行中', pending: '未开始' };
+  const stageHtml = (progress.stages || []).map(s => `<span class="ws-hub-stage ${esc(s.state)}">${esc(s.label)}`
+    + `${s.percent != null ? ` · ${s.percent}%` : ''}<em>${stateText[s.state] || ''}</em></span>`).join('');
+  const typeHtml = (progress.types || []).map(t => {
+    const dir = t.directory_confirmed ? '目录已确认' : (t.has_outline ? '目录待确认' : '无目录');
+    const budget = t.budget?.confirmed ? `篇幅已确认 ${t.budget.allocated}/${t.budget.total} 页`
+      : (t.budget?.total ? `篇幅待确认（已分配 ${t.budget.allocated} 页）` : '篇幅未设置');
+    return `<div class="ws-hub-type"><h4>${esc(t.label)}应答</h4>`
+      + `<p>${dir} · ${budget} · 编写单元 ${t.units.complete}/${t.units.total}（${t.units.percent}%）`
+      + ` · 已写 ${t.written_pages} 页</p></div>`;
+  }).join('') || '<p class="ws-dim">本标包还没有目录草案：去「应答策划」点商务/技术卡片生成。</p>';
+  const todoHtml = (todo.todos || []).map((item, index) => `<div class="ws-hub-todo ${esc(item.severity)}">`
+    + `<div><b>${esc(item.title)}</b><span class="ws-dim">${esc(item.detail || '')}</span></div>`
+    + `<button type="button" data-todo="${index}">${esc(item.action?.label || '去处理')}</button></div>`).join('')
+    || '<p class="ws-dim">没有待办：目录与篇幅都已确认，没有素材缺口。</p>';
+  body.innerHTML = `<nav class="ws-hub-tabs" aria-label="进度中心">
+      <button type="button" data-hub="progress" class="on">进度</button>
+      <button type="button" data-hub="todos">待办${(todo.todos || []).length ? ` ${(todo.todos || []).length}` : ''}</button>
+      <button type="button" data-hub="records">记录</button>
+    </nav>
+    <section data-hub-pane="progress">
+      <p class="ws-hub-stages">${stageHtml}</p>
+      ${progress.current ? `<p class="ws-dim">当前：${esc(progress.current.label)}（${stateText[progress.current.state] || ''}）</p>` : ''}
+      ${typeHtml}
+      <p class="ws-micro">编写单元口径与编写页一致（父目录无正文不算单元）；篇幅取「应答策划」的分配结果。</p>
+    </section>
+    <section data-hub-pane="todos" hidden>${todoHtml}</section>
+    <section data-hub-pane="records" hidden>
+      <p class="ws-micro">运行记录与章节版本都保留只读；章节版本在每次保存正文时递增。</p>
+      <div class="ws-hub-records">
+        <button type="button" data-record="run">运行记录</button>
+        <button type="button" data-record="history">章节版本</button>
+      </div>
+    </section>`;
+  const tabs = body.querySelectorAll('.ws-hub-tabs button');
+  tabs.forEach(button => button.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.toggle('on', x === button));
+    body.querySelectorAll('[data-hub-pane]').forEach(pane => {
+      pane.hidden = pane.dataset.hubPane !== button.dataset.hub;
+    });
+  }));
+  body.querySelectorAll('[data-todo]').forEach(button => button.addEventListener('click', () => {
+    const item = (todo.todos || [])[Number(button.dataset.todo)];
+    if (!item) return;
+    if (item.action?.thread_id) { dialog.close(); openThread(item.action.thread_id); return; }
+    if (item.kind === 'run') { body.querySelector('[data-hub="records"]').click(); return; }
+    dialog.close();
+    if (!jumpStage(item.stage)) openThread(workspace.threadId);
+  }));
+  body.querySelector('[data-record="run"]')?.addEventListener('click', () => showRun());
+  body.querySelector('[data-record="history"]')?.addEventListener('click', () => showHistory());
 }
 
 export async function showHistory(dbId) {
