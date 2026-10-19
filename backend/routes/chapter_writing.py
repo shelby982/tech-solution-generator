@@ -16,6 +16,56 @@ class TeamRequest(BaseModel):
     auto_save_empty:bool=True
 
 
+class PlanRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    root_block_id: str = Field(min_length=1)
+
+
+class PlanConfirmRequest(BaseModel):
+    leaf_block_ids: list[str] = Field(default_factory=list)   # 空 = 确认全部
+
+
+@router.get('/projects/{project_id}/writing-plan-units')
+async def writing_plan_units(project_id: int, threadId: str):
+    """编写计划的「单位」：评分根 + 技术评分点的一级目录（编写页据此挂入口）。"""
+    from services.writing_plans import plan_units
+    async with get_db() as db:
+        return await plan_units(db, project_id, threadId)
+
+
+@router.post('/projects/{project_id}/writing-plans')
+async def create_writing_plan(project_id: int, body: PlanRequest):
+    """生成该一级目录的编写计划（确定性、不调模型），返回可确认的 draft。"""
+    from services.writing_plans import build_plan
+    async with get_db() as db:
+        try:
+            plan = await build_plan(db, project_id, body.thread_id, body.root_block_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+    return plan
+
+
+@router.get('/projects/{project_id}/writing-plans/{plan_id}')
+async def read_writing_plan(project_id: int, plan_id: str):
+    from services.writing_plans import load_plan
+    async with get_db() as db:
+        try:
+            return await load_plan(db, project_id, plan_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+
+
+@router.post('/projects/{project_id}/writing-plans/{plan_id}/confirm', status_code=202)
+async def confirm_writing_plan(project_id: int, plan_id: str, body: PlanConfirmRequest):
+    """确认计划并起 job：确认过的计划会被预置进 job（主编不再重新规划）。"""
+    from services.writing_plans import confirm_plan
+    async with get_db() as db:
+        try:
+            return await confirm_plan(db, project_id, plan_id, body.leaf_block_ids)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+
 @router.post('/projects/{project_id}/studio/writing-jobs',status_code=202)
 async def start_team(project_id:int,body:TeamRequest):
     from routes.chapter_studio import require_run,require_block,chapter_context,material_rows,source_for

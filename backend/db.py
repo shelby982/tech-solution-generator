@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS chapter_writing_jobs (
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+-- 技术评分点一级目录的编写计划：先规划、确认、再并发生成（P0）。
+-- 单位 = 「技术评分项应答」评分根下的一级子目录；plan 里存整棵子树的叶子计划。
+CREATE TABLE IF NOT EXISTS writing_plans (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    root_block_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    plan TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TEXT
+);
 CREATE TABLE IF NOT EXISTS chapter_studio (
     block_id INTEGER PRIMARY KEY REFERENCES blocks(id),
     layout TEXT NOT NULL DEFAULT 'solution',

@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v230';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v230';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v230';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v231';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v231';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v231';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -149,11 +149,90 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   };
   // ── 篇幅（2026-10-16）：预算页数来自 /page-budget，已写字数来自正文长度 ──
   // 原型要求：目录行只给颜色（状态）与行底进度（预算），名称必须完整。
+  // ── 编写计划（P0）：单位 = 技术评分点的一级目录（评分根的直接子目录）──
+  // 只在这一层出「编写计划」入口（一页 7 次确认，而不是每节一次）。
+  const planUnits = new Map();      // block_id -> {title, leaves}
+  const unitOf = new Map();         // 叶/任意子孙 block_id -> 所属一级目录 block_id
+  async function loadPlanUnits() {
+    if (!threadId) return;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/writing-plan-units?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(15000)});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      planUnits.clear(); unitOf.clear();
+      (data.units || []).forEach((unit) => {
+        planUnits.set(String(unit.block_id), { title: unit.title, leaves: unit.leaves });
+        (blocks || []).forEach((b) => {
+          const key = String(b.block_id || b.id);
+          if (key === String(unit.block_id) || key.startsWith(`${unit.block_id}.`)) unitOf.set(key, String(unit.block_id));
+        });
+      });
+      paintTree();
+    } catch (e) { /* 计划单元拿不到不影响编写 */ }
+  }
   const WPP = 250;                    // 1 页 ≈ 250 字（与策划页分配口径一致）
   const pageBudget = { byBlock: {}, loaded: false };
   const budgetOf = b => pageBudget.byBlock[String(b.block_id || b.id)] || null;
   const wordsOf = b => String(b.content || '').replace(/\s+/g, '').length;
   const pagesOf = b => wordsOf(b) / WPP;
+  /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
+  async function openWritingPlan(unitBlockId) {
+    if (!unitBlockId) return;
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>编写计划</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body"><p class="cs-muted">正在生成计划…</p></div>`;
+    (host.ownerDocument?.body || globalThis.document.body).append(dialog);
+    dialog.querySelector('header button').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    const body = dialog.querySelector('.cs-plan-body');
+    let plan;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/writing-plans`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({thread_id: threadId, root_block_id: String(unitBlockId)}),
+        signal: AbortSignal.timeout(60000),
+      });
+      plan = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(plan.detail || `HTTP ${resp.status}`);
+    } catch (err) {
+      body.innerHTML = `<p class="cs-warning">计划生成失败：${esc(String(err.message || err))}</p>`;
+      return;
+    }
+    const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
+    body.innerHTML = `<p class="cs-muted">《${esc(plan.root_title)}》共 ${plan.chapters.length} 个章节。确认后按章节并发生成；
+       主编会按此计划执行（不再重新规划）。</p>`
+      + plan.chapters.map((c) => `<section class="cs-plan-chapter">
+          <h4>${esc(c.title)} <em>${esc(c.layout_label)}${c.pages ? ` · ${c.pages} 页` : ''}</em></h4>
+          <p>${c.tasks.map((t) => `<span class="cs-plan-task ${esc(t.kind)}">${kindLabel[t.kind] || t.kind} · ${esc(t.title)}</span>`).join('')}</p>
+          ${c.gaps.length ? `<p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>` : ''}
+        </section>`).join('')
+      + `${plan.gaps.length ? `<p class="cs-muted">全章素材缺口 ${plan.gaps.length} 项</p>` : ''}`
+      + `<div class="cs-plan-actions"><button type="button" class="mw-btn" data-plan-cancel>取消</button>
+           <button type="button" class="mw-btn primary" data-plan-confirm>确认并开始编制</button></div>`;
+    body.querySelector('[data-plan-cancel]').onclick = () => dialog.close();
+    body.querySelector('[data-plan-confirm]').onclick = async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = '启动中…';
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/confirm`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({leaf_block_ids: []}),
+          signal: AbortSignal.timeout(60000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        dialog.close();
+        status(`已启动 ${data.chapters} 个章节的编制，可在右栏查看进度`);
+        team?.refresh();
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = '确认并开始编制';
+        body.insertAdjacentHTML('afterbegin', `<p class="cs-warning">启动失败：${esc(String(err.message || err))}</p>`);
+      }
+    };
+  }
   async function loadPageBudget() {
     const tid = threadId;                 // mountChapterStudio 的参数，不猜 URL
     if (!tid) return;
@@ -207,6 +286,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const stateOf = b => !units.has(b.id) ? '目录' : profile[b.id]?.writing_status==='complete' ? '完成' : b.content?.trim() ? (profile[b.id]?.writing_status==='review'?'待核对':'草稿') : '未开始';
   // 拿到篇幅后重画左树与章头（不阻塞首屏）
   loadPageBudget().then(() => { if (active) paintTree(); });
+  void loadPlanUnits();          // 一级目录上挂「编写计划」入口
   // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
   // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
   const asideHost = host.querySelector('[data-cs="aside"]');
@@ -250,9 +330,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tips = [b.title, st,
         bs.target ? `预算 ${bs.target} 页 · 已写 ${bs.pages.toFixed(1)} 页 · ${bs.gapText}${bs.isParent ? '（子树合计）' : ''}` : '',
       ].filter(Boolean).join(' · ');
+      const unit = planUnits.get(String(b.block_id));
+      const planButton = unit
+        ? `<button class="cs-plan-btn" data-plan="${esc(String(b.block_id))}" title="先出编写计划，确认后再开始编制">编写计划${unit.leaves ? ` · ${unit.leaves} 节` : ''}</button>`
+        : '';
       return `<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
         ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
-        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
+        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>${planButton}`;
     }).join('');
   };
   async function save() {
@@ -321,6 +405,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
     get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据</h4>${context.points.map(p=>`<details><summary>${esc(p.item||p.factor)} · ${p.points ?? '—'} 分</summary><p>${esc(p.criterion)}</p></details>`).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
+      ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
+        return info ? `<section data-pane="basis"><h4>编写计划</h4><p class="cs-muted">本章属于《${esc(info.title)}》的编写计划（${info.leaves} 节）：先确认计划，再按计划编制。</p><button type="button" class="mw-btn" data-plan="${esc(unit)}">查看 / 确认计划</button></section>` : ''; })()}
       <section data-pane="basis"><h4>编排建议</h4><label>章节类型 <select data-cs="layout">${Object.entries(context.layouts).map(([id,l])=>`<option value="${id}" ${id===context.profile.layout?'selected':''}>${esc(l.label)}</option>`).join('')}</select></label><p>${layout.blocks.map(esc).join(' → ')}</p><p class="cs-muted">${context.materials.some(m=>m.confirmed)?'生成仅引用已核对素材，并结合本章评分及规范要求。':'无已核对素材：可先写项目分析与拟实施方案；人员、业绩、证书、实测参数等保留待补充。'}</p>${context.missing.map(m=>`<p class="cs-warning">${esc(m)}</p>`).join('')}</section>
       <section data-pane="materials"><div class="cs-material-head"><h4>本章素材 ${context.materials.length}</h4><label class="cs-upload">上传素材<input data-cs="upload" type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"></label></div><p class="cs-muted">PDF／Word 提取原文与页码；图片保留原图，需人工核对含义。</p><button data-action="library">从项目素材库关联</button><button data-action="refresh-materials">刷新解析状态</button><div data-cs="library"></div>${context.materials.map(m=>`<article class="cs-material"><strong>${esc(m.filename)}</strong><small>${esc(m.parse_status==='done'?'已解析':m.parse_status==='failed'?'解析失败，可移除后重传':'解析中，请稍后刷新')} · ${m.confirmed?'已核对':'待核对'}${m.adopted?' · 正文已引用':''}</small>${m.image_url?`<img src="${esc(m.image_url)}" alt="${esc(m.filename)}">`:''}<details><summary>提炼摘录与映射依据（${m.excerpts.length} 段）</summary><p class="cs-muted">${esc(m.mapping_reason)}</p>${(m.key_points||[]).length?`<h5>规则提炼的原文要点</h5>${m.key_points.map(p=>`<p><b>${esc(p.category)}</b>：${esc(p.quote)}<small>${p.page?`第 ${p.page} 页`:`片段 ${p.chunk_id}`}</small></p>`).join('')}<h5>完整原文片段</h5>`:''}${m.excerpts.map(x=>`<p>${esc(x.text)}<small>${x.page?`第 ${x.page} 页`:`片段 ${x.chunk_id}`}</small></p>`).join('') || '<p>图片不自动推断事实；文档解析中或暂无可提取原文。</p>'}</details><button data-material="confirm" data-id="${m.id}" ${m.parse_status!=='done'?'disabled':''}>${m.confirmed?'撤销核对':'核对适用于本章'}</button>${m.confirmed?`<button data-material="insert" data-id="${m.id}">${m.image_url?'插入图片':'引用原文摘录'}</button>`:''}<button data-material="unlink" data-id="${m.id}">移除关联</button></article>`).join('')}</section>`;
     get('layout').onchange = async event => {
@@ -390,6 +476,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
+    const planButton=event.target.closest('[data-plan]');
+    if(planButton){await openWritingPlan(planButton.dataset.plan);return;}
     const chapter=event.target.closest('[data-chapter]');
     if(chapter) {await select(chapter.dataset.chapter);return;}
     const material=event.target.closest('[data-material]');
