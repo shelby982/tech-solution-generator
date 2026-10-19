@@ -322,3 +322,40 @@
 .cs-cp-kids { display: flex; flex-direction: column; gap: 4px; }
 .cs-cp-kid { display: grid; grid-template-columns: 1.5fr 56px 86px 70px 108px; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #eef2f7; }
 .cs-cp-kid-title { font-weight: 600; }
+
+/* 计划弹窗（可读性重排）：结论卡 + 四块 */
+.cs-cp-dialog .cs-plan-body { padding-top: 4px; }
+.cs-cp-top { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 6px 0 12px; border-bottom: 1px solid #eef2f7; margin-bottom: 4px; }
+.cs-cp-top-main { min-width: 0; }
+.cs-cp-top h4 { margin: 0 0 4px; font-size: 17px; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+.cs-cp-tag { font-size: 10.5px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: #eef2ff; color: #4338ca; }
+.cs-cp-top-line { margin: 0; font-size: 13px; color: #334155; font-variant-numeric: tabular-nums; }
+.cs-cp-warn-line { margin: 4px 0 0; font-size: 12px; color: #b45309; }
+.cs-cp-main-btn { flex-shrink: 0; }
+.cs-cp-block { border-top: 1px solid #eef2f7; padding: 10px 0 6px; }
+.cs-cp-block > header, .cs-cp-block > summary { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #0f172a; cursor: default; }
+.cs-cp-block > summary { cursor: pointer; list-style: none; }
+.cs-cp-block > summary::-webkit-details-marker { display: none; }
+.cs-cp-block > summary::before { content: '▸'; color: #94a3b8; font-size: 10px; }
+.cs-cp-block[open] > summary::before { content: '▾'; }
+.cs-cp-block em { font-style: normal; font-size: 11.5px; color: #64748b; flex: 1; }
+.cs-cp-link { font: inherit; font-size: 11.5px; padding: 2px 8px; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; cursor: pointer; color: #1d4ed8; }
+.cs-cp-del { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; font-size: 12.5px; }
+.cs-cp-kind { flex-shrink: 0; font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: #f1f5f9; color: #475569; margin-top: 1px; }
+.cs-cp-del-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cs-cp-del-main small { color: #64748b; font-size: 11.5px; }
+.cs-cp-del-main small i { font-style: normal; color: #b45309; }
+.cs-cp-del.达标 .cs-cp-kind { background: #dcfce7; color: #166534; }
+.cs-cp-empty { margin: 4px 0; font-size: 12px; color: #94a3b8; }
+.cs-cp-brief { margin: 6px 0 0; font-size: 11.5px; color: #1d4ed8; }
+.cs-cp-check { margin: 2px 0; font-size: 12px; color: #b45309; }
+.cs-cp-ok { margin: 2px 0; font-size: 12px; color: #15803d; }
+.cs-cp-actions-inline { margin: 6px 0 0; }
+.cs-cp-dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+.cs-cp-dot.ok { background: #22c55e; }
+.cs-cp-kid { display: grid; grid-template-columns: 1.4fr 1fr 86px 60px; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px dashed #f1f5f9; font-size: 12.5px; cursor: pointer; border-radius: 6px; }
+.cs-cp-kid:hover { background: #f8fafc; }
+.cs-cp-kid-bar { height: 5px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
+.cs-cp-kid-bar i { display: block; height: 100%; background: #60a5fa; }
+.cs-cp-kid em { font-style: normal; font-size: 11px; color: #94a3b8; }
+.cs-cp-kid em.ok { color: #15803d; }

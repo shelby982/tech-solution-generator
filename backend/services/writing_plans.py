@@ -929,10 +929,14 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
             item["target_words"] = 400 if item.get("source") == "system" else 0
             if not item["target_words"] and any(other.get("source") == "system" for other in deliverables):
                 item["target_words"] = 0
-        word_plan = {"total": 400, "written": written_total,
-                     "percent": round(written_total / 400 * 100) if written_total else 0,
-                     "over": written_total > 600,
-                     "note": f"父章只写总述 300–500 字；子节共 {len(deliverables)} 项另计"}
+        own_words = len(str(content or "").replace(" ", ""))
+        advice = ""
+        if own_words > 600:
+            advice = f"父章已写 {round(own_words / 250, 1)} 页（{own_words} 字），远超总述建议（300–500 字）：建议精简为总述，或把细节下沉到子节"
+        word_plan = {"total": 400, "written": own_words,
+                     "percent": round(own_words / 400 * 100) if own_words else 0,
+                     "over": own_words > 600, "advice": advice,
+                     "note": "父章只写总述 300–500 字；子节在各自章节里写"}
         for item in deliverables:
             if item["kind"] != "text":
                 item["target_words"] = 0
