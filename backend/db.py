@@ -430,6 +430,15 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             await conn.execute(f"ALTER TABLE blocks ADD COLUMN {col} TEXT")
     # 来源链（2026-10-13，用户确定的核心数据关系）：
     #   招标评分点 ↔ 技术规范要求 ↔ 应标章节 ↔ 企业素材 ↔ 生成内容 ↔ 审查结果
+    # citations 的 trust / gap 是后加的列：老库里的 citations 表早已建好，
+    # 光改 CREATE TABLE 不会补列（实测：接受引用时报 500 no such column: gap）。
+    citation_columns = {r[1] for r in await (await conn.execute("PRAGMA table_info(citations)")).fetchall()}
+    if citation_columns:
+        for name, kind in (("trust", "TEXT NOT NULL DEFAULT 'official'"),
+                           ("gap", "TEXT NOT NULL DEFAULT ''")):
+            if name not in citation_columns:
+                await conn.execute(f"ALTER TABLE citations ADD COLUMN {name} {kind}")
+
     # 在此之前评分点/规范要求只在本轮派生中内存存活，章节只有 8 段散文，
     # 于是"这章为哪个评分点得分、响应了哪条规范要求"无法反查、覆盖度算不出来。
     for col in ("review_point_ids", "spec_requirement_ids", "criterion_text", "spec_topic",
