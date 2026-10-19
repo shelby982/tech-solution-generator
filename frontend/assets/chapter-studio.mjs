@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v271';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v271';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v271';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v273';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v273';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v273';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -327,7 +327,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
   }
 
-  /** 本章编写计划（S1a 只读）：要写什么 / 写多少 / 怎么写更好 / 要哪些素材 / 哪些图表 / 还差什么。 */
+  /** 本章编写计划：按章计划（要求/篇幅/写法/素材/图表/还差什么）+ 章级确认与验收状态。
+   *  R1 重排：顶部只留"计划"信息（验收移到底部）；A/F 展开、B/C/D/E 折叠；A 不重复素材状态。 */
   async function openChapterPlan(blockId) {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog cs-cp-dialog';
@@ -339,7 +340,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dialog.showModal();
     const body = dialog.querySelector('.cs-plan-body');
     let data = null;
-    const typeLabel = {text: '文字', table: '表格', figure: '图示', material: '素材'};
+    const planType = {text: '写作', table: '产出·表', figure: '产出·图', material: '素材'};
     const materialTone = (status) => status === '已满足' ? 'ok' : status === '已补不足' ? 'warn' : 'bad';
     const load = async () => {
       const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockId)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
@@ -347,103 +348,192 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
       return payload;
     };
+    let issuesCache = null;
     const loadChapterIssues = async () => {
+      if (issuesCache) return issuesCache;
       try {
         const resp = await fetch(`/api/projects/${projectId}/quality?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(60000)});
         const payload = await resp.json().catch(() => ({}));
         const row = (payload.chapters || []).find((item) => String(item.block_id) === String(blockId));
-        return (row?.issues || []).filter((issue) => issue.level !== 'info');
-      } catch (e) { return []; }
+        issuesCache = (row?.issues || []).filter((issue) => issue.level !== 'info');
+        return issuesCache;
+      } catch (e) { issuesCache = []; return issuesCache; }
+    };
+    // 素材绑定抽屉（D 段"选片段"与 A 段共用）
+    const openBindPicker = (requirement) => {
+      if (!data.plan_id) { status('本章还没有计划，无法绑定素材'); return; }
+      const linked = citationInfo.rows.filter((c) => (c.links || []).includes(String(blockId)) || !c.block_id);
+      const segRows = linked.map((citation) => (citation.segments || []).map((segment, index) => ({citation, segment, index}))).flat().slice(0, 60);
+      const picker = globalThis.document.createElement('dialog');
+      picker.className = 'cs-plan-dialog';
+      picker.innerHTML = `<header><h3>给「${esc(String(requirement.text).slice(0, 16))}」补充素材</h3><button type="button" aria-label="关闭">×</button></header>
+        <div class="cs-plan-body"><p class="cs-muted">从本章已接受的来源里勾选可用片段，绑定到这条要求。</p>
+          ${segRows.length ? segRows.map(({citation, segment, index}) => `<label class="cs-seg-row">
+              <input type="checkbox" data-cp-bind-citation="${esc(citation.id)}" data-cp-bind-index="${index}" />
+              <div><span class="cs-seg-kind ${esc(segment.kind)}">${{text:'段落',table:'表格',image:'图片'}[segment.kind] || '内容'}</span>
+                <b>${esc(String(citation.title || '').slice(0, 22))}</b>
+                <p>${esc(String(segment.content || '').slice(0, 180))}</p></div></label>`).join('')
+            : '<p class="cs-warning">本章还没有可用的来源片段：先在「素材池」添加官方来源并提取片段。</p>'}
+          <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cp-bind-cancel>取消</button>
+            ${segRows.length ? '<button type="button" class="mw-btn primary" data-cp-bind-save>绑定</button>' : ''}</div>
+          <p class="cs-dim" data-cp-bind-msg></p></div>`;
+      globalThis.document.body.append(picker);
+      picker.querySelector('header button').onclick = () => picker.close();
+      picker.querySelector('[data-cp-bind-cancel]').onclick = () => picker.close();
+      picker.addEventListener('close', () => picker.remove());
+      picker.querySelector('[data-cp-bind-save]')?.addEventListener('click', async () => {
+        const checked = [...picker.querySelectorAll('[data-cp-bind-citation]:checked')];
+        if (!checked.length) { picker.querySelector('[data-cp-bind-msg]').textContent = '先勾选至少一个片段'; return; }
+        try {
+          for (const input of checked) {
+            await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/needs/bind`, {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({block_id: blockId, requirement_id: String(requirement.id),
+                                    citation_id: input.dataset.cpBindCitation,
+                                    indices: [Number(input.dataset.cpBindIndex)]}),
+              signal: AbortSignal.timeout(30000),
+            });
+          }
+          picker.close();
+          status(`已绑定 ${checked.length} 个片段`);
+          issuesCache = null;
+          data = await load();
+          await render();
+        } catch (err) { picker.querySelector('[data-cp-bind-msg]').textContent = `绑定失败：${String(err.message || err)}`; }
+      });
+      picker.showModal();
     };
     const render = async () => {
       const issues = await loadChapterIssues();
       const requirements = data.requirements || [];
-      const pages = data.pages || 0;
+      const planPages = data.pages || 0;
       const writtenPages = Math.round((data.words || 0) / 250 * 10) / 10;
+      const over = planPages > 0 && writtenPages > planPages;
       const stats = data.stats || {};
       const guidance = data.guidance || {};
       const figures = data.figures_plan || {tables: [], figures: []};
+      const completion = data.completion || {ok: false, reasons: []};
       const unit = unitOf.get(String(blockId));
       const unitInfo = unit ? planUnits.get(unit) : null;
-      const planUnconfirmed = unitInfo && !(unitInfo.plan && unitInfo.plan.status === 'confirmed');
+      const branchUnconfirmed = unitInfo && !(unitInfo.plan && unitInfo.plan.status === 'confirmed');
+      const basisLabel = (data.basis?.points || []).map((p) => `${p.label}（${p.points ?? '—'} 分）`).join('；');
       body.innerHTML = `
-        ${planUnconfirmed ? `<p class="cs-cp-warn">《${esc(unitInfo.title)}》的编写计划还未确认（共 ${unitInfo.leaves} 节）
-          <button type="button" class="cs-cp-mini" data-cp-open-branch>去看 / 确认</button></p>` : ''}
-        <div class="cs-cp-head"><h4>${esc(data.title || '')}
+        <div class="cs-cp-head">
+          <h4>${esc(data.title || '')}
             <span class="cs-cp-badge ${data.confirmed ? 'ok' : ''}">${data.confirmed ? '本章计划已确认' : '本章计划未确认'}</span>
             ${data.plan_changed_after_content ? '<span class="cs-cp-badge warn">计划在正文之后有更新</span>' : ''}
-            <span class="cs-cp-badge ${data.completion?.ok ? 'ok' : ''}">${data.completion?.ok ? '可判定完成' : '未达完成'}</span>
           </h4>
-          <span class="cs-cp-facts">计划 ${pages || '—'} 页 · 要求 ${stats.requirements || 0} 条（已回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
-          ${(data.completion?.reasons || []).length ? `<span class="cs-cp-reasons">未达完成：${esc(data.completion.reasons.join('；'))}</span>` : ''}
+          <span class="cs-cp-facts">计划 ${planPages || '—'} 页 · 已写 ${writtenPages} 页${over ? ` <b class="cs-cp-over">超 ${Math.round((writtenPages - planPages) * 10) / 10} 页</b>` : ''}
+            · 要求 ${stats.requirements || 0} 条（已回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
+          ${basisLabel ? `<span class="cs-cp-basis">依据：${esc(basisLabel)}</span>` : ''}
+          ${(data.confirmed || !branchUnconfirmed) ? ''
+            : `<span class="cs-cp-branchwarn">所属《${esc(unitInfo.title)}》的目录计划还未确认（共 ${unitInfo.leaves} 节）
+                <button type="button" class="cs-cp-mini" data-cp-open-branch>去看目录计划</button></span>`}
         </div>
-        <section class="cs-cp-sec" data-cp-sec="a">
-          <h5>A · 要写什么（要求与依据）<button type="button" class="cs-cp-mini" data-cp-edit-req>编辑要求</button></h5>
+
+        <details class="cs-cp-sec" data-cp-sec="a" open>
+          <summary><b>A · 要写什么</b><em>要求 ${requirements.length} 条 · 已回应 ${stats.responded || 0}</em>
+            <button type="button" class="cs-cp-mini" data-cp-edit-req>编辑要求</button></summary>
           <div data-cp-req-view>
           ${requirements.length ? requirements.map((requirement) => `<div class="cs-cp-req">
-              <div class="cs-cp-req-line"><span class="cs-plan-task ${esc(requirement.type || 'text')}">${typeLabel[requirement.type] || '要求'}</span>
+              <div class="cs-cp-req-line"><span class="cs-plan-task ${esc(requirement.type || 'text')}">${planType[requirement.type] || '要求'}</span>
                 <b>${esc(requirement.text)}</b>
                 <em class="${requirement.responded ? 'ok' : ''}">${requirement.responded ? '正文已回应' : '正文未回应'}</em></div>
-              <div class="cs-cp-req-meta">
-                <span class="cs-cp-mat ${materialTone(requirement.material)}">素材${requirement.material}</span>
-                <small>依据：${esc((requirement.basis || []).join('；').slice(0, 40) || '（未绑定评分点/条款）')}</small>
-                ${requirement.material === '已满足' ? '' : `<button type="button" class="cs-cp-mini" data-cp-bind="${esc(String(requirement.id))}">选片段</button>`}
-              </div></div>`).join('') : '<p class="cs-dim">本章还没有编写要求。</p>'}
+             </div>`).join('') : '<p class="cs-dim">本章还没有编写要求。</p>'}
           </div>
           <div data-cp-req-edit hidden></div>
-        </section>
-        <section class="cs-cp-sec" data-cp-sec="b">
-          <h5>B · 写多少（篇幅）</h5>
-          <p class="cs-cp-line">计划 <b>${pages || '—'}</b> 页 · 正文已写 ${writtenPages} 页（${data.words || 0} 字）
-            <span class="cs-dim">（篇幅在「应答策划」分配；"已写"以进度为准）</span>
-            ${pages ? '' : '<span class="cs-dim">本章尚未分到页数，可到「应答策划」调整篇幅分配。</span>'}</p>
-        </section>
-        <section class="cs-cp-sec" data-cp-sec="c">
-          <h5>C · 怎么写更好（本章写法）<button type="button" class="cs-cp-mini" data-cp-open-spec>查看 / 修改写作规范</button></h5>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="b">
+          <summary><b>B · 写多少</b><em>计划 ${planPages || '—'} 页 · 已写 ${writtenPages} 页</em></summary>
+          <p class="cs-cp-line">${planPages
+            ? `计划 ${planPages} 页，已写 ${writtenPages} 页${over ? `<b class="cs-cp-over">（超 ${Math.round((writtenPages - planPages) * 10) / 10} 页）</b>` : ''}`
+            : '本章未分到页数 <button type="button" class="cs-cp-mini" data-cp-open-budget>去分配篇幅</button>'}
+            <span class="cs-dim">（篇幅在「应答策划」分配；"已写"以进度为准）</span></p>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="c">
+          <summary><b>C · 怎么写更好</b><em>结构 / 写法要点 / 易失分</em>
+            <button type="button" class="cs-cp-mini" data-cp-open-spec title="全局模块配方，改动影响所有同类章节">查看写作规范（全局）</button></summary>
           <div class="cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
-            ${(guidance.tables || []).length ? `<p><b>建议表格</b>：${esc(guidance.tables.join('；'))}</p>` : ''}
-            ${(guidance.figures || []).length ? `<p><b>建议图示</b>：${esc(guidance.figures.join('；'))}</p>` : ''}
             ${(guidance.pitfalls || []).length ? `<p class="cs-cp-pitfall"><b>易失分</b>：${esc(guidance.pitfalls.join('；'))}</p>` : ''}
+            ${(guidance.notes || []).length ? `<p><b>要求</b>：${esc(guidance.notes.join('；'))}</p>` : ''}
+            <p class="cs-dim">建议表格/图示见 E 段（只在本章计划里出现一次）。</p>
           </div>
-        </section>
-        <section class="cs-cp-sec" data-cp-sec="d">
-          <h5>D · 要哪些素材（素材需求）</h5>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="d">
+          <summary><b>D · 要哪些素材</b><em>待补 ${stats.material_pending || 0}${stats.material_short ? ` · 不足 ${stats.material_short}` : ''}</em></summary>
           ${requirements.length ? requirements.map((requirement) => `<div class="cs-cp-need">
               <span class="cs-cp-mat ${materialTone(requirement.material)}">${requirement.material}</span>
               <span class="cs-cp-need-text">${esc(requirement.text)}</span>
-              ${(requirement.bound || []).length ? `<small>已绑 ${(requirement.bound || []).length} 个片段：${esc((requirement.bound || []).slice(0, 2).map((b) => b.heading || b.kind || '').join('、'))}</small>` : '<small class="cs-cp-bad">尚未绑定片段</small>'}
+              <small>${(requirement.bound || []).length ? `已绑 ${(requirement.bound || []).length} 个片段` : '尚未绑定片段'}</small>
+              ${requirement.material === '已满足' ? '' : `<button type="button" class="cs-cp-mini" data-cp-find>找素材</button>
+                <button type="button" class="cs-cp-mini" data-cp-bind="${esc(String(requirement.id))}">选片段</button>`}
             </div>`).join('') : '<p class="cs-dim">没有素材需求。</p>'}
           ${(data.gaps || []).length ? `<p class="cs-warning">正文素材缺口：${esc(data.gaps.join('；'))}</p>` : ''}
-        </section>
-        <section class="cs-cp-sec" data-cp-sec="e">
-          <h5>E · 体现哪些图表<button type="button" class="cs-cp-mini" data-cp-edit-fig>编辑图表</button></h5>
-          <p class="cs-cp-line">表格 <b>${figures.tables.length}</b> 张 · 图示 <b>${figures.figures.length}</b> 张</p>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="e">
+          <summary><b>E · 体现哪些图表</b><em>表 ${figures.tables.length} 张 · 图 ${figures.figures.length} 张</em>
+            <button type="button" class="cs-cp-mini" data-cp-edit-fig>编辑图表</button></summary>
           ${(figures.tables || []).map((item) => `<p class="cs-cp-fig">▤ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
           ${(figures.figures || []).map((item) => `<p class="cs-cp-fig">▦ ${esc(item.name)}<small>用途：${esc(item.purpose.slice(0, 40))} · 来源：${esc(item.source)}</small></p>`).join('')}
           ${(!figures.tables.length && !figures.figures.length) ? '<p class="cs-dim">本章计划未要求图表。</p>' : ''}
-        </section>
-        <section class="cs-cp-sec" data-cp-sec="f">
-          <h5>F · 还差什么（验收清单）</h5>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="f" open>
+          <summary><b>F · 还差什么</b><em>${issues.length} 条</em></summary>
           ${issues.length ? issues.map((issue) => `<div class="cs-cp-issue ${esc(issue.level)}">
               <div class="cs-cp-issue-main"><b>${esc(issue.check || '')}</b><span>${esc(issue.message)}</span></div>
               <div class="cs-cp-issue-acts">
-                ${(issue.actions || []).includes('find_material') ? `<button type="button" class="cs-cp-mini" data-cp-fix="find_material">去补素材</button>` : ''}
-                ${(issue.actions || []).includes('regenerate') ? `<button type="button" class="cs-cp-mini" data-cp-fix="regenerate">重新生成</button>` : ''}
-                ${(issue.actions || []).includes('open_spec') ? `<button type="button" class="cs-cp-mini" data-cp-fix="open_spec">看规范</button>` : ''}
+                ${(issue.actions || []).includes('find_material') ? '<button type="button" class="cs-cp-mini" data-cp-fix="find_material">去补素材</button>' : ''}
+                ${(issue.actions || []).includes('regenerate') ? '<button type="button" class="cs-cp-mini" data-cp-fix="regenerate">重新生成</button>' : ''}
+                ${(issue.actions || []).includes('open_spec') ? '<button type="button" class="cs-cp-mini" data-cp-fix="open_spec">看规范</button>' : ''}
                 ${issue.finding_id ? `<button type="button" class="cs-cp-mini" data-cp-fix="ignore" data-finding="${esc(issue.finding_id)}">标为已处理</button>` : ''}
               </div></div>`).join('') : '<p class="cs-muted">没有待处理项。</p>'}
-        </section>
+        </details>
+
+        <details class="cs-cp-sec" data-cp-sec="g">
+          <summary><b>验收状态</b><em>${completion.ok ? '可判定完成' : '未达完成'}</em></summary>
+          ${completion.ok ? '<p class="cs-cp-ok">要求已全部落点、素材已满足、图表齐全、无待修问题。</p>'
+            : `<p class="cs-cp-reasons">未达完成：${esc(completion.reasons.join('；'))}</p>`}
+        </details>
+
         <div class="cs-plan-actions">
           <button type="button" class="mw-btn" data-cp-close>关闭</button>
+          ${data.plan_changed_after_content ? '<button type="button" class="mw-btn" data-cp-refresh>按新计划重新生成</button>' : ''}
           ${data.confirmed ? '' : '<button type="button" class="mw-btn" data-cp-confirm>确认本章计划</button>'}
           <button type="button" class="mw-btn primary" data-cp-generate>AI 编制本章</button>
         </div>
-        <p class="cs-dim" data-cp-msg></p>`;
+        <p class="cs-cp-hint">未达完成也可生成（正文会写【待补充】），修复后可重新生成。</p>`;
+      bindEvents();
+    };
+    const bindEvents = () => {
       body.querySelector('[data-cp-close]').onclick = () => dialog.close();
       body.querySelector('[data-cp-open-branch]')?.addEventListener('click', () => {
         dialog.close();
+        const unit = unitOf.get(String(blockId));
         if (unit) void openWritingPlan(unit);
+      });
+      body.querySelector('[data-cp-open-budget]')?.addEventListener('click', () => {
+        dialog.close();
+        globalThis.document.querySelector('.sr-rail-item[data-stage="2"]')?.click();
+      });
+      body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
+        globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
+          {detail: {layout: (data.guidance && data.guidance.layout) || 'global'}}));
+      });
+      body.querySelector('[data-cp-generate]').onclick = () => {
+        dialog.close();
+        void select(blockId);
+        globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
+      };
+      body.querySelector('[data-cp-refresh]')?.addEventListener('click', () => {
+        dialog.close();
+        void select(blockId);
+        globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
       });
       body.querySelector('[data-cp-confirm]')?.addEventListener('click', async () => {
         if (!data.plan_id) { status('本章还没有计划'); return; }
@@ -459,6 +549,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           await render();
         } catch (err) { status(`确认失败：${String(err.message || err)}`); }
       });
+      // D 段：找素材 / 选片段
+      body.querySelectorAll('[data-cp-find]').forEach((button) => button.addEventListener('click', () => {
+        dialog.close();
+        openCitationDialog(blockId);
+      }));
+      body.querySelectorAll('[data-cp-bind]').forEach((button) => button.addEventListener('click', () => {
+        const requirement = (data.requirements || []).find((item) => String(item.id) === String(button.dataset.cpBind));
+        if (requirement) openBindPicker(requirement);
+      }));
       // F 段：一键动作
       body.querySelectorAll('[data-cp-fix]').forEach((button) => button.addEventListener('click', async () => {
         const kind = button.dataset.cpFix;
@@ -479,19 +578,62 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             const resp = await fetch(`/api/projects/${projectId}/quality/findings/${encodeURIComponent(button.dataset.finding)}/ignore`, {method: 'POST', signal: AbortSignal.timeout(20000)});
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             button.closest('.cs-cp-issue')?.remove();
+            issuesCache = null;
             status('已标记为已处理');
           } catch (err) { status(`标记失败：${String(err.message || err)}`); }
         }
       }));
-      // 写法要点 → 打开本章类型的编写规范（草稿区可改，影响后续生成）
-      body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
-        globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
-          {detail: {layout: (data.guidance && data.guidance.layout) || 'global'}}));
+      // A 段：编辑要求
+      body.querySelector('[data-cp-edit-req]')?.addEventListener('click', () => {
+        const view = body.querySelector('[data-cp-req-view]');
+        const edit = body.querySelector('[data-cp-req-edit]');
+        const rows = (data.requirements || []).map((requirement) => `<div class="cs-req-row" data-cp-req-row>
+            <select data-cp-req-type>${['text','table','figure','material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${planType[kind]}</option>`).join('')}</select>
+            <input type="text" data-cp-req-text value="${esc(requirement.text)}" />
+            <button type="button" class="cs-req-del" data-cp-req-del>×</button>
+          </div>`).join('');
+        edit.innerHTML = `${rows || '<p class="cs-dim">还没有要求</p>'}
+          <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cp-req-add>＋ 添加要求</button>
+            <button type="button" class="mw-btn" data-cp-req-cancel>取消</button>
+            <button type="button" class="mw-btn primary" data-cp-req-save>保存要求</button></div>
+          <p class="cs-dim" data-cp-req-msg></p>`;
+        view.hidden = true;
+        edit.hidden = false;
+        edit.querySelector('[data-cp-req-add]').onclick = () => {
+          edit.insertAdjacentHTML('beforeend', `<div class="cs-req-row" data-cp-req-row>
+              <select data-cp-req-type><option value="text">写作</option><option value="table">产出·表</option><option value="figure">产出·图</option><option value="material">素材</option></select>
+              <input type="text" data-cp-req-text placeholder="例：说明政策依据（至少两个部委文件）" />
+              <button type="button" class="cs-req-del" data-cp-req-del>×</button></div>`);
+        };
+        edit.addEventListener('click', (event) => {
+          if (event.target.closest('[data-cp-req-del]')) event.target.closest('[data-cp-req-row]').remove();
+        });
+        edit.querySelector('[data-cp-req-cancel]').onclick = () => { edit.hidden = true; view.hidden = false; };
+        edit.querySelector('[data-cp-req-save]').onclick = async () => {
+          const requirementsNext = [...edit.querySelectorAll('[data-cp-req-row]')].map((row) => ({
+            text: (row.querySelector('[data-cp-req-text]') || {}).value?.trim() || '',
+            type: (row.querySelector('[data-cp-req-type]') || {}).value || 'text',
+          })).filter((item) => item.text);
+          if (!data.plan_id) { edit.querySelector('[data-cp-req-msg]').textContent = '本章还没有计划，无法保存要求'; return; }
+          try {
+            const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/requirements`, {
+              method: 'PUT', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({block_id: blockId, requirements: requirementsNext}),
+              signal: AbortSignal.timeout(30000),
+            });
+            const payload = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+            status(`已保存 ${payload.requirements.length} 条编写要求`);
+            issuesCache = null;
+            data = await load();
+            await render();
+          } catch (err) { edit.querySelector('[data-cp-req-msg]').textContent = `保存失败：${String(err.message || err)}`; }
+        };
       });
-      // 图表计划编辑（内联）
+      // E 段：编辑图表
       body.querySelector('[data-cp-edit-fig]')?.addEventListener('click', () => {
         const figures = data.figures_plan || {tables: [], figures: []};
-        const rowHtml = (item, kind, index) => `<div class="cs-cp-figrow" data-fig-row data-kind="${kind}">
+        const rowHtml = (item, kind) => `<div class="cs-cp-figrow" data-fig-row data-kind="${kind}">
             <input type="text" data-fig-name value="${esc(item.name || '')}" placeholder="名称（如：政策依据映射表）" />
             <input type="text" data-fig-purpose value="${esc(item.purpose || '')}" placeholder="用途" />
             <input type="text" data-fig-source value="${esc(item.source || '')}" placeholder="来源（我方材料/外部来源/生成）" />
@@ -500,9 +642,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         editor.className = 'cs-plan-dialog';
         editor.innerHTML = `<header><h3>编辑图表计划</h3><button type="button" aria-label="关闭">×</button></header>
           <div class="cs-plan-body"><p class="cs-muted">说清"这一章要出哪些表、哪些图，分别干什么用、从哪来"。</p>
-            <h5 class="cs-cp-sub">表格</h5><div data-fig-tables>${(figures.tables || []).map((item, index) => rowHtml(item, 'table', index)).join('')}</div>
+            <h5 class="cs-cp-sub">表格</h5><div data-fig-tables>${(figures.tables || []).map((item) => rowHtml(item, 'table')).join('')}</div>
             <button type="button" class="cs-cp-mini" data-fig-add="table">＋ 添加表格</button>
-            <h5 class="cs-cp-sub">图示</h5><div data-fig-figures>${(figures.figures || []).map((item, index) => rowHtml(item, 'figure', index)).join('')}</div>
+            <h5 class="cs-cp-sub">图示</h5><div data-fig-figures>${(figures.figures || []).map((item) => rowHtml(item, 'figure')).join('')}</div>
             <button type="button" class="cs-cp-mini" data-fig-add="figure">＋ 添加图示</button>
             <div class="cs-plan-actions"><button type="button" class="mw-btn" data-fig-cancel>取消</button>
               <button type="button" class="mw-btn primary" data-fig-save>保存图表计划</button></div>
@@ -513,8 +655,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         editor.addEventListener('close', () => editor.remove());
         editor.querySelectorAll('[data-fig-add]').forEach((button) => button.addEventListener('click', () => {
           const kind = button.dataset.figAdd;
-          const host2 = editor.querySelector(kind === 'table' ? '[data-fig-tables]' : '[data-fig-figures]');
-          host2.insertAdjacentHTML('beforeend', rowHtml({}, kind, 0));
+          const target = editor.querySelector(kind === 'table' ? '[data-fig-tables]' : '[data-fig-figures]');
+          target.insertAdjacentHTML('beforeend', rowHtml({}, kind));
         }));
         editor.addEventListener('click', (event) => {
           if (event.target.closest('[data-fig-del]')) event.target.closest('[data-fig-row]').remove();
@@ -542,103 +684,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         };
         editor.showModal();
       });
-      // 要求编辑（内联）
-      body.querySelector('[data-cp-edit-req]')?.addEventListener('click', () => {
-        const view = body.querySelector('[data-cp-req-view]');
-        const edit = body.querySelector('[data-cp-req-edit]');
-        const rows = (data.requirements || []).map((requirement) => `<div class="cs-req-row" data-cp-req-row>
-            <select data-cp-req-type>${['text','table','figure','material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${{text:'文字',table:'表格',figure:'图示',material:'素材'}[kind]}</option>`).join('')}</select>
-            <input type="text" data-cp-req-text value="${esc(requirement.text)}" />
-            <button type="button" class="cs-req-del" data-cp-req-del>×</button>
-          </div>`).join('');
-        edit.innerHTML = `${rows || '<p class="cs-dim">还没有要求</p>'}
-          <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cp-req-add>＋ 添加要求</button>
-            <button type="button" class="mw-btn" data-cp-req-cancel>取消</button>
-            <button type="button" class="mw-btn primary" data-cp-req-save>保存要求</button></div>
-          <p class="cs-dim" data-cp-req-msg></p>`;
-        view.hidden = true;
-        edit.hidden = false;
-        edit.querySelector('[data-cp-req-add]').onclick = () => {
-          edit.insertAdjacentHTML('beforeend', `<div class="cs-req-row" data-cp-req-row>
-              <select data-cp-req-type><option value="text">文字</option><option value="table">表格</option><option value="figure">图示</option><option value="material">素材</option></select>
-              <input type="text" data-cp-req-text placeholder="例：说明政策依据（至少两个部委文件）" />
-              <button type="button" class="cs-req-del" data-cp-req-del>×</button></div>`);
-        };
-        edit.addEventListener('click', (event) => {
-          if (event.target.closest('[data-cp-req-del]')) event.target.closest('[data-cp-req-row]').remove();
-        });
-        edit.querySelector('[data-cp-req-cancel]').onclick = () => { edit.hidden = true; view.hidden = false; };
-        edit.querySelector('[data-cp-req-save]').onclick = async () => {
-          const requirementsNext = [...edit.querySelectorAll('[data-cp-req-row]')].map((row) => ({
-            text: (row.querySelector('[data-cp-req-text]') || {}).value?.trim() || '',
-            type: (row.querySelector('[data-cp-req-type]') || {}).value || 'text',
-          })).filter((item) => item.text);
-          if (!data.plan_id) { edit.querySelector('[data-cp-req-msg]').textContent = '本章还没有计划，无法保存要求'; return; }
-          try {
-            const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/requirements`, {
-              method: 'PUT', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({block_id: blockId, requirements: requirementsNext}),
-              signal: AbortSignal.timeout(30000),
-            });
-            const payload = await resp.json().catch(() => ({}));
-            if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
-            status(`已保存 ${payload.requirements.length} 条编写要求`);
-            data = await load();
-            await render();
-          } catch (err) { edit.querySelector('[data-cp-req-msg]').textContent = `保存失败：${String(err.message || err)}`; }
-        };
-      });
-      // 素材绑定：选片段
-      body.querySelectorAll('[data-cp-bind]').forEach((button) => button.addEventListener('click', async () => {
-        const requirementId = button.dataset.cpBind;
-        const requirement = (data.requirements || []).find((item) => String(item.id) === String(requirementId));
-        if (!requirement) return;
-        if (!data.plan_id) { status('本章还没有计划，无法绑定素材'); return; }
-        const linked = citationInfo.rows.filter((c) => (c.links || []).includes(String(blockId)) || !c.block_id);
-        const segRows = linked.map((citation) => (citation.segments || []).map((segment, index) => ({citation, segment, index}))).flat().slice(0, 60);
-        const picker = globalThis.document.createElement('dialog');
-        picker.className = 'cs-plan-dialog';
-        picker.innerHTML = `<header><h3>给「${esc(String(requirement.text).slice(0, 16))}」补充素材</h3><button type="button" aria-label="关闭">×</button></header>
-          <div class="cs-plan-body"><p class="cs-muted">从本章已接受的来源里勾选可用片段，绑定到这条要求。</p>
-            ${segRows.length ? segRows.map(({citation, segment, index}) => `<label class="cs-seg-row">
-                <input type="checkbox" data-cp-bind-citation="${esc(citation.id)}" data-cp-bind-index="${index}" />
-                <div><span class="cs-seg-kind ${esc(segment.kind)}">${{text:'段落',table:'表格',image:'图片'}[segment.kind] || '内容'}</span>
-                  <b>${esc(String(citation.title || '').slice(0, 22))}</b>
-                  <p>${esc(String(segment.content || '').slice(0, 180))}</p></div></label>`).join('')
-              : '<p class="cs-warning">本章还没有可用的来源片段：先在「素材」页签添加官方来源并提取片段。</p>'}
-            <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cp-bind-cancel>取消</button>
-              ${segRows.length ? '<button type="button" class="mw-btn primary" data-cp-bind-save>绑定</button>' : ''}</div>
-            <p class="cs-dim" data-cp-bind-msg></p></div>`;
-        globalThis.document.body.append(picker);
-        picker.querySelector('header button').onclick = () => picker.close();
-        picker.querySelector('[data-cp-bind-cancel]').onclick = () => picker.close();
-        picker.addEventListener('close', () => picker.remove());
-        picker.querySelector('[data-cp-bind-save]')?.addEventListener('click', async () => {
-          const checked = [...picker.querySelectorAll('[data-cp-bind-citation]:checked')];
-          if (!checked.length) { picker.querySelector('[data-cp-bind-msg]').textContent = '先勾选至少一个片段'; return; }
-          try {
-            for (const input of checked) {
-              await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/needs/bind`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({block_id: blockId, requirement_id: requirementId,
-                                      citation_id: input.dataset.cpBindCitation,
-                                      indices: [Number(input.dataset.cpBindIndex)]}),
-                signal: AbortSignal.timeout(30000),
-              });
-            }
-            picker.close();
-            status(`已绑定 ${checked.length} 个片段`);
-            data = await load();
-            await render();
-          } catch (err) { picker.querySelector('[data-cp-bind-msg]').textContent = `绑定失败：${String(err.message || err)}`; }
-        });
-        picker.showModal();
-      }));
-      body.querySelector('[data-cp-generate]').onclick = () => {
-        dialog.close();
-        void select(blockId);
-        globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
-      };
     };
     try {
       data = await load();
@@ -648,7 +693,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
   }
 
-  /** 来源的可用片段  /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
+  /** 来源的可用片段  /** 来源的可用片段  /** 来源的可用片段：段落/表格/图片，勾选后进入本章编写上下文（AI 基于它改写）。 */
   function openCitationSegments(citationId) {
     const citation = citationInfo.rows.find((row) => String(row.id) === String(citationId));
     if (!citation) return;
@@ -1410,7 +1455,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `<section data-pane="basis">
       <div class="cs-plan-summary"><b>本章编写计划</b>
-        <small>要求 ${basisCovered ? `${basisCovered.responded}/${basisCovered.total}` : '—'} 条已落点</small>
+        <small>评分点 ${basisCovered ? `${basisCovered.responded}/${basisCovered.total}` : '—'} 已落点</small>
         <button type="button" class="mw-btn" data-aside-open-plan="${esc(String(active.block_id))}">打开本章计划</button></div>
       <h4>本章编制依据${basisCovered ? ` <small>正文已回应 ${basisCovered.responded}/${basisCovered.total}</small>` : ''}</h4>${context.points.map((p, index) => {
         const cov = basisCovered?.points?.[index];

@@ -272,3 +272,17 @@
 .cs-cp-badge.ok { background: #dcfce7; color: #166534; }
 .cs-cp-badge.warn { background: #fef3c7; color: #92400e; }
 .cs-cp-reasons { font-size: 11.5px; color: #b45309; margin-top: 2px; }
+
+/* R1：本章计划重排样式 */
+.cs-cp-sec { border-top: 1px solid #eef2f7; padding: 8px 0 4px; }
+.cs-cp-sec > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 12.5px; color: #0f172a; }
+.cs-cp-sec > summary::-webkit-details-marker { display: none; }
+.cs-cp-sec > summary::before { content: '▸'; color: #94a3b8; font-size: 10px; }
+.cs-cp-sec[open] > summary::before { content: '▾'; }
+.cs-cp-sec > summary em { font-style: normal; font-size: 11px; color: #64748b; font-weight: 400; flex: 1; }
+.cs-cp-sec > summary .cs-cp-mini { margin-left: auto; }
+.cs-cp-over { color: #b91c1c; font-weight: 600; }
+.cs-cp-basis { font-size: 11px; color: #475569; }
+.cs-cp-branchwarn { font-size: 11.5px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 5px 9px; display: inline-flex; align-items: center; gap: 6px; }
+.cs-cp-hint { margin: 6px 0 0; font-size: 11px; color: #94a3b8; }
+.cs-cp-ok { color: #15803d; font-size: 12px; }
