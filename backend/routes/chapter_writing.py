@@ -31,6 +31,13 @@ class RequirementsBody(BaseModel):
     requirements: list[RequirementItem] = Field(default_factory=list)
 
 
+class BindBody(BaseModel):
+    block_id: str = Field(min_length=1)
+    requirement_id: str = Field(min_length=1)
+    citation_id: str = Field(min_length=1)
+    indices: list[int] = Field(default_factory=list)
+
+
 class PlanConfirmRequest(BaseModel):
     leaf_block_ids: list[str] = Field(default_factory=list)   # 空 = 确认全部
 
@@ -73,6 +80,26 @@ async def update_plan_requirements(project_id: int, plan_id: str, body: Requirem
         try:
             return await update_requirements(db, project_id, plan_id, body.block_id,
                                              [item.model_dump() for item in body.requirements])
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+
+
+@router.get('/projects/{project_id}/writing-plans/{plan_id}/needs')
+async def plan_needs(project_id: int, plan_id: str, threadId: str):
+    """需求级充足度：每条要求 → 素材需求（已补 N 片段 / 待补）。"""
+    from services.writing_plans import chapter_needs
+    async with get_db() as db:
+        return await chapter_needs(db, project_id, plan_id, threadId)
+
+
+@router.post('/projects/{project_id}/writing-plans/{plan_id}/needs/bind')
+async def bind_need(project_id: int, plan_id: str, body: BindBody):
+    """把来源片段绑到某条要求上。"""
+    from services.writing_plans import bind_snippets
+    async with get_db() as db:
+        try:
+            return await bind_snippets(db, project_id, plan_id, body.block_id, body.requirement_id,
+                                       body.citation_id, body.indices)
         except ValueError as exc:
             raise HTTPException(404, str(exc))
 
@@ -121,6 +148,8 @@ async def start_team(project_id:int,body:TeamRequest):
             from services.citations import citations_for_prompt, citation_line
             package['writing_spec']=await spec_for(db,layout)
             package['citations']=[citation_line(c) for c in await citations_for_prompt(db,project_id,block['block_id'])]
+            from services.writing_plans import needs_for_prompt
+            package['requirements']=await needs_for_prompt(db,project_id,body.thread_id,block['block_id'])
             if len(json.dumps(package,ensure_ascii=False))>160000:raise HTTPException(413,'章节依据过多，需分拆任务后编制')
             prepared.append((block,package))
         jobs=[]

@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS quality_findings (
 );
 CREATE INDEX IF NOT EXISTS idx_quality_findings_open ON quality_findings(project_id, status);
 
+-- 片段 → 需求 的绑定（P6）：只有绑定的片段才算"这条要求有素材了"
+CREATE TABLE IF NOT EXISTS need_snippets (
+    plan_id TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    requirement_id TEXT NOT NULL,
+    citation_id TEXT NOT NULL,
+    segment_index INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (plan_id, block_id, requirement_id, citation_id, segment_index)
+);
+
 -- 检索历史（P5）：同一章下次打开时可看"上次找到的候选"，避免重复搜
 CREATE TABLE IF NOT EXISTS citation_searches (
     id TEXT PRIMARY KEY,

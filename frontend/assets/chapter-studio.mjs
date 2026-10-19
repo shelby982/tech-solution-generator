@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v262';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v262';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v262';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v263';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v263';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v263';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -204,6 +204,36 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
   /** 质检清单：结构完整性 / 图表数量 / 占位与空词 / 篇幅偏差（确定性检查，不阻断保存）。 */
   /** 质检清单（分组版）：规范 / 计划 / 依据 / 素材 四组，每条带一键动作。 */
+  /** 绑定/编辑后刷新计划抽屉里的要求块（只重绘该章，避免整表跳动）。 */
+  async function refreshPlanRequirements(host, block) {
+    const blockId = host.dataset.planChapter;
+    try {
+      const [coverageResp, needsResp] = await Promise.all([
+        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(planIdOf(host))}/coverage?threadId=${encodeURIComponent(threadId)}`).catch(() => null),
+        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(planIdOf(host))}/needs?threadId=${encodeURIComponent(threadId)}`).catch(() => null),
+      ]);
+      const coverage = coverageResp?.ok ? await coverageResp.json() : null;
+      const needsData = needsResp?.ok ? await needsResp.json() : null;
+      const cov = (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId));
+      const needs = (needsData?.chapters || []).find((c) => String(c.block_id) === String(blockId))?.needs || [];
+      block.querySelectorAll('[data-req-row]').forEach((row, index) => {
+        const status = row.querySelector('em');
+        if (status && cov) status.textContent = cov.requirements?.[index]?.responded ? '已回应' : '未回应';
+        if (status) status.classList.toggle('ok', !!cov?.requirements?.[index]?.responded);
+        const needButton = row.querySelector('[data-req-need]');
+        if (needButton) {
+          const count = needs[index]?.snippets || 0;
+          needButton.textContent = count ? `素材 ${count}` : '未补素材';
+          needButton.classList.toggle('ok', !!count);
+        }
+      });
+    } catch (e) { /* 刷新失败保持原样 */ }
+  }
+
+  function planIdOf(host) {
+    return globalThis.document.querySelector('[data-req-block]')?.dataset.planId || host?.dataset?.planId || '';
+  }
+
   async function openQualityDialog() {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog';
@@ -686,10 +716,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
     // 要求回应率（进度的"标准维度"）
     let coverage = null;
+    let needsData = null;
     try {
-      const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/coverage?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
-      if (resp.ok) coverage = await resp.json();
-    } catch (e) { /* 回应率拿不到不影响浏览计划 */ }
+      const [coverageResp, needsResp] = await Promise.all([
+        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/coverage?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
+        fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
+      ]);
+      if (coverageResp.ok) coverage = await coverageResp.json();
+      if (needsResp.ok) needsData = await needsResp.json();
+    } catch (e) { /* 拿不到不影响浏览计划 */ }
+    const needsOf = (blockId) => (needsData?.chapters || []).find((c) => String(c.block_id) === String(blockId));
     const coverageOf = (blockId) => (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId));
     const requirementHtml = (chapter) => {
       const cov = coverageOf(chapter.block_id);
@@ -698,9 +734,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <select data-req-type>${['text', 'table', 'figure', 'material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${typeLabel[kind]}</option>`).join('')}</select>
           <input type="text" data-req-text value="${esc(requirement.text)}" />
           <em class="${cov?.requirements?.[index]?.responded ? 'ok' : ''}">${cov ? (cov.requirements?.[index]?.responded ? '已回应' : '未回应') : '—'}</em>
+          <button type="button" class="cs-req-need ${(needsOf(chapter.block_id)?.needs || [])[index]?.snippets ? 'ok' : ''}"
+            data-req-need data-plan="${esc(plan.id)}" data-block="${esc(String(chapter.block_id))}"
+            data-req-id="${esc(String(requirement.id))}">${(needsOf(chapter.block_id)?.needs || [])[index]?.snippets ? `素材 ${(needsOf(chapter.block_id)?.needs || [])[index].snippets}` : '未补素材'}</button>
           <button type="button" class="cs-req-del" data-req-del>×</button>
         </div>`).join('');
-      return `<div class="cs-req-block" data-req-block>
+      return `<div class="cs-req-block" data-req-block data-plan-id="${esc(plan.id)}">
           <div class="cs-req-head"><b>编写要求</b>
             <span class="cs-dim">${cov ? `已回应 ${cov.responded}/${cov.total}` : '尚无正文'}</span>
             <button type="button" class="cs-req-add" data-req-add>＋ 添加</button>
@@ -744,6 +783,57 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       });
       block.addEventListener('click', (event) => {
         if (event.target.closest('[data-req-del]')) event.target.closest('[data-req-row]').remove();
+      });
+      block.addEventListener('click', (event) => {
+        const needButton = event.target.closest('[data-req-need]');
+        if (!needButton) return;
+        const blockId = needButton.dataset.block;
+        const requirementId = needButton.dataset.reqId;
+        const chapter = plan.chapters.find((c) => String(c.block_id) === String(blockId));
+        const requirement = (chapter?.requirements || []).find((r) => String(r.id) === String(requirementId));
+        if (!requirement) return;
+        const linked = citationInfo.rows.filter((c) => (c.links || []).includes(String(blockId)) || !c.block_id);
+        const picker = globalThis.document.createElement('dialog');
+        picker.className = 'cs-plan-dialog';
+        const segRows = linked.map((citation) => ((citation.segments) || []).map((segment, index) => ({citation, segment, index})))
+          .flat().slice(0, 60);
+        picker.innerHTML = `<header><h3>给「${esc(String(requirement.text).slice(0, 16))}」补充素材</h3><button type="button" aria-label="关闭">×</button></header>
+          <div class="cs-plan-body"><p class="cs-muted">从本章已接受的来源里勾选可用片段，绑定到这条要求。生成时会先给这一段要求对应的材料。</p>
+            ${segRows.length ? segRows.map(({citation, segment, index}) => `<label class="cs-seg-row">
+                <input type="checkbox" data-bind-citation="${esc(citation.id)}" data-bind-index="${index}" />
+                <div><span class="cs-seg-kind ${esc(segment.kind)}">${{text:'段落',table:'表格',image:'图片'}[segment.kind] || '内容'}</span>
+                  <b>${esc(String(citation.title || '').slice(0, 22))}</b>
+                  <p>${esc(String(segment.content || '').slice(0, 200))}</p></div></label>`).join('')
+              : '<p class="cs-warning">本章还没有可用的来源片段：先在「素材」页签添加官方来源并提取片段。</p>'}
+            <div class="cs-plan-actions"><button type="button" class="mw-btn" data-bind-cancel>取消</button>
+              ${segRows.length ? '<button type="button" class="mw-btn primary" data-bind-save>绑定到这条要求</button>' : ''}</div>
+            <p class="cs-dim" data-bind-msg></p></div>`;
+        globalThis.document.body.append(picker);
+        picker.querySelector('header button').onclick = () => picker.close();
+        picker.addEventListener('close', () => picker.remove());
+        picker.querySelector('[data-bind-cancel]').onclick = () => picker.close();
+        picker.querySelector('[data-bind-save]')?.addEventListener('click', async () => {
+          const checked = [...picker.querySelectorAll('[data-bind-citation]:checked')];
+          if (!checked.length) { picker.querySelector('[data-bind-msg]').textContent = '先勾选至少一个片段'; return; }
+          try {
+            for (const input of checked) {
+              await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs/bind`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({block_id: blockId, requirement_id: requirementId,
+                                      citation_id: input.dataset.bindCitation,
+                                      indices: [Number(input.dataset.bindIndex)]}),
+                signal: AbortSignal.timeout(30000),
+              });
+            }
+            status(`已绑定 ${checked.length} 个片段到要求「${String(requirement.text).slice(0, 12)}」`);
+            needsData = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/needs?threadId=${encodeURIComponent(threadId)}`).then((r) => r.json()).catch(() => needsData);
+            picker.close();
+            await refreshPlanRequirements(host, block);
+          } catch (err) {
+            picker.querySelector('[data-bind-msg]').textContent = `绑定失败：${String(err.message || err)}`;
+          }
+        });
+        picker.showModal();
       });
       block.querySelector('[data-req-save]')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;

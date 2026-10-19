@@ -359,6 +359,107 @@ async def requirement_coverage(db, project_id: int, plan_id: str, thread_id: str
             "percent": round(responded / total * 100) if total else 0}
 
 
+async def chapter_needs(db, project_id: int, plan_id: str, thread_id: str) -> dict:
+    """需求级充足度：每条要求 → 素材需求（已补 N 片段 / 待补）。"""
+    loaded = await load_plan(db, project_id, plan_id)
+    plan = loaded["plan"]
+    bound_rows = await (await db.execute(
+        "SELECT block_id, requirement_id, citation_id, segment_index FROM need_snippets WHERE plan_id=?",
+        (plan_id,),
+    )).fetchall()
+    for chapter in plan.get("chapters") or []:
+        block_id = str(chapter.get("block_id"))
+        needs = []
+        for requirement in chapter.get("requirements") or []:
+            rid = str(requirement.get("id"))
+            # 要求 id 是每章内编号（r1/r2…），必须连 block_id 一起判，否则会串章
+            bound = [row for row in bound_rows
+                     if str(row["requirement_id"]) == rid and str(row["block_id"]) == block_id]
+            needs.append({"requirement_id": rid, "text": requirement.get("text"),
+                          "kind": requirement.get("type") or "text",
+                          "snippets": len(bound), "status": "已补" if bound else "待补"})
+        chapter["needs"] = needs
+    pending = sum(1 for chapter in plan.get("chapters") or []
+                  for need in chapter.get("needs") or [] if need["status"] == "待补")
+    return {"plan_id": plan_id, "chapters": plan.get("chapters") or [], "pending": pending}
+
+
+async def bind_snippets(db, project_id: int, plan_id: str, block_id: str, requirement_id: str,
+                        citation_id: str, indices: list[int]) -> dict:
+    """把来源里的片段绑到某条要求上（这条要求就算"有素材了"）。"""
+    loaded = await load_plan(db, project_id, plan_id)
+    chapter = next((item for item in loaded["plan"].get("chapters") or []
+                    if str(item.get("block_id")) == str(block_id)), None)
+    if chapter is None:
+        raise ValueError("计划里没有这一章")
+    if not any(str(item.get("id")) == str(requirement_id) for item in chapter.get("requirements") or []):
+        raise ValueError("本章没有这条要求")
+    for index in indices:
+        await db.execute(
+            "INSERT OR IGNORE INTO need_snippets (plan_id, block_id, requirement_id, citation_id, segment_index) "
+            "VALUES (?,?,?,?,?)", (plan_id, str(block_id), str(requirement_id), citation_id, int(index)),
+        )
+    await db.commit()
+    return {"plan_id": plan_id, "block_id": block_id, "requirement_id": requirement_id,
+            "bound": len(indices)}
+
+
+async def plan_of_block(db, project_id: int, thread_id: str, block_id: str) -> tuple[str, dict] | None:
+    """找到**包含该章**的计划（计划按一级目录分开，不能简单取"最新一份"）。"""
+    rows = await (await db.execute(
+        "SELECT id, plan FROM writing_plans WHERE project_id=? AND thread_id=? "
+        "ORDER BY created_at DESC, rowid DESC", (project_id, thread_id),
+    )).fetchall()
+    for row in rows:
+        try:
+            plan = json.loads(row["plan"] or "{}")
+        except ValueError:
+            continue
+        if any(str(item.get("block_id")) == str(block_id) for item in plan.get("chapters") or []):
+            return row["id"], plan
+    return None
+
+
+async def needs_for_prompt(db, project_id: int, thread_id: str, block_id: str) -> list[dict]:
+    """生成时注入：本章每条要求 + 绑定到它的片段正文（"按要求给素材"）。"""
+    found = await plan_of_block(db, project_id, thread_id, block_id)
+    if not found:
+        return []
+    _, plan = found
+    chapter = next((item for item in plan.get("chapters") or []
+                    if str(item.get("block_id")) == str(block_id)), None)
+    if not chapter:
+        return []
+    bound = await (await db.execute(
+        "SELECT requirement_id, citation_id, segment_index FROM need_snippets WHERE block_id=?", (str(block_id),),
+    )).fetchall()
+    result = []
+    for requirement in chapter.get("requirements") or []:
+        rid = str(requirement.get("id"))
+        snippets = []
+        for row_bound in bound:
+            if str(row_bound["requirement_id"]) != rid:
+                continue
+            citation = await (await db.execute(
+                "SELECT segments, title FROM citations WHERE id=?", (row_bound["citation_id"],),
+            )).fetchone()
+            if not citation:
+                continue
+            try:
+                segments = json.loads(citation["segments"] or "[]")
+            except ValueError:
+                segments = []
+            index = int(row_bound["segment_index"])
+            if 0 <= index < len(segments):
+                snippets.append({"kind": segments[index].get("kind"),
+                                 "heading": segments[index].get("heading"),
+                                 "content": str(segments[index].get("content") or "")[:600],
+                                 "source": citation["title"]})
+        result.append({"requirement": requirement.get("text"), "type": requirement.get("type"),
+                       "snippets": snippets})
+    return result
+
+
 async def load_plan(db, project_id: int, plan_id: str) -> dict:
     row = await (await db.execute(
         "SELECT * FROM writing_plans WHERE id = ? AND project_id = ?", (plan_id, project_id),
@@ -408,6 +509,7 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
         from services.citations import citations_for_prompt, citation_line
         package["writing_spec"] = await spec_for(db, chapter["layout"])
         package["citations"] = [citation_line(c) for c in await citations_for_prompt(db, project_id, chapter["block_id"])]
+        package["requirements"] = await needs_for_prompt(db, project_id, thread_id, chapter["block_id"])
         job_id = await create_job(db, block, package, settings, auto_save=True)   # 返回 job id
         # 预置主编计划：run_job 看到 artifacts.chief 就不再调主编重新规划
         spec = package.get("writing_spec") or {}
@@ -429,4 +531,5 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
 
 
 __all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
-           "update_requirements", "requirement_coverage"]
+           "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
+           "needs_for_prompt", "plan_of_block"]

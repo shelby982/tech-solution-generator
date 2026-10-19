@@ -27,6 +27,7 @@ CHECK_META = {
     "material": {"group": "素材", "label": "素材不足", "actions": ["find_material"]},
     "citation_unused": {"group": "素材", "label": "来源未引用", "actions": ["regenerate", "find_material"]},
     "pending": {"group": "素材", "label": "待补充", "actions": ["find_material"]},
+    "need_pending": {"group": "素材", "label": "素材需求", "actions": ["find_material"]},
 }
 
 
@@ -230,6 +231,20 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
             if missing:
                 row["issues"].append(_issue("spec_clause", "medium",
                     f"承接的规范条款里有 {missing} 条在正文没有落点"))
+        # D3 需求待补：计划要求没有绑定任何素材片段（有正文时提示）
+        if written:
+            pending_needs = []
+            for requirement in plan_requirements.get(key, []):
+                bound = await (await db.execute(
+                    "SELECT COUNT(*) AS n FROM need_snippets WHERE block_id=? AND requirement_id=?",
+                    (key, str(requirement.get("id"))),
+                )).fetchone()
+                if not int(bound["n"] if bound else 0):
+                    pending_needs.append(str(requirement.get("text") or "")[:24])
+            if pending_needs:
+                # 按章聚合成一条，避免一次冒出十几条同类提示
+                row["issues"].append(_issue("need_pending", "medium",
+                    f"素材需求待补 {len(pending_needs)} 条：{('、'.join(pending_needs[:3]))}"))
         # B1 要求回应：按计划里本章的要求逐条核（要求是主线的准绳）
         for requirement in plan_requirements.get(key, []):
             if not _content_responds_requirement(unit.get("content"), requirement):
