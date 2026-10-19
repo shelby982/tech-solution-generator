@@ -109,3 +109,46 @@ def test_normalize_diagram_nodes_filters_and_caps():
     assert nodes.count("存储层") == 1
     assert len(nodes[-1]) == 60
     assert len(normalize_diagram_nodes([f"n{i}" for i in range(20)])) == 8
+
+
+async def test_plan_chapters_have_requirements_and_can_be_edited(db):
+    """计划章节要带"逐条要求"（确定性起草），并能逐条编辑。"""
+    from services.writing_plans import build_plan, load_plan, update_requirements
+
+    plan = await build_plan(db, 1, "t1", "s1.1")
+    chapter = plan["chapters"][0]
+    assert chapter["requirements"], "计划章节应带 requirements"
+    assert all(item["id"].startswith("r") and item["text"] for item in chapter["requirements"])
+    edited = await update_requirements(db, 1, plan["id"], chapter["block_id"], [
+        {"text": "说明政策依据（至少两个部委文件）", "type": "text"},
+        {"text": "用表格对比现状与目标", "type": "table"},
+    ])
+    assert [item["text"] for item in edited["requirements"]] == ["说明政策依据（至少两个部委文件）", "用表格对比现状与目标"]
+    loaded = await load_plan(db, 1, plan["id"])
+    saved = next(c for c in loaded["plan"]["chapters"] if c["block_id"] == chapter["block_id"])
+    assert len(saved["requirements"]) == 2
+
+
+async def test_requirement_coverage_counts_responded(db):
+    """要求回应率：文本要求按关键词、表/图要求按体裁判定。"""
+    from services.writing_plans import build_plan, requirement_coverage, update_requirements
+
+    plan = await build_plan(db, 1, "t1", "s1.1")
+    chapter = plan["chapters"][0]
+    await update_requirements(db, 1, plan["id"], chapter["block_id"], [
+        {"text": "说明政策依据", "type": "text"},
+        {"text": "对比表", "type": "table"},
+    ])
+    # 其他章清空要求，便于验证整份计划的回应率
+    for other in plan["chapters"]:
+        if other["block_id"] != chapter["block_id"]:
+            await update_requirements(db, 1, plan["id"], other["block_id"], [])
+    # 给这一章写一段含"政策依据"和表格的正文
+    await db.execute(
+        "UPDATE blocks SET content=? WHERE project_id=1 AND run_thread_id='t1' AND block_id=?",
+        ("这里说明政策依据。\n| a | b |\n| --- | --- |\n| 1 | 2 |", chapter["block_id"]))
+    await db.commit()
+    coverage = await requirement_coverage(db, 1, plan["id"], "t1")
+    chapter_cov = next(c for c in coverage["chapters"] if c["block_id"] == chapter["block_id"])
+    assert chapter_cov["total"] == 2 and chapter_cov["responded"] == 2
+    assert coverage["percent"] == 100

@@ -22,6 +22,20 @@ def _skeleton_keywords(item: str) -> list[str]:
     return [part[:4] for part in parts[:3]]
 
 
+def _content_responds_requirement(content, requirement) -> bool:
+    """与 services/writing_plans._content_responds 同口径（要求是否在正文有落点）。"""
+    import re as _re
+    text = str(content or "")
+    kind = (requirement or {}).get("type") or "text"
+    if kind == "table":
+        return text.count("| ---") >= 1
+    if kind == "figure":
+        return ":::diagram" in text or "![" in text
+    keywords = [part for part in _re.split(r"[\s、，,；;/（）()【】]+", str((requirement or {}).get("text") or ""))
+                if len(part) >= 2][:4]
+    return bool(keywords) and any(keyword in text for keyword in keywords)
+
+
 def check_chapter(content: str, recipe: dict | None = None, budget_pages: int = 0) -> dict:
     text = str(content or "")
     recipe = recipe or {}
@@ -126,6 +140,20 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
     specs = (await list_specs(db)).get("specs") or {}
     layouts = await _layouts(db, project_id, thread_id)
     children = {str(b["block_id"]) for b in blocks}
+    # 计划里的逐条要求（一次读出，循环里对齐各章）
+    plan_requirements: dict[str, list] = {}
+    branch_plan = await (await db.execute(
+        "SELECT plan FROM writing_plans WHERE project_id=? AND thread_id=? "
+        "ORDER BY created_at DESC LIMIT 1", (project_id, thread_id),
+    )).fetchone()
+    if branch_plan:
+        import json as _json
+        try:
+            plan_data = _json.loads(branch_plan["plan"] or "{}")
+        except ValueError:
+            plan_data = {}
+        for chapter in plan_data.get("chapters") or []:
+            plan_requirements[str(chapter.get("block_id"))] = chapter.get("requirements") or []
     results = []
     for unit in units:
         key = str(unit["block_id"])
@@ -145,6 +173,12 @@ async def check_thread(db, project_id: int, thread_id: str) -> dict:
         # 结构（骨架）是**整章**的要求：叶子节只查图表/占位/篇幅，骨架在章级聚合里查
         leaf_recipe = {"skeleton": [], "figures": recipe.get("figures") or []}
         row = check_chapter(unit.get("content"), leaf_recipe, int(unit.get("page_budget") or 0))
+        # B1 要求回应：按计划里本章的要求逐条核（要求是主线的准绳）
+        for requirement in plan_requirements.get(key, []):
+            if not _content_responds_requirement(unit.get("content"), requirement):
+                row["issues"].append({"code": "requirement", "level": "high",
+                                      "message": f"计划要求未回应：{str(requirement.get('text'))[:40]}"})
+                row["ok"] = False
         # 素材充足度：有正文但没有任何关联材料/引用来源 → 写作必然大量【待补充】
         if written:
             mats = await (await db.execute(

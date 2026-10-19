@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 from agents.chapter_team import Plan
@@ -86,6 +87,46 @@ def _template_tasks(leaf: dict) -> list[dict] | None:
                      "requirement_ids": []}
                     for index, (kind, name) in enumerate(items, 1)]
     return None
+
+
+REQUIREMENT_PREFIX = {"text": "写明", "table": "用表格呈现", "figure": "配图说明", "material": "引用"}
+
+
+def _requirements_for(leaf: dict, recipe: dict) -> list[dict]:
+    """按配方骨架 + 必表 + 必图 + 素材缺口，起草本章的**逐条编写要求**。
+
+    产品口径：要求由主编写人员输出/确认，系统只做**初稿**（确定性、不调模型、可逐条编辑）。
+    """
+    title = str(leaf.get("title") or "")
+    # 按章名裁剪：只保留与本章相关的骨架项/表/图（否则每个理解类章节都是 13 条通用要求）
+    def _relevant(text: str) -> bool:
+        """章名与配方项的相关性：用字符重合度判断（"建设范围"↔"范围与内容"、"解决措施"↔"对策表（措施…）"）。"""
+        overlap = set(title) & set(str(text))
+        return len(overlap) >= 2
+
+    skeleton = [text for text in (recipe.get("skeleton") or []) if _relevant(text)]
+    tables = [name for name in (recipe.get("tables") or []) if _relevant(name)]
+    figures = [name for name in (recipe.get("figures") or []) if _relevant(name)]
+    items: list[dict] = []
+    # 优先用 8 类章名模板（本来就是按"背景/范围/内容/重难点/需求/痛点/措施"设计的，最贴合本章）
+    templated = _template_tasks(leaf)
+    if templated:
+        kind_map = {"text": "text", "table": "table", "diagram": "figure"}
+        for task in templated:
+            items.append({"text": task["title"], "type": kind_map.get(task["kind"], "text")})
+    else:
+        for text in (skeleton or (recipe.get("skeleton") or [])[:2])[:4]:
+            items.append({"text": f"{text}（要给出结论与依据）", "type": "text"})
+        for name in (tables or [])[:3]:
+            items.append({"text": f"{name}", "type": "table"})
+        for name in (figures or [])[:2]:
+            items.append({"text": f"{name}", "type": "figure"})
+    evidence = str(leaf.get("evidence_required") or "").strip()
+    if evidence:
+        items.append({"text": evidence, "type": "material"})
+    for index, item in enumerate(items, 1):
+        item["id"] = f"r{index}"
+    return items
 
 
 def _tasks_for(leaf: dict, layout: str) -> list[dict]:
@@ -174,6 +215,8 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     if not leaves:
         raise ValueError("该目录下没有可编写的章节")
     materials = await _material_counts(db, project_id)
+    from services.writing_specs import list_specs
+    specs = (await list_specs(db)).get("specs") or {}
     # 章节类型优先用**用户在编写页选过的**（chapter_studio.layout），没选过才按标题推荐
     stored = {int(r["block_id"] if hasattr(r, "keys") else r[0]):
               str((r["layout"] if hasattr(r, "keys") else r[1]) or "")
@@ -207,6 +250,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
     chapters, gaps = [], []
     for leaf in leaves:
         layout = layout_for(leaf)
+        recipe = (specs.get(layout) or {}).get("structured") or {}
         tasks = _tasks_for(leaf, layout)
         need = str(leaf.get("evidence_required") or "").strip()
         have = materials.get(int(leaf["id"]), 0) if leaf.get("id") else 0
@@ -221,6 +265,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             "layout": layout, "layout_label": LAYOUTS[layout]["label"],
             "pages": int(leaf.get("page_budget") or 0),
             "objective": plan["objective"], "tasks": plan["tasks"], "gaps": chapter_gaps,
+            "requirements": _requirements_for(leaf, recipe),
         })
     plan_row = {
         "id": uuid.uuid4().hex,
@@ -250,6 +295,68 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
         )
     await db.commit()
     return plan_row
+
+
+async def update_requirements(db, project_id: int, plan_id: str, block_id: str,
+                              requirements: list[dict]) -> dict:
+    """编辑某章的编写要求（逐条）。只允许改文本/类型，id 由系统补齐。"""
+    loaded = await load_plan(db, project_id, plan_id)
+    plan = loaded["plan"]
+    chapters = plan.get("chapters") or []
+    chapter = next((item for item in chapters if str(item.get("block_id")) == str(block_id)), None)
+    if chapter is None:
+        raise ValueError("计划里没有这一章")
+    cleaned = []
+    for index, item in enumerate(requirements or [], 1):
+        text = str((item or {}).get("text") or "").strip()
+        if not text:
+            continue
+        cleaned.append({"id": f"r{index}", "text": text[:300],
+                        "type": str((item or {}).get("type") or "text")})
+    chapter["requirements"] = cleaned
+    await db.execute("UPDATE writing_plans SET plan=? WHERE id=?",
+                     (json.dumps(plan, ensure_ascii=False), plan_id))
+    await db.commit()
+    return {"plan_id": plan_id, "block_id": block_id, "requirements": cleaned}
+
+
+def _content_responds(content: str, requirement: dict) -> bool:
+    """要求是否在正文里有落点：表/图按数量判断，文本按要求里的关键词判断。"""
+    text = str(content or "")
+    kind = requirement.get("type") or "text"
+    if kind == "table":
+        return text.count("| ---") >= 1
+    if kind == "figure":
+        return ":::diagram" in text or "![" in text
+    keywords = [part for part in re.split(r"[\s、，,；;/（）()【】]+", str(requirement.get("text") or ""))
+                if len(part) >= 2][:4]
+    return bool(keywords) and any(keyword in text for keyword in keywords)
+
+
+async def requirement_coverage(db, project_id: int, plan_id: str, thread_id: str) -> dict:
+    """要求回应率：计划里每条要求是否已在正文里有落点（进度的"标准维度"）。"""
+    from services.block_store import list_blocks
+
+    loaded = await load_plan(db, project_id, plan_id)
+    plan = loaded["plan"]
+    blocks = {str(b.get("block_id")): dict(b) for b in await list_blocks(db, project_id, thread_id)}
+    chapters = []
+    for chapter in plan.get("chapters") or []:
+        block = blocks.get(str(chapter.get("block_id"))) or {}
+        content = str(block.get("content") or "")
+        items = []
+        for requirement in chapter.get("requirements") or []:
+            items.append({**requirement, "responded": _content_responds(content, requirement)})
+        chapters.append({"block_id": chapter.get("block_id"), "title": chapter.get("title"),
+                         "words": len(content.replace(" ", "")),
+                         "total": len(items),
+                         "responded": sum(1 for item in items if item["responded"]),
+                         "requirements": items})
+    total = sum(chapter["total"] for chapter in chapters)
+    responded = sum(chapter["responded"] for chapter in chapters)
+    return {"plan_id": plan_id, "chapters": chapters,
+            "total": total, "responded": responded,
+            "percent": round(responded / total * 100) if total else 0}
 
 
 async def load_plan(db, project_id: int, plan_id: str) -> dict:
@@ -321,4 +428,5 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
     return {"plan_id": plan_id, "jobs": created, "chapters": len(created)}
 
 
-__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan"]
+__all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan",
+           "update_requirements", "requirement_coverage"]

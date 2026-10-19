@@ -172,3 +172,25 @@
 .cs-seg-kind { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #f1f5f9; color: #475569; margin-bottom: 2px; }
 .cs-seg-kind.table { background: #ecfdf5; color: #047857; }
 .cs-seg-kind.image { background: #fef3c7; color: #92400e; }
+
+/* 素材充足度摘要 + 片段工具条 + 图片入库 */
+.cs-material-summary { margin: 0 0 8px; font-size: 11.5px; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; }
+.cs-material-summary b { color: #1d4ed8; }
+.cs-seg-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.cs-seg-filter { font: inherit; font-size: 11px; padding: 3px 9px; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; cursor: pointer; color: #475569; }
+.cs-seg-filter.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.cs-seg-tools input[type="search"] { flex: 1; min-width: 120px; font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #dbe3ef; border-radius: 8px; }
+.cs-seg-download { margin-top: 4px; font: inherit; font-size: 11px; padding: 2px 8px; border: 1px solid #dbe3ef; background: #fff; border-radius: 6px; cursor: pointer; color: #1d4ed8; }
+
+/* 编写要求：逐条可编辑 + 回应状态 */
+.cs-req-block { border: 1px dashed #dbe3ef; border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: #fbfdff; }
+.cs-req-head { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.cs-req-head b { color: #0f172a; }
+.cs-req-head .cs-dim { flex: 1; color: #64748b; }
+.cs-req-add, .cs-req-save { font: inherit; font-size: 11px; padding: 3px 9px; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; cursor: pointer; color: #1d4ed8; }
+.cs-req-row { display: grid; grid-template-columns: 72px 1fr 58px 22px; gap: 6px; align-items: center; margin-bottom: 4px; font-size: 12px; }
+.cs-req-row select, .cs-req-row input { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #dbe3ef; border-radius: 6px; }
+.cs-req-row em { font-style: normal; font-size: 11px; color: #b45309; white-space: nowrap; }
+.cs-req-row em.ok { color: #15803d; }
+.cs-req-del { font: inherit; font-size: 12px; border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
+.cs-req-msg { margin: 4px 0 0; font-size: 11px; }

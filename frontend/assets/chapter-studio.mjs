@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v259';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v259';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v259';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v261';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v261';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v261';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -245,23 +245,68 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!citation) return;
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog';
+    let filter = 'all';
+    let keyword = '';
     const render = (segments, selected) => {
       const kindLabel = {text: '段落', table: '表格', image: '图片'};
-      const rows = (segments || []).map((segment, index) => `<label class="cs-seg-row${(selected || []).includes(index) ? ' on' : ''}">
-          <input type="checkbox" data-seg-index="${index}" ${(selected || []).includes(index) ? 'checked' : ''} />
+      const chosen = new Set(selected || []);
+      const visible = (segments || []).map((segment, index) => ({segment, index}))
+        .filter(({segment}) => filter === 'all' || segment.kind === filter)
+        .filter(({segment}) => !keyword || String(segment.content || '').includes(keyword)
+          || String(segment.heading || '').includes(keyword));
+      const rows = visible.map(({segment, index}) => `<label class="cs-seg-row${chosen.has(index) ? ' on' : ''}">
+          <input type="checkbox" data-seg-index="${index}" ${chosen.has(index) ? 'checked' : ''} />
           <div><span class="cs-seg-kind ${esc(segment.kind)}">${kindLabel[segment.kind] || '内容'}</span>
             ${segment.heading ? `<b>${esc(segment.heading)}</b>` : ''}
-            <p>${esc(String(segment.content || '').slice(0, 260))}</p></div>
+            <p>${esc(String(segment.content || '').slice(0, 260))}</p>
+            ${segment.kind === 'image' ? `<button type="button" class="cs-seg-download" data-seg-image="${esc(segment.content)}">下载为我方素材</button>` : ''}
+          </div>
         </label>`).join('');
       dialog.querySelector('.cs-plan-body').innerHTML = `<p class="cs-muted">《${esc(citation.title || citation.url)}》
           里可以直接沿用的内容。勾选后进入本章编写上下文：AI 会基于所选片段改写，并保留来源标注。</p>
-        ${segments && segments.length ? rows : '<p class="cs-warning">这条来源还没有提取到片段。</p>'}
+        ${segments && segments.length ? `<div class="cs-seg-tools">
+          ${['all', 'text', 'table', 'image'].map((kind) => `<button type="button" class="cs-seg-filter${filter === kind ? ' on' : ''}" data-seg-filter="${kind}">${kind === 'all' ? '全部' : kindLabel[kind]}</button>`).join('')}
+          <input type="search" data-seg-search placeholder="搜索片段…" value="${esc(keyword)}" />
+          <button type="button" class="mw-btn" data-seg-all>全选可见</button>
+        </div>${rows}` : '<p class="cs-warning">这条来源还没有提取到片段。</p>'}
         <div class="cs-plan-actions">
           ${segments && segments.length ? '' : '<button type="button" class="mw-btn" data-seg-refresh>重新抓取并提取片段</button>'}
           <button type="button" class="mw-btn" data-seg-cancel>取消</button>
           ${segments && segments.length ? '<button type="button" class="mw-btn primary" data-seg-save>保存选用</button>' : ''}
         </div>`;
       dialog.querySelector('[data-seg-cancel]').onclick = () => dialog.close();
+      dialog.querySelectorAll('[data-seg-filter]').forEach((button) => button.addEventListener('click', () => {
+        filter = button.dataset.segFilter;
+        render(citation.segments || [], [...dialog.querySelectorAll('[data-seg-index]:checked')].map((input) => Number(input.dataset.segIndex)));
+      }));
+      dialog.querySelector('[data-seg-search]')?.addEventListener('input', (event) => {
+        keyword = event.target.value.trim();
+        render(citation.segments || [], [...dialog.querySelectorAll('[data-seg-index]:checked')].map((input) => Number(input.dataset.segIndex)));
+        dialog.querySelector('[data-seg-search]')?.focus();
+      });
+      dialog.querySelector('[data-seg-all]')?.addEventListener('click', () => {
+        dialog.querySelectorAll('[data-seg-index]').forEach((input) => { input.checked = true; input.closest('.cs-seg-row').classList.add('on'); });
+      });
+      dialog.querySelectorAll('[data-seg-image]').forEach((button) => button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.disabled = true;
+        button.textContent = '下载中…';
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/citations/${encodeURIComponent(citation.id)}/image`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: button.dataset.segImage}), signal: AbortSignal.timeout(120000),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          status(`已下载为素材《${data.filename}》，可在「本章素材」里引用`);
+          button.textContent = '已入库 ✓';
+        } catch (err) {
+          button.disabled = false;
+          button.textContent = '下载为我方素材';
+          status(`下载失败：${String(err.message || err)}`);
+        }
+      }));
       dialog.querySelector('[data-seg-refresh]')?.addEventListener('click', async () => {
         try {
           const resp = await fetch(`/api/projects/${projectId}/citations/${encodeURIComponent(citation.id)}/refresh`, {
@@ -594,10 +639,36 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
 
   const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
+    // 要求回应率（进度的"标准维度"）
+    let coverage = null;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/coverage?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
+      if (resp.ok) coverage = await resp.json();
+    } catch (e) { /* 回应率拿不到不影响浏览计划 */ }
+    const coverageOf = (blockId) => (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId));
+    const requirementHtml = (chapter) => {
+      const cov = coverageOf(chapter.block_id);
+      const typeLabel = {text: '文字', table: '表格', figure: '图示', material: '素材'};
+      const rows = (chapter.requirements || []).map((requirement, index) => `<div class="cs-req-row" data-req-row="${index}">
+          <select data-req-type>${['text', 'table', 'figure', 'material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${typeLabel[kind]}</option>`).join('')}</select>
+          <input type="text" data-req-text value="${esc(requirement.text)}" />
+          <em class="${cov?.requirements?.[index]?.responded ? 'ok' : ''}">${cov ? (cov.requirements?.[index]?.responded ? '已回应' : '未回应') : '—'}</em>
+          <button type="button" class="cs-req-del" data-req-del>×</button>
+        </div>`).join('');
+      return `<div class="cs-req-block" data-req-block>
+          <div class="cs-req-head"><b>编写要求</b>
+            <span class="cs-dim">${cov ? `已回应 ${cov.responded}/${cov.total}` : '尚无正文'}</span>
+            <button type="button" class="cs-req-add" data-req-add>＋ 添加</button>
+            <button type="button" class="cs-req-save" data-req-save>保存要求</button></div>
+          ${rows || '<p class="cs-dim">还没有要求：点「＋ 添加」写一条（例：说明政策依据）</p>'}
+          <p class="cs-dim cs-req-msg" data-req-msg></p>
+        </div>`;
+    };
     body.innerHTML = `<p class="cs-muted">《${esc(plan.root_title)}》共 ${plan.chapters.length} 个章节。确认后按章节并发生成；
        主编会按此计划执行（不再重新规划）。</p>`
-      + plan.chapters.map((c) => `<section class="cs-plan-chapter">
+      + plan.chapters.map((c) => `<section class="cs-plan-chapter" data-plan-chapter="${esc(String(c.block_id))}">
           <h4>${esc(c.title)} <em>${esc(c.layout_label)}${c.pages ? ` · ${c.pages} 页` : ''}</em></h4>
+          ${requirementHtml(c)}
           <p>${c.tasks.map((t) => `<span class="cs-plan-task ${esc(t.kind)}">${kindLabel[t.kind] || t.kind} · ${esc(t.title)}</span>`).join('')}</p>
           ${c.gaps.length ? `<div class="cs-plan-gap"><p class="cs-warning">素材缺口：${esc(c.gaps.join('；'))}</p>
             <div class="cs-plan-gap-actions"><label class="mw-btn cs-plan-upload">上传素材
@@ -611,6 +682,46 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       + `<div class="cs-plan-actions"><button type="button" class="mw-btn" data-plan-cancel>取消</button>
            <button type="button" class="mw-btn primary" data-plan-confirm>确认并开始编制</button></div>`;
     body.querySelector('[data-plan-cancel]').onclick = () => dialog.close();
+    body.querySelectorAll('[data-plan-chapter]').forEach((host) => {
+      const blockId = host.dataset.planChapter;
+      const block = host.querySelector('[data-req-block]');
+      if (!block) return;
+      const collect = () => [...block.querySelectorAll('[data-req-row]')].map((row) => ({
+        text: (row.querySelector('[data-req-text]') || {}).value?.trim() || '',
+        type: (row.querySelector('[data-req-type]') || {}).value || 'text',
+      })).filter((item) => item.text);
+      block.querySelector('[data-req-add]')?.addEventListener('click', () => {
+        block.insertAdjacentHTML('beforeend', `<div class="cs-req-row" data-req-row>
+            <select data-req-type><option value="text">文字</option><option value="table">表格</option><option value="figure">图示</option><option value="material">素材</option></select>
+            <input type="text" data-req-text placeholder="例：说明政策依据（至少两个部委文件）" />
+            <em>未回应</em><button type="button" class="cs-req-del" data-req-del>×</button></div>`);
+        block.querySelector('[data-req-row]:last-of-type [data-req-text]')?.focus();
+      });
+      block.addEventListener('click', (event) => {
+        if (event.target.closest('[data-req-del]')) event.target.closest('[data-req-row]').remove();
+      });
+      block.querySelector('[data-req-save]')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(plan.id)}/requirements`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({block_id: blockId, requirements: collect()}),
+            signal: AbortSignal.timeout(30000),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          const chapterInPlan = plan.chapters.find((c) => String(c.block_id) === String(blockId));
+          if (chapterInPlan) chapterInPlan.requirements = data.requirements;
+          status(`已保存本章 ${data.requirements.length} 条编写要求`);
+          block.querySelector('[data-req-msg]').textContent = `已保存 ${data.requirements.length} 条要求（重新生成后会按它核回应率）`;
+        } catch (err) {
+          block.querySelector('[data-req-msg]').textContent = `保存失败：${String(err.message || err)}`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
     body.querySelectorAll('[data-plan-upload]').forEach((input) => input.addEventListener('change', async () => {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -827,14 +938,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
     get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据</h4>${context.points.map(p=>`<details><summary>${esc(p.item||p.factor)} · ${p.points ?? '—'} 分</summary><p>${esc(p.criterion)}</p></details>`).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
-      ${(() => {
-        const mine = citationInfo.rows.filter((c) => !c.block_id || c.block_id === String(active.block_id));
-        const rows = mine.slice(0, 5).map((c) => `<p class="cs-cite-line">${esc(c.title || c.url)}<small>${esc(c.publisher || c.domain)} · ${esc(c.published_at || '日期待补')}</small></p>`).join('');
-        return `<section data-pane="basis"><h4>官方来源 ${mine.length ? `<small>${mine.length} 条</small>` : ''}</h4>
-          ${rows || '<p class="cs-muted">本章还没有可引用的官方来源。外部信息必须可核验，二手内容不采。</p>'}
-          <button type="button" class="mw-btn" data-add-citation="${esc(String(active.block_id))}">添加官方来源</button>
-          </section>`;
-      })()}
       ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
         return recipe ? `<section data-pane="basis"><h4>编写规范</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
       ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
@@ -853,7 +956,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         };
         const linked = citationInfo.rows.filter((c) => (c.links || []).includes(key) || !c.block_id);
         const unused = linked.filter((c) => !usedOf(c));
-        return `<div class="cs-material-head"><h4>外部依据 ${linked.length}${linked.length ? ` <small>已引用 ${linked.length - unused.length} / 未引用 ${unused.length}</small>` : ''}</h4>
+        const selectedSnippets = linked.reduce((sum, c) => sum + (c.selected || []).length, 0);
+        return `<p class="cs-material-summary">素材状态：外部依据 ${linked.length} 条 · 已选片段 <b>${selectedSnippets}</b> · 正文已引用 ${linked.length - unused.length} 条</p>
+        <div class="cs-material-head"><h4>外部依据 ${linked.length}${linked.length ? ` <small>已引用 ${linked.length - unused.length} / 未引用 ${unused.length}</small>` : ''}</h4>
           <button type="button" class="mw-btn" data-add-citation="${esc(key)}">添加官方来源</button></div>
           ${linked.map((c) => {
             const segmentCount = (c.segments || []).length;

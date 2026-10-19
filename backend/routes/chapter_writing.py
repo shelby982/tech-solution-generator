@@ -21,6 +21,16 @@ class PlanRequest(BaseModel):
     root_block_id: str = Field(min_length=1)
 
 
+class RequirementItem(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+    type: str = "text"
+
+
+class RequirementsBody(BaseModel):
+    block_id: str = Field(min_length=1)
+    requirements: list[RequirementItem] = Field(default_factory=list)
+
+
 class PlanConfirmRequest(BaseModel):
     leaf_block_ids: list[str] = Field(default_factory=list)   # 空 = 确认全部
 
@@ -53,6 +63,26 @@ async def read_writing_plan(project_id: int, plan_id: str):
             return await load_plan(db, project_id, plan_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc))
+
+
+@router.put('/projects/{project_id}/writing-plans/{plan_id}/requirements')
+async def update_plan_requirements(project_id: int, plan_id: str, body: RequirementsBody):
+    """编辑某章的逐条编写要求（要求是主线的锚点：素材/质检/进度都挂它）。"""
+    from services.writing_plans import update_requirements
+    async with get_db() as db:
+        try:
+            return await update_requirements(db, project_id, plan_id, body.block_id,
+                                             [item.model_dump() for item in body.requirements])
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+
+
+@router.get('/projects/{project_id}/writing-plans/{plan_id}/coverage')
+async def plan_coverage(project_id: int, plan_id: str, threadId: str):
+    """要求回应率：计划里每条要求是否已在正文有落点。"""
+    from services.writing_plans import requirement_coverage
+    async with get_db() as db:
+        return await requirement_coverage(db, project_id, plan_id, threadId)
 
 
 @router.post('/projects/{project_id}/writing-plans/{plan_id}/confirm', status_code=202)

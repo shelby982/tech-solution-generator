@@ -31,6 +31,10 @@ class SaveBody(BaseModel):
     block_id: str = ""
 
 
+class ImageBody(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
 class LinkBody(BaseModel):
     block_id: str = Field(min_length=1, max_length=120)
 
@@ -65,6 +69,62 @@ async def refresh(project_id: int, citation_id: str):
             return await refresh_segments(db, project_id, citation_id)
         except ValueError as exc:
             raise HTTPException(409, str(exc))
+
+
+@router.post("/{citation_id}/image")
+async def download_image(project_id: int, citation_id: str, body: "ImageBody"):
+    """把来源里的图片**下载成本项目素材**（正文不放外链，导出才稳）。
+
+    产品口径：外部图片只作"参考素材"，入库后仍标注来源，引用时由用户确认版权/可用性。
+    """
+    import io
+    import uuid as _uuid
+    from pathlib import Path
+
+    from fastapi import File
+    import httpx
+    from PIL import Image, UnidentifiedImageError
+
+    from routes.chapter_studio import MAX_IMAGE_BYTES
+    from routes.materials import UPLOAD_ROOT
+    from services.block_store import create_material
+
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT segments, selected FROM citations WHERE id=? AND project_id=?", (citation_id, project_id),
+        )).fetchone()
+    if not row:
+        raise HTTPException(404, "引用不存在")
+    import json as _json
+    try:
+        segments = _json.loads(row["segments"] or "[]")
+    except ValueError:
+        segments = []
+    image_urls = [segment["content"] for segment in segments if segment.get("kind") == "image"]
+    target = body.url.strip()
+    if target not in image_urls:
+        raise HTTPException(409, "这张图片不属于该来源，请从来源的图片片段里选")
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        resp = await client.get(target, headers={"User-Agent": "Mozilla/5.0 (compatible; bid-assistant)"})
+    data = resp.content
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "图片超过 10 MB")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.verify()
+            suffix = (image.format or "png").lower()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(400, "不是有效图片") from exc
+    name = f"来源图片_{_uuid.uuid4().hex[:6]}.{ 'jpg' if suffix in ('jpeg', 'jpg') else suffix }"
+    relative = f"uploads/{project_id}/{_uuid.uuid4().hex}_{name}"
+    path = UPLOAD_ROOT.parent / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    async with get_db() as db:
+        material = await create_material(db, project_id, name, suffix, relative, "source", file_size=len(data))
+        await db.execute("UPDATE materials SET parse_status='done' WHERE id=?", (material["id"],))
+        await db.commit()
+    return {"material_id": material["id"], "filename": name, "image_url": f"/api/studio/materials/{material['id']}/image"}
 
 
 @router.post("/{citation_id}/link")
