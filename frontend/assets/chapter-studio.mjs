@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v266';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v266';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v266';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v268';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v268';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v268';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -363,7 +363,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const stats = data.stats || {};
       const guidance = data.guidance || {};
       const figures = data.figures_plan || {tables: [], figures: []};
+      const unit = unitOf.get(String(blockId));
+      const unitInfo = unit ? planUnits.get(unit) : null;
+      const planUnconfirmed = unitInfo && !(unitInfo.plan && unitInfo.plan.status === 'confirmed');
       body.innerHTML = `
+        ${planUnconfirmed ? `<p class="cs-cp-warn">《${esc(unitInfo.title)}》的编写计划还未确认（共 ${unitInfo.leaves} 节）
+          <button type="button" class="cs-cp-mini" data-cp-open-branch>去看 / 确认</button></p>` : ''}
         <div class="cs-cp-head"><h4>${esc(data.title || '')}</h4>
           <span class="cs-cp-facts">计划 ${pages || '—'} 页 · 要求 ${stats.requirements || 0} 条（已回应 ${stats.responded || 0}）· 素材待补 ${stats.material_pending || 0}${stats.material_short ? ` · 已补不足 ${stats.material_short}` : ''}</span>
         </div>
@@ -386,7 +391,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <h5>B · 写多少（篇幅）</h5>
           <p class="cs-cp-line">计划 <b>${pages || '—'}</b> 页 · 正文已写 ${writtenPages} 页（${data.words || 0} 字）
             <span class="cs-dim">（篇幅在「应答策划」分配；"已写"以进度为准）</span>
-            ${pages ? '' : '<button type="button" class="cs-cp-mini" data-cp-distribute>按总篇幅分配到章</button>'}</p>
+            ${pages ? '' : '<span class="cs-dim">本章尚未分到页数，可到「应答策划」调整篇幅分配。</span>'}</p>
         </section>
         <section class="cs-cp-sec" data-cp-sec="c">
           <h5>C · 怎么写更好（本章写法）</h5>
@@ -425,19 +430,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
         <p class="cs-dim" data-cp-msg></p>`;
       body.querySelector('[data-cp-close]').onclick = () => dialog.close();
-      // 篇幅自动分配
-      body.querySelector('[data-cp-distribute]')?.addEventListener('click', async () => {
-        try {
-          const resp = await fetch(`/api/projects/${projectId}/page-budgets/auto`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({threadId}), signal: AbortSignal.timeout(60000),
-          });
-          const payload = await resp.json().catch(() => ({}));
-          if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
-          status(`已按总篇幅 ${payload.total} 页分配到 ${payload.units.length} 个编写单元`);
-          data = await load();
-          await render();
-        } catch (err) { status(`分配失败：${String(err.message || err)}`); }
+      body.querySelector('[data-cp-open-branch]')?.addEventListener('click', () => {
+        dialog.close();
+        if (unit) void openWritingPlan(unit);
       });
       // 要求编辑（内联）
       body.querySelector('[data-cp-edit-req]')?.addEventListener('click', () => {

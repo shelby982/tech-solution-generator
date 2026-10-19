@@ -361,6 +361,20 @@ async def sync_findings(db, project_id: int, thread_id: str, data: dict) -> dict
                 issue["finding_id"] = row["id"]
                 issue["status"] = row["status"]
                 status_map[row["id"]] = row["status"]
+    # 本轮检查结果里已不存在的问题 → 置为 resolved（避免"待修"长期残留陈旧项）
+    current_keys = {(str(chapter.get("block_id")), str(issue.get("code")), str(issue.get("message"))[:400])
+                    for chapter in data.get("chapters") or []
+                    for issue in chapter.get("issues") or []}
+    stale_rows = await (await db.execute(
+        "SELECT id, block_id, check_code, message FROM quality_findings "
+        "WHERE project_id=? AND thread_id=? AND status='open'", (project_id, thread_id),
+    )).fetchall()
+    resolved = 0
+    for row in stale_rows:
+        if (str(row["block_id"]), str(row["check_code"]), str(row["message"])[:400]) not in current_keys:
+            await db.execute("UPDATE quality_findings SET status='resolved', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             (row["id"],))
+            resolved += 1
     await db.commit()
     # 已标记"已处理"的不再出现在待修清单里
     for chapter in data.get("chapters") or []:
@@ -368,6 +382,7 @@ async def sync_findings(db, project_id: int, thread_id: str, data: dict) -> dict
                              if issue.get("status") != "ignored"]
         chapter["ok"] = not any(issue["level"] in ("high", "medium") for issue in chapter["issues"])
     data["summary"]["ignored"] = sum(1 for status in status_map.values() if status == "ignored")
+    data["summary"]["resolved"] = resolved
     return data
 
 

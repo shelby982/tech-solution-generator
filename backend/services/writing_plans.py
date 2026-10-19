@@ -424,12 +424,20 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     blocks = {str(b.get("block_id")): dict(b) for b in await list_blocks(db, project_id, thread_id)}
     block = blocks.get(str(block_id)) or {}
     content = str(block.get("content") or "")
-    # 页数：自身有预算用它；否则继承最近的祖先（子节不单独占页）
+    # 页数：篇幅的唯一 owner 是「应答策划」的分配（blocks.page_budget）。
+    # 本章自己有预算用它；否则取最近祖先的预算**按可写单元均分**（子节不单独占页）。
     pages_of_block = int(block.get("page_budget") or 0)
+    ancestors = []
     ancestor_id = str(block_id)
     while not pages_of_block and "." in ancestor_id:
         ancestor_id = ancestor_id.rsplit(".", 1)[0]
-        pages_of_block = int((blocks.get(ancestor_id) or {}).get("page_budget") or 0)
+        budget = int((blocks.get(ancestor_id) or {}).get("page_budget") or 0)
+        if budget:
+            ancestors = [key for key in blocks
+                         if key.startswith(ancestor_id)
+                         and not any(other != key and other.startswith(key + ".") for other in blocks)]
+            pages_of_block = max(1, round(budget / max(1, len(ancestors))))
+            break
 
     # 依据：本章承接的评分点/规范条款
     try:
