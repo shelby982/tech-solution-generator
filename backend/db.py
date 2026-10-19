@@ -36,6 +36,20 @@ CREATE TABLE IF NOT EXISTS chapter_writing_jobs (
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+-- 编写规范（P0.5）：L0 全局纪律 + L1 模块配方，多版本、可回滚、生成留痕。
+-- key：'global' 或 layout_key（understanding/solution/implementation/evidence/point_to_point）
+CREATE TABLE IF NOT EXISTS writing_specs (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'recipe',
+    layout_key TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'published',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_writing_specs_key ON writing_specs(key, version DESC);
+
 -- 技术评分点一级目录的编写计划：先规划、确认、再并发生成（P0）。
 -- 单位 = 「技术评分项应答」评分根下的一级子目录；plan 里存整棵子树的叶子计划。
 CREATE TABLE IF NOT EXISTS writing_plans (

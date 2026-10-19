@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v234';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v234';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v234';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v236';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v236';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v236';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -151,6 +151,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 原型要求：目录行只给颜色（状态）与行底进度（预算），名称必须完整。
   // ── 编写计划（P0）：单位 = 技术评分点的一级目录（评分根的直接子目录）──
   // 只在这一层出「编写计划」入口（一页 7 次确认，而不是每节一次）。
+  const specInfo = { specs: {} };    // 编写规范（L0/L1）版本，右栏显示 + 就近打开
+  async function loadSpecs() {
+    try {
+      const resp = await fetch('/api/writing-specs', {signal: AbortSignal.timeout(12000)});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      specInfo.specs = data.specs || {};
+      if (active) paintAside();
+    } catch (e) { /* 规范拿不到不影响编写 */ }
+  }
   const planUnits = new Map();      // block_id -> {title, leaves}
   const unitOf = new Map();         // 叶/任意子孙 block_id -> 所属一级目录 block_id
   async function loadPlanUnits() {
@@ -176,6 +186,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const budgetOf = b => pageBudget.byBlock[String(b.block_id || b.id)] || null;
   const wordsOf = b => String(b.content || '').replace(/\s+/g, '').length;
   const pagesOf = b => wordsOf(b) / WPP;
+  // 编写规范（L0/L1）的显示名：模块作用域 —— 渲染模板与抽屉都会用，别放进函数里
+  const RECIPE_LABELS = {understanding: '项目理解', solution: '技术方案', implementation: '实施计划',
+                         evidence: '人员／业绩', point_to_point: '点对点应答', global: '全局纪律'};
+  const recipeLabel = (key) => RECIPE_LABELS[key] || key;
+
   /** 编写计划抽屉：先看计划（每节的表/图/素材缺口），确认后一次起 job。 */
   async function openWritingPlan(unitBlockId) {
     if (!unitBlockId) return;
@@ -201,7 +216,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       body.innerHTML = `<p class="cs-warning">计划生成失败：${esc(String(err.message || err))}</p>`;
       return;
     }
-    const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
+
+  const kindLabel = {text: '正文', table: '表格', diagram: '图示'};
     body.innerHTML = `<p class="cs-muted">《${esc(plan.root_title)}》共 ${plan.chapters.length} 个章节。确认后按章节并发生成；
        主编会按此计划执行（不再重新规划）。</p>`
       + plan.chapters.map((c) => `<section class="cs-plan-chapter">
@@ -288,6 +304,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 拿到篇幅后重画左树与章头（不阻塞首屏）
   loadPageBudget().then(() => { if (active) paintTree(); });
   void loadPlanUnits();          // 一级目录上挂「编写计划」入口
+  void loadSpecs();              // 编写规范版本（右栏就近入口）
   // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
   // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
   const asideHost = host.querySelector('[data-cs="aside"]');
@@ -402,6 +419,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     profile[active.id]=context.profile;paintTree();stats();
     const layout = context.layouts[context.profile.layout];
     get('aside').innerHTML = `<section data-pane="basis"><h4>本章编制依据</h4>${context.points.map(p=>`<details><summary>${esc(p.item||p.factor)} · ${p.points ?? '—'} 分</summary><p>${esc(p.criterion)}</p></details>`).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
+      ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
+        return recipe ? `<section data-pane="basis"><h4>编写规范</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
       ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
         return info ? `<section data-pane="basis"><h4>编写计划</h4><p class="cs-muted">本章属于《${esc(info.title)}》的编写计划（${info.leaves} 节）：先确认计划，再按计划编制。</p><button type="button" class="mw-btn" data-plan="${esc(unit)}">查看 / 确认计划</button></section>` : ''; })()}
       <section data-pane="basis"><h4>编排建议</h4><label>章节类型 <select data-cs="layout">${Object.entries(context.layouts).map(([id,l])=>`<option value="${id}" ${id===context.profile.layout?'selected':''}>${esc(l.label)}</option>`).join('')}</select></label><p>${layout.blocks.map(esc).join(' → ')}</p><p class="cs-muted">${context.materials.some(m=>m.confirmed)?'生成仅引用已核对素材，并结合本章评分及规范要求。':'无已核对素材：可先写项目分析与拟实施方案；人员、业绩、证书、实测参数等保留待补充。'}</p>${context.missing.map(m=>`<p class="cs-warning">${esc(m)}</p>`).join('')}</section>
@@ -486,6 +505,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
+    const specLink=event.target.closest('[data-spec]');
+    if(specLink){globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',{detail:{layout:specLink.dataset.spec}}));return;}
     const planButton=event.target.closest('[data-plan]');
     if(planButton){await openWritingPlan(planButton.dataset.plan);return;}
     const chapter=event.target.closest('[data-chapter]');

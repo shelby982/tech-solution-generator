@@ -28,6 +28,7 @@ from routes.revisions import router as revisions_router
 from routes.packages import router as packages_router
 from routes.chapter_studio import router as studio_router
 from routes.chapter_writing import router as writing_router
+from routes.writing_specs import router as specs_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -237,6 +238,7 @@ app.include_router(review_router,    prefix="/api")
 app.include_router(packages_router,  prefix="/api")
 app.include_router(studio_router,    prefix="/api")
 app.include_router(writing_router,   prefix="/api")
+app.include_router(specs_router,     prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────

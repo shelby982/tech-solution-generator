@@ -296,11 +296,16 @@ async def confirm_plan(db, project_id: int, plan_id: str, leaf_block_ids: list[s
         source = await source_for(block)
         _, prompt = build_writing_prompt(block, reqs, points, materials, chapter["layout"], source)
         package = json.loads(prompt) | {"block_id": block["block_id"], "layout": chapter["layout"]}
+        from services.writing_specs import spec_for
+        package["writing_spec"] = await spec_for(db, chapter["layout"])
         job_id = await create_job(db, block, package, settings, auto_save=True)   # 返回 job id
         # 预置主编计划：run_job 看到 artifacts.chief 就不再调主编重新规划
+        spec = package.get("writing_spec") or {}
         artifacts = {"chief": {"plan": {"objective": chapter["objective"],
                                         "tasks": chapter["tasks"], "gaps": chapter["gaps"]},
-                               "model": "confirmed-plan"}}
+                               "model": "confirmed-plan"},
+                     "spec": {"global": (spec.get("global") or {}).get("version"),
+                              "recipe": (spec.get("recipe") or {}).get("version")}}
         await db.execute("UPDATE chapter_writing_jobs SET artifacts=? WHERE id=?",
                          (json.dumps(artifacts, ensure_ascii=False), job_id))
         await db.commit()          # create_job 内部用 BEGIN IMMEDIATE，必须先提交再进下一轮

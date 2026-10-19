@@ -86,9 +86,20 @@ async def start_team(project_id:int,body:TeamRequest):
             source=await source_for(block);layout=recommend_layout(block,source)
             _,prompt=build_writing_prompt(block,reqs,points,materials,layout,source)
             package=json.loads(prompt)|{'block_id':block['block_id'],'layout':layout,'document_outline':outlines}
+            # 编写规范（L0 全局 + L1 模块配方）注入生成上下文，并把版本记进 job（留痕）
+            from services.writing_specs import spec_for
+            package['writing_spec']=await spec_for(db,layout)
             if len(json.dumps(package,ensure_ascii=False))>160000:raise HTTPException(413,'章节依据过多，需分拆任务后编制')
             prepared.append((block,package))
-        jobs=[await create_job(db,block,package,body.models,body.auto_save_empty) for block,package in prepared]
+        jobs=[]
+        for block,package in prepared:
+            job_id=await create_job(db,block,package,body.models,body.auto_save_empty)
+            spec=package.get('writing_spec') or {}
+            await db.execute('UPDATE chapter_writing_jobs SET artifacts=? WHERE id=?',
+                (json.dumps({'spec':{'global':(spec.get('global') or {}).get('version'),
+                                     'recipe':(spec.get('recipe') or {}).get('version')}},ensure_ascii=False),job_id))
+            await db.commit()
+            jobs.append(job_id)
     for job in jobs:queue_job(job)
     return {'jobs':jobs,'notice':'第一阶段每次最多试编三章；空章节自动保存初稿，已有正文保留为建议。'}
 

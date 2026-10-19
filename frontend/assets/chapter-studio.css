@@ -64,3 +64,6 @@
 .cs-plan-slot { display: inline-flex; align-items: center; }
 .cs-plan-slot .cs-plan-btn { margin-left: auto; font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .cs-plan-slot .cs-plan-btn:hover { background: #dbeafe; }
+
+/* 编写页右栏：编写规范块（版本 + 就近入口） */
+[data-pane="basis"][data-spec-pane] , [data-pane="basis"] .cs-spec-line { font-size: 12px; }
