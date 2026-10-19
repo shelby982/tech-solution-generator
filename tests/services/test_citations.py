@@ -66,7 +66,11 @@ async def test_search_reports_not_configured(monkeypatch):
 def test_citation_line_format():
     line = citation_line({"publisher": "国家发改委", "published_at": "2024-03-15",
                           "title": "指导意见", "url": "https://www.gov.cn/a.html", "excerpt": "摘录"})
-    assert line.startswith("【来源】国家发改委 · 2024-03-15 · 指导意见 · https://www.gov.cn/a.html")
+    assert line.startswith("【来源】")
+    assert "国家发改委 · 2024-03-15 · 指导意见 · https://www.gov.cn/a.html" in line
+    # 非官方来源要显式标注，供人工确认
+    assert citation_line({"trust": "confirmed", "domain": "某行业网", "title": "行业报告",
+                          "url": "https://example.org/a", "excerpt": "x"}).startswith("【来源·非官方，用户已确认】")
 
 
 def test_link_candidates_only_official_and_keyword_matched():
@@ -127,3 +131,19 @@ def test_404_footer_page_rejected_by_fetch_guard():
             assert "页脚" in str(exc)
         else:
             raise AssertionError("页脚页应被拒绝")
+
+
+async def test_suggest_query_derives_from_chapter_and_reports_coverage(db):
+    """按章节推导检索词：标题 + 素材缺口 + 配方骨架，并报告本章已有来源/材料数。"""
+    from services.citations import suggest_query
+
+    await db.execute("INSERT INTO workflow_runs (thread_id, project_id, stage) VALUES ('t1', 1, 'outline_review')")
+    await db.execute(
+        "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status, evidence_required) "
+        "VALUES (1, 's1.1', '项目背景现状目标', 3, '正文', 0, 't1', 'draft', '近三年行业数据；政策依据')")
+    await db.commit()
+    data = await suggest_query(db, 1, "t1", "s1.1")
+    assert data["chapter"]["title"] == "项目背景现状目标"
+    assert data["gaps"] == ["近三年行业数据", "政策依据"]
+    assert data["query"] and "项目背景现状目标" in data["query"]
+    assert data["have"] == {"citations": 0, "materials": 0}

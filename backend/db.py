@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS citations (
     published_at TEXT NOT NULL DEFAULT '',
     excerpt TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
+    -- trust: official（官方原文）/ unverified（非官方，需用户确认）/ confirmed（非官方但用户已确认可靠）
+    trust TEXT NOT NULL DEFAULT 'official',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);

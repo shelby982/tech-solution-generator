@@ -205,9 +205,14 @@ async def search_official(query: str, limit: int = 5) -> dict:
 
 
 async def fetch_candidate(url: str, whitelist_additions: list[str] | None = None) -> dict:
-    """抓取并核验一个官方链接，返回待接受的引用候选（不落库）。"""
-    if not is_official(url, whitelist_additions):
-        raise ValueError("不是官方来源域名，请改用政府/南方电网/标准发布/招标平台原文")
+    """抓取并核验一个链接，返回待接受的引用候选（不落库）。
+
+    产品口径：**官方原文最优，非官方真实来源也允许**（否则素材不够、写不出来）——
+    但非官方必须带来源标注、由用户确认。trust: official / unverified。
+    """
+    if not domain_of(url):
+        raise ValueError("请粘贴完整链接（https://…）")
+    official = is_official(url, whitelist_additions)
     async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
         resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; bid-assistant)"})
     resp.raise_for_status()
@@ -221,19 +226,80 @@ async def fetch_candidate(url: str, whitelist_additions: list[str] | None = None
     if re.search(r"(ICP备|公网安备|网站标识码)", excerpt):
         raise ValueError("抓到的是站点页脚（可能是 404 或重定向页），请换原文链接")
     candidate["status"] = "pending"
+    candidate["trust"] = "official" if official else "unverified"
+    if not official:
+        candidate["warning"] = ("非官方渠道：内容可能真实，但引用时必须标注来源并由你确认；"
+                                "涉及政策/标准/指标等硬信息建议换官方原文")
     return candidate
 
 
+async def suggest_query(db, project_id: int, thread_id: str, block_id: str) -> dict:
+    """按**当前章节**推导检索词 —— 用户不需要盲搜。
+
+    依据：章节标题 + 该章 evidence_required（素材缺口）+ 配方骨架里的第一项。
+    同时给出"本章已有多少来源/材料"，让用户知道够不够。
+    """
+    from services.block_store import list_blocks
+
+    blocks = [dict(b) for b in await list_blocks(db, project_id, thread_id)]
+    block = next((b for b in blocks if str(b.get("block_id")) == str(block_id)), None)
+    if block is None:
+        raise ValueError("找不到该章节")
+    title = str(block.get("title") or "")
+    gaps = [item.strip() for item in re.split(r"[；;、，,/]", str(block.get("evidence_required") or "")) if len(item.strip()) >= 2]
+    # 章节类型（与质检/计划同一口径）
+    from services.quality_check import infer_layout
+    stored = {}
+    for row in await (await db.execute(
+        "SELECT b.block_id, cs.layout FROM chapter_studio cs JOIN blocks b ON b.id=cs.block_id "
+        "WHERE b.project_id=? AND b.run_thread_id=?", (project_id, thread_id),
+    )).fetchall():
+        stored[row["block_id"]] = row["layout"] or ""
+    layout = infer_layout(block, blocks, stored)
+    from services.writing_specs import list_specs
+    recipe = ((await list_specs(db)).get("specs") or {}).get(layout, {}).get("structured") or {}
+    skeleton = (recipe.get("skeleton") or [])[:1]
+    keywords = []
+    for source in [title, *(gaps[:2]), *skeleton]:
+        for part in re.split(r"[\s、，,；;/]+", str(source or "")):
+            part = part.strip()
+            if len(part) >= 2 and part not in keywords:
+                keywords.append(part)
+    query = " ".join(keywords[:3])[:60]
+    have_citations = await (await db.execute(
+        "SELECT COUNT(*) AS n FROM citations WHERE project_id=? AND status='accepted' AND ("
+        "  block_id=? OR EXISTS (SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?))",
+        (project_id, str(block_id), str(block_id)),
+    )).fetchone()
+    have_materials = await (await db.execute(
+        "SELECT COUNT(*) AS n FROM blocks b JOIN chapter_materials cm ON cm.block_id = b.id "
+        "WHERE b.project_id=? AND b.run_thread_id=? AND b.block_id=?", (project_id, thread_id, str(block_id)),
+    )).fetchone()
+    return {
+        "query": query,
+        "keywords": keywords[:6],
+        "chapter": {"block_id": str(block_id), "title": title, "layout": layout},
+        "gaps": gaps[:5],
+        "have": {"citations": int(have_citations["n"]), "materials": int(have_materials["n"])},
+    }
+
+
 async def save_citation(db, project_id: int, payload: dict, thread_id: str = "", block_id: str = "") -> dict:
-    """接受一条引用（落库，带溯源字段）。"""
+    """接受一条引用（落库，带溯源字段）。非官方来源必须用户确认（confirmed=True）。"""
+    url = str(payload.get("url") or "")
+    trust = str(payload.get("trust") or ("official" if is_official(url) else "unverified"))
+    if trust != "official" and not payload.get("confirmed"):
+        raise ValueError("非官方来源需要你确认内容真实可靠后才能引用")
+    if trust != "official":
+        trust = "confirmed"
     citation_id = uuid.uuid4().hex
     await db.execute(
         "INSERT INTO citations (id, project_id, thread_id, block_id, query, url, domain, title, "
-        "publisher, published_at, excerpt, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "publisher, published_at, excerpt, status, trust) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (citation_id, project_id, thread_id, block_id, str(payload.get("query") or ""),
-         str(payload.get("url") or ""), str(payload.get("domain") or domain_of(payload.get("url"))),
+         url, str(payload.get("domain") or domain_of(url)),
          str(payload.get("title") or ""), str(payload.get("publisher") or ""),
-         str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted"),
+         str(payload.get("published_at") or ""), str(payload.get("excerpt") or ""), "accepted", trust),
     )
     if block_id:
         await db.execute("INSERT OR IGNORE INTO citation_links (citation_id, block_id) VALUES (?, ?)",
@@ -241,7 +307,7 @@ async def save_citation(db, project_id: int, payload: dict, thread_id: str = "",
     await db.commit()
     return {"id": citation_id, **{k: payload.get(k) for k in
                                   ("url", "domain", "title", "publisher", "published_at", "excerpt")},
-            "status": "accepted", "links": [block_id] if block_id else []}
+            "status": "accepted", "trust": trust, "links": [block_id] if block_id else []}
 
 
 async def list_citations(db, project_id: int, status: str | None = None,
@@ -305,7 +371,7 @@ async def reject_citation(db, project_id: int, citation_id: str) -> bool:
 async def citations_for_prompt(db, project_id: int, block_id: str, limit: int = 12) -> list[dict]:
     """编写上下文用的引用（只要 accepted；章级优先，含项目级）。"""
     rows = await (await db.execute(
-        "SELECT url, domain, title, publisher, published_at, excerpt FROM citations "
+        "SELECT url, domain, title, publisher, published_at, excerpt, trust FROM citations "
         "WHERE project_id=? AND status='accepted' AND ("
         "  block_id='' OR block_id=? OR EXISTS ("
         "    SELECT 1 FROM citation_links l WHERE l.citation_id = citations.id AND l.block_id = ?)) "
@@ -316,7 +382,10 @@ async def citations_for_prompt(db, project_id: int, block_id: str, limit: int = 
 
 
 def citation_line(citation: dict) -> str:
-    return "【来源】{} · {} · {} · {} · {}".format(
+    trust = citation.get("trust") or "official"
+    label = "【来源】" if trust == "official" else "【来源·非官方，用户已确认】"
+    return "{} {} · {} · {} · {} · {}".format(
+        label,
         citation.get("publisher") or citation.get("domain") or "",
         citation.get("published_at") or "日期待补", citation.get("title") or "",
         citation.get("url") or "", (citation.get("excerpt") or "")[:EXCERPT_LIMIT],
@@ -326,4 +395,4 @@ def citation_line(citation: dict) -> str:
 __all__ = ["is_official", "extract_page", "fetch_candidate", "search_official", "search_configured",
            "OFFICIAL_PORTALS", "discover_candidates",
            "save_citation", "list_citations", "reject_citation", "citations_for_prompt",
-           "citation_line", "domain_of", "link_citation", "unlink_citation"]
+           "citation_line", "domain_of", "link_citation", "unlink_citation", "suggest_query"]

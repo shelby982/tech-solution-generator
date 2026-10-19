@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v252';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v252';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v252';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v253';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v253';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v253';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -281,11 +281,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const host = dialog.querySelector('[data-cite-portals]');
       host.innerHTML = (list || []).map((portal) => `<a href="${esc(portal.url)}" target="_blank" rel="noreferrer" title="${esc(portal.hint)}">${esc(portal.name.replace(' · ', ' '))}</a>`).join('');
     };
-    const accept = async (candidate, row) => {
-      const button = row.querySelector('[data-cite-accept]');
-      button.disabled = true;
+    const accept = async (candidate, row, buttonEl) => {
+      const button = buttonEl || row.querySelector('[data-cite-accept]');
+      if (button) button.disabled = true;
+      const confirmed = candidate.trust === 'official' ? true
+        : !!(row && row.querySelector('[data-cite-confirm]')?.checked)
+          || !!(panel.querySelector('[data-cite-confirm]')?.checked);
       try {
-        await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId});
+        await post(`/api/projects/${projectId}/citations`, {...candidate, block_id: blockKey, thread_id: threadId, confirmed});
         accepted += 1;
         markAccepted();
         row.classList.add('accepted');
@@ -303,15 +306,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (preview) preview.innerHTML = '<p class="cs-dim">正在抓取并抽取机构/日期/摘录…</p>';
       try {
         const candidate = await post(`/api/projects/${projectId}/citations/fetch`, {url});
+        const unverified = candidate.trust !== 'official';
         const html = `<div class="cs-cite-card">
-            <h4>${esc(candidate.title)}</h4>
+            <h4>${esc(candidate.title)} <span class="cs-cite-trust ${unverified ? 'unverified' : 'official'}">${unverified ? '非官方来源 · 需确认' : '官方原文'}</span></h4>
             <p class="cs-muted">${esc(candidate.publisher || candidate.domain)} · ${esc(candidate.published_at || '日期待补')}</p>
             <p>${esc(candidate.excerpt || '')}</p>
             <p class="cs-dim">${esc(candidate.url)}</p>
-            <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-cite-accept>接受为引用</button></div>
+            ${unverified ? `<p class="cs-warning">${esc(candidate.warning || '非官方渠道内容可能真实，但请先核对')}</p>
+              <label class="cs-cite-confirm"><input type="checkbox" data-cite-confirm /> 我已核对：内容真实可靠，愿意以该来源引用</label>` : ''}
+            <div class="cs-plan-actions"><button type="button" class="mw-btn primary" data-cite-accept${unverified ? ' disabled' : ''}>接受为引用</button></div>
             <p class="cs-dim" data-cite-msg></p></div>`;
-        if (preview) { preview.innerHTML = html; preview.querySelector('[data-cite-accept]').onclick = () => void accept(candidate, row); }
-        else { panel.innerHTML = html; panel.querySelector('[data-cite-accept]').onclick = (event) => void accept(candidate, panel); }
+        const host = preview || panel;
+        host.innerHTML = html;
+        const confirmBox = host.querySelector('[data-cite-confirm]');
+        const acceptButton = host.querySelector('[data-cite-accept]');
+        if (confirmBox && acceptButton) {
+          confirmBox.addEventListener('change', () => { acceptButton.disabled = !confirmBox.checked; });
+        }
+        acceptButton.onclick = (event) => void accept(candidate, row || panel, event.currentTarget);
       } catch (err) {
         const message = `<p class="cs-warning">抓取失败：${esc(String(err.message || err))}</p>`;
         if (preview) preview.innerHTML = message; else panel.innerHTML = message;
@@ -369,6 +381,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       .catch(() => {});
     markAccepted();
     if (initialQuery && !isUrl(initialQuery)) void discover();
+    // 按当前章节推导检索词（标题 + 素材缺口 + 配方骨架），并自动检索一次 —— 用户不需要盲搜
+    if (blockKey) {
+      fetch(`/api/projects/${projectId}/citations/suggest?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(15000)})
+        .then((resp) => (resp.ok ? resp.json() : null))
+        .then((data) => {
+          if (!dialog.isConnected || !data || !data.query) return;
+          if (!input.value.trim()) input.value = data.query;
+          const context = globalThis.document.createElement('p');
+          context.className = 'cs-dim cs-cite-ctx';
+          context.textContent = `本章《${data.chapter.title}》 · 已有 ${data.have.citations} 条来源 / ${data.have.materials} 份材料`
+            + (data.gaps.length ? ` · 素材缺口：${data.gaps.join('、')}` : '');
+          dialog.querySelector('.cs-cite-search').insertAdjacentElement('afterend', context);
+          if (!initialQuery) void discover();
+        })
+        .catch(() => {});
+    }
   }
 
   /** 文字生成图：用户粘贴一段描述 → 抽成关系链图（:::diagram）→ 插入正文。 */

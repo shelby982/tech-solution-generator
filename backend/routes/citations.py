@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from db import get_db
 from services.citations import (OFFICIAL_PORTALS, discover_candidates, fetch_candidate, link_citation,
                                 list_citations, reject_citation, save_citation, search_official,
-                                search_configured, unlink_citation)
+                                search_configured, suggest_query, unlink_citation)
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -60,6 +60,19 @@ async def unlink(project_id: int, citation_id: str, block_id: str):
 
 class DiscoverBody(BaseModel):
     query: str = Field(min_length=2, max_length=200)
+
+
+@router.get("/suggest")
+async def suggest(project_id: int, threadId: str = Query(min_length=1), blockId: str = Query(min_length=1)):
+    """按当前章节推导检索词（标题 + 素材缺口 + 配方骨架），并给出本章已有来源/材料数。
+
+    产品口径：检索是为了"写这一章素材够不够"，用户不该盲搜。
+    """
+    async with get_db() as db:
+        try:
+            return await suggest_query(db, project_id, threadId, blockId)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
 
 
 @router.get("/portals")
