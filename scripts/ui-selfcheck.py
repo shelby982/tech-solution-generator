@@ -264,7 +264,7 @@ HARNESS = r"""
   // X 工具条：主动作 + 视图 + 插入▾ + 更多▾；无重复"文字生成图"；状态是浮动 toast
   const toolbar = document.querySelector('.cs-toolbar');
   if (toolbar) {
-    const labels = [...toolbar.querySelectorAll(':scope > button, :scope > .cs-toolbar-right > details > summary')]
+    const labels = [...toolbar.querySelectorAll(':scope > button, :scope > .cs-toolbar-right > button, :scope > .cs-toolbar-right > details > summary')]
       .map((b) => b.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const dupDiagram = toolbar.textContent.includes('文字生成图');
     const moreItems = [...toolbar.querySelectorAll('.cs-more-menu button')].map((b) => b.textContent.trim());
@@ -282,42 +282,47 @@ HARNESS = r"""
   const statusStyle = statusEl ? getComputedStyle(statusEl).position : '';
   mark('状态为浮动 toast（不占正文行）', statusStyle === 'fixed', { position: statusStyle });
 
-  // Y 插入功能可用（文字说明 / 表格）：点完正文变长、状态无报错
-  const ed = dialog.parentElement ? document.querySelector('.cs-editor') : document.querySelector('.cs-editor');
-  const before = (ed?.value || '').length;
-  const insertMenu = document.querySelector('.cs-insert');
-  const clickInsert = async (action) => {
-    insertMenu?.setAttribute('open', '');
-    await sleep(150);
-    document.querySelector(`.cs-insert-menu [data-action="${action}"]`)?.click();
-    await sleep(900);
-    insertMenu?.removeAttribute('open');
-  };
-  // 菜单结构：按来源分三组
-  insertMenu?.setAttribute('open', '');
-  await sleep(400);
-  const groups = [...document.querySelectorAll('.cs-ins-group')].map((g) => g.textContent.replace(/\s+/g, ' ').trim());
-  const segBtns = document.querySelectorAll('[data-ins-segment]').length;
-  mark('插入菜单按来源分组（素材/官方来源/结构）',
-       groups.length === 3 && groups[0].includes('从素材插入') && groups[1].includes('从官方来源') && groups[2].includes('插入结构'),
-       { groups, segBtns });
-  // 从官方来源插入片段 → 正文变长且带【来源
-  const seg = document.querySelector('[data-ins-segment]');
-  seg?.click();
-  await sleep(900);
-  const afterSeg = (ed?.value || '').length;
-  const hasSource = (ed?.value || '').includes('【来源');
-  insertMenu?.removeAttribute('open');
-  mark('从官方来源插入片段（自动带【来源】）', !!seg && afterSeg > before && hasSource,
-       { before, afterSeg, hasSource, seg: seg?.textContent?.trim().slice(0, 24) });
-  // 插入结构里的表格模板
-  await clickInsert('table');
-  const afterTable = (ed?.value || '').length;
-  const stEl = document.querySelector('[data-cs="status"]');
-  const statusText = stEl ? (stEl.textContent || '') : '';
-  const bad = /Cannot|null|失败|错误/.test(statusText);
-  mark('插入结构模板可用（表格）', afterTable > afterSeg && !bad,
-       { afterSeg, afterTable, status: statusText.slice(0, 60) });
+  // Y 插入面板：三个互斥页签 + 搜索 + 选中预览后插入
+  document.querySelector('[data-open-insert]')?.click();
+  await sleep(700);
+  const insDlg = [...document.querySelectorAll('dialog')].find((d) => d.open && d.classList.contains('cs-insert-dialog'));
+  mark('「插入…」打开插入面板', !!insDlg, {});
+  if (insDlg) {
+    const tabs = [...insDlg.querySelectorAll('[data-ins-tab]')].map((b) => b.textContent.trim());
+    mark('插入面板有 3 个页签', tabs.length === 3 && tabs[0].includes('官方来源') && tabs[1].includes('素材') && tabs[2].includes('结构'),
+         { tabs });
+    const rows = insDlg.querySelectorAll('[data-pick-source]').length;
+    const groups = insDlg.querySelectorAll('.cs-ins-group-name').length;
+    const search = !!insDlg.querySelector('[data-ins-search]');
+    mark('官方来源页签：按来源分组 + 片段带序号 + 有搜索',
+         (rows === 0 || (groups >= 1 && !!insDlg.querySelector('.cs-ins-no'))) && search,
+         { rows, groups, search });
+    const confirm = insDlg.querySelector('[data-ins-confirm]');
+    const beforeDisabled = confirm ? confirm.disabled : null;
+    const pick = insDlg.querySelector('[data-pick-source]');
+    pick?.click();
+    await sleep(300);
+    const afterEnabled = confirm ? !confirm.disabled : false;
+    mark('选中后才可插入（先看再插）', beforeDisabled === true && afterEnabled,
+         { beforeDisabled, afterEnabled });
+    const ed = document.querySelector('.cs-editor');
+    const beforeLen = (ed?.value || '').length;
+    if (afterEnabled) {
+      confirm?.click();
+      await sleep(800);
+      const grew = (ed?.value || '').length > beforeLen;
+      const withSource = (ed?.value || '').includes('【来源');
+      mark('插入来源片段（自动带【来源】）', grew && withSource, { grew, withSource });
+    } else {
+      mark('插入来源片段（自动带【来源】）', false, { note: '无可选片段' });
+    }
+    if (insDlg.open) insDlg.close();
+  } else {
+    mark('插入面板有 3 个页签', false, {});
+    mark('官方来源页签：按来源分组 + 片段带序号 + 有搜索', false, {});
+    mark('选中后才可插入（先看再插）', false, {});
+    mark('插入来源片段（自动带【来源】）', false, {});
+  }
 
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),

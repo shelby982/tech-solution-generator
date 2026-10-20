@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v321';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v321';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v321';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v322';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v322';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v322';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -129,7 +129,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <button data-action="save" disabled>保存</button>
           <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
           <div class="cs-toolbar-right">
-            <details class="cs-insert"><summary>插入 ▾</summary><div class="cs-insert-menu" data-insert-menu></div></details>
+            <button type="button" class="cs-insert-btn" data-open-insert title="从官方来源 / 素材 / 结构模板插入内容">插入…</button>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
               <button data-action="complete">确认本章完成</button>
               <div class="cs-more-sep"></div>
@@ -1366,55 +1366,136 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `${block('公开资料可补', '系统可检索官方原文', pub)}${block('必须你上传', '公开渠道没有这类材料', up)}`;
   }
 
-  /** 插入菜单：按"来源"分三组（素材 / 官方来源 / 结构模板），懒渲染 */
-  function renderInsertMenu() {
-    const box = host.querySelector('[data-insert-menu]');
-    if (!box) return;
-    const mats = (context?.materials) || [];
-    const cites = (citationInfo?.rows) || [];
-    const matItems = mats.length
-      ? mats.map((m) => {
-          const canQuote = (m.excerpts || []).length > 0;
-          const page = (m.excerpts || [])[0]?.page;
-          return `<div class="cs-ins-item">
-            <span class="cs-ins-name" title="${esc(m.filename)}">${esc(m.filename)}</span>
-            <span class="cs-ins-acts">
-              ${canQuote ? `<button type="button" data-ins-material="${m.id}">摘录${page ? `·第${page}页` : ''}</button>` : '<i>未解析</i>'}
-              <button type="button" data-ins-table="${m.id}" title="从该文件抽取表格后插入">表格</button>
-              ${m.image_url ? `<button type="button" data-ins-image="${m.id}">图片</button>` : ''}
-            </span></div>`;
-        }).join('')
-      : '<p class="cs-ins-empty">还没有素材 · 去右栏「素材池」上传</p>';
-    const citeItems = cites.length
-      ? cites.map((c) => {
-          const segs = (c.segments || []);
-          const sel = new Set((c.selected || []).map((x) => (typeof x === 'object' ? x.index : x)));
-          const pick = segs.slice(0, 6);
-          return `<div class="cs-ins-src">
-              <p class="cs-ins-src-name">${esc(c.title || c.url)}</p>
-              ${pick.map((s, i) => {
-                const body = String(s.content || s.heading || '').replace(/\s+/g, ' ').trim();
-                const label = body.slice(0, 34);
-                const kindTag = s.kind && s.kind !== 'text' ? `[${esc(s.kind)}] ` : '';
-                return `<button type="button" class="cs-ins-seg" data-ins-segment="${esc(c.id)}:${i}" title="${esc(body.slice(0, 120))}">
-                  ${sel.has(i) ? '★ ' : ''}${kindTag}${esc(label)}${body.length > 34 ? '…' : ''}
-                </button>`;
-              }).join('')}
-              ${segs.length > 6 ? `<p class="cs-ins-more">… 共 ${segs.length} 段（去「素材池 → 片段」看全部）</p>` : ''}
-            </div>`;
-        }).join('')
-      : '<p class="cs-ins-empty">还没有官方来源 · 去右栏「素材池」添加</p>';
-    box.innerHTML = `
-      <p class="cs-ins-group">从素材插入 <span>我方材料 · 有出处</span></p>${matItems}
-      <div class="cs-ins-sep"></div>
-      <p class="cs-ins-group">从官方来源插入 <span>自动带【来源】</span></p>${citeItems}
-      <div class="cs-ins-sep"></div>
-      <p class="cs-ins-group">插入结构 <span>模板 · 需人工补齐</span></p>
-      <div class="cs-ins-item"><span class="cs-ins-name">对比表 / 响应表</span><span class="cs-ins-acts"><button type="button" data-action="table">插入</button></span></div>
-      <div class="cs-ins-item"><span class="cs-ins-name">关系图骨架</span><span class="cs-ins-acts"><button type="button" data-action="diagram">插入</button></span></div>`;
+  /** 插入面板：三个互斥页签（官方来源 / 素材 / 结构模板）+ 搜索 + 选中预览后插入 */
+  function openInsertDialog() {
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog cs-insert-dialog';
+    dlg.innerHTML = `<header><h3>插入内容</h3><button type="button" aria-label="关闭" data-ins-close>×</button></header>
+      <div class="cs-plan-body">
+        <nav class="cs-ins-tabs">
+          <button type="button" data-ins-tab="source" aria-pressed="true">从官方来源</button>
+          <button type="button" data-ins-tab="material" aria-pressed="false">从素材</button>
+          <button type="button" data-ins-tab="struct" aria-pressed="false">结构模板</button>
+        </nav>
+        <div class="cs-ins-search"><input type="search" data-ins-search placeholder="搜索片段 / 来源…" /></div>
+        <div class="cs-ins-list" data-ins-list></div>
+      </div>
+      <footer class="cs-ins-foot"><span class="cs-ins-picked" data-ins-picked>未选择内容</span>
+        <button type="button" class="cs-cp-ghost" data-ins-cancel>取消</button>
+        <button type="button" class="cs-cp-primary" data-ins-confirm disabled>插入</button></footer>`;
+    const body = dlg.querySelector('.cs-plan-body');
+    const listEl = dlg.querySelector('[data-ins-list]');
+    const pickedEl = dlg.querySelector('[data-ins-picked]');
+    const confirmEl = dlg.querySelector('[data-ins-confirm]');
+    const searchEl = dlg.querySelector('[data-ins-search]');
+    const state = { tab: 'source', query: '', picked: null };
+
+    const citeSource = (c) => `${c.publisher || c.domain || ''}${c.published_at ? ` · ${c.published_at}` : ''}`;
+    const sourceText = (c, seg) => `${String(seg.content || seg.heading || '').trim()}
+
+【来源：${c.title || c.url}${citeSource(c) ? `（${citeSource(c)}）` : ''}】`;
+
+    const render = () => {
+      for (const b of dlg.querySelectorAll('[data-ins-tab]')) b.setAttribute('aria-pressed', String(b.dataset.insTab === state.tab));
+      searchEl.hidden = state.tab === 'struct';
+      const q = state.query.trim().toLowerCase();
+      const hit = (text) => !q || String(text || '').toLowerCase().includes(q);
+      let html = '';
+      if (state.tab === 'source') {
+        const rows = (citationInfo?.rows || []).map((c) => {
+          const segs = (c.segments || []).map((s, i) => ({ s, i }))
+            .filter(({ s }) => hit(s.content) || hit(s.heading) || hit(c.title));
+          if (!segs.length && !hit(c.title)) return '';
+          return `<div class="cs-ins-group"><p class="cs-ins-group-name">${esc(c.title || c.url)}</p>
+            ${segs.map(({ s, i }) => {
+              const text = String(s.content || s.heading || '').replace(/\s+/g, ' ').trim();
+              return `<button type="button" class="cs-ins-row" data-pick-source="${esc(c.id)}:${i}">
+                  <span class="cs-ins-no">${i + 1}</span>
+                  <span class="cs-ins-row-text">${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</span></button>`;
+            }).join('')}</div>`;
+        }).join('');
+        html = rows || '<p class="cs-ins-empty">还没有官方来源 · <button type="button" class="cs-mat-link" data-ins-goto>去素材页签添加</button></p>';
+      } else if (state.tab === 'material') {
+        const mats = (context?.materials || []).filter((m) => hit(m.filename));
+        html = mats.length
+          ? mats.map((m) => `<div class="cs-ins-mat">
+              <span class="cs-ins-mat-name" title="${esc(m.filename)}">${esc(m.filename)}</span>
+              <span class="cs-ins-mat-acts">
+                ${(m.excerpts || []).length ? `<button type="button" class="cs-ins-chip" data-pick-material="${m.id}">摘录${m.excerpts[0]?.page ? `·第${m.excerpts[0].page}页` : ''}</button>` : '<i>未解析</i>'}
+                <button type="button" class="cs-ins-chip" data-ins-image="${m.id}">图片</button>
+                <button type="button" class="cs-ins-chip" data-ins-table="${m.id}">表格</button>
+              </span></div>`).join('')
+          : '<p class="cs-ins-empty">本章还没有素材 · <button type="button" class="cs-mat-link" data-ins-goto>去素材页签上传</button></p>';
+      } else {
+        html = INS_TEMPLATES.map((tpl) => `<button type="button" class="cs-ins-row" data-pick-struct="${esc(tpl.id)}">
+            <span class="cs-ins-row-text"><b>${esc(tpl.label)}</b><small>${esc(tpl.hint)}</small></span></button>`).join('');
+      }
+      listEl.innerHTML = html;
+      pickedEl.textContent = state.picked ? `已选：${state.picked.label}` : '未选择内容';
+      confirmEl.disabled = !state.picked;
+    };
+
+    const pick = (label, text) => { state.picked = { label, text }; render(); };
+    dlg.addEventListener('click', async (event) => {
+      const target = event.target;
+      if (target.closest('[data-ins-close]') || target.closest('[data-ins-cancel]')) { dlg.close(); return; }
+      const tab = target.closest('[data-ins-tab]');
+      if (tab) { state.tab = tab.dataset.insTab; state.picked = null; state.query = ''; searchEl.value = ''; render(); return; }
+      if (target.closest('[data-ins-goto]')) { dlg.close(); showPanel('materials'); return; }
+      const src = target.closest('[data-pick-source]');
+      if (src) {
+        const [cid, idx] = String(src.dataset.pickSource).split(':');
+        const c = (citationInfo?.rows || []).find((x) => String(x.id) === cid);
+        const seg = (c?.segments || [])[Number(idx)];
+        if (c && seg) pick(`${c.title || c.url} · 第 ${Number(idx) + 1} 条`, sourceText(c, seg));
+        return;
+      }
+      const mat = target.closest('[data-pick-material]');
+      if (mat) {
+        const m = (context?.materials || []).find((x) => String(x.id) === mat.dataset.pickMaterial);
+        const ex = (m?.excerpts || [])[0];
+        if (ex) pick(`《${m.filename}》摘录`, `> 摘自《${m.filename}》${ex.page ? `（第 ${ex.page} 页）` : ''}\n${ex.text || ex.content || ''}`);
+        return;
+      }
+      const img = target.closest('[data-ins-image]');
+      if (img) {
+        const m = (context?.materials || []).find((x) => String(x.id) === img.dataset.insImage);
+        if (m?.image_url) { insertAtCursor(`:::figure ${m.filename}\n![${String(m.filename).replaceAll(']', '')}](${m.image_url})\n:::`); dlg.close(); }
+        else status('该素材没有可插入的图片');
+        return;
+      }
+      const tbl = target.closest('[data-ins-table]');
+      if (tbl) {
+        const m = (context?.materials || []).find((x) => String(x.id) === tbl.dataset.insTable);
+        dlg.close();
+        await insertMaterialTable(tbl.dataset.insTable, m?.filename || '素材');
+        return;
+      }
+      const st = target.closest('[data-pick-struct]');
+      if (st) {
+        const tpl = INS_TEMPLATES.find((x) => x.id === st.dataset.pickStruct);
+        if (tpl) pick(tpl.label, tpl.text);
+        return;
+      }
+      if (target.closest('[data-ins-confirm]')) {
+        if (state.picked) { insertAtCursor(state.picked.text); dlg.close(); }
+      }
+    });
+    searchEl.addEventListener('input', () => { state.query = searchEl.value; render(); });
+    render();
+    globalThis.document.body.appendChild(dlg);
+    dlg.addEventListener('close', () => dlg.remove());
+    dlg.showModal();
   }
 
-  /** 把后端抽取的表格转成 Markdown（单元格里的 | 转义） */
+  const INS_TEMPLATES = [
+    { id: 'compare', label: '对比表', hint: '现状 / 目标 / 差距 三列', text: '| 维度 | 现状 | 目标 / 差距 |\n| --- | --- | --- |\n| 【待补充】 | 【待补充】 | 【待补充】 |' },
+    { id: 'response', label: '响应表', hint: '要求 / 响应 / 验证 三列', text: '| 要求 | 响应方案 | 验证 / 证明 |\n| --- | --- | --- |\n| 【待补充：要求】 | 【待补充：响应】 | 【待补充：依据】 |' },
+    { id: 'diagram', label: '关系图骨架', hint: '三层结构，改成实际方案', text: ':::diagram 技术关系图\n用户接入层 -> 应用服务层 -> 数据服务层\n:::' },
+    { id: 'points', label: '分点清单', hint: '三条要点骨架', text: '- 【待补充：要点一】\n- 【待补充：要点二】\n- 【待补充：要点三】' },
+  ];
+
+  /** 把后端抽取的表格转成 Markdown  /** 把后端抽取的表格转成 Markdown（单元格里的 | 转义） */
   function markdownTable(table) {
     const rows = (table.rows || []).filter((r) => (r || []).some((c) => String(c || '').trim()));
     if (!rows.length) return '';
@@ -1677,6 +1758,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       else status('该素材尚未解析出可引用原文');
       return;
     }
+    if(event.target.closest('[data-open-insert]')){openInsertDialog();return;}
     const tblBtn=event.target.closest('[data-ins-table]');
     if(tblBtn){
       const m=(context?.materials||[]).find(x=>String(x.id)===tblBtn.dataset.insTable);
