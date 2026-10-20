@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>编写计划弹窗 · 折叠展开态</title>
+<style>
+  :root{--ink:#0f172a;--ink2:#334155;--dim:#64748b;--faint:#94a3b8;--line:#eef2f7;--line2:#e2e8f0;--blue:#1d4ed8;--warn:#b45309;--ok:#15803d;--bg:#f1f5f9}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);padding:26px}
+  .stage{display:flex;gap:24px;align-items:flex-start;justify-content:center;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;gap:8px}
+  .col-title{font-size:12px;color:var(--dim);text-align:center}
+  .dialog{width:680px;background:#fff;border-radius:14px;box-shadow:0 18px 48px rgba(15,23,42,.16);overflow:hidden}
+  header{display:flex;align-items:center;justify-content:space-between;padding:15px 20px 9px}
+  header h3{margin:0;font-size:15px;font-weight:600}
+  .x{color:var(--faint);font-size:18px}
+  .body{padding:0 20px 12px}
+  .fold{border-top:1px solid var(--line);padding:11px 0}
+  .fold .fh{display:flex;align-items:center;gap:8px;font-size:13px}
+  .fold .fh .tri{color:var(--faint);font-size:10px;width:10px}
+  .fold .fh b{font-weight:600}
+  .fold .fh em{font-style:normal;font-size:11.5px;color:var(--dim);flex:1}
+  .fold .content{padding:8px 0 2px 18px}
+  .pt{font-size:12.5px;color:var(--ink2);margin:0 0 6px}
+  .pt b{color:var(--ink)}
+  .sub{margin:6px 0 0}
+  .sub .sh{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);cursor:pointer}
+  .sub .sh .tri{color:var(--faint);font-size:9px}
+  .band{margin:6px 0 0;padding:9px 12px;background:#f8fafc;border-radius:8px;font-size:11.8px;line-height:1.75;color:#475569}
+  .clause{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);margin:5px 0}
+  .must{font-size:10px;padding:0 5px;border-radius:4px;background:#fee2e2;color:#b91c1c}
+  .link{border:0;background:transparent;color:var(--blue);font-size:11.5px;cursor:pointer;padding:0}
+  .pit{margin:9px 0 0;font-size:12px;color:var(--warn)}
+  .write p{margin:0 0 5px;font-size:12px;color:var(--ink2);line-height:1.7}
+  .write p b{color:var(--ink)}
+  footer{display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding:12px 20px 15px}
+  .btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;color:var(--ink2)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- A：依据与标准 展开（含满分档原文展开 + 条款折叠） -->
+  <div class="col">
+    <div class="col-title">③ 依据与标准 —— 展开（满分档已展开，条款仍折叠）</div>
+    <div class="dialog">
+      <header><h3>本章编写计划</h3><span class="x">×</span></header>
+      <div class="body">
+        <div class="fold">
+          <div class="fh"><span class="tri">▾</span><b>依据与标准</b><em>评分点 1 · 招标条款 3 · 失分点 4</em></div>
+          <div class="content">
+            <p class="pt"><b>评分点：对项目的理解正确、深入、全面（10 分）</b></p>
+
+            <div class="sub">
+              <div class="sh"><span class="tri">▾</span>满分档要求（得 8–10 分的要求）</div>
+              <p class="band">深刻理解项目背景、现状、目标、建设范围、建设内容、项目重难点等。深刻理解本项目相关业务需求及特点，能较好的分析本项目建设的难点和痛点，并能提出解决措施，分析全面准确、描述详细，得 8–10 分。</p>
+            </div>
+
+            <div class="sub">
+              <div class="sh"><span class="tri">▸</span>本章承接的招标条款 3 条</div>
+            </div>
+
+            <p class="pit">失分点：只复述招标文件；没有现状数据；目标与现状混淆；范围越界承诺</p>
+          </div>
+        </div>
+        <div class="fold">
+          <div class="fh"><span class="tri">▸</span><b>写法要点</b><em>结构 / 段落 / 落点</em></div>
+        </div>
+      </div>
+      <footer><button class="btn">关闭</button><button class="btn primary">AI 编制本章</button></footer>
+    </div>
+  </div>
+
+  <!-- B：条款展开 + 写法要点展开 -->
+  <div class="col">
+    <div class="col-title">③ 条款展开 + ④ 写法要点展开</div>
+    <div class="dialog">
+      <header><h3>本章编写计划</h3><span class="x">×</span></header>
+      <div class="body">
+        <div class="fold">
+          <div class="fh"><span class="tri">▾</span><b>依据与标准</b><em>评分点 1 · 招标条款 3 · 失分点 4</em></div>
+          <div class="content">
+            <p class="pt"><b>评分点：对项目的理解正确、深入、全面（10 分）</b></p>
+
+            <div class="sub">
+              <div class="sh"><span class="tri">▸</span>满分档要求（得 8–10 分的要求）</div>
+            </div>
+
+            <div class="sub">
+              <div class="sh"><span class="tri">▾</span>本章承接的招标条款 3 条</div>
+              <div style="padding:4px 0 0 15px">
+                <div class="clause"><span class="must">强制</span>技术服务能力要求 · 第 1 条</div>
+                <div class="clause"><span class="must">强制</span>技术服务能力要求 · 第 2 条</div>
+                <div class="clause">高可靠性容灾研究及验证 · 第 3 条</div>
+                <button class="link">重新用 AI 匹配</button>
+              </div>
+            </div>
+
+            <p class="pit">失分点：只复述招标文件；没有现状数据；目标与现状混淆；范围越界承诺</p>
+          </div>
+        </div>
+
+        <div class="fold">
+          <div class="fh"><span class="tri">▾</span><b>写法要点</b><em>结构 / 段落 / 落点</em>
+            <button class="link">看写作规范（全局）</button></div>
+          <div class="content write">
+            <p><b>结构</b>：政策依据 → 现状差距 → 目标指标 → 范围与内容 → 重难点与对策 → 业务需求特点</p>
+            <p><b>段落</b>：每段第一句给判断，后面给依据与数据；表后必跟一段"从表可见…"的落点句。</p>
+            <p><b>落点</b>：每个必答点至少一段；引用政策/标准/数据处必须带【来源】。</p>
+          </div>
+        </div>
+      </div>
+      <footer><button class="btn">关闭</button><button class="btn primary">AI 编制本章</button></footer>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
