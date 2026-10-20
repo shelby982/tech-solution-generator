@@ -136,6 +136,18 @@ HARNESS = r"""
   }
   mark('顶部主按钮与数字行同一行', sameRow, rowDetail);
 
+  // N 所有区块都可展开收起（结构一致）
+  const sections = [...dialog.querySelectorAll('[data-cp-sec]')];
+  const allDetails = sections.length > 0 && sections.every((el) => el.tagName === 'DETAILS');
+  mark('所有区块可展开收起（结构一致）', allDetails,
+       { total: sections.length, details: sections.filter((el) => el.tagName === 'DETAILS').length });
+
+  // O 块内按钮字号与行内链接一致（≤13px，防止被弹窗头部样式污染）
+  const innerBtns = [...dialog.querySelectorAll('.cs-cp-block button')].filter((b) => b.offsetParent !== null);
+  const bigBtns = innerBtns.filter((b) => parseFloat(getComputedStyle(b).fontSize) > 13);
+  mark('块内按钮字号一致（≤13px）', bigBtns.length === 0,
+       { buttons: innerBtns.length, tooBig: bigBtns.slice(0, 3).map((b) => b.textContent.trim()) });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),

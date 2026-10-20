@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v292';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v292';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v292';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v295';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v295';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v295';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -426,18 +426,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
         </div>
 
-        <section class="cs-cp-block" data-cp-sec="todo">
-          <header><b><span class="cs-cp-idx">1</span>待办</b><em>${todoCount} 项${todoCount ? ' · 按优先级' : ''}</em></header>
+        <details class="cs-cp-block" data-cp-sec="todo" open>
+          <summary><b><span class="cs-cp-idx">1</span>待办</b><em>${todoCount} 项${todoCount ? ' · 按优先级' : ''}</em></summary>
           ${todoCount ? todo.map((item, index) => `<div class="cs-cp-todo">
                 <span class="cs-cp-no">${index + 1}</span>
                 <span class="cs-cp-todo-text">${esc(item.text)}</span>
                 <button type="button" class="cs-cp-link" data-cp-todo="${esc(item.action)}">${esc(item.action_label)}</button>
               </div>`).join('') : '<p class="cs-cp-ok">✓ 没有待办，可以直接生成</p>'}
-        </section>
+        </details>
 
-        ${isCatalog ? '' : `<section class="cs-cp-block" data-cp-sec="deliverables">
-          <header><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
-            <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></header>
+        ${isCatalog ? '' : `<details class="cs-cp-block" data-cp-sec="deliverables" open>
+          <summary><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
+            <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></summary>
           ${deliverables.length ? deliverables.map((item, index) => {
             const open = index === firstUnmet;
             return `<div class="cs-cp-del tone-${item.status === '达标' ? 'ok' : item.status === '未写' ? 'idle' : 'warn'}" data-index="${index}" ${open ? '' : 'data-collapsed'}>
@@ -454,7 +454,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 </div>
               </div>`;
           }).join('') : '<p class="cs-cp-empty">本章还没有交付物</p>'}
-        </section>`}
+        </details>`}
 
         <details class="cs-cp-block" data-cp-sec="standard">
           <summary><b><span class="cs-cp-idx">3</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
@@ -482,8 +482,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           </div>
         </details>
 
-        ${(isParent || isCatalog) ? `<section class="cs-cp-block" data-cp-sec="children">
-          <header><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></header>
+        ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
+          <summary><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
           ${isParent ? '<p class="cs-cp-howto">本章只写总述（300–500 字）：先全貌 → 3 个关键结论 → 子节索引，细节见下列各节。</p>' : ''}
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>
@@ -491,7 +491,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <small>${child.written_pages || 0} / ${child.pages || '—'} 页</small>
               <em class="${child.has_content ? 'ok' : ''}">${child.has_content ? '有正文' : '未开始'}</em>
             </div>`).join('')}
-        </section>` : ''}
+        </details>` : ''}
         <div class="cs-cp-footer">
           <button type="button" class="cs-cp-ghost" data-cp-close>关闭</button>
           <button type="button" class="cs-cp-primary" data-cp-generate>AI 编制本章</button>
@@ -612,11 +612,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           button.textContent = '用 AI 匹配条款';
         }
       });
-      body.querySelector('[data-cp-open-spec]')?.addEventListener('click', () => {
+      body.querySelector('[data-cp-open-spec]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
         globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',
           {detail: {layout: (data.guidance && data.guidance.layout) || 'global'}}));
       });
-      body.querySelector('[data-cp-edit-req]')?.addEventListener('click', () => {
+      body.querySelector('[data-cp-edit-req]')?.addEventListener('click', (event) => {
+        event.stopPropagation();          // 在 summary 里，别把折叠面板一起关掉
+        event.preventDefault();
         const edit = body.querySelector('[data-cp-req-edit]');
         const rows = (data.requirements || []).map((requirement) => `<div class="cs-req-row" data-cp-req-row>
             <select data-cp-req-type>${['text','table','figure','material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${kindLabel[kind]}</option>`).join('')}</select>
