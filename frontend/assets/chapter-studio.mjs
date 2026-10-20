@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v310';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v310';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v310';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v313';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v313';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v313';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -129,11 +129,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <button data-action="save" disabled>保存</button>
           <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
           <div class="cs-toolbar-right">
-            <details class="cs-insert"><summary>插入 ▾</summary><div class="cs-insert-menu">
-              <button data-action="text">文字说明</button>
-              <button data-action="table">手动表格</button>
-              <button data-action="diagram" title="把一段文字抽成结构图，插入正文">关系图</button>
-            </div></details>
+            <details class="cs-insert"><summary>插入 ▾</summary><div class="cs-insert-menu" data-insert-menu></div></details>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
               <button data-action="quality">质检清单</button>
               <button data-action="complete">确认本章完成</button>
@@ -1317,6 +1313,69 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     editor.setRangeText(`\n\n${text}\n\n`,editor.selectionStart,editor.selectionEnd,'end');
     changed();editor.focus();
   };
+  /** 插入菜单：按"来源"分三组（素材 / 官方来源 / 结构模板），懒渲染 */
+  function renderInsertMenu() {
+    const box = host.querySelector('[data-insert-menu]');
+    if (!box) return;
+    const mats = (context?.materials) || [];
+    const cites = (citationInfo?.rows) || [];
+    const matItems = mats.length
+      ? mats.map((m) => {
+          const canQuote = (m.excerpts || []).length > 0;
+          const page = (m.excerpts || [])[0]?.page;
+          return `<div class="cs-ins-item">
+            <span class="cs-ins-name" title="${esc(m.filename)}">${esc(m.filename)}</span>
+            <span class="cs-ins-acts">
+              ${canQuote ? `<button type="button" data-ins-material="${m.id}">摘录${page ? `·第${page}页` : ''}</button>` : '<i>未解析</i>'}
+              ${m.image_url ? `<button type="button" data-ins-image="${m.id}">图片</button>` : ''}
+            </span></div>`;
+        }).join('')
+      : '<p class="cs-ins-empty">还没有素材 · 去右栏「素材池」上传</p>';
+    const citeItems = cites.length
+      ? cites.map((c) => {
+          const segs = (c.segments || []);
+          const sel = new Set((c.selected || []).map((x) => (typeof x === 'object' ? x.index : x)));
+          const pick = segs.slice(0, 6);
+          return `<div class="cs-ins-src">
+              <p class="cs-ins-src-name">${esc(c.title || c.url)}</p>
+              ${pick.map((s, i) => {
+                const body = String(s.content || s.heading || '').replace(/\s+/g, ' ').trim();
+                const label = body.slice(0, 34);
+                const kindTag = s.kind && s.kind !== 'text' ? `[${esc(s.kind)}] ` : '';
+                return `<button type="button" class="cs-ins-seg" data-ins-segment="${esc(c.id)}:${i}" title="${esc(body.slice(0, 120))}">
+                  ${sel.has(i) ? '★ ' : ''}${kindTag}${esc(label)}${body.length > 34 ? '…' : ''}
+                </button>`;
+              }).join('')}
+              ${segs.length > 6 ? `<p class="cs-ins-more">… 共 ${segs.length} 段（去「素材池 → 片段」看全部）</p>` : ''}
+            </div>`;
+        }).join('')
+      : '<p class="cs-ins-empty">还没有官方来源 · 去右栏「素材池」添加</p>';
+    box.innerHTML = `
+      <p class="cs-ins-group">从素材插入 <span>我方材料 · 有出处</span></p>${matItems}
+      <div class="cs-ins-sep"></div>
+      <p class="cs-ins-group">从官方来源插入 <span>自动带【来源】</span></p>${citeItems}
+      <div class="cs-ins-sep"></div>
+      <p class="cs-ins-group">插入结构 <span>模板 · 需人工补齐</span></p>
+      <div class="cs-ins-item"><span class="cs-ins-name">对比表 / 响应表</span><span class="cs-ins-acts"><button type="button" data-action="table">插入</button></span></div>
+      <div class="cs-ins-item"><span class="cs-ins-name">关系图骨架</span><span class="cs-ins-acts"><button type="button" data-action="diagram">插入</button></span></div>`;
+  }
+
+  /** 在光标处插入，并选中新内容（便于继续编辑 / 撤销） */
+  function insertAtCursor(text, { kind = 'text', select = true } = {}) {
+    if (writingBusy) { status('AI 正在编制，结束后可手动插入内容。'); return; }
+    paintView(false);
+    if (live.active) { live.add(kind, text); status('已插入到实时编制区'); return; }
+    const start = editor.selectionStart;
+    const payload = `\n\n${text}\n\n`;
+    editor.setRangeText(payload, start, editor.selectionEnd, 'end');
+    // 光标落在插入内容末尾（不选中）：否则下一次"插入"会把刚插入的内容替换掉
+    const to = start + 2 + text.length;
+    if (select) editor.setSelectionRange(to, to);
+    editor.focus();
+    changed();
+    status('已插入；确认后可继续编辑（⌘Z / Ctrl+Z 撤销）');
+  }
+
   async function confirmComplete(check){
     if(check.blockId!==active.id){status('章节已切换，请重新核对。');return;}
     const updated=await json(`/api/blocks/${active.id}/studio`,send('PUT',{layout:context.profile.layout,writing_status:'complete',
@@ -1473,6 +1532,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     try { await json(`/api/projects/${projectId}/studio/document`,send('PUT',{thread_id:threadId,template:event.target.value}));document.template=event.target.value;paintFormat();status('交付格式已保存，导出时应用；已生成文件保留原版本。'); }
     catch(error) {event.target.value=document.template;status(error.message);}
   };
+  host.addEventListener('toggle', (event) => {
+    if (event.target.classList?.contains('cs-insert') && event.target.open) renderInsertMenu();
+  }, true);
   host.onclick = async event => {
     const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
     if(panel){showPanel(panel.dataset.panel);return;}
@@ -1510,6 +1572,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
     const inMenu=event.target.closest('.cs-insert-menu, .cs-more-menu');
     if(inMenu) event.target.closest('details')?.removeAttribute('open');
+    // 素材 / 官方来源 插入
+    const matBtn=event.target.closest('[data-ins-material]');
+    if(matBtn){
+      const m=(context?.materials||[]).find(x=>String(x.id)===matBtn.dataset.insMaterial);
+      const ex=(m?.excerpts||[])[0];
+      if(ex){ const page=ex.page?`（第 ${ex.page} 页）`:''; insertAtCursor(`> 摘自《${m.filename}》${page}\n${ex.text||ex.content||''}`); }
+      else status('该素材尚未解析出可引用原文');
+      return;
+    }
+    const imgBtn=event.target.closest('[data-ins-image]');
+    if(imgBtn){
+      const m=(context?.materials||[]).find(x=>String(x.id)===imgBtn.dataset.insImage);
+      if(m?.image_url){ insertAtCursor(`:::figure ${m.filename}\n![${String(m.filename).replaceAll(']','')}](${m.image_url})\n:::`); }
+      else status('该素材没有可插入的图片');
+      return;
+    }
+    const segBtn=event.target.closest('[data-ins-segment]');
+    if(segBtn){
+      const [cid, idxRaw]=String(segBtn.dataset.insSegment).split(':');
+      const c=(citationInfo?.rows||[]).find(x=>String(x.id)===cid);
+      const seg=(c?.segments||[])[Number(idxRaw)];
+      if(seg){
+        const body=String(seg.content||seg.heading||'').trim();
+        const src=`${c.publisher||c.domain||''}${c.published_at?` · ${c.published_at}`:''}`;
+        insertAtCursor(`> ${body}\n\n【来源：${c.title||c.url}${src?`（${src}）`:''}】`);
+      } else status('这段片段为空，换个片段试试');
+      return;
+    }
     const button=event.target.closest('[data-action]');
     if(!button || !active) return;
     const action=button.dataset.action;

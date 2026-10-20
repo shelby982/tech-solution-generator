@@ -529,3 +529,21 @@
   pointer-events: none; }
 [data-cs="status"].is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
 [data-cs="status"].is-error { background: #7f1d1d; }
+
+/* 插入菜单：按来源分组 */
+.cs-insert-menu { min-width: 280px; max-height: 70vh; overflow: auto; }
+.cs-ins-group { margin: 6px 6px 4px; font-size: 10.5px; font-weight: 600; color: #64748b; letter-spacing: .2px; }
+.cs-ins-group span { font-weight: 400; color: #94a3b8; margin-left: 4px; }
+.cs-ins-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; }
+.cs-ins-name { flex: 1; min-width: 0; font-size: 11.5px; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-ins-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.cs-ins-acts button, .cs-ins-seg { font: inherit; font-size: 11px; padding: 2px 8px; border: 1px solid #dbe3ef; background: #fff;
+  border-radius: 999px; color: #1d4ed8; cursor: pointer; }
+.cs-ins-acts button:hover, .cs-ins-seg:hover { background: #eff6ff; }
+.cs-ins-acts i { font-size: 10.5px; color: #94a3b8; font-style: normal; }
+.cs-ins-src { padding: 3px 6px; }
+.cs-ins-src-name { margin: 0 0 3px; font-size: 11px; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-ins-seg { display: block; width: 100%; text-align: left; margin-bottom: 2px; border-radius: 6px; }
+.cs-ins-more { margin: 2px 0 0; font-size: 10.5px; color: #94a3b8; }
+.cs-ins-empty { margin: 2px 8px 6px; font-size: 11px; color: #94a3b8; }
+.cs-ins-sep { height: 1px; background: #eef2f7; margin: 6px 6px; }

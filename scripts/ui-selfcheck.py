@@ -252,15 +252,31 @@ HARNESS = r"""
     await sleep(900);
     insertMenu?.removeAttribute('open');
   };
-  await clickInsert('text');
-  const afterText = (ed?.value || '').length;
-  const stEl = document.querySelector('[data-cs="status"]');
-  const statusText = stEl ? (stEl.textContent || '') : '';
+  // 菜单结构：按来源分三组
+  insertMenu?.setAttribute('open', '');
+  await sleep(400);
+  const groups = [...document.querySelectorAll('.cs-ins-group')].map((g) => g.textContent.replace(/\s+/g, ' ').trim());
+  const segBtns = document.querySelectorAll('[data-ins-segment]').length;
+  mark('插入菜单按来源分组（素材/官方来源/结构）',
+       groups.length === 3 && groups[0].includes('从素材插入') && groups[1].includes('从官方来源') && groups[2].includes('插入结构'),
+       { groups, segBtns });
+  // 从官方来源插入片段 → 正文变长且带【来源
+  const seg = document.querySelector('[data-ins-segment]');
+  seg?.click();
+  await sleep(900);
+  const afterSeg = (ed?.value || '').length;
+  const hasSource = (ed?.value || '').includes('【来源');
+  insertMenu?.removeAttribute('open');
+  mark('从官方来源插入片段（自动带【来源】）', !!seg && afterSeg > before && hasSource,
+       { before, afterSeg, hasSource, seg: seg?.textContent?.trim().slice(0, 24) });
+  // 插入结构里的表格模板
   await clickInsert('table');
   const afterTable = (ed?.value || '').length;
+  const stEl = document.querySelector('[data-cs="status"]');
+  const statusText = stEl ? (stEl.textContent || '') : '';
   const bad = /Cannot|null|失败|错误/.test(statusText);
-  mark('插入功能可用（文字说明 / 表格）', afterText >= before && afterTable > afterText && !bad,
-       { before, afterText, afterTable, status: statusText.slice(0, 60) });
+  mark('插入结构模板可用（表格）', afterTable > afterSeg && !bad,
+       { afterSeg, afterTable, status: statusText.slice(0, 60) });
 
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
