@@ -282,46 +282,36 @@ HARNESS = r"""
   const statusStyle = statusEl ? getComputedStyle(statusEl).position : '';
   mark('状态为浮动 toast（不占正文行）', statusStyle === 'fixed', { position: statusStyle });
 
-  // Y 插入面板：三个互斥页签 + 搜索 + 选中预览后插入
+  // Y 插入面板：图片 / 表格 两类 ×（AI 生成 / 从素材插入）
   document.querySelector('[data-open-insert]')?.click();
   await sleep(700);
   const insDlg = [...document.querySelectorAll('dialog')].find((d) => d.open && d.classList.contains('cs-insert-dialog'));
   mark('「插入…」打开插入面板', !!insDlg, {});
   if (insDlg) {
-    const tabs = [...insDlg.querySelectorAll('[data-ins-tab]')].map((b) => b.textContent.trim());
-    mark('插入面板有 3 个页签', tabs.length === 3 && tabs[0].includes('官方来源') && tabs[1].includes('素材') && tabs[2].includes('结构'),
-         { tabs });
-    const rows = insDlg.querySelectorAll('[data-pick-source]').length;
-    const groups = insDlg.querySelectorAll('.cs-ins-group-name').length;
-    const search = !!insDlg.querySelector('[data-ins-search]');
-    mark('官方来源页签：按来源分组 + 片段带序号 + 有搜索',
-         (rows === 0 || (groups >= 1 && !!insDlg.querySelector('.cs-ins-no'))) && search,
-         { rows, groups, search });
-    const confirm = insDlg.querySelector('[data-ins-confirm]');
-    const beforeDisabled = confirm ? confirm.disabled : null;
-    const pick = insDlg.querySelector('[data-pick-source]');
-    pick?.click();
+    const insTabs = [...insDlg.querySelectorAll('[data-ins-tab]')].map((b) => b.textContent.trim());
+    mark('插入面板只有 图片/表格 两个页签', insTabs.length === 2 && insTabs[0] === '图片' && insTabs[1] === '表格', { tabs: insTabs });
+    const hasInfoGen = !!insDlg.querySelector('[data-ins-generate="info"]');
+    const hasArchGen = !!insDlg.querySelector('[data-ins-generate="arch"]');
+    const hasImgMat = !!insDlg.querySelector('[data-ins-from-material="image"]');
+    mark('图片页签：AI 生成信息图 / 架构图 / 从素材插入', hasInfoGen && hasArchGen && hasImgMat, {});
+    const removedOld = !/从官方来源|结构模板|摘录/.test(insDlg.textContent);
+    mark('面板已去掉 官方来源/结构模板/摘录', removedOld, { removedOld });
+    insDlg.querySelector('[data-ins-generate="info"]')?.click();
+    await sleep(400);
+    const genForm = insDlg.querySelector('[data-ins-text]');
+    const runBtn = insDlg.querySelector('[data-ins-run]');
+    mark('信息图生成表单有预填内容与生成按钮',
+         !!genForm && !!runBtn && (genForm.value || '').length >= 4, { prefill: (genForm?.value || '').slice(0, 24) });
+    [...insDlg.querySelectorAll('[data-ins-tab]')].find((b) => b.dataset.insTab === 'table')?.click();
     await sleep(300);
-    const afterEnabled = confirm ? !confirm.disabled : false;
-    mark('选中后才可插入（先看再插）', beforeDisabled === true && afterEnabled,
-         { beforeDisabled, afterEnabled });
-    const ed = document.querySelector('.cs-editor');
-    const beforeLen = (ed?.value || '').length;
-    if (afterEnabled) {
-      confirm?.click();
-      await sleep(800);
-      const grew = (ed?.value || '').length > beforeLen;
-      const withSource = (ed?.value || '').includes('【来源');
-      mark('插入来源片段（自动带【来源】）', grew && withSource, { grew, withSource });
-    } else {
-      mark('插入来源片段（自动带【来源】）', false, { note: '无可选片段' });
-    }
-    if (insDlg.open) insDlg.close();
+    const tGen = !!insDlg.querySelector('[data-ins-generate="table"]');
+    const tMat = !!insDlg.querySelector('[data-ins-from-material="table"]');
+    mark('表格页签：AI 生成表格 / 从素材插入表格', tGen && tMat, {});
+    insDlg.close();
   } else {
-    mark('插入面板有 3 个页签', false, {});
-    mark('官方来源页签：按来源分组 + 片段带序号 + 有搜索', false, {});
-    mark('选中后才可插入（先看再插）', false, {});
-    mark('插入来源片段（自动带【来源】）', false, {});
+    for (const name of ['插入面板只有 图片/表格 两个页签', '图片页签：AI 生成信息图 / 架构图 / 从素材插入',
+                        '面板已去掉 官方来源/结构模板/摘录', '信息图生成表单有预填内容与生成按钮',
+                        '表格页签：AI 生成表格 / 从素材插入表格']) mark(name, false, {});
   }
 
   out.metrics = {

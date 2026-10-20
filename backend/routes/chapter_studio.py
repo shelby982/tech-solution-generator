@@ -235,6 +235,69 @@ async def generate_diagram(block_id: int, body: DiagramBody):
     return {'nodes': nodes, 'markdown': markdown, 'title': title, 'model': model}
 
 
+class TableBody(BaseModel):
+    title: str = Field(default='', max_length=120)
+    requirement: str = Field(default='', max_length=2000)
+    text: str = Field(default='', max_length=8000)
+    columns: int = Field(default=3, ge=2, le=6)
+
+
+def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -> str:
+    """把模型输出规整成合法 Markdown 表：只留表格行、补齐列、限制行列数。"""
+    lines = [line.strip() for line in str(raw or '').splitlines()]
+    rows = [line for line in lines if line.startswith('|') and line.endswith('|')]
+    if len(rows) < 2:
+        return ''
+    parsed = []
+    for row in rows:
+        cells = [c.strip() for c in row.strip('|').split('|')]
+        if all(set(c) <= set('-: ') for c in cells):
+            continue                      # 分隔行后面重建
+        parsed.append(cells[:max_cols])
+        if len(parsed) > max_rows + 1:
+            break
+    if len(parsed) < 2:
+        return ''
+    width = max(len(r) for r in parsed)
+    parsed = [r + [''] * (width - len(r)) for r in parsed]
+    out = ['| ' + ' | '.join(parsed[0]) + ' |',
+           '| ' + ' | '.join(['---'] * width) + ' |']
+    out += ['| ' + ' | '.join(r) + ' |' for r in parsed[1:]]
+    return '\n'.join(out)
+
+
+@router.post('/blocks/{block_id}/studio/table')
+async def generate_table(block_id: int, body: TableBody):
+    """按本章要求生成一张**有内容的**表格草稿（Markdown）。
+
+    产品口径：只输出结构与要点，**不编造具体数据**；缺数据处写【待补充：xx】，
+    由用户核对或替换。产出落到正文，可继续手工编辑。
+    """
+    from agents.chapter_team import call_role
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+    title = (body.title or block.get('title') or '本章').strip()[:120]
+    requirement = (body.requirement or '').strip()
+    text = (body.text or '').strip()
+    system = (
+        '你是表格 Agent。根据章节标题、编写要求与正文要点，生成一张**可直接放进标书正文**的表格。'
+        f'列数约 {body.columns} 列（2~6 列），行数不超过 12 行。'
+        '第一行是表头，必须简洁（4~10 字）。'
+        '**禁止编造具体数字、名称、日期**：缺数据处写【待补充：xx】。'
+        '只输出 Markdown 表格本身，不要解释、不要代码块围栏。'
+    )
+    payload = {'title': title, 'requirement': requirement, 'text': text[:4000]}
+    try:
+        raw, model = await call_role('table', system, payload, {})
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    markdown = _normalize_markdown_table(raw if isinstance(raw, str) else str(raw))
+    if not markdown:
+        raise HTTPException(422, '这次没有生成出表格，请补充一句"表格要表达什么"再试')
+    return {'markdown': markdown, 'title': title, 'model': model}
+
+
 @router.post('/blocks/{block_id}/studio/materials')
 async def upload_chapter_material(block_id: int, file: UploadFile = File(...)):
     from routes.materials import upload_material, UPLOAD_ROOT
