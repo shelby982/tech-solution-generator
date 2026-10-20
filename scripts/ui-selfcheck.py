@@ -72,8 +72,8 @@ HARNESS = r"""
   const hasDeliv = !!dialog.querySelector('[data-cp-sec="deliverables"]') || !!dialog.querySelector('[data-cp-sec="children"]');
   const hasFolds = dialog.querySelectorAll('details.cs-cp-block').length;
   const footer = dialog.querySelector('.cs-cp-footer');
-  mark('区块齐备（待办/交付物/折叠/底部操作）', !!hasTodo && hasDeliv && hasFolds >= 2 && !!footer,
-       { todo: hasTodo, deliverables: hasDeliv, folds: hasFolds, footer: !!footer });
+  mark('计划面板区块齐备（交付物/折叠/底部操作）', hasDeliv && hasFolds >= 2 && !!footer,
+       { todoBlockRemoved: !hasTodo, deliverables: hasDeliv, folds: hasFolds, footer: !!footer });
 
   // B 主操作唯一且是主色
   const primary = [...dialog.querySelectorAll('.cs-cp-primary')];
@@ -117,8 +117,8 @@ HARNESS = r"""
   // J 待办条数与主操作文案一致
   const todoCount = dialog.querySelectorAll('[data-cp-todo]').length;
   const mainLabel = headerPrimary[0]?.textContent || '';
-  const consistent = todoCount === 0 ? /生成|子节/.test(mainLabel) : mainLabel.includes(String(todoCount));
-  mark('主操作文案与待办数一致', consistent, { todos: todoCount, label: mainLabel.trim() });
+  const consistent = /AI 编制本章/.test(mainLabel);
+  mark('计划面板主操作为「AI 编制本章」', consistent, { label: mainLabel.trim() });
 
   // K 交付物展开区在标题下方（不是右侧）
   const openRow = openRows[0];
@@ -157,6 +157,7 @@ HARNESS = r"""
   // N 所有区块都可展开收起（结构一致）
   const sections = [...dialog.querySelectorAll('[data-cp-sec]')];
   const allDetails = sections.length > 0 && sections.every((el) => el.tagName === 'DETAILS');
+  mark('计划面板不含待办块（待办在右栏）', !dialog.querySelector('[data-cp-sec="todo"]'), {});
   mark('所有区块可展开收起（结构一致）', allDetails,
        { total: sections.length, details: sections.filter((el) => el.tagName === 'DETAILS').length });
 
@@ -175,15 +176,22 @@ HARNESS = r"""
   mark('序号行与内容区有视觉区分', summaries.length >= 3 && badSummary.length === 0,
        { summaries: summaries.length, noTint: badSummary.length });
 
-  // S 右栏信息架构：页签为 依据/素材池/进度（不再有"计划"），pane 里只有 依据/写法
+  // S 右栏信息架构：页签 = 待办 / 素材 / 进度（依据已并入计划面板）
   const tabLabels = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].map((b) => b.textContent.trim());
-  const noPlanTab = !tabLabels.includes('计划');
-  const asidePane = document.querySelector('[data-pane="basis"]');
-  const h4s = asidePane ? [...asidePane.querySelectorAll('h4')].map((h) => h.textContent.replace(/\s+/g, '')) : [];
-  const stale = asidePane ? /先确认计划|查看 \/ 确认计划|编排建议/.test(asidePane.textContent) : false;
-  mark('右栏页签为 依据/素材池/进度（无「计划」）', noPlanTab && tabLabels.length === 3,
+  mark('右栏页签为 待办/素材/进度', tabLabels.length === 3 && tabLabels[0] === '待办' && tabLabels[1] === '素材' && tabLabels[2] === '进度',
        { tabs: tabLabels });
-  mark('依据页签只含 依据/写法', h4s.length <= 2 && !stale, { blocks: h4s, stale });
+  // 待办页签：按模块分组，每条含动作按钮
+  const todoPane = document.querySelector('[data-pane="todo"]');
+  const todoRows = todoPane ? [...todoPane.querySelectorAll('.cs-todo-row')] : [];
+  const todoActs = todoRows.filter((r) => r.querySelector('.cs-todo-act')).length;
+  const hasGroups = todoPane ? !!todoPane.querySelector('.cs-todo-glabel') : false;
+  mark('待办页签按模块分组且每条有动作', !!todoPane && (todoRows.length === 0 || (hasGroups && todoActs === todoRows.length)),
+       { rows: todoRows.length, groups: hasGroups, acts: todoActs });
+  // 素材页签：三分法
+  const matPane2 = document.querySelector('[data-pane="materials"]');
+  const gapGroups = matPane2 ? [...matPane2.querySelectorAll('.cs-gap-glabel')].map((g) => g.textContent.trim()) : [];
+  mark('素材页签有缺口三分法分组', gapGroups.length === 0 || gapGroups.some((g) => g.includes('公开资料可补')) || gapGroups.some((g) => g.includes('必须你上传')),
+       { groups: gapGroups });
 
   // T 章头「本章计划」按钮（带待办角标）
   const planBtn = document.querySelector('.cs-plan-btn');
@@ -231,7 +239,7 @@ HARNESS = r"""
     mark('工具条分组清晰（主操作/视图/插入/更多）',
          labels.includes('AI 编制本章') && labels.some((l) => l.startsWith('插入')) && labels.some((l) => l.startsWith('更多')) && !dupDiagram,
          { labels, dupDiagram });
-    mark('更多菜单按性质分组（≤4 项）', moreItems.length <= 4 && insertItems.length <= 3,
+    mark('更多菜单只剩确认完成与导出（无质检）', moreItems.length <= 3 && !moreItems.includes('质检清单') && insertItems.length <= 3,
          { more: moreItems, insert: insertItems });
   } else {
     mark('工具条分组清晰（主操作/视图/插入/更多）', false, { note: '未找到工具条' });

@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v314';
-import { api } from './api.js?v=20261016-v314';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v314';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v316';
+import { api } from './api.js?v=20261016-v316';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v316';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v314';
+       } from './workspace.js?v=20261016-v316';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v314';
+       } from './workspace-model.mjs?v=20261016-v316';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -180,7 +180,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v314';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v316';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4672,7 +4672,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           <!-- ⑤ 评审：评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻 -->
           <div class="sr-stage" data-stage="5">
             <div class="sr-stage-head"><span class="t">评审与交付</span>
-              <span class="hint">${stageHint('5')}</span></div>
+              <span class="hint">${stageHint('5')}</span>
+              <button type="button" class="mw-btn" data-quality-open title="按规范/计划/依据/素材四组列出问题">质检清单</button></div>
             <div class="sr-stage-body"><div class="sr-answer"><strong>导出当前应答</strong><button class="mw-btn" data-response-download>导出 Word 草稿</button><span class="sr-dim">仅导出已保存正文；未编写章节仍为空</span></div><div data-document-export-status role="status"></div></div>
             <div class="sr-stage-body" id="sr-review-body">
               <div class="sr-note">正在加载评审结论…</div>
@@ -5136,6 +5137,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
       url.searchParams.set('planning', '1');
       location.assign(url.href);
     } catch (err) { button.disabled = false; slot.textContent = err.message; }
+  });
+  el.querySelector('[data-quality-open]')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('writing-quality:open'));
   });
   el.querySelector('[data-response-download]')?.addEventListener('click', async event => {
     const button = event.currentTarget;

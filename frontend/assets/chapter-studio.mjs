@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v314';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v314';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v314';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v316';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v316';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v316';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -131,7 +131,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-toolbar-right">
             <details class="cs-insert"><summary>插入 ▾</summary><div class="cs-insert-menu" data-insert-menu></div></details>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
-              <button data-action="quality">质检清单</button>
               <button data-action="complete">确认本章完成</button>
               <div class="cs-more-sep"></div>
               <button data-action="export-chapter">导出本章 Word</button>
@@ -147,7 +146,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
         <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="basis"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="basis" aria-pressed="true">依据</button><button data-panel="materials" aria-pressed="false">素材池</button><button data-panel="ai" aria-pressed="false">编制进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办</button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -194,7 +193,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       basisInfo = basisResp.ok ? await basisResp.json() : null;
       if (planResp.ok) {
         const plan = await planResp.json();
-        planBrief = { todo: (plan.todo || []).length, pages: plan.pages || 0 };
+        planBrief = {
+          todo: plan.todo || [],
+          gaps: plan.material_gaps || [],
+          pages: plan.pages || 0,
+          wordPlan: plan.word_plan || null,
+          deliverables: plan.deliverables || [],
+        };
       } else { planBrief = null; }
     } catch (e) { basisInfo = null; planBrief = null; }
   }
@@ -446,7 +451,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ? `目录节点 · 下辖 ${children.length} 节（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
         : isParent
           ? `总述 ${wordPlan.written || 0} / ${wordPlan.total || '—'} 字 ｜ 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
-          : `计划 ${pages || '—'} 页 · ${wordPlan.total || '—'} 字 ｜ 已写 ${wordPlan.written || 0} 字 ｜ 待办 ${todoCount} 项`;
+          : `计划 ${pages || '—'} 页 · ${wordPlan.total || '—'} 字 ｜ 已写 ${wordPlan.written || 0} 字 ｜ 待办见右栏`;
       const detected = deliverables.reduce((sum, item) => sum + (item.written_words || 0), 0);
       const wordTooltip = `全章已写 ${wordPlan.written || 0} 字；能按小节标题对应到交付物的是 ${detected} 字，逐项"已写"为估算值，以正文为准`;
       body.innerHTML = `
@@ -454,19 +459,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
           <div class="cs-cp-toprow">
             <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
-            <button type="button" class="cs-cp-primary" data-cp-main>${esc(mainAction)}</button>
+            <button type="button" class="cs-cp-primary" data-cp-main>AI 编制本章</button>
           </div>
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
         </div>
 
-        <details class="cs-cp-block" data-cp-sec="todo" open>
-          <summary><b><span class="cs-cp-idx">1</span>待办</b><em>${todoCount} 项${todoCount ? ' · 按优先级' : ''}</em></summary>
-          ${todoCount ? todo.map((item, index) => `<div class="cs-cp-todo">
-                <span class="cs-cp-no">${index + 1}</span>
-                <span class="cs-cp-todo-text">${esc(item.text)}</span>
-                <button type="button" class="cs-cp-link" data-cp-todo="${esc(item.action)}">${esc(item.action_label)}</button>
-              </div>`).join('') : '<p class="cs-cp-ok">✓ 没有待办，可以直接生成</p>'}
-        </details>
+
 
         ${isCatalog ? '' : `<details class="cs-cp-block" data-cp-sec="deliverables" open>
           <summary><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
@@ -561,8 +559,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     };
     const bindEvents = () => {
       body.querySelector('[data-cp-main]')?.addEventListener('click', () => {
-        const first = (data.todo || [])[0];
-        if (first) { runAction(first.action); return; }
+        // 计划面板不再承载「去补待办」：待办在右栏「待办」页签
         if (data.catalog || (data.children || []).length) {
           body.querySelector('[data-cp-sec="children"]')?.scrollIntoView({behavior: 'smooth', block: 'start'});
           return;
@@ -1215,6 +1212,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   void loadPlanUnits();          // 一级目录上挂「编写计划」入口
   void loadSpecs();              // 编写规范版本（右栏就近入口）
   void loadCitations();          // 已接受的官方来源
+  // 质检清单入口在「评审与交付」阶段（编写页不再提供），通过事件唤起
+  const onQualityOpen = () => { if (active) void openQualityDialog(); };
+  globalThis.document.addEventListener('writing-quality:open', onQualityOpen);
   // P5（2026-10-16）：章节类型是"会影响生成的输入"，从右栏「编排建议」搬到正文上方。
   // 右栏每次切换章节都会重渲染，因此监听其变化，搬完即止。
   const asideHost = host.querySelector('[data-cs="aside"]');
@@ -1313,6 +1313,49 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     editor.setRangeText(`\n\n${text}\n\n`,editor.selectionStart,editor.selectionEnd,'end');
     changed();editor.focus();
   };
+  const TODO_GROUPS = [
+    ['content', '内容'], ['material', '素材'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
+  ];
+
+  /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
+  function todoPaneHtml() {
+    const todos = planBrief?.todo || [];
+    if (!todos.length) {
+      return `<section data-pane="todo"><h4>待办</h4>
+        <p class="cs-todo-ok">✓ 本章没有待办，可以生成或交付</p></section>`;
+    }
+    const groups = TODO_GROUPS.map(([key, label]) => {
+      const items = todos.filter((x) => (x.module || 'content') === key);
+      if (!items.length) return '';
+      return `<div class="cs-todo-group"><p class="cs-todo-glabel"><i class="m-${key}"></i>${label}模块 ${items.length}</p>
+        ${items.map((x, i) => `<div class="cs-todo-row">
+            <span class="cs-todo-idx">${i + 1}</span>
+            <span class="cs-todo-text">${esc(x.text)}</span>
+            <button type="button" class="cs-todo-act" data-aside-todo="${esc(x.action)}" data-gap-kind="${esc(x.target || '')}">${esc(x.action_label)}</button>
+          </div>`).join('')}</div>`;
+    }).join('');
+    return `<section data-pane="todo"><h4>待办 <small>${todos.length} 项 · 按优先级</small></h4>${groups}</section>`;
+  }
+
+  /** 右栏「素材」页签：三分法 —— 已有可用 / 公开资料可补 / 必须你上传 */
+  function gapGroupsHtml() {
+    const gaps = planBrief?.gaps || [];
+    if (!gaps.length) return '';
+    const pub = gaps.filter((g) => g.availability === 'public');
+    const up = gaps.filter((g) => g.availability === 'upload');
+    const block = (title, hint, items) => !items.length ? '' : `<div class="cs-gap-group">
+        <p class="cs-gap-glabel">${title} <small>${hint}</small></p>
+        ${items.map((g) => `<div class="cs-gap-row">
+            <span class="cs-gap-kind">${esc(g.kind)}</span>
+            <span class="cs-gap-meta">缺 ${g.lack} 份${g.purpose ? ` · ${esc(g.purpose)}` : ''}</span>
+            ${g.availability === 'public'
+              ? `<button type="button" class="cs-gap-act" data-gap-search="${esc(g.suggestions[0] || g.kind)}">去检索</button>`
+              : `<button type="button" class="cs-gap-act" data-gap-upload="1">上传</button>`}
+            <span class="cs-gap-why">${esc(g.reason || '')}</span>
+          </div>`).join('')}</div>`;
+    return `${block('公开资料可补', '系统可检索官方原文', pub)}${block('必须你上传', '公开渠道没有这类材料', up)}`;
+  }
+
   /** 插入菜单：按"来源"分三组（素材 / 官方来源 / 结构模板），懒渲染 */
   function renderInsertMenu() {
     const box = host.querySelector('[data-insert-menu]');
@@ -1424,17 +1467,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const layout = context.layouts[context.profile.layout];
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
-    get('aside').innerHTML = `<section data-pane="basis">
-      <h4>依据</h4>${context.points.map((p, index) => {
-        const cov = basisCovered?.points?.[index];
-        return `<details><summary>${esc(p.item || p.factor)} · ${p.points ?? '—'} 分
-          <b class="${cov?.responded ? 'cs-cite-used' : 'cs-cite-unused'}">${cov ? (cov.responded ? '正文已回应' : '正文未回应') : ''}</b></summary><p>${esc(p.criterion)}</p></details>`;
-      }).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
-      ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
-        return recipe ? `<section data-pane="basis"><h4>写法</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
-
-      
-      <section data-pane="materials">${(() => {
+    get('aside').innerHTML = `${todoPaneHtml()}
+      <section data-pane="materials">${gapGroupsHtml()}
+        ${(() => {
         const key = String(active.block_id);
         const body = String(active.content || '');
         // 来源"有没有被正文用到"：完整标题（去站点后缀、≥12 字）或 URL 出现在正文里（前 10 字会误判）
@@ -1507,7 +1542,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const unit = block ? unitOf.get(String(block.block_id)) : null;
     const info = unit ? planUnits.get(unit) : null;
     if (!info) { slot.innerHTML = ''; return; }
-    const todoCount = planBrief?.todo || 0;
+    const todoCount = (planBrief?.todo || []).length;
     slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
       + `title="本章计划：要交什么 / 待办 ${todoCount} 项 / 依据与写法 —— 点开查看与处理">`
       + `本章计划${todoCount ? `<span class="cs-plan-badge">待办 ${todoCount}</span>` : ''}</button>`;
@@ -1581,6 +1616,23 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(planButton){await openChapterPlan(String(active?.block_id || ''));return;}
     const chapter=event.target.closest('[data-chapter]');
     if(chapter) {await select(chapter.dataset.chapter);return;}
+    const asideTodo=event.target.closest('[data-aside-todo]');
+    if(asideTodo && active){
+      const action=asideTodo.dataset.asideTodo;
+      if(action==='find'){openCitationDialog(String(active.block_id), asideTodo.dataset.gapKind || '');return;}
+      if(action==='condense'){status('篇幅超额：可删减重复论述，或让 AI 重新精简本章');return;}
+      // regen：直接触发本章重编
+      host.querySelector('[data-action="ai"]')?.click();
+      return;
+    }
+    const gapSearch=event.target.closest('[data-gap-search]');
+    if(gapSearch && active){openCitationDialog(String(active.block_id), gapSearch.dataset.gapSearch || '');return;}
+    const gapUpload=event.target.closest('[data-gap-upload]');
+    if(gapUpload && active){
+      showPanel('materials');
+      globalThis.setTimeout(()=>host.querySelector('[data-cs="upload"]')?.click(), 200);
+      return;
+    }
     const refreshMat=event.target.closest('[data-refresh-materials]');
     if(refreshMat && active){
       try{context=await json(`/api/blocks/${active.id}/studio`);paintAside();status('已刷新素材解析状态');}

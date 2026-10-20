@@ -547,3 +547,34 @@
 .cs-ins-more { margin: 2px 0 0; font-size: 10.5px; color: #94a3b8; }
 .cs-ins-empty { margin: 2px 8px 6px; font-size: 11px; color: #94a3b8; }
 .cs-ins-sep { height: 1px; background: #eef2f7; margin: 6px 6px; }
+
+/* 右栏「待办」页签 */
+.cs-todo-group { margin: 0 0 10px; }
+.cs-todo-glabel { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #475569; }
+.cs-todo-glabel i { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; }
+.cs-todo-glabel i.m-content { background: #2563eb; }
+.cs-todo-glabel i.m-material { background: #7c3aed; }
+.cs-todo-glabel i.m-source { background: #0891b2; }
+.cs-todo-glabel i.m-budget { background: #d97706; }
+.cs-todo-glabel i.m-figure { background: #059669; }
+.cs-todo-row { display: flex; align-items: flex-start; gap: 6px; padding: 5px 0; border-bottom: 1px dashed #f1f5f9; }
+.cs-todo-row:last-child { border-bottom: 0; }
+.cs-todo-idx { width: 15px; height: 15px; border-radius: 50%; background: #eef2ff; color: #4338ca; font-size: 9.5px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+.cs-todo-text { flex: 1; min-width: 0; font-size: 11.5px; color: #334155; line-height: 1.5; }
+.cs-todo-act { flex-shrink: 0; font: inherit; font-size: 11px; padding: 1px 8px; border: 1px solid #dbe3ef;
+  background: #fff; border-radius: 999px; color: #1d4ed8; cursor: pointer; }
+.cs-todo-act:hover { background: #eff6ff; }
+.cs-todo-ok { margin: 4px 0 0; font-size: 11.5px; color: #15803d; }
+
+/* 右栏「素材」三分法 */
+.cs-gap-group { margin: 0 0 10px; }
+.cs-gap-glabel { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #475569; }
+.cs-gap-glabel small { font-weight: 400; color: #94a3b8; margin-left: 4px; }
+.cs-gap-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 5px 0; border-bottom: 1px dashed #f1f5f9; }
+.cs-gap-row:last-child { border-bottom: 0; }
+.cs-gap-kind { font-size: 11.5px; color: #0f172a; font-weight: 500; }
+.cs-gap-meta { font-size: 10.5px; color: #64748b; }
+.cs-gap-act { font: inherit; font-size: 11px; padding: 1px 8px; border: 1px solid #dbe3ef; background: #fff;
+  border-radius: 999px; color: #1d4ed8; cursor: pointer; }
+.cs-gap-why { flex-basis: 100%; font-size: 10.5px; color: #94a3b8; }

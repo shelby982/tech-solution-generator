@@ -10,8 +10,8 @@
  * ⚠️ 注意别和编辑器工具栏里的 `#ced-mode-switch`（编辑/预览）搞混：
  * 那个是**编辑器内部**的视图切换，与页面三模式无关。
  */
-import { DEFAULT_MODE, isValidMode } from './workbench-modes.mjs?v=20261016-v314';
-import { renderWorkspaceChrome } from './workspace.js?v=20261016-v314';
+import { DEFAULT_MODE, isValidMode } from './workbench-modes.mjs?v=20261016-v316';
+import { renderWorkspaceChrome } from './workspace.js?v=20261016-v316';
 
 const VIEW_KEY = 'aibidding:workspace-view';
 
