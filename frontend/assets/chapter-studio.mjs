@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v313';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v313';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v313';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v314';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v314';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v314';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1327,6 +1327,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <span class="cs-ins-name" title="${esc(m.filename)}">${esc(m.filename)}</span>
             <span class="cs-ins-acts">
               ${canQuote ? `<button type="button" data-ins-material="${m.id}">摘录${page ? `·第${page}页` : ''}</button>` : '<i>未解析</i>'}
+              <button type="button" data-ins-table="${m.id}" title="从该文件抽取表格后插入">表格</button>
               ${m.image_url ? `<button type="button" data-ins-image="${m.id}">图片</button>` : ''}
             </span></div>`;
         }).join('')
@@ -1358,6 +1359,36 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <p class="cs-ins-group">插入结构 <span>模板 · 需人工补齐</span></p>
       <div class="cs-ins-item"><span class="cs-ins-name">对比表 / 响应表</span><span class="cs-ins-acts"><button type="button" data-action="table">插入</button></span></div>
       <div class="cs-ins-item"><span class="cs-ins-name">关系图骨架</span><span class="cs-ins-acts"><button type="button" data-action="diagram">插入</button></span></div>`;
+  }
+
+  /** 把后端抽取的表格转成 Markdown（单元格里的 | 转义） */
+  function markdownTable(table) {
+    const rows = (table.rows || []).filter((r) => (r || []).some((c) => String(c || '').trim()));
+    if (!rows.length) return '';
+    const cols = Math.max(...rows.map((r) => r.length));
+    const fmt = (row) => `| ${Array.from({length: cols}, (_, i) => String(row[i] ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()).join(' | ')} |`;
+    const head = fmt(rows[0]);
+    const sep = `| ${Array.from({length: cols}, () => '---').join(' | ')} |`;
+    return [head, sep, ...rows.slice(1).map(fmt)].join('\n');
+  }
+
+  async function insertMaterialTable(materialId, filename) {
+    status('正在抽取表格…');
+    let data;
+    try {
+      const resp = await fetch(`/api/materials/${materialId}/tables`, {signal: AbortSignal.timeout(30000)});
+      data = await resp.json();
+    } catch (error) {
+      status(`表格抽取失败：${error.message}`);
+      return;
+    }
+    const tables = data.tables || [];
+    if (!tables.length) { status(data.reason || '该文件里没有可插入的表格'); return; }
+    const pick = tables.length === 1 ? tables[0] : tables[0];   // 多表时先取第一张，可在预览里换
+    const md = markdownTable(pick);
+    if (!md) { status('这张表是空的'); return; }
+    insertAtCursor(`**表：来自《${filename}》${tables.length > 1 ? ` · ${pick.name}` : ''}**\n\n${md}`);
+    if (tables.length > 1) status(`已插入「${pick.name}」；该文件共 ${tables.length} 张表`);
   }
 
   /** 在光标处插入，并选中新内容（便于继续编辑 / 撤销） */
@@ -1579,6 +1610,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const ex=(m?.excerpts||[])[0];
       if(ex){ const page=ex.page?`（第 ${ex.page} 页）`:''; insertAtCursor(`> 摘自《${m.filename}》${page}\n${ex.text||ex.content||''}`); }
       else status('该素材尚未解析出可引用原文');
+      return;
+    }
+    const tblBtn=event.target.closest('[data-ins-table]');
+    if(tblBtn){
+      const m=(context?.materials||[]).find(x=>String(x.id)===tblBtn.dataset.insTable);
+      await insertMaterialTable(tblBtn.dataset.insTable, m?.filename || '素材');
       return;
     }
     const imgBtn=event.target.closest('[data-ins-image]');

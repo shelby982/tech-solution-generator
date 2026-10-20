@@ -112,6 +112,77 @@ async def _parse_and_chunk_in_background(
                 pass
 
 
+def _extract_tables_from_file(abs_path: str, suffix: str) -> list[dict]:
+    """按需抽取文件里的表格（用于"从素材插入表格"）。
+
+    只做抽取，不落库：避免给 materials 加列 + 历史素材回填。
+    - .docx：python-docx 的 document.tables（Word 无可靠页码 → page=0）
+    - .xlsx/.xlsm：openpyxl 每个 sheet 的 used range
+    - 其它（含 PDF）：不支持，返回空并给出原因
+    """
+    suffix = (suffix or "").lower()
+    tables: list[dict] = []
+    if suffix == ".docx":
+        from docx import Document
+
+        doc = Document(abs_path)
+        for idx, table in enumerate(doc.tables, start=1):
+            rows: list[list[str]] = []
+            for row in table.rows:
+                cells = [(cell.text or "").replace("\n", " ").strip() for cell in row.cells]
+                if any(cells):
+                    rows.append(cells)
+            if len(rows) >= 2:
+                tables.append({"index": idx, "name": f"表 {idx}", "rows": rows,
+                               "cols": max(len(r) for r in rows), "page": 0,
+                               "header": rows[0]})
+        return tables
+    if suffix in (".xlsx", ".xlsm"):
+        from openpyxl import load_workbook
+
+        wb = load_workbook(abs_path, data_only=True, read_only=True)
+        for idx, sheet in enumerate(wb.worksheets, start=1):
+            rows = []
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if v is None else str(v).strip() for v in row]
+                while cells and not cells[-1]:
+                    cells.pop()
+                if any(cells):
+                    rows.append(cells)
+            if len(rows) >= 2:
+                tables.append({"index": idx, "name": sheet.title or f"表 {idx}", "rows": rows,
+                               "cols": max(len(r) for r in rows), "page": 0,
+                               "header": rows[0]})
+        return tables
+    return tables
+
+
+@router.get("/materials/{material_id}/tables")
+async def material_tables(material_id: int):
+    """素材可插入的表格（按需解析，不落库）。"""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, filename, file_path, type FROM materials WHERE id = ? AND deleted_at IS NULL",
+            (material_id,),
+        )
+        row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    path = _abs_upload_path(row["file_path"] or "")
+    suffix = path.suffix.lower() or f".{str(row['type'] or '').lower()}"
+    if not path.exists():
+        return {"tables": [], "reason": "源文件已不存在（可能已清理）"}
+    try:
+        tables = await _asyncio.to_thread(_extract_tables_from_file, str(path), suffix)
+    except Exception as exc:  # noqa: BLE001 - 抽取失败不应 500
+        logger.warning("素材 %s 表格抽取失败：%s", material_id, exc)
+        return {"tables": [], "reason": f"表格抽取失败：{exc}"}
+    if not tables:
+        hint = "PDF 表格暂不支持自动抽取，可复制内容后手动插入表格" if suffix == ".pdf" else "该文件里没有可识别的表格"
+        return {"tables": [], "reason": hint}
+    return {"tables": tables}
+
+
 def _split_for_scoring_evaluation(parsed) -> list[str]:
     """评分表 / 评审要素的细粒度切片：把所有 section 文本按行汇总，
     用 4 行 + 1 行重叠的滑动窗口产出 chunks，避免 BM25 反向分配时一锅端。
