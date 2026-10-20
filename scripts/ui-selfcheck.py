@@ -241,6 +241,27 @@ HARNESS = r"""
   const statusStyle = statusEl ? getComputedStyle(statusEl).position : '';
   mark('状态为浮动 toast（不占正文行）', statusStyle === 'fixed', { position: statusStyle });
 
+  // Y 插入功能可用（文字说明 / 表格）：点完正文变长、状态无报错
+  const ed = dialog.parentElement ? document.querySelector('.cs-editor') : document.querySelector('.cs-editor');
+  const before = (ed?.value || '').length;
+  const insertMenu = document.querySelector('.cs-insert');
+  const clickInsert = async (action) => {
+    insertMenu?.setAttribute('open', '');
+    await sleep(150);
+    document.querySelector(`.cs-insert-menu [data-action="${action}"]`)?.click();
+    await sleep(900);
+    insertMenu?.removeAttribute('open');
+  };
+  await clickInsert('text');
+  const afterText = (ed?.value || '').length;
+  const stEl = document.querySelector('[data-cs="status"]');
+  const statusText = stEl ? (stEl.textContent || '') : '';
+  await clickInsert('table');
+  const afterTable = (ed?.value || '').length;
+  const bad = /Cannot|null|失败|错误/.test(statusText);
+  mark('插入功能可用（文字说明 / 表格）', afterText >= before && afterTable > afterText && !bad,
+       { before, afterText, afterTable, status: statusText.slice(0, 60) });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
