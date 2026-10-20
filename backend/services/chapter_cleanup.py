@@ -46,3 +46,38 @@ def has_pending(content: str) -> bool:
     """正文里是否还有待核对痕迹（用于前端提示）。"""
     text = str(content or "")
     return bool(_SECTION_RE.search(text) or _PLACEHOLDER_LINE_RE.search(text))
+
+
+async def record_generation_gaps(db, project_id: int, thread_id: str, block_id: str, gaps: list[str]) -> int:
+    """把生成时的"事实缺口"落库成待办（quality_findings, group=计划）。
+
+    正文只保留完整内容；缺口在这里沉淀，右栏「待办」按"依据核对"呈现。
+    """
+    import hashlib
+
+    saved = 0
+    for gap in gaps or []:
+        text = str(gap or '').strip()
+        if len(text) < 6:
+            continue
+        code = 'GEN_GAP'
+        fid = hashlib.sha1(f'{thread_id}|{block_id}|{code}|{text}'.encode()).hexdigest()[:16]
+        await db.execute(
+            "INSERT OR IGNORE INTO quality_findings (id, project_id, thread_id, block_id, check_code, \"group\", level, message, status) "
+            "VALUES (?, ?, ?, ?, ?, '计划', 'low', ?, 'open')",
+            (fid, project_id, thread_id, block_id, code, f'依据核对：{text}'),
+        )
+        saved += 1
+    await db.commit()
+    return saved
+
+
+async def load_generation_gaps(db, thread_id: str, block_id: str) -> list[dict]:
+    """读取某章已沉淀的"依据核对"项（待办用）。"""
+    cursor = await db.execute(
+        "SELECT id, message, status FROM quality_findings "
+        "WHERE thread_id = ? AND block_id = ? AND check_code = 'GEN_GAP' AND status = 'open' ORDER BY created_at",
+        (thread_id, block_id),
+    )
+    rows = await cursor.fetchall()
+    return [{'id': r['id'], 'text': str(r['message']).removeprefix('依据核对：'), 'status': r['status']} for r in rows]

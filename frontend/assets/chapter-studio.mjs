@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v325';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v325';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v325';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v326';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v326';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v326';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -196,6 +196,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         planBrief = {
           todo: plan.todo || [],
           gaps: plan.material_gaps || [],
+          generationGaps: plan.generation_gaps || [],
           pages: plan.pages || 0,
           wordPlan: plan.word_plan || null,
           deliverables: plan.deliverables || [],
@@ -1322,7 +1323,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   function paintTodoBadge() {
     const el = host.querySelector('[data-todo-badge]');
     if (!el) return;
-    const count = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length;
+    const count = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length + ((planBrief?.generationGaps || []).length);
     el.textContent = String(count);
     el.hidden = !count;
   }
@@ -1344,7 +1345,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-todo-act" data-aside-todo="${esc(x.action)}" data-gap-kind="${esc(x.target || '')}">${esc(x.action_label)}</button>
           </div>`).join('')}</div>`;
     }).join('');
-    return `<section data-pane="todo"><h4>待办 <small>${todos.length} 项 · 按优先级</small></h4>${groups}</section>`;
+    const checks = planBrief?.generationGaps || [];
+    const checkGroup = checks.length
+      ? `<div class="cs-todo-group"><p class="cs-todo-glabel"><i class="m-source"></i>依据核对 ${checks.length}</p>
+          ${checks.map((g) => `<div class="cs-todo-row">
+              <span class="cs-todo-idx">·</span>
+              <span class="cs-todo-text">${esc(g.text)}</span>
+              <button type="button" class="cs-todo-act" data-gap-abate="${esc(g.id)}">去核对</button>
+            </div>`).join('')}</div>`
+      : '';
+    return `<section data-pane="todo"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
   }
 
   /** 右栏「素材」页签：三分法 —— 已有可用 / 公开资料可补 / 必须你上传 */
@@ -1724,6 +1734,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='condense'){status('篇幅超额：可删减重复论述，或让 AI 重新精简本章');return;}
       // regen：直接触发本章重编
       host.querySelector('[data-action="ai"]')?.click();
+      return;
+    }
+    const abate=event.target.closest('[data-gap-abate]');
+    if(abate && active){
+      const item=(planBrief?.generationGaps||[]).find(x=>String(x.id)===abate.dataset.gapAbate);
+      const query=String(item?.text||'').replace(/^依据核对：/,'').slice(0,30);
+      openCitationDialog(String(active.block_id), query);
       return;
     }
     const gapSearch=event.target.closest('[data-gap-search]');

@@ -202,6 +202,10 @@ HARNESS = r"""
   // 待办页签不得再出现"素材模块"（素材问题归素材页签）
   const todoHasMaterialGroup = todoPane ? /素材模块/.test(todoPane.textContent) : false;
   mark('待办页签不含素材模块', !todoHasMaterialGroup, { hasMaterialGroup: todoHasMaterialGroup });
+  // 生成时的事实缺口：以"依据核对"分组出现在待办里（正文里不再出现）
+  const hasCheckGroup = todoPane ? /依据核对/.test(todoPane.textContent) : false;
+  mark('待办含「依据核对」分组（缺口不落正文）', hasCheckGroup,
+       { hasCheckGroup });
   // 页签互斥：切到素材时，两个 pane 只能有一个可见
   const matTabEl = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.dataset.panel === 'materials');
   matTabEl?.click();

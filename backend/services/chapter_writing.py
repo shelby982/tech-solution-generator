@@ -64,6 +64,12 @@ async def finish(job_id,snapshot,artifacts,content):
         can_save=(snapshot['auto_save'] and not snapshot['base_content'].strip() and not (block['content'] or '').strip()
                   and await revision_id(db,block['id'])==snapshot['base_revision']
                   and await evidence_version(db,block['id'])==snapshot['evidence_version'])
+        # 生成时的事实缺口不进正文，沉淀为"依据核对"待办（右栏「待办」可见）
+        try:
+            from services.chapter_cleanup import record_generation_gaps
+            await record_generation_gaps(db, block['project_id'], job['thread_id'], block['block_id'], plan.get('gaps') or [])
+        except Exception:
+            pass
         if can_save:
             await db.execute("UPDATE blocks SET content=?,status='draft' WHERE id=?",(content,block['id']))
             number=(await (await db.execute('SELECT COALESCE(MAX(revision_no),0)+1 FROM block_revisions WHERE block_id=?',(block['id'],))).fetchone())[0]

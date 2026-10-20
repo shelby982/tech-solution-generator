@@ -955,7 +955,9 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
     """
     from services.block_store import list_blocks
     from services.quality_check import basis_coverage
+    from services.chapter_cleanup import load_generation_gaps
 
+    generation_gaps = await load_generation_gaps(db, str(thread_id), str(block_id))
     found = await plan_of_block(db, project_id, thread_id, str(block_id))
     chapter = None
     plan_id = ""
@@ -1151,6 +1153,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "material_gaps": _material_gaps(_materials_plan(requirements, bound_kinds, len(clauses)), requirements),
+        "generation_gaps": generation_gaps or [],
         "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
                             word_plan, guidance, content, is_parent_chapter, is_catalog),
         "children": children,
