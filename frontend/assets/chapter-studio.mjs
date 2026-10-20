@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v300';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v300';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v300';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v302';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v302';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v302';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -133,7 +133,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
         <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="basis"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="basis" aria-pressed="true">计划</button><button data-panel="materials" aria-pressed="false">素材池</button><button data-panel="ai" aria-pressed="false">编制进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="basis"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="basis" aria-pressed="true">依据</button><button data-panel="materials" aria-pressed="false">素材池</button><button data-panel="ai" aria-pressed="false">编制进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -156,16 +156,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const specInfo = { specs: {} };    // 编写规范（L0/L1）版本，右栏显示 + 就近打开
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
   let basisInfo = null;
+  let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
 
-  /** 依据 ↔ 正文对应（评分点/规范条款是否已落在正文）。 */
+  /** 依据 ↔ 正文对应 + 本章计划摘要（待办数）。 */
   async function loadBasis(blockKey) {
-    if (!blockKey) { basisInfo = null; return; }
+    if (!blockKey) { basisInfo = null; planBrief = null; return; }
     try {
-      const resp = await fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)});
-      basisInfo = resp.ok ? await resp.json() : null;
-    } catch (e) {
-      basisInfo = null;
-    }
+      const [basisResp, planResp] = await Promise.all([
+        fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)}),
+        fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
+      ]);
+      basisInfo = basisResp.ok ? await basisResp.json() : null;
+      if (planResp.ok) {
+        const plan = await planResp.json();
+        planBrief = { todo: (plan.todo || []).length, pages: plan.pages || 0 };
+      } else { planBrief = null; }
+    } catch (e) { basisInfo = null; planBrief = null; }
   }
 
   async function loadCitations() {
@@ -481,6 +487,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
             <p><b>段落</b>：每段第一句给判断，后面给依据与数据；表后必跟一段"从表可见…"的落点句。</p>
             <p><b>落点</b>：每个必答点至少一段；引用政策/标准/数据处必须带【来源】。</p>
+            <label class="cs-cp-kind-row">本章类型
+              <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === ((context?.profile || {}).layout || '') ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+              <span class="cs-dim">决定本章按哪类章节编制（影响提示词与结构）</span>
+            </label>
           </div>
         </details>
 
@@ -613,6 +623,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           button.disabled = false;
           button.textContent = '用 AI 匹配条款';
         }
+      });
+      body.querySelector('[data-cp-layout]')?.addEventListener('change', async (event) => {
+        const previous = (context?.profile || {}).layout;
+        try {
+          const updated = await json(`/api/blocks/${active.id}/studio`,
+            send('PUT', {layout: event.target.value, writing_status: (context?.profile || {}).writing_status}));
+          context.profile = {...context.profile, ...updated};
+          status(`本章类型已改为：${(context.layouts[event.target.value] || {}).label || event.target.value}`);
+        } catch (error) { event.target.value = previous; status(error.message); }
       });
       body.querySelector('[data-cp-open-spec]')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1287,8 +1306,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `<section data-pane="basis">
-      <div class="cs-plan-summary"><b>本章编写计划</b>
-        <small>${basisCovered ? `评分点 ${basisCovered.responded}/${basisCovered.total} 已落点` : '暂无评分点'} · 入口在章头「本章编写计划」</small></div>
       <h4>依据</h4>${context.points.map((p, index) => {
         const cov = basisCovered?.points?.[index];
         return `<details><summary>${esc(p.item || p.factor)} · ${p.points ?? '—'} 分
@@ -1297,7 +1314,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
         return recipe ? `<section data-pane="basis"><h4>写法</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
 
-      <section data-pane="basis"><h4>编排建议</h4><label>章节类型 <select data-cs="layout">${Object.entries(context.layouts).map(([id,l])=>`<option value="${id}" ${id===context.profile.layout?'selected':''}>${esc(l.label)}</option>`).join('')}</select></label><p>${layout.blocks.map(esc).join(' → ')}</p><p class="cs-muted">${context.materials.some(m=>m.confirmed)?'生成仅引用已核对素材，并结合本章评分及规范要求。':'无已核对素材：可先写项目分析与拟实施方案；人员、业绩、证书、实测参数等保留待补充。'}</p>${context.missing.map(m=>`<p class="cs-warning">${esc(m)}</p>`).join('')}</section>
+      
       <section data-pane="materials">${(() => {
         const key = String(active.block_id);
         const body = String(active.content || '');
@@ -1352,9 +1369,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const unit = block ? unitOf.get(String(block.block_id)) : null;
     const info = unit ? planUnits.get(unit) : null;
     if (!info) { slot.innerHTML = ''; return; }
+    const todoCount = planBrief?.todo || 0;
     slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
-      + `title="本章的计划（要求依据/素材/图表/还差什么）；目录下 ${info.leaves} 节的批量确认在左树一级目录上">`
-      + `本章编写计划</button>`;
+      + `title="本章计划：要交什么 / 待办 ${todoCount} 项 / 依据与写法 —— 点开查看与处理">`
+      + `本章计划${todoCount ? `<span class="cs-plan-badge">待办 ${todoCount}</span>` : ''}</button>`;
   }
 
   async function select(id) {

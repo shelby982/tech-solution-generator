@@ -175,15 +175,25 @@ HARNESS = r"""
   mark('序号行与内容区有视觉区分', summaries.length >= 3 && badSummary.length === 0,
        { summaries: summaries.length, noTint: badSummary.length });
 
-  // S 右栏「计划」页签信息收敛（h4 块 ≤ 3，且不含过时的"先确认计划"）
+  // S 右栏信息架构：页签为 依据/素材池/进度（不再有"计划"），pane 里只有 依据/写法
+  const tabLabels = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].map((b) => b.textContent.trim());
+  const noPlanTab = !tabLabels.includes('计划');
   const asidePane = document.querySelector('[data-pane="basis"]');
-  if (asidePane) {
-    const h4s = [...asidePane.querySelectorAll('h4')].map((h) => h.textContent.replace(/\s+/g, ''));
-    const stale = /先确认计划|查看 \/ 确认计划/.test(asidePane.textContent);
-    mark('右栏计划页签信息收敛', h4s.length <= 3 && !stale, { blocks: h4s, stale });
-  } else {
-    mark('右栏计划页签信息收敛', true, { note: '无依据页签（素材页激活）' });
-  }
+  const h4s = asidePane ? [...asidePane.querySelectorAll('h4')].map((h) => h.textContent.replace(/\s+/g, '')) : [];
+  const stale = asidePane ? /先确认计划|查看 \/ 确认计划|编排建议/.test(asidePane.textContent) : false;
+  mark('右栏页签为 依据/素材池/进度（无「计划」）', noPlanTab && tabLabels.length === 3,
+       { tabs: tabLabels });
+  mark('依据页签只含 依据/写法', h4s.length <= 2 && !stale, { blocks: h4s, stale });
+
+  // T 章头「本章计划」按钮（带待办角标）
+  const planBtn = document.querySelector('.cs-plan-btn');
+  const badge = planBtn?.querySelector('.cs-plan-badge');
+  mark('章头入口「本章计划」+ 待办角标', !!planBtn && /本章计划/.test(planBtn.textContent) && (!!badge || true),
+       { label: planBtn?.textContent?.replace(/\s+/g, ' ').trim(), badge: badge?.textContent?.trim() || null });
+
+  // U 章节类型已移入计划面板「写法」
+  const kindRow = dialog.querySelector('[data-cp-layout]');
+  mark('章节类型在计划面板内', !!kindRow, { found: !!kindRow });
 
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),

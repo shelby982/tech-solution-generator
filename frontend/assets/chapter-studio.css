@@ -477,3 +477,9 @@
 /* 内容区与序号行之间留出呼吸，且内容不再贴左边界 */
 .cs-cp-block { padding-top: 10px; }
 .cs-cp-todo:first-of-type, .cs-cp-del:first-of-type { border-top: 1px solid #f1f5f9; }
+
+/* 章头「本章计划」按钮的待办角标 + 计划面板里的章节类型行 */
+.cs-plan-badge { display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 600; padding: 1px 6px;
+  border-radius: 999px; background: #fee2e2; color: #b91c1c; }
+.cs-cp-kind-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: #334155; flex-wrap: wrap; }
+.cs-cp-kind-row select { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #dbe3ef; border-radius: 6px; }
