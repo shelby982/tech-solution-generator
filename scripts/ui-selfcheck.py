@@ -260,6 +260,12 @@ async def run(args) -> int:
         report = {"steps": [], "error": str(raw)[:300]}
 
     steps = report.get("steps", [])
+    # 控制台错误也算一条规则（页面 JS 崩了，界面看着对也不能过）
+    if console:
+        steps = steps + [{"name": f"页面无控制台错误（发现 {len(console)} 条）", "ok": False,
+                          "detail": console[:3]}]
+    else:
+        steps = steps + [{"name": "页面无控制台错误", "ok": True}]
     failed = [s for s in steps if not s.get("ok")]
     print(f"  UI 自动审查 · {args.block or args.title or '本章'}")
     for step in steps:

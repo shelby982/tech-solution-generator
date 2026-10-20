@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v304';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v304';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v304';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v305';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v305';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v305';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1344,7 +1344,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${unused.length ? `<p class="cs-material-hint">未引用的来源晚于正文：点上方「AI 编制本章」重新生成本章，引用才会写进正文。</p>` : ''}`;
       })()}</section>
       <section data-pane="materials"><div class="cs-material-head"><h4>本章素材 ${context.materials.length}</h4><label class="cs-upload">上传素材<input data-cs="upload" type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"></label></div><p class="cs-muted">PDF／Word 提取原文与页码；图片保留原图，需人工核对含义。</p><button data-action="library">从项目素材库关联</button><button data-action="refresh-materials">刷新解析状态</button><div data-cs="library"></div>${context.materials.map(m=>`<article class="cs-material"><strong>${esc(m.filename)}</strong><small>${esc(m.parse_status==='done'?'已解析':m.parse_status==='failed'?'解析失败，可移除后重传':'解析中，请稍后刷新')} · ${m.confirmed?'已核对':'待核对'}${m.adopted?' · 正文已引用':''}</small>${m.image_url?`<img src="${esc(m.image_url)}" alt="${esc(m.filename)}">`:''}<details><summary>提炼摘录与映射依据（${m.excerpts.length} 段）</summary><p class="cs-muted">${esc(m.mapping_reason)}</p>${(m.key_points||[]).length?`<h5>规则提炼的原文要点</h5>${m.key_points.map(p=>`<p><b>${esc(p.category)}</b>：${esc(p.quote)}<small>${p.page?`第 ${p.page} 页`:`片段 ${p.chunk_id}`}</small></p>`).join('')}<h5>完整原文片段</h5>`:''}${m.excerpts.map(x=>`<p>${esc(x.text)}<small>${x.page?`第 ${x.page} 页`:`片段 ${x.chunk_id}`}</small></p>`).join('') || '<p>图片不自动推断事实；文档解析中或暂无可提取原文。</p>'}</details><button data-material="confirm" data-id="${m.id}" ${m.parse_status!=='done'?'disabled':''}>${m.confirmed?'撤销核对':'核对适用于本章'}</button>${m.confirmed?`<button data-material="insert" data-id="${m.id}">${m.image_url?'插入图片':'引用原文摘录'}</button>`:''}<button data-material="unlink" data-id="${m.id}">移除关联</button></article>`).join('')}</section>`;
-    get('layout').onchange = async event => {
+    const asideLayout = get('layout');      // 右栏「编排建议」已移除（章节类型移入计划面板），这里可能为 null
+    if (asideLayout) asideLayout.onchange = async event => {
       const previous = context.profile.layout;
       try {
         const updated=await json(`/api/blocks/${active.id}/studio`,send('PUT',{layout:event.target.value,writing_status:context.profile.writing_status}));

@@ -1,4 +1,4 @@
-import { api } from './api.js?v=20261016-v304';
+import { api } from './api.js?v=20261016-v305';
 
 const pid = Number(new URLSearchParams(location.search).get('projectId'));
 const $ = id => document.getElementById(id);
