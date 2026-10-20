@@ -193,6 +193,7 @@ async def unlink_material(block_id: int, material_id: int):
 class DiagramBody(BaseModel):
     text: str = Field(min_length=10, max_length=8000)
     title: str = Field(default='', max_length=80)
+    type: str = Field(default='auto', max_length=16)   # auto / flow / layered / timeline
 
 
 def normalize_diagram_nodes(raw) -> list[str]:
@@ -210,29 +211,43 @@ def normalize_diagram_nodes(raw) -> list[str]:
 
 @router.post('/blocks/{block_id}/studio/diagram')
 async def generate_diagram(block_id: int, body: DiagramBody):
-    """用户粘贴文字 → 生成一幅结构/关系图（`:::diagram`）。
+    """用户给一段文字 + 期望图型 → 生成结构化信息图（`:::diagram type=…`）。
 
-    产品口径：不生成 Visio 级位图架构图（不可审计），只把**文字里的结构**抽成
-    关系链图，插进正文由用户核对。作者=图示 Agent，提示词与它保持一致。
+    图型：flow（流程）/ layered（层次）/ timeline（时间线）/ auto（由模型判断）。
+    产品口径：不生成位图架构图（不可审计）；只把文字里的**结构**抽出来，
+    插进正文由用户核对，可继续手改。
     """
     from agents.chapter_team import call_role
+    from services.diagrams import normalize_model_output, render_diagram_markdown, TYPE_LABELS
 
     async with get_db() as db:
         block = await require_block(db, block_id)
-    system = ('你是图示 Agent。把用户提供的文字抽成 3~8 个节点的**关系链**（单向箭头连接），'
-              '节点是短语而不是整段句子，每个节点不超过 60 字，不要出现箭头符号本身。'
-              '只输出 JSON：{"nodes":["节点1","节点2","节点3"]}')
+    wanted = (body.type or 'auto').strip().lower()
+    if wanted not in ('auto', 'flow', 'layered', 'timeline'):
+        wanted = 'auto'
+    hint = ('先判断这段文字的结构：并列/分类 → layered；先后步骤 → flow；按年份演进 → timeline。'
+            if wanted == 'auto' else f'请严格用 {wanted}（{TYPE_LABELS.get(wanted, wanted)}）表达。')
+    system = (
+        '你是图示 Agent。把用户提供的文字抽成 2~12 个节点，输出 JSON：'
+        '{"type":"flow|layered|timeline","title":"不超过20字",'
+        '"nodes":[{"label":"短语，≤24字","level":0,"when":"年份（仅 timeline）"}]}。'
+        + hint +
+        ' 节点是短语而不是整句；layered 必须给出 level（0 顶层，最多 3 层）；'
+        'timeline 必须给 when（四位年份）。只输出 JSON。'
+    )
+    payload = {'text': body.text, 'prefer_type': wanted}
     try:
-        raw, model = await call_role('diagram', system, {'text': body.text}, {})
+        raw, model = await call_role('diagram', system, payload, {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
-    parsed = extract_json_object(raw) if isinstance(raw, str) else (raw or {})
-    nodes = normalize_diagram_nodes((parsed or {}).get('nodes'))
-    if len(nodes) < 2:
+    structure = normalize_model_output(raw, fallback_title=body.title or block.get('title') or '')
+    if not structure:
         raise HTTPException(422, '这段文字抽不出结构，建议补充层级或流程信息')
-    title = (body.title or block.get('title') or '结构关系图').strip()[:80]
-    markdown = f':::diagram {title}\n' + ' -> '.join(nodes) + '\n:::'
-    return {'nodes': nodes, 'markdown': markdown, 'title': title, 'model': model}
+    structure['title'] = (body.title or structure.get('title') or block.get('title') or '结构关系图')[:80]
+    markdown = render_diagram_markdown(structure)
+    return {'type': structure['type'], 'title': structure['title'],
+            'nodes': structure['nodes'], 'edges': structure.get('edges') or [],
+            'markdown': markdown, 'model': model}
 
 
 class TableBody(BaseModel):
@@ -252,7 +267,7 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
     for row in rows:
         cells = [c.strip() for c in row.strip('|').split('|')]
         if all(set(c) <= set('-: ') for c in cells):
-            continue                      # 分隔行后面重建
+            continue
         parsed.append(cells[:max_cols])
         if len(parsed) > max_rows + 1:
             break
@@ -263,7 +278,7 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
     out = ['| ' + ' | '.join(parsed[0]) + ' |',
            '| ' + ' | '.join(['---'] * width) + ' |']
     out += ['| ' + ' | '.join(r) + ' |' for r in parsed[1:]]
-    return '\n'.join(out)
+    return chr(10).join(out)
 
 
 @router.post('/blocks/{block_id}/studio/table')

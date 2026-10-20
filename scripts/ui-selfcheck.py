@@ -318,6 +318,30 @@ HARNESS = r"""
                         '表格页签：AI 生成表格 / 从素材插入表格']) mark(name, false, {});
   }
 
+  // AA 插入面板有图型选择；正文预览按图型渲染
+  document.querySelector('[data-open-insert]')?.click();
+  await sleep(600);
+  const insDlg2 = [...document.querySelectorAll('dialog')].find((d) => d.open && d.classList.contains('cs-insert-dialog'));
+  insDlg2?.querySelector('[data-ins-generate="info"]')?.click();
+  await sleep(400);
+  const dtypeSel = insDlg2?.querySelector('[data-ins-dtype]');
+  const dtypeOptions = dtypeSel ? [...dtypeSel.options].map((o) => o.value) : [];
+  mark('信息图可指定图型（自动/层次/流程/时间线）',
+       dtypeOptions.join(',') === 'auto,layered,flow,timeline', { options: dtypeOptions });
+  insDlg2?.close();
+  // 用三种图型直接调用渲染函数（不依赖 UI 预览态）
+  const renderCheck = await (async () => {
+    const fn = globalThis.__csPreview;
+    if (typeof fn !== 'function') return { ok: false, reason: 'no renderer' };
+    const md = [':::diagram type=layered 测试层次', '- 顶层', '-- 第二层', ':::', '',
+                ':::diagram type=flow 测试流程', 'A -> B -> C', ':::', '',
+                ':::diagram type=timeline 测试时间线', '2024 | 试点', '2025 | 推广', ':::'].join('\n');
+    const html = fn(md) || '';
+    return { ok: /cs-dg-layered/.test(html) && /cs-dg-flow/.test(html) && /cs-dg-timeline/.test(html),
+             hasLayered: /cs-dg-layered/.test(html), hasFlow: /cs-dg-flow/.test(html), hasTimeline: /cs-dg-timeline/.test(html) };
+  })();
+  mark('正文预览区分三种图型渲染', renderCheck.ok, renderCheck);
+
   // Z 正文不得含"待核对与补充"占位块（应留在待办里）
   const edVal = document.querySelector('.cs-editor')?.value || '';
   const hasPendingBlock = /(^|\n)#{2,4}\s*待核对与补充/.test(edVal);

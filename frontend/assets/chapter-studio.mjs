@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v327';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v327';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v327';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v331';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v331';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v331';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -11,6 +11,36 @@ const json = async (url, options = {}) => {
 };
 const send = (method, body) => ({method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
 
+/** 把 `:::diagram type=… 标题` + 结构行渲染成对应图型（flow / layered / timeline） */
+function renderDiagramFigure(head, bodyLines) {
+  const m = /^:::diagram(?:\s+type=(\w+))?(?:\s+(.*))?$/.exec(String(head || '').trim());
+  const type = ['flow', 'layered', 'timeline'].includes(m && m[1]) ? m[1] : 'flow';
+  const title = ((m && m[2]) || '结构关系图').trim();
+  const lines = bodyLines.map((line) => String(line).trim()).filter(Boolean);
+  if (type === 'layered') {
+    const nodes = lines.map((line) => {
+      const hit = /^(-{1,6})\s*(.+)$/.exec(line);
+      return hit ? {level: hit[1].length - 1, label: hit[2].trim()} : {level: 0, label: line};
+    });
+    const levels = new Map();
+    nodes.forEach((n) => { if (!levels.has(n.level)) levels.set(n.level, []); levels.get(n.level).push(n.label); });
+    const rows = [...levels.keys()].sort((a, b) => a - b).map((level) =>
+      `<div class="cs-dg-row lv${Math.min(level, 2)}">${levels.get(level).map((label) => `<div class="cs-dg-box">${esc(label)}</div>`).join('')}</div>`).join('');
+    return `<figure class="cs-diagram cs-dg cs-dg-layered"><div class="cs-dg-rows">${rows}</div><figcaption>${esc(title)}</figcaption></figure>`;
+  }
+  if (type === 'timeline') {
+    const items = lines.map((line) => {
+      const hit = /^(\d{4})\s*[|:：、]\s*(.+)$/.exec(line);
+      return hit ? {when: hit[1], label: hit[2].trim()} : {when: '', label: line};
+    });
+    return `<figure class="cs-diagram cs-dg cs-dg-timeline"><div class="cs-dg-axis">${items.map((item) =>
+      `<div class="cs-dg-tl"><span class="cs-dg-when">${esc(item.when || '—')}</span><span class="cs-dg-dot"></span><div class="cs-dg-box">${esc(item.label)}</div></div>`).join('')}</div><figcaption>${esc(title)}</figcaption></figure>`;
+  }
+  const nodes = lines.join(' ').replaceAll('→', '->').split('->').map((n) => n.trim()).filter(Boolean);
+  return `<figure class="cs-diagram cs-dg cs-dg-flow"><div class="cs-dg-axis">${nodes.map((label, i) =>
+    `${i ? '<span class="cs-dg-arrow" aria-hidden="true">→</span>' : ''}<div class="cs-dg-box">${esc(label)}</div>`).join('')}</div><figcaption>${esc(title)}</figcaption></figure>`;
+}
+
 export function previewContent(value) {
   const lines = String(value || '').split('\n');
   const html = [];
@@ -19,13 +49,12 @@ export function previewContent(value) {
   for (let index = 0; index < lines.length; index++) {
     const image = lines[index].trim().match(/^!\[([^\]]*)\]\((\/api\/studio\/materials\/\d+\/image)\)$/);
     const heading = lines[index].match(/^(#{1,6})\s+(.+)$/);
-    if (lines[index].startsWith(':::diagram ')) {
+    if (lines[index].startsWith(':::diagram')) {
       flush();
-      const title = lines[index].slice(11);
+      const head = lines[index].trim();
       const body = [];
       while (++index < lines.length && lines[index].trim() !== ':::') body.push(lines[index]);
-      const nodes = body.join('\n').replaceAll('→','->').split('->').map(n=>n.trim()).filter(Boolean);
-      html.push(`<figure class="cs-diagram">${nodes.map((n,i)=>`${i ? '<span aria-hidden="true">↓</span>' : ''}<div>${esc(n)}</div>`).join('')}<figcaption>${esc(title)}</figcaption></figure>`);
+      html.push(renderDiagramFigure(head, body));
     } else if (image) {
       flush(); html.push(`<figure><img src="${esc(image[2])}" alt="${esc(image[1])}" loading="lazy"><figcaption>${esc(image[1])}</figcaption></figure>`);
     } else if (heading) {
@@ -35,6 +64,8 @@ export function previewContent(value) {
   flush();
   return html.join('') || '<p class="cs-muted">暂无内容</p>';
 }
+// 自检用：直接调用渲染函数（避免依赖当前是否预览态）
+try { globalThis.__csPreview = previewContent; } catch (e) { /* ignore */ }
 
 export function chapterDisplayState(preview,live){
   return {editorHidden:preview||live,liveHidden:preview||!live,previewHidden:!preview};
@@ -188,7 +219,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     try {
       const [basisResp, planResp] = await Promise.all([
         fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)}),
-        fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)}),
+        fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}&_=${Date.now()}`, {signal: AbortSignal.timeout(30000), cache: 'no-store'}),
       ]);
       basisInfo = basisResp.ok ? await basisResp.json() : null;
       if (planResp.ok) {
@@ -1408,10 +1439,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       pickedEl.textContent = '';
       bodyEl.innerHTML = isImage ? `
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成信息图</b>
-            <small>把选中的文字 / 本章要点抽成结构关系图</small></div>
+            <small>把选中的文字 / 本章要点抽成图：层次 / 流程 / 时间线，自动判断结构</small></div>
           <button type="button" class="cs-ins-chip" data-ins-generate="info">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成架构图</b>
-            <small>按"接入 → 服务 → 数据"分层生成图示</small></div>
+            <small>按"接入 → 服务 → 数据"分层生成（等同层次图）</small></div>
           <button type="button" class="cs-ins-chip" data-ins-generate="arch">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>从素材插入图片</b>
             <small>证书 / 截图 / 现场照（真实图片）</small></div>
@@ -1434,7 +1465,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ? '说明这张表要表达什么（列名、行对象）。缺具体数据会写【待补充】，不会编造。'
           : '描述层级 / 流程 / 因果关系，系统抽成结构图；生成后可继续手改。'}</p>
         <textarea class="cs-ins-text" data-ins-text rows="5">${esc(prefill)}</textarea>
-        ${isTable ? '<div class="cs-ins-cols">列数 <select data-ins-cols><option>3</option><option>4</option><option>5</option></select></div>' : ''}
+        ${isTable
+          ? '<div class="cs-ins-cols">列数 <select data-ins-cols><option>3</option><option>4</option><option>5</option></select></div>'
+          : '<div class="cs-ins-cols">图型 <select data-ins-dtype><option value="auto">自动（推荐）</option><option value="layered">层次图</option><option value="flow">流程图</option><option value="timeline">时间线</option></select></div>'}
         <div class="cs-ins-actions"><button type="button" class="cs-cp-ghost" data-ins-back>返回</button>
           <button type="button" class="cs-cp-primary" data-ins-run="${kind}">生成</button></div>
         <div class="cs-ins-result" data-ins-result></div>`;
@@ -1490,11 +1523,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           const url = kind === 'table' ? `/api/blocks/${active.id}/studio/table` : `/api/blocks/${active.id}/studio/diagram`;
           const payload = kind === 'table'
             ? {title: active.title, requirement: text, text: chapterGist(), columns: Number(dlg.querySelector('[data-ins-cols]')?.value || 3)}
-            : {text, title: active.title};
+            : {text, title: active.title, type: dlg.querySelector('[data-ins-dtype]')?.value || 'auto'};
           const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload), signal: AbortSignal.timeout(120000)});
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-          result.innerHTML = `<p class="cs-muted">${kind === 'table' ? '表格草稿' : `节点 ${(data.nodes || []).length} 个`} · 模型 ${esc(data.model || '')}</p>
+          const typeLabel = {flow: '流程图', layered: '层次图', timeline: '时间线'}[data.type] || '';
+          result.innerHTML = `<p class="cs-muted">${kind === 'table' ? '表格草稿' : `${typeLabel || '图示'} · 节点 ${(data.nodes || []).length} 个`} · 模型 ${esc(data.model || '')}</p>
             <pre class="cs-ins-preview">${esc(data.markdown)}</pre>
             <div class="cs-ins-actions"><button type="button" class="cs-cp-ghost" data-ins-rerun="${kind}">重新生成</button>
               <button type="button" class="cs-cp-primary" data-ins-apply>插入正文</button></div>`;

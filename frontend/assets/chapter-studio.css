@@ -652,3 +652,20 @@
   background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; font-size: 11.5px; color: #9a3412; }
 .cs-todo-clean b { flex: 1; font-weight: 600; }
 .cs-todo-glabel small { font-weight: 400; color: #94a3b8; font-size: 10px; }
+
+/* 信息图三型渲染（flow 横排 / layered 分带 / timeline 时间轴） */
+.cs-dg { margin: 10px 0 14px; padding: 12px; border: 1px solid #eef2f7; border-radius: 10px; background: #fff; }
+.cs-dg-axis { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.cs-dg-box { padding: 8px 12px; border: 1px solid #93c5fd; border-radius: 8px; background: #eff6ff;
+  font-size: 11.5px; color: #1e3a8a; line-height: 1.5; max-width: 220px; }
+.cs-dg-arrow { color: #64748b; font-size: 14px; }
+.cs-dg-rows { display: flex; flex-direction: column; gap: 12px; }
+.cs-dg-row { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.cs-dg-row.lv0 .cs-dg-box { background: #dbeafe; border-color: #3b82f6; color: #1e3a8a; font-weight: 600; }
+.cs-dg-row.lv1 .cs-dg-box { background: #eff6ff; }
+.cs-dg-row.lv2 .cs-dg-box { background: #f8fbff; color: #3b82f6; }
+.cs-dg-timeline .cs-dg-axis { align-items: stretch; }
+.cs-dg-tl { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 96px; }
+.cs-dg-when { font-size: 10.5px; color: #1d4ed8; font-weight: 600; }
+.cs-dg-dot { width: 8px; height: 8px; border-radius: 50%; background: #1d4ed8; }
+.cs-dg figcaption { margin-top: 8px; text-align: center; font-size: 11px; color: #64748b; }

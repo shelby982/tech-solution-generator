@@ -63,6 +63,19 @@ CREATE TABLE IF NOT EXISTS citations (
 CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status);
 
 -- 质检发现（落库用于待办/趋势/已处理标记；实时计算仍保留为"当前状态"）
+-- 生成时的事实缺口（"依据核对"待办）——与质检发现分开存，避免被 sync_findings 清掉
+CREATE TABLE IF NOT EXISTS chapter_gaps (
+    id          TEXT PRIMARY KEY,
+    project_id  INTEGER NOT NULL,
+    thread_id   TEXT NOT NULL DEFAULT '',
+    block_id    TEXT NOT NULL DEFAULT '',
+    message     TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(thread_id, block_id, message)
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_gaps_open ON chapter_gaps(project_id, block_id, status);
+
 CREATE TABLE IF NOT EXISTS quality_findings (
     id TEXT PRIMARY KEY,
     project_id INTEGER NOT NULL,
