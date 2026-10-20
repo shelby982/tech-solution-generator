@@ -184,9 +184,14 @@ HARNESS = r"""
        { summaries: summaries.length, noTint: badSummary.length });
 
   // S 右栏信息架构：页签 = 待办 / 素材 / 进度（依据已并入计划面板）
-  const tabLabels = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].map((b) => b.textContent.trim());
-  mark('右栏页签为 待办/素材/进度', tabLabels.length === 3 && tabLabels[0] === '待办' && tabLabels[1] === '素材' && tabLabels[2] === '进度',
-       { tabs: tabLabels });
+  const tabEls = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')];
+  const tabKeys = tabEls.map((b) => b.dataset.panel);
+  // 文案可能带计数徽标（如「待办4」），匹配用前缀
+  const tabTexts = tabEls.map((b) => b.textContent.replace(/\d+/g, '').trim());
+  mark('右栏页签为 待办/素材/进度',
+       tabKeys.length === 3 && tabKeys[0] === 'todo' && tabKeys[1] === 'materials' && tabKeys[2] === 'ai'
+       && tabTexts[0] === '待办' && tabTexts[1] === '素材' && tabTexts[2] === '进度',
+       { keys: tabKeys, texts: tabTexts });
   // 待办页签：按模块分组，每条含动作按钮
   const todoPane = document.querySelector('[data-pane="todo"]');
   const todoRows = todoPane ? [...todoPane.querySelectorAll('.cs-todo-row')] : [];
@@ -215,18 +220,13 @@ HARNESS = r"""
   // T 章头「本章计划」按钮（带待办角标）
   const planBtn = document.querySelector('.cs-plan-btn');
   const badge = planBtn?.querySelector('.cs-plan-badge');
-  // 徽标必须完整落在按钮内（右边界不越过边框），且按钮右内边距 ≥4px
-  let badgeInside = null, badgePad = null;
-  if (planBtn && badge) {
-    const pb = planBtn.getBoundingClientRect();
-    const cs2 = getComputedStyle(planBtn);
-    badgePad = parseFloat(cs2.paddingRight) || 0;
-    badgeInside = Math.round(pb.right - (parseFloat(cs2.borderRightWidth) || 0) - badge.getBoundingClientRect().right);
-  }
-  mark('章头入口「本章计划」+ 待办角标', !!planBtn && /本章计划/.test(planBtn.textContent),
-       { label: planBtn?.textContent?.replace(/\s+/g, ' ').trim(), badge: badge?.textContent?.trim() || null });
-  mark('待办角标不溢出且留白 ≥4px', !badge || (badgeInside !== null && badgeInside >= 0 && badgePad >= 4),
-       { inside: badgeInside, padRight: badgePad });
+  // 章头按钮只写「本章计划」；待办数量显示在右栏「待办」页签标题上
+  mark('章头入口为纯「本章计划」（无角标）',
+       !!planBtn && /^本章计划$/.test(planBtn.textContent.replace(/\s+/g, ' ').trim()) && !planBtn.querySelector('.cs-plan-badge'),
+       { label: planBtn?.textContent?.replace(/\s+/g, ' ').trim() });
+  const tabBadge = document.querySelector('[data-todo-badge]');
+  const tabBadgeCount = tabBadge && !tabBadge.hidden ? tabBadge.textContent.trim() : '';
+  mark('待办页签标题显示待办数量', !!tabBadge, { badge: tabBadgeCount });
 
   // U 章节类型已移入计划面板「写法」
   const kindRow = dialog.querySelector('[data-cp-layout]');

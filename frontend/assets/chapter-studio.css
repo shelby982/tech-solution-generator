@@ -584,3 +584,8 @@
 .cs-plan-slot .cs-plan-btn .cs-plan-badge { margin-left: 0; }
 .cs-plan-slot .cs-plan-btn:has(.cs-plan-badge) { padding-right: 6px; }
 .cs-plan-badge { font-size: 10px; line-height: 14px; padding: 0 6px; }
+
+/* 右栏「待办」页签计数徽标 */
+.cs-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px;
+  margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #fee2e2; color: #b91c1c;
+  font-size: 10px; font-weight: 600; line-height: 1; }

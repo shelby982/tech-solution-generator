@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v319';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v319';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v319';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v320';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v320';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v320';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -146,7 +146,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
         <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办</button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办<span class="cs-tab-badge" data-todo-badge hidden></span></button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -1318,6 +1318,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     ['content', '内容'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
   ];
 
+  /** 右栏「待办」页签标题上的计数徽标（口径与待办页签一致，排除素材类） */
+  function paintTodoBadge() {
+    const el = host.querySelector('[data-todo-badge]');
+    if (!el) return;
+    const count = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length;
+    el.textContent = String(count);
+    el.hidden = !count;
+  }
+
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
     const todos = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material');
@@ -1464,7 +1473,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 置顶并标星、给出计数。业务口径：挂载是"编写时的参考依据"，不参与目录生成。
   // 详见 docs/design/原型到代码-落点对照.md 「四、【挂起·待办】编写模块：技术规范书关键要求」。
   const paintAside = () => {
-    profile[active.id]=context.profile;paintTree();stats();
+    profile[active.id]=context.profile;paintTree();stats();paintTodoBadge();
     const layout = context.layouts[context.profile.layout];
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
@@ -1543,10 +1552,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const unit = block ? unitOf.get(String(block.block_id)) : null;
     const info = unit ? planUnits.get(unit) : null;
     if (!info) { slot.innerHTML = ''; return; }
-    const todoCount = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length;
     slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
-      + `title="本章计划：要交什么 / 待办 ${todoCount} 项 / 依据与写法 —— 点开查看与处理">`
-      + `本章计划${todoCount ? `<span class="cs-plan-badge">待办 ${todoCount}</span>` : ''}</button>`;
+      + `title="本章计划：要交什么 / 依据与写法 —— 点开查看">本章计划</button>`;
   }
 
   async function select(id) {
