@@ -375,3 +375,41 @@
 .cs-cp-sub-details .cs-cp-band { margin-top: 4px; }
 
 .cs-cp-note { margin: 4px 0 6px; font-size: 11px; color: #94a3b8; }
+
+/* 编写计划弹窗 —— 按定稿效果图实现 */
+.cs-cp-head { padding-bottom: 12px; border-bottom: 1px solid var(--line, #eef2f7); }
+.cs-cp-head h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 17px; font-weight: 600; color: #0f172a; }
+.cs-cp-facts { margin: 0; font-size: 13px; color: #334155; font-variant-numeric: tabular-nums; }
+.cs-cp-info { display: inline-flex; width: 13px; height: 13px; border-radius: 50%; border: 1px solid #cbd5e1; color: #94a3b8; font-size: 9px; align-items: center; justify-content: center; margin-left: 3px; vertical-align: 1px; cursor: help; }
+.cs-cp-cta { display: flex; justify-content: flex-end; margin-top: 10px; }
+.cs-cp-block { border-top: 1px solid #eef2f7; padding: 12px 0 6px; }
+.cs-cp-block > header, .cs-cp-block > summary { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.cs-cp-block > header b, .cs-cp-block > summary b { font-weight: 600; color: #0f172a; }
+.cs-cp-block > header em, .cs-cp-block > summary em { font-style: normal; font-size: 11.5px; color: #64748b; flex: 1; }
+.cs-cp-block > summary { cursor: pointer; list-style: none; }
+.cs-cp-block > summary::-webkit-details-marker { display: none; }
+.cs-cp-block > summary::before { content: '▸'; color: #94a3b8; font-size: 10px; }
+.cs-cp-block[open] > summary::before { content: '▾'; }
+.cs-cp-fold-body { padding: 8px 0 2px 18px; }
+.cs-cp-todo { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed #f1f5f9; font-size: 12.5px; }
+.cs-cp-todo:last-child { border-bottom: 0; }
+.cs-cp-no { width: 16px; height: 16px; border-radius: 50%; background: #eef2ff; color: #4338ca; font-size: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.cs-cp-todo-text { flex: 1; min-width: 0; color: #334155; }
+.cs-cp-del { border-bottom: 1px dashed #f1f5f9; border-left: 3px solid #cbd5e1; padding: 7px 0 7px 9px; cursor: pointer; }
+.cs-cp-del.tone-ok { border-left-color: #22c55e; }
+.cs-cp-del.tone-warn { border-left-color: #f59e0b; }
+.cs-cp-del.tone-idle { border-left-color: #cbd5e1; }
+.cs-cp-del-head { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.cs-cp-del-head b { font-weight: 500; min-width: 0; }
+.cs-cp-tri { color: #94a3b8; font-size: 9px; width: 9px; flex-shrink: 0; }
+.cs-cp-del-num { margin-left: auto; font-size: 11.5px; color: #64748b; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.cs-cp-del-status { font-size: 11px; color: #b45309; flex-shrink: 0; margin-left: 12px; }
+.cs-cp-del.tone-ok .cs-cp-del-status { color: #15803d; }
+.cs-cp-del.tone-idle .cs-cp-del-status { color: #94a3b8; }
+.cs-cp-del-body { padding-top: 5px; }
+.cs-cp-sub { margin: 6px 0 0; }
+.cs-cp-sub > summary { cursor: pointer; font-size: 12px; color: #334155; list-style: none; }
+.cs-cp-sub > summary::-webkit-details-marker { display: none; }
+.cs-cp-sub > summary::before { content: '▸'; color: #94a3b8; font-size: 9px; margin-right: 4px; }
+.cs-cp-sub[open] > summary::before { content: '▾'; }
+.cs-cp-sub .cs-cp-band { margin-top: 6px; padding: 9px 12px; background: #f8fafc; border-radius: 8px; }

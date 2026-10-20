@@ -782,6 +782,78 @@ def _key_points_from_title(title: str) -> list[str]:
     return []
 
 
+def _build_todo(deliverables: list[dict], materials: list[dict], word_plan: dict,
+                guidance: dict, content: str, is_parent: bool, is_catalog: bool) -> list[dict]:
+    """统一待办：编写人员打开弹窗第一眼要看的东西（按"卡生成 > 内容 > 来源 > 字数 > 图表"排序）。"""
+    if is_catalog:
+        return []
+    body = str(content or "")
+    todos: list[dict] = []
+
+    if is_parent:
+        written = word_plan.get("written") or 0
+        target = word_plan.get("total") or 0
+        if target and written < target * 0.6:
+            todos.append({"priority": 1, "kind": "summary", "text": f"总述未写完（已写 {written} 字 / 目标 {target} 字）",
+                          "action": "regen", "action_label": "去写总述"})
+        elif written > (target or 0) * 1.5:
+            todos.append({"priority": 4, "kind": "budget", "text": f"总述超建议（{written} 字 / 建议 {target} 字）",
+                          "action": "condense", "action_label": "去精简"})
+        return todos
+
+    # 1) 素材缺口（缺料就写不出）
+    for item in materials:
+        if item.get("status") == "已齐":
+            continue
+        lack = max(0, int(item.get("need") or 0) - int(item.get("have") or 0))
+        if lack:
+            todos.append({"priority": 1, "kind": "material",
+                          "text": f"补 {lack} 份「{item.get('kind')}」（{item.get('purpose')}）",
+                          "action": "find", "action_label": "去找素材"})
+    # 2) 内容未达标（某项交付物没写/不足）
+    for item in deliverables:
+        if str(item.get("title") or "").endswith("总述") or item.get("source") == "system":
+            continue
+        status = item.get("status")
+        if status in ("未写", "不足"):
+            detail = (f"已写 {item.get('written_words') or 0} / 目标 {item.get('target_words')} 字"
+                      if item.get("kind") == "text" else "尚未产出")
+            todos.append({"priority": 2, "kind": "deliverable",
+                          "text": f"{item.get('title')}：{status}（{detail}）",
+                          "action": "regen", "action_label": "去补写"})
+    # 3) 来源标注
+    if re.search(r"(政策|标准|指标|数据)", body) and "【来源" not in body:
+        todos.append({"priority": 3, "kind": "source_mark", "text": "政策 / 标准 / 数据处补【来源】标注",
+                      "action": "find", "action_label": "去补来源"})
+    # 4) 字数
+    total, written = word_plan.get("total") or 0, word_plan.get("written") or 0
+    if total and written > total * 1.3:
+        todos.append({"priority": 4, "kind": "budget",
+                      "text": f"字数超计划 {round((written / total - 1) * 100)}%（{written} / {total} 字）",
+                      "action": "condense", "action_label": "去精简"})
+    elif total and written and written < total * 0.4:
+        todos.append({"priority": 4, "kind": "budget",
+                      "text": f"字数不足（{written} / {total} 字）", "action": "regen", "action_label": "去补写"})
+    # 5) 图表缺失
+    for item in deliverables:
+        if item.get("kind") in ("table", "figure") and item.get("status") == "未写":
+            todos.append({"priority": 5, "kind": "figure",
+                          "text": f"缺{item.get('kind_label')}：{item.get('title')}",
+                          "action": "regen", "action_label": "去出图"})
+    todos.sort(key=lambda item: item["priority"])
+    # 每类最多 2 条，保证"素材 / 内容 / 来源 / 字数 / 图表"都能覆盖到，而不是被同类占满
+    picked, per_kind = [], {}
+    for item in todos:
+        kind = item["kind"]
+        if per_kind.get(kind, 0) >= 2:
+            continue
+        per_kind[kind] = per_kind.get(kind, 0) + 1
+        picked.append(item)
+        if len(picked) >= 5:
+            break
+    return picked
+
+
 def _self_check(deliverables: list[dict], word_plan: dict, clauses: list[dict],
                 content: str, figures_plan: dict) -> list[dict]:
     """写完自检（可直接勾）。"""
@@ -1025,6 +1097,8 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "key_points_by_deliverable": _split_key_points(key_points, deliverables),
         "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
+        "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
+                            word_plan, guidance, content, is_parent_chapter, is_catalog),
         "children": children,
         "catalog": is_catalog,
         "has_children": has_children,
