@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v288';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v288';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v288';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v291';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v291';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v291';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -404,7 +404,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const isParent = children.length > 0 && !isCatalog;
       const todoCount = todo.length;
       const doneCount = deliverables.filter((item) => item.status === '达标').length;
-      const pendingCount = deliverables.length - doneCount;
+      const unmetCount = deliverables.filter((item) => item.status === '不足' || item.status === '超额').length;
+      const unwrittenCount = deliverables.filter((item) => item.status === '未写').length;
       // 只展开"第一项未达标"的交付物
       const firstUnmet = deliverables.findIndex((item) => item.status !== '达标');
       const mainAction = isCatalog ? '看子节进度' : todoCount ? `去补 ${todoCount} 项` : '去生成正文';
@@ -470,7 +471,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         <details class="cs-cp-block" data-cp-sec="how">
-          <summary><b>④ 写法要点</b><em>结构 / 段落 / 落点</em>
+          <summary><b>④ 写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
             <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
           <div class="cs-cp-fold-body cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}

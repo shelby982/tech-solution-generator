@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""UI 自动审查：按设计稿规则检查真实界面（还原度 + 结构 + 视觉主次）。
+
+依赖：本机 Chrome（需以 --remote-debugging-port=9333 启动）、websockets、运行中的后端。
+用法：python scripts/ui-selfcheck.py --thread <threadId> [--block s1.2.1.1] [--shot out.png]
+输出：每条规则的 PASS/FAIL + 截图；退出码非 0 表示有 FAIL。
+"""
+import argparse, asyncio, base64, json, pathlib, sys, urllib.request
+import websockets
+
+PORT = 9333
+APP = "http://127.0.0.1:8015/three-mode?projectId=29&packageId=559&view=outline&threadId={thread}&planning=1"
+
+HARNESS = r"""
+(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const out = { steps: [] };
+  const mark = (name, ok, extra) => out.steps.push({ name, ok, ...(extra || {}) });
+
+  // 1) 进入编写阶段
+  document.querySelector('.sr-rail-item[data-stage="4"]')?.click();
+  for (let i = 0; i < 60 && !document.querySelector('.cs-node'); i++) await sleep(500);
+  mark('进入编写阶段', !!document.querySelector('.cs-node'), { nodes: document.querySelectorAll('.cs-node').length });
+
+  // 2) 选中目标章节（按 blockId 或标题）
+  const targetBlock = __BLOCK__;
+  const targetTitle = __TITLE__;
+  const nodes = [...document.querySelectorAll('.cs-node')];
+  let node = targetBlock ? nodes.find((n) => (n.dataset.block || '').includes(targetBlock)) : null;
+  if (!node && targetTitle) node = nodes.find((n) => (n.textContent || '').replace(/\s+/g, '').includes(targetTitle));
+  if (!node) node = nodes.find((n) => !/目录/.test(n.textContent || ''));
+  node?.click();
+  await sleep(2600);
+
+  // 3) 打开「本章编写计划」
+  document.querySelector('.cs-plan-btn')?.click();
+  for (let i = 0; i < 40 && !document.querySelector('[data-cp-sec]'); i++) await sleep(400);
+  const dialog = [...document.querySelectorAll('dialog')].find((d) => d.textContent.includes('本章编写计划'));
+  mark('打开本章编写计划', !!dialog);
+  if (!dialog) return JSON.stringify(out);
+  await sleep(600);
+
+  const measure = (el, props) => {
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const o = { width: Math.round(rect.width), height: Math.round(rect.height) };
+    props.forEach((p) => { o[p] = cs[p]; });
+    return o;
+  };
+
+  // A 结构：五个区块
+  const hasTodo = !!dialog.querySelector('[data-cp-sec="todo"]');
+  const hasDeliv = !!dialog.querySelector('[data-cp-sec="deliverables"]') || !!dialog.querySelector('[data-cp-sec="children"]');
+  const hasFolds = dialog.querySelectorAll('details.cs-cp-block').length;
+  const footer = dialog.querySelector('.cs-cp-footer');
+  mark('区块齐备（待办/交付物/折叠/底部操作）', !!hasTodo && hasDeliv && hasFolds >= 2 && !!footer,
+       { todo: hasTodo, deliverables: hasDeliv, folds: hasFolds, footer: !!footer });
+
+  // B 主操作唯一且是主色
+  const primary = [...dialog.querySelectorAll('.cs-cp-primary')];
+  const headerPrimary = primary.filter((b) => !b.closest('.cs-cp-footer'));
+  const primaryBg = headerPrimary[0] ? getComputedStyle(headerPrimary[0]).backgroundColor : '';
+  mark('主操作唯一且蓝底', headerPrimary.length === 1 && /29, 78, 216|30, 64, 175/.test(primaryBg),
+       { count: headerPrimary.length, bg: primaryBg, label: headerPrimary[0]?.textContent?.trim() });
+
+  // C 交付物：只展开一项
+  const rows = [...dialog.querySelectorAll('.cs-cp-del')];
+  const openRows = rows.filter((r) => { const b = r.querySelector('.cs-cp-del-body'); return b && !b.hidden; });
+  mark('交付物只展开一项', rows.length === 0 || openRows.length === 1, { rows: rows.length, open: openRows.length });
+
+  // D 状态只出现一次（每行）
+  const dupStatus = rows.filter((r) => (r.textContent.match(/不足|未写|达标/g) || []).length > 2).length;
+  mark('状态词不重复', dupStatus === 0, { rows: rows.length, dupRows: dupStatus });
+
+  // E 折叠摘要带数字
+  const foldSummaries = [...dialog.querySelectorAll('details.cs-cp-block > summary')].map((s) => s.textContent.trim());
+  const withNumber = foldSummaries.filter((t) => /\d/.test(t)).length;
+  mark('折叠摘要带数字', foldSummaries.length === 0 || withNumber === foldSummaries.length,
+       { total: foldSummaries.length, withNumber });
+
+  // F ⓘ 只出现一次
+  const infoCount = dialog.querySelectorAll('.cs-cp-info').length;
+  mark('口径提示 ⓘ 只有一个', infoCount <= 1, { count: infoCount });
+
+  // G 弹窗宽度接近设计（680 ± 60）
+  const dw = Math.round(dialog.getBoundingClientRect().width);
+  mark('弹窗宽度符合设计（680±60）', Math.abs(dw - 680) <= 60, { width: dw });
+
+  // H 底部操作 sticky
+  const footerPos = measure(footer, ['position']);
+  mark('底部操作固定可见', footerPos?.position === 'sticky' || footerPos?.position === 'fixed', footerPos || {});
+
+  // I 无横向溢出
+  const bodyEl = dialog.querySelector('.cs-plan-body');
+  const overflowX = bodyEl ? bodyEl.scrollWidth - bodyEl.clientWidth : 0;
+  mark('无横向溢出', overflowX <= 2, { overflowX });
+
+  // J 待办条数与主操作文案一致
+  const todoCount = dialog.querySelectorAll('[data-cp-todo]').length;
+  const mainLabel = headerPrimary[0]?.textContent || '';
+  const consistent = todoCount === 0 ? /生成|子节/.test(mainLabel) : mainLabel.includes(String(todoCount));
+  mark('主操作文案与待办数一致', consistent, { todos: todoCount, label: mainLabel.trim() });
+
+  // K 交付物展开区在标题下方（不是右侧）
+  const openRow = openRows[0];
+  if (openRow) {
+    const headEl = openRow.querySelector('.cs-cp-del-head');
+    const bodyEl2 = openRow.querySelector('.cs-cp-del-body');
+    const below = headEl && bodyEl2 && bodyEl2.getBoundingClientRect().top >= headEl.getBoundingClientRect().bottom - 2;
+    mark('交付物展开区在标题下方', !!below, { headBottom: Math.round(headEl?.getBoundingClientRect().bottom || 0),
+      bodyTop: Math.round(bodyEl2?.getBoundingClientRect().top || 0) });
+  } else {
+    mark('交付物展开区在标题下方', true, { note: '无展开项' });
+  }
+
+  out.metrics = {
+    dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
+    title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
+    facts: measure(dialog.querySelector('.cs-cp-facts'), ['fontSize', 'color']),
+  };
+  out.todoCount = todoCount;
+  return JSON.stringify(out);
+})()
+"""
+
+
+async def run(args) -> int:
+    info = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/version", timeout=5).read())
+    async with websockets.connect(info["webSocketDebuggerUrl"], max_size=64 * 1024 * 1024) as ws:
+        seq, console = 0, []
+
+        async def call(method, params=None, sid=None, await_promise=False):
+            nonlocal seq
+            seq += 1
+            msg = {"id": seq, "method": method, "params": params or {}}
+            if sid:
+                msg["sessionId"] = sid
+            await ws.send(json.dumps(msg))
+            while True:
+                data = json.loads(await ws.recv())
+                if data.get("method") == "Runtime.consoleAPICalled" and data["params"].get("type") == "error":
+                    console.append(" ".join(str(a.get("value", "")) for a in data["params"].get("args", [])))
+                if data.get("method") == "Runtime.exceptionThrown":
+                    console.append("exception: " + str(data["params"].get("exceptionDetails", {}).get("text")))
+                if data.get("id") == seq:
+                    if await_promise and data.get("result", {}).get("exceptionDetails"):
+                        console.append("eval-exc: " + str(data["result"]["exceptionDetails"].get("text")))
+                    return data.get("result", {})
+
+        target = await call("Target.createTarget", {"url": "about:blank"})
+        sid = (await call("Target.attachToTarget", {"targetId": target["targetId"], "flatten": True}))["sessionId"]
+        await call("Runtime.enable", sid=sid)
+        await call("Page.enable", sid=sid)
+        await call("Emulation.setDeviceMetricsOverride",
+                   {"width": 1440, "height": 960, "deviceScaleFactor": 2, "mobile": False}, sid=sid)
+        await call("Page.navigate", {"url": APP.format(thread=args.thread)}, sid=sid)
+        await asyncio.sleep(args.wait)
+        js = HARNESS.replace("__BLOCK__", json.dumps(args.block)).replace("__TITLE__", json.dumps(args.title))
+        result = await call("Runtime.evaluate",
+                            {"expression": js, "awaitPromise": True, "returnByValue": True},
+                            sid=sid, await_promise=True)
+        if args.shot:
+            data = await call("Page.captureScreenshot", {"format": "png"}, sid=sid)
+            pathlib.Path(args.shot).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(args.shot).write_bytes(base64.b64decode(data.get("data", "")))
+        await call("Target.closeTarget", {"targetId": target["targetId"]})
+
+    raw = result.get("result", {}).get("value")
+    try:
+        report = json.loads(raw) if raw else {"steps": [], "error": "no result"}
+    except json.JSONDecodeError:
+        report = {"steps": [], "error": str(raw)[:300]}
+
+    steps = report.get("steps", [])
+    failed = [s for s in steps if not s.get("ok")]
+    print(f"  UI 自动审查 · {args.block or args.title or '本章'}")
+    for step in steps:
+        print(f"   {'PASS' if step.get('ok') else 'FAIL'}  {step.get('name')}")
+    if console:
+        print(f"   控制台错误 {len(console)} 条：{console[:3]}")
+    metrics = report.get("metrics") or {}
+    if metrics.get("title"):
+        print(f"   度量：标题 {metrics['title'].get('fontSize')}/{metrics['title'].get('fontWeight')} · "
+              f"数字行 {metrics['facts'].get('fontSize')} · 弹窗宽 {metrics['dialog'].get('width')}px")
+    print(f"   结论：{len(steps) - len(failed)}/{len(steps)} 通过" + (f"，截图 {args.shot}" if args.shot else ""))
+    return 0 if steps and not failed else 1
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--thread", required=True)
+    ap.add_argument("--block", default="")
+    ap.add_argument("--title", default="项目背景现状目标")
+    ap.add_argument("--wait", type=float, default=8)
+    ap.add_argument("--shot", default="")
+    sys.exit(asyncio.run(run(ap.parse_args())))

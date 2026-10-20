@@ -432,3 +432,7 @@
 .cs-cp-del-acts { margin: 6px 0 0; }
 .cs-cp-block { padding: 13px 0 7px; }
 .cs-cp-todo { padding: 8px 0; }
+
+/* 还原度修正：交付物行必须是"上下结构"（标题一行、必答/动作在下方） */
+.cs-cp-del { display: block; }
+.cs-cp-del-head { display: flex; }
