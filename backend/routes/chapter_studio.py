@@ -266,6 +266,26 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
     return '\n'.join(out)
 
 
+@router.post('/blocks/{block_id}/studio/cleanup-pending')
+async def cleanup_pending_placeholders(block_id: int):
+    """清掉正文里的「待核对与补充」整段与纯占位行（历史内容一次性修复）。
+
+    产品口径：正文始终是一份完整正常的内容；事实缺口留在待办/质检里。
+    """
+    from services.chapter_cleanup import strip_pending_sections
+    from services.block_store import update_block_content, add_revision
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        before = str(block.get('content') or '')
+        cleaned, removed = strip_pending_sections(before)
+        if cleaned == before.strip() and not removed:
+            return {'removed': 0, 'unchanged': True}
+        await add_revision(db, block_id, before, summary='清理待核对占位内容', source='manual')
+        await update_block_content(db, block_id, cleaned, status=block.get('status') or 'done')
+    return {'removed': len(removed), 'unchanged': False, 'content': cleaned}
+
+
 @router.post('/blocks/{block_id}/studio/table')
 async def generate_table(block_id: int, body: TableBody):
     """按本章要求生成一张**有内容的**表格草稿（Markdown）。

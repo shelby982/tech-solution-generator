@@ -314,6 +314,11 @@ HARNESS = r"""
                         '表格页签：AI 生成表格 / 从素材插入表格']) mark(name, false, {});
   }
 
+  // Z 正文不得含"待核对与补充"占位块（应留在待办里）
+  const edVal = document.querySelector('.cs-editor')?.value || '';
+  const hasPendingBlock = /(^|\n)#{2,4}\s*待核对与补充/.test(edVal);
+  mark('正文不含「待核对与补充」占位块', !hasPendingBlock, { hasPendingBlock });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),

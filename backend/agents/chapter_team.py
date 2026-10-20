@@ -164,7 +164,8 @@ def assemble(plan,artifacts):
             parts.append('| '+' | '.join(map(escape,piece['columns']))+' |\n| '+' | '.join('---' for _ in piece['columns'])+' |\n'+
                          '\n'.join('| '+' | '.join(map(escape,row))+' |' for row in piece['rows']))
         else:parts.append(':::diagram '+task['title']+'\n'+' -> '.join(piece['nodes'])+'\n:::')
-    if plan.get('gaps'):parts.append('### 待核对与补充\n\n'+'\n'.join('【待补充：'+gap+'】' for gap in plan['gaps']))
+    # 正文必须是「完整正常的内容」：事实缺口不写进正文，
+    # 由调用方把 plan['gaps'] 落库为待办/质检项（见 services/chapter_writing）。
     return '\n\n'.join(parts)
 
 

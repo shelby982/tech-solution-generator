@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v323';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v323';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v323';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v324';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v324';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v324';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1344,7 +1344,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-todo-act" data-aside-todo="${esc(x.action)}" data-gap-kind="${esc(x.target || '')}">${esc(x.action_label)}</button>
           </div>`).join('')}</div>`;
     }).join('');
-    return `<section data-pane="todo"><h4>待办 <small>${todos.length} 项 · 按优先级</small></h4>${groups}</section>`;
+    const pending = /^#{2,4}\s*待核对与补充|^\s*【待补充[：:]/m.test(String(editor?.value || ''));
+    const cleanCard = pending
+      ? `<div class="cs-todo-clean"><b>正文里有「待核对与补充」占位</b>
+           <button type="button" class="cs-todo-act" data-cleanup-pending>一键清理</button></div>`
+      : '';
+    return `<section data-pane="todo"><h4>待办 <small>${todos.length} 项 · 按优先级</small></h4>${cleanCard}${groups}</section>`;
   }
 
   /** 右栏「素材」页签：三分法 —— 已有可用 / 公开资料可补 / 必须你上传 */
@@ -1724,6 +1729,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='condense'){status('篇幅超额：可删减重复论述，或让 AI 重新精简本章');return;}
       // regen：直接触发本章重编
       host.querySelector('[data-action="ai"]')?.click();
+      return;
+    }
+    if(event.target.closest('[data-cleanup-pending]') && active){
+      const btn=event.target.closest('[data-cleanup-pending]');
+      btn.disabled=true; btn.textContent='清理中…';
+      try{
+        const r=await json(`/api/blocks/${active.id}/studio/cleanup-pending`,{method:'POST'});
+        const fresh=await json(`/api/blocks/${active.id}/studio`);
+        context=fresh; if(fresh.block)editor.value=fresh.block.content||''; changed&&changed();
+        paintAside(); status(r.removed?`已清理 ${r.removed} 处待核对占位`:'正文里没有待核对占位');
+      }catch(error){status(error.message); btn.disabled=false; btn.textContent='一键清理';}
       return;
     }
     const gapSearch=event.target.closest('[data-gap-search]');

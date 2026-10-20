@@ -20,7 +20,8 @@ export function mountLiveWriting(host,{editor,render,onChange,scope}){
   let custom=[],focused=null,lastJob=null;
   const key=()=>`chapter-live:${scope}:${jobId}`;
   const merged=()=>mergeWritingBlocks(blocks,edits,removed);
-  const value=()=>merged().filter(b=>b.content).map(b=>b.content).join('\n\n')+(gaps.length?'\n\n### 待核对与补充\n\n'+gaps.map(g=>'【待补充：'+g+'】').join('\n\n'):'');
+  // 事实缺口不进正文（正文始终是完整正常的内容）：gaps 只在待办/质检里呈现
+  const value=()=>merged().filter(b=>b.content).map(b=>b.content).join('\n\n');
   const sync=()=>{
     editor.value=value();
     sessionStorage.setItem(key(),JSON.stringify({edits,removed,custom}));
