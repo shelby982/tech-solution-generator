@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v283';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v283';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v283';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v284';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v284';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v284';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -469,12 +469,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       bindEvents();
     };
     const bindEvents = () => {
-      body.querySelector('[data-cp-close]').onclick = () => dialog.close();
-      body.querySelector('[data-cp-generate]').onclick = () => {
+      // 关闭按钮在新布局里已移除（用弹窗右上角 ×）；这里用可选链，避免 null.onclick 报错
+      body.querySelector('[data-cp-close]')?.addEventListener('click', () => dialog.close());
+      body.querySelector('[data-cp-generate]')?.addEventListener('click', () => {
         dialog.close();
         void select(blockId);
         globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
-      };
+      });
 
       body.querySelectorAll('[data-cp-find]').forEach((button) => button.addEventListener('click', () => {
         dialog.close();
@@ -587,6 +588,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       await render();
     } catch (err) {
       body.innerHTML = `<p class="cs-warning">加载失败：${esc(String(err.message || err))}</p>`;
+      // 出错时把细节打到控制台，便于定位（不弹给用户）
+      globalThis.console?.error?.('[本章计划] 渲染失败', err);
     }
   }
 
