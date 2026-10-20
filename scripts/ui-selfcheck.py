@@ -175,6 +175,16 @@ HARNESS = r"""
   mark('序号行与内容区有视觉区分', summaries.length >= 3 && badSummary.length === 0,
        { summaries: summaries.length, noTint: badSummary.length });
 
+  // S 右栏「计划」页签信息收敛（h4 块 ≤ 3，且不含过时的"先确认计划"）
+  const asidePane = document.querySelector('[data-pane="basis"]');
+  if (asidePane) {
+    const h4s = [...asidePane.querySelectorAll('h4')].map((h) => h.textContent.replace(/\s+/g, ''));
+    const stale = /先确认计划|查看 \/ 确认计划/.test(asidePane.textContent);
+    mark('右栏计划页签信息收敛', h4s.length <= 3 && !stale, { blocks: h4s, stale });
+  } else {
+    mark('右栏计划页签信息收敛', true, { note: '无依据页签（素材页激活）' });
+  }
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),

@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v299';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v299';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v299';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v300';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v300';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v300';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1288,17 +1288,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `<section data-pane="basis">
       <div class="cs-plan-summary"><b>本章编写计划</b>
-        <small>评分点 ${basisCovered ? `${basisCovered.responded}/${basisCovered.total}` : '—'} 已落点</small>
-        <button type="button" class="mw-btn" data-aside-open-plan="${esc(String(active.block_id))}">打开本章计划</button></div>
-      <h4>本章编制依据${basisCovered ? ` <small>正文已回应 ${basisCovered.responded}/${basisCovered.total}</small>` : ''}</h4>${context.points.map((p, index) => {
+        <small>${basisCovered ? `评分点 ${basisCovered.responded}/${basisCovered.total} 已落点` : '暂无评分点'} · 入口在章头「本章编写计划」</small></div>
+      <h4>依据</h4>${context.points.map((p, index) => {
         const cov = basisCovered?.points?.[index];
         return `<details><summary>${esc(p.item || p.factor)} · ${p.points ?? '—'} 分
           <b class="${cov?.responded ? 'cs-cite-used' : 'cs-cite-unused'}">${cov ? (cov.responded ? '正文已回应' : '正文未回应') : ''}</b></summary><p>${esc(p.criterion)}</p></details>`;
       }).join('') || '<p class="cs-muted">本章未直接关联评分点。</p>'}${context.requirements.length?`<details><summary>规范要求 ${context.requirements.length} 条 · 查看原文</summary>${context.requirements.map(r=>`<p>${esc(r.text)}<small>${esc(r.source_file||'')}</small></p>`).join('')}</details>`:''}${context.source.raw_content?`<details><summary>本章原文内容</summary>${specContentHtml(context.source.raw_content)}</details>`:''}</section>
       ${(() => { const layout = context.profile.layout; const recipe = specInfo.specs[layout]; const global = specInfo.specs.global;
-        return recipe ? `<section data-pane="basis"><h4>编写规范</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
-      ${(() => { const unit = active && unitOf.get(String(active.block_id)); const info = unit && planUnits.get(unit);
-        return info ? `<section data-pane="basis"><h4>编写计划</h4><p class="cs-muted">本章属于《${esc(info.title)}》的编写计划（${info.leaves} 节）：先确认计划，再按计划编制。</p><button type="button" class="mw-btn" data-plan="${esc(unit)}">查看 / 确认计划</button></section>` : ''; })()}
+        return recipe ? `<section data-pane="basis"><h4>写法</h4><p class="cs-muted">本章按《${esc(recipeLabel(layout))} v${recipe.version}》编写，全局纪律 v${global ? global.version : '—'}。</p><button type="button" class="mw-btn" data-spec="${esc(layout)}">查看 / 编辑规范</button></section>` : ''; })()}
+
       <section data-pane="basis"><h4>编排建议</h4><label>章节类型 <select data-cs="layout">${Object.entries(context.layouts).map(([id,l])=>`<option value="${id}" ${id===context.profile.layout?'selected':''}>${esc(l.label)}</option>`).join('')}</select></label><p>${layout.blocks.map(esc).join(' → ')}</p><p class="cs-muted">${context.materials.some(m=>m.confirmed)?'生成仅引用已核对素材，并结合本章评分及规范要求。':'无已核对素材：可先写项目分析与拟实施方案；人员、业绩、证书、实测参数等保留待补充。'}</p>${context.missing.map(m=>`<p class="cs-warning">${esc(m)}</p>`).join('')}</section>
       <section data-pane="materials">${(() => {
         const key = String(active.block_id);
