@@ -201,6 +201,25 @@ HARNESS = r"""
   const gapPx = (stageHead && wsEl) ? Math.round(wsEl.getBoundingClientRect().top - stageHead.getBoundingClientRect().bottom) : null;
   mark('头部到工作台间距 ≤ 18px', gapPx !== null && gapPx <= 18, { gap: gapPx });
 
+  // W 素材池：卡片式、无重复状态条、空态有上传入口
+  const matTab = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.textContent.trim() === '素材池');
+  matTab?.click();
+  await sleep(500);
+  const matPane = document.querySelector('[data-pane="materials"]');
+  if (matPane) {
+    const cards = matPane.querySelectorAll('.cs-mat-card').length;
+    const dupSummary = !!matPane.querySelector('.cs-material-summary');
+    const emptyState = matPane.querySelector('.cs-mat-empty');
+    const uploadable = !!matPane.querySelector('[data-cs="upload"]');
+    mark('素材池为卡片式且无重复状态条', !dupSummary && (cards > 0 || !emptyState) && uploadable,
+         { cards, dupSummary, hasEmptyHint: !!emptyState, uploadable });
+  } else {
+    mark('素材池为卡片式且无重复状态条', false, { note: '未找到素材面板' });
+  }
+  // 切回依据页签，避免影响后续规则
+  [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.textContent.trim() === '依据')?.click();
+  await sleep(300);
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),

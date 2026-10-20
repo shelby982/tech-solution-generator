@@ -483,3 +483,25 @@
   border-radius: 999px; background: #fee2e2; color: #b91c1c; }
 .cs-cp-kind-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: #334155; flex-wrap: wrap; }
 .cs-cp-kind-row select { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #dbe3ef; border-radius: 6px; }
+
+/* 素材池：卡片式 */
+.cs-mat-add { flex-shrink: 0; font: inherit; font-size: 11.5px; padding: 3px 10px; border: 1px solid #dbe3ef;
+  background: #fff; border-radius: 999px; color: #1d4ed8; cursor: pointer; }
+.cs-material-head h4 b { font-weight: 600; }
+.cs-material-head { display: flex; align-items: center; gap: 8px; }
+.cs-material-head h4 { flex: 1; margin: 0 0 6px; }
+.cs-material-head--sub { margin-top: 14px; }
+.cs-mat-card { border: 1px solid #eef2f7; border-radius: 9px; padding: 8px 10px; margin-bottom: 6px; }
+.cs-mat-title { margin: 0; font-size: 12px; font-weight: 500; color: #0f172a; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cs-mat-meta { margin: 3px 0 0; font-size: 11px; color: #64748b; }
+.cs-mat-meta b { margin-left: 4px; }
+.cs-mat-acts { margin: 6px 0 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cs-mat-link { font: inherit; font-size: 11.5px; padding: 0; border: 0; background: transparent; color: #1d4ed8; cursor: pointer; text-decoration: none; }
+.cs-mat-empty { margin: 4px 0 0; font-size: 11.5px; color: #94a3b8; line-height: 1.6; }
+.cs-mat-warn { margin: 6px 0 0; font-size: 11px; color: #b45309; }
+
+.cs-mat-card-top { display: flex; align-items: flex-start; gap: 8px; }
+.cs-mat-card-top .cs-mat-title { flex: 1; min-width: 0; }
+.cs-mat-tag { flex-shrink: 0; font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: #fef3c7; color: #92400e; }
+.cs-mat-tag.ok { background: #dcfce7; color: #166534; }
