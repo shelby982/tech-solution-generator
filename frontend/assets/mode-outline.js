@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v302';
-import { api } from './api.js?v=20261016-v302';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v302';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v304';
+import { api } from './api.js?v=20261016-v304';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v304';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v302';
+       } from './workspace.js?v=20261016-v304';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v302';
+       } from './workspace-model.mjs?v=20261016-v304';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -180,7 +180,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v302';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v304';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -4813,13 +4813,14 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-stack{flex:1;min-width:0;background:#fcfcfd}
   .sr-stage{display:none}
   .sr-stage.on{display:block}
-  .sr-stage-head{display:flex;align-items:center;gap:10px;padding:11px 15px;
+  .sr-stage-head{display:flex;align-items:center;gap:10px;padding:6px 15px;
     border-bottom:1px solid var(--line2,#eef1f5);background:#fff}
   .sr-stage-head .t{font-weight:600;font-size:13.5px}
   .sr-stage-head .hint{color:var(--muted);font-size:11.5px}
-  .sr-stage-body{padding:12px 15px 18px}
+  .sr-stage-body{padding:6px 15px 12px}
   .sr-subtabs{display:flex;gap:4px;margin:0 0 8px;flex-wrap:wrap}
   .sr-subtabs--head{margin:0 0 0 auto;flex-wrap:nowrap}
+  .sr-subtabs--head .sr-subtab{padding:3px 10px;font-size:12px}
   .sr-subtab{font-size:12.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);
     background:#fff;color:var(--muted);cursor:pointer}
   .sr-subtab.on{background:#eff6ff;border-color:#bfdbfe;color:#2563eb;font-weight:600}
@@ -4937,6 +4938,9 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
   .sr-topic-name{flex:0 0 46%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sr-topic-row select{flex:1;font:inherit;font-size:12.5px;padding:2px 6px;
     border:1px solid var(--line);border-radius:6px;background:#fff}
+  #sr-write-body{margin-top:0}
+  .cs-document-head{display:none}   /* 交付格式块已隐藏，容器不再占 25px 空白 */
+  #sr-write-body .cs-workspace{margin-top:0}
   .sr-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.6}`;
     document.head.appendChild(st);
   }

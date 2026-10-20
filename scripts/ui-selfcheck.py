@@ -195,6 +195,12 @@ HARNESS = r"""
   const kindRow = dialog.querySelector('[data-cp-layout]');
   mark('章节类型在计划面板内', !!kindRow, { found: !!kindRow });
 
+  // V 头部到工作台的垂直间距（章选中后再测）
+  const stageHead = document.querySelector('.sr-stage[data-stage="4"] .sr-stage-head');
+  const wsEl = document.querySelector('#sr-write-body .cs-workspace');
+  const gapPx = (stageHead && wsEl) ? Math.round(wsEl.getBoundingClientRect().top - stageHead.getBoundingClientRect().bottom) : null;
+  mark('头部到工作台间距 ≤ 18px', gapPx !== null && gapPx <= 18, { gap: gapPx });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
