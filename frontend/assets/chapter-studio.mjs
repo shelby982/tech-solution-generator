@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v295';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v295';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v295';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v296';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v296';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v296';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {

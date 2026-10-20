@@ -462,3 +462,18 @@
 .cs-cp-todo-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cs-cp-block > summary { min-width: 0; flex-wrap: nowrap; }
 .cs-cp-block > summary em { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 序号行 vs 内容行：给序号行加浅底带，内容区另起一段，形成层级 */
+.cs-cp-block > summary {
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin: 0 0 2px;
+}
+.cs-cp-block[open] > summary { margin-bottom: 8px; border-color: #e8eef6; }
+.cs-cp-block > summary:hover { background: #f1f5f9; }
+.cs-cp-block > summary::before { margin-right: 2px; }
+/* 内容区与序号行之间留出呼吸，且内容不再贴左边界 */
+.cs-cp-block { padding-top: 10px; }
+.cs-cp-todo:first-of-type, .cs-cp-del:first-of-type { border-top: 1px solid #f1f5f9; }

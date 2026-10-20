@@ -148,6 +148,15 @@ HARNESS = r"""
   mark('块内按钮字号一致（≤13px）', bigBtns.length === 0,
        { buttons: innerBtns.length, tooBig: bigBtns.slice(0, 3).map((b) => b.textContent.trim()) });
 
+  // P 序号行与内容区有区分（序号行有浅底 + 边框，内容区无）
+  const summaries = [...dialog.querySelectorAll('[data-cp-sec] > summary')];
+  const badSummary = summaries.filter((el) => {
+    const cs = getComputedStyle(el);
+    return cs.backgroundColor === 'rgba(0, 0, 0, 0)' || cs.borderBottomWidth === '0px';
+  });
+  mark('序号行与内容区有视觉区分', summaries.length >= 3 && badSummary.length === 0,
+       { summaries: summaries.length, noTint: badSummary.length });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
