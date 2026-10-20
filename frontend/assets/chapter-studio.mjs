@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v307';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v307';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v307';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v310';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v310';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v310';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -124,7 +124,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
-        <div class="cs-toolbar"><button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button><button data-action="save" disabled>保存</button><div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div><button type="button" data-action="diagram" title="把一段文字抽成结构图，插入正文">文字生成图</button><details class="cs-more"><summary>更多</summary><div class="cs-more-menu"><details data-add-menu><summary>添加内容</summary><button data-action="text">文字说明</button><button data-action="table">手动表格</button><button data-action="diagram">手动关系图</button></details><button data-action="complete">确认本章完成</button><button data-action="export-chapter">导出本章 Word</button><button data-action="quality">质检清单</button><button data-action="export-group">导出本组 Word</button></div></details></div>
+        <div class="cs-toolbar">
+          <button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button>
+          <button data-action="save" disabled>保存</button>
+          <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
+          <div class="cs-toolbar-right">
+            <details class="cs-insert"><summary>插入 ▾</summary><div class="cs-insert-menu">
+              <button data-action="text">文字说明</button>
+              <button data-action="table">手动表格</button>
+              <button data-action="diagram" title="把一段文字抽成结构图，插入正文">关系图</button>
+            </div></details>
+            <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
+              <button data-action="quality">质检清单</button>
+              <button data-action="complete">确认本章完成</button>
+              <div class="cs-more-sep"></div>
+              <button data-action="export-chapter">导出本章 Word</button>
+              <button data-action="export-group">导出本组 Word</button>
+            </div></details>
+          </div>
+        </div>
         <div data-cs="status" role="status" aria-live="polite"></div>
         <div data-cs="recovery" hidden></div>
         <textarea class="cs-editor" data-cs="editor" aria-label="本章正文" placeholder="点击上方「AI 编制」生成本章内容，也可直接在此编写。生成结果将显示在这里；核对后点击「保存正文」。"></textarea>
@@ -142,7 +160,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     for(const button of host.querySelectorAll('.cs-inspector-tabs button'))button.setAttribute('aria-pressed',String(button.dataset.panel===panel));
     if(window.innerWidth<=980)get('inspector').scrollIntoView({behavior:'smooth',block:'start'});
   };
-  const status = message => { get('status').textContent = message; };
+  let statusTimer = null;
+  const status = message => {
+    const el = get('status');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', /失败|错误|Cannot|null|异常/.test(String(message)));
+    if (!message) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.add('is-on');
+    globalThis.clearTimeout(statusTimer);
+    statusTimer = globalThis.setTimeout(() => { el.classList.remove('is-on'); el.hidden = true; }, el.classList.contains('is-error') ? 8000 : 4000);
+  };
   const stats = () => {
     const written = blocks.filter(b=>units.has(b.id) && b.content?.trim()).length;
     const complete = blocks.filter(b=>units.has(b.id) && profile[b.id]?.writing_status==='complete').length;
@@ -1279,7 +1308,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(preview)live.hide();else if(live.active)live.show();
     host.querySelector('[data-action="edit"]').setAttribute('aria-pressed',String(!preview));
     host.querySelector('[data-action="preview"]').setAttribute('aria-pressed',String(preview));
-    host.querySelector('[data-add-menu]').hidden=preview||writingBusy;
+    const addMenu=host.querySelector('[data-add-menu]');if(addMenu)addMenu.hidden=preview||writingBusy;  // 已并入「插入 ▾」
   };
   const insert = (text,kind='text') => {
     if(writingBusy){status('AI 正在编制，结束后可手动添加内容。');return;}
@@ -1479,6 +1508,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       } catch(error){status(error.message);}
       return;
     }
+    const inMenu=event.target.closest('.cs-insert-menu, .cs-more-menu');
+    if(inMenu) event.target.closest('details')?.removeAttribute('open');
     const button=event.target.closest('[data-action]');
     if(!button || !active) return;
     const action=button.dataset.action;

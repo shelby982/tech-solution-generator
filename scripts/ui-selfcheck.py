@@ -220,6 +220,27 @@ HARNESS = r"""
   [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.textContent.trim() === '依据')?.click();
   await sleep(300);
 
+  // X 工具条：主动作 + 视图 + 插入▾ + 更多▾；无重复"文字生成图"；状态是浮动 toast
+  const toolbar = document.querySelector('.cs-toolbar');
+  if (toolbar) {
+    const labels = [...toolbar.querySelectorAll(':scope > button, :scope > .cs-toolbar-right > details > summary')]
+      .map((b) => b.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const dupDiagram = toolbar.textContent.includes('文字生成图');
+    const moreItems = [...toolbar.querySelectorAll('.cs-more-menu button')].map((b) => b.textContent.trim());
+    const insertItems = [...toolbar.querySelectorAll('.cs-insert-menu button')].map((b) => b.textContent.trim());
+    mark('工具条分组清晰（主操作/视图/插入/更多）',
+         labels.includes('AI 编制本章') && labels.some((l) => l.startsWith('插入')) && labels.some((l) => l.startsWith('更多')) && !dupDiagram,
+         { labels, dupDiagram });
+    mark('更多菜单按性质分组（≤4 项）', moreItems.length <= 4 && insertItems.length <= 3,
+         { more: moreItems, insert: insertItems });
+  } else {
+    mark('工具条分组清晰（主操作/视图/插入/更多）', false, { note: '未找到工具条' });
+    mark('更多菜单按性质分组（≤4 项）', false, { note: '未找到工具条' });
+  }
+  const statusEl = document.querySelector('[data-cs="status"]');
+  const statusStyle = statusEl ? getComputedStyle(statusEl).position : '';
+  mark('状态为浮动 toast（不占正文行）', statusStyle === 'fixed', { position: statusStyle });
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
