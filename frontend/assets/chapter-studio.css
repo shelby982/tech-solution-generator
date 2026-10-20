@@ -413,3 +413,22 @@
 .cs-cp-sub > summary::before { content: '▸'; color: #94a3b8; font-size: 9px; margin-right: 4px; }
 .cs-cp-sub[open] > summary::before { content: '▾'; }
 .cs-cp-sub .cs-cp-band { margin-top: 6px; padding: 9px 12px; background: #f8fafc; border-radius: 8px; }
+
+/* 还原度修正：弹窗骨架 / 主按钮 / 箭头 / 间距 / 底部操作 */
+.cs-cp-dialog { width: min(680px, 94vw); }
+.cs-cp-dialog .cs-plan-body { max-height: 78vh; overflow: auto; padding: 0 20px 0; }
+.cs-cp-dialog header { padding: 15px 20px 9px; }
+.cs-cp-primary { border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; border-radius: 8px; padding: 7px 16px; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.cs-cp-primary:hover { background: #1e40af; }
+.cs-cp-ghost { border: 1px solid #e2e8f0; background: #fff; color: #334155; border-radius: 8px; padding: 7px 16px; font-size: 12.5px; cursor: pointer; }
+.cs-cp-footer { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #eef2f7; padding: 13px 0 15px; margin-top: 6px; position: sticky; bottom: 0; background: #fff; }
+.cs-cp-del { padding: 8px 0 8px 9px; }
+.cs-cp-del-head { align-items: center; }
+.cs-cp-tri { font-size: 11px; color: #64748b; width: 11px; }
+.cs-cp-del-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-cp-del-num { margin-left: 0; }
+.cs-cp-del-status { margin-left: 12px; }
+.cs-cp-del-body { padding: 6px 0 2px 20px; }
+.cs-cp-del-acts { margin: 6px 0 0; }
+.cs-cp-block { padding: 13px 0 7px; }
+.cs-cp-todo { padding: 8px 0; }

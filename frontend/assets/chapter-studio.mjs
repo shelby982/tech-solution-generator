@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v287';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v287';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v287';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v288';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v288';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v288';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -412,15 +412,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ? `目录节点 · 下辖 ${children.length} 节（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
         : isParent
           ? `总述 ${wordPlan.written || 0} / ${wordPlan.total || '—'} 字 ｜ 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
-          : `计划 ${pages || '—'} 页 · ${wordPlan.total || '—'} 字 ｜ 已写 ${wordPlan.written || 0} 字 ⓘ ｜ 待办 ${todoCount} 项`;
+          : `计划 ${pages || '—'} 页 · ${wordPlan.total || '—'} 字 ｜ 已写 ${wordPlan.written || 0} 字 ｜ 待办 ${todoCount} 项`;
       const detected = deliverables.reduce((sum, item) => sum + (item.written_words || 0), 0);
       const wordTooltip = `全章已写 ${wordPlan.written || 0} 字；能按小节标题对应到交付物的是 ${detected} 字，逐项"已写"为估算值，以正文为准`;
       body.innerHTML = `
         <div class="cs-cp-head">
           <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
-          <p class="cs-cp-facts">${esc(headline)}${headline.includes('ⓘ') ? `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>` : ''}</p>
+          <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
-          <div class="cs-cp-cta"><button type="button" class="mw-btn primary" data-cp-main>${esc(mainAction)}</button></div>
+          <div class="cs-cp-cta"><button type="button" class="cs-cp-primary" data-cp-main>${esc(mainAction)}</button></div>
         </div>
 
         <section class="cs-cp-block" data-cp-sec="todo">
@@ -433,7 +433,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </section>
 
         ${isCatalog ? '' : `<section class="cs-cp-block" data-cp-sec="deliverables">
-          <header><b>② 交付物</b><em>${doneCount} 项达标${pendingCount ? ` · ${pendingCount} 项待补` : ''}</em>
+          <header><b>② 交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></header>
           ${deliverables.length ? deliverables.map((item, index) => {
             const open = index === firstUnmet;
@@ -447,7 +447,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 </div>
                 <div class="cs-cp-del-body" ${open ? '' : 'hidden'}>
                   ${(keyPointsBy[index] || []).length ? `<p class="cs-cp-brief">必答：${esc((keyPointsBy[index] || []).join(' / '))}</p>` : ''}
-                  <button type="button" class="cs-cp-link" data-cp-locate="${index}">定位到正文</button>
+                  <p class="cs-cp-del-acts"><button type="button" class="cs-cp-link" data-cp-locate="${index}">定位到正文</button></p>
                 </div>
               </div>`;
           }).join('') : '<p class="cs-cp-empty">本章还没有交付物</p>'}
@@ -489,6 +489,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <em class="${child.has_content ? 'ok' : ''}">${child.has_content ? '有正文' : '未开始'}</em>
             </div>`).join('')}
         </section>` : ''}
+        <div class="cs-cp-footer">
+          <button type="button" class="cs-cp-ghost" data-cp-close>关闭</button>
+          <button type="button" class="cs-cp-primary" data-cp-generate>AI 编制本章</button>
+        </div>
         <div data-cp-req-edit hidden></div>`;
       bindEvents();
     };
