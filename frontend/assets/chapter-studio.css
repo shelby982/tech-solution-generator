@@ -436,3 +436,13 @@
 /* 还原度修正：交付物行必须是"上下结构"（标题一行、必答/动作在下方） */
 .cs-cp-del { display: block; }
 .cs-cp-del-head { display: flex; }
+
+/* 序号统一：区块徽标与待办序号同一套视觉 */
+.cs-cp-idx { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #eef2ff; color: #4338ca;
+  font-size: 10px; font-weight: 600; align-items: center; justify-content: center; margin-right: 7px; flex-shrink: 0; }
+.cs-cp-block > header b, .cs-cp-block > summary b { display: inline-flex; align-items: center; }
+/* 顶部：数字行与主操作同一行，去掉多余留白 */
+.cs-cp-toprow { display: flex; align-items: center; gap: 12px; }
+.cs-cp-toprow .cs-cp-facts { flex: 1; min-width: 0; margin: 0; }
+.cs-cp-toprow .cs-cp-primary { flex-shrink: 0; }
+.cs-cp-head { padding: 4px 0 12px; }

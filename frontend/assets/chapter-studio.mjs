@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v291';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v291';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v291';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v292';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v292';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v292';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -419,13 +419,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       body.innerHTML = `
         <div class="cs-cp-head">
           <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
-          <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
+          <div class="cs-cp-toprow">
+            <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
+            <button type="button" class="cs-cp-primary" data-cp-main>${esc(mainAction)}</button>
+          </div>
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
-          <div class="cs-cp-cta"><button type="button" class="cs-cp-primary" data-cp-main>${esc(mainAction)}</button></div>
         </div>
 
         <section class="cs-cp-block" data-cp-sec="todo">
-          <header><b>① 待办</b><em>${todoCount} 项${todoCount ? ' · 按优先级' : ''}</em></header>
+          <header><b><span class="cs-cp-idx">1</span>待办</b><em>${todoCount} 项${todoCount ? ' · 按优先级' : ''}</em></header>
           ${todoCount ? todo.map((item, index) => `<div class="cs-cp-todo">
                 <span class="cs-cp-no">${index + 1}</span>
                 <span class="cs-cp-todo-text">${esc(item.text)}</span>
@@ -434,7 +436,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </section>
 
         ${isCatalog ? '' : `<section class="cs-cp-block" data-cp-sec="deliverables">
-          <header><b>② 交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
+          <header><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></header>
           ${deliverables.length ? deliverables.map((item, index) => {
             const open = index === firstUnmet;
@@ -455,7 +457,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </section>`}
 
         <details class="cs-cp-block" data-cp-sec="standard">
-          <summary><b>③ 依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
+          <summary><b><span class="cs-cp-idx">3</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
           <div class="cs-cp-fold-body">
             ${points.map((point) => `<p class="cs-cp-point"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
             ${data.grade_band ? `<details class="cs-cp-sub"><summary>满分档要求（得 8–10 分的要求）</summary>
@@ -471,7 +473,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         <details class="cs-cp-block" data-cp-sec="how">
-          <summary><b>④ 写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
+          <summary><b><span class="cs-cp-idx">4</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
             <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
           <div class="cs-cp-fold-body cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
@@ -481,7 +483,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         ${(isParent || isCatalog) ? `<section class="cs-cp-block" data-cp-sec="children">
-          <header><b>⑤ 子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></header>
+          <header><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></header>
           ${isParent ? '<p class="cs-cp-howto">本章只写总述（300–500 字）：先全貌 → 3 个关键结论 → 子节索引，细节见下列各节。</p>' : ''}
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>

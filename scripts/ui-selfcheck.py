@@ -114,6 +114,28 @@ HARNESS = r"""
     mark('交付物展开区在标题下方', true, { note: '无展开项' });
   }
 
+  // L 序号样式统一：区块用 .cs-cp-idx，待办用 .cs-cp-no，且两者尺寸一致
+  const idxEls = [...dialog.querySelectorAll('.cs-cp-idx')];
+  const noEls = [...dialog.querySelectorAll('.cs-cp-no')];
+  const sz = (el) => { const r = el.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); };
+  const idxSizes = new Set(idxEls.map(sz));
+  const noSizes = new Set(noEls.map(sz));
+  const sameSize = idxSizes.size <= 1 && noSizes.size <= 1 && [...idxSizes][0] === [...noSizes][0];
+  mark('序号样式统一（区块/待办同款同尺寸）', idxEls.length >= 2 && noEls.length >= 0 && (noEls.length === 0 || sameSize),
+       { blocks: idxEls.length, todos: noEls.length, sizes: [...idxSizes, ...noSizes] });
+
+  // M 顶部主按钮与数字行同一行（垂直中心差 ≤ 14px）
+  const factsEl = dialog.querySelector('.cs-cp-facts');
+  const mainBtn = dialog.querySelector('[data-cp-main]');
+  let sameRow = false, rowDetail = {};
+  if (factsEl && mainBtn) {
+    const f = factsEl.getBoundingClientRect(), b = mainBtn.getBoundingClientRect();
+    const centerDiff = Math.abs((f.top + f.height / 2) - (b.top + b.height / 2));
+    sameRow = centerDiff <= 14;
+    rowDetail = { centerDiff: Math.round(centerDiff) };
+  }
+  mark('顶部主按钮与数字行同一行', sameRow, rowDetail);
+
   out.metrics = {
     dialog: measure(dialog, ['backgroundColor', 'borderRadius']),
     title: measure(dialog.querySelector('.cs-cp-head h4'), ['fontSize', 'fontWeight']),
