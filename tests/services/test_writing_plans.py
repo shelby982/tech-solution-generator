@@ -163,21 +163,35 @@ async def test_condense_to_summary_falls_back_and_archives(db, monkeypatch):
     await db.execute("INSERT OR IGNORE INTO workflow_runs (thread_id, project_id, stage) VALUES ('t1', 1, 'outline_review')")
     await db.execute(
         "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status) "
-        "VALUES (1, 's1.2', '对项目的理解', 3, ?, 0, 't1', 'done')",
+        "VALUES (1, 'p9', '对项目的理解', 3, ?, 0, 't1', 'done')",
         ("很长的父章正文。" * 300,))
     await db.execute(
         "INSERT INTO blocks (project_id, block_id, title, level, content, order_idx, run_thread_id, status) "
-        "VALUES (1, 's1.2.1', '项目背景', 4, '', 1, 't1', 'draft')")
+        "VALUES (1, 'p9.1', '项目背景', 4, '', 1, 't1', 'draft')")
     await db.commit()
 
     async def boom(*args, **kwargs):
         raise RuntimeError("模型不可用")
 
     monkeypatch.setattr(plan_ai, "_call_model", boom)
-    result = await plan_ai.condense_to_summary(db, 1, "t1", "s1.2")
+    # 模型不可用 → 必须**拒绝修改**（不能拿模板顶替正文）
+    with __import__("pytest").raises(ValueError):
+        await plan_ai.condense_to_summary(db, 1, "t1", "p9")
+    current = await (await db.execute(
+        "SELECT length(content) AS n FROM blocks WHERE block_id='p9' "
+        "AND run_thread_id='t1' AND project_id=1")).fetchone()
+    assert int(current["n"]) > 2000, "模型失败时正文不能被改动"
+
+    # 模型可用（打桩）→ 精简成功且旧稿进版本记录
+    async def fake(*args, **kwargs):
+        return ("本章覆盖背景、现状、目标、范围四个方面，系统回答了项目为什么建、现状差在哪、要建成什么样、边界在哪里。"
+                "关键结论有三条：一是建设必要性充分，政策与业务双驱动；二是现状存在明确差距，可靠性、适配性均有短板；"
+                "三是目标可量化、范围可界定。各项论证与数据详见下列各节。")
+
+    monkeypatch.setattr(plan_ai, "_call_model", fake)
+    result = await plan_ai.condense_to_summary(db, 1, "t1", "p9")
     assert result["words"] < 700 and result["previous_words"] > 2000
-    assert result["children"] >= 1
     revisions = await (await db.execute(
         "SELECT COUNT(*) AS n FROM block_revisions WHERE block_id IN "
-        "(SELECT id FROM blocks WHERE block_id='s1.2')")).fetchone()
+        "(SELECT id FROM blocks WHERE block_id='p9' AND run_thread_id='t1')")).fetchone()
     assert int(revisions["n"]) >= 1

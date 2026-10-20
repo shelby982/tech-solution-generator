@@ -27,8 +27,16 @@ def _clean(text: str) -> str:
 async def _call_model(system: str, payload: dict, *, call_site: str) -> str:
     from agents.chapter_team import call_role
 
-    raw, _model = await call_role("text", system, payload, {})
-    return _clean(raw)
+    last_error = None
+    for _attempt in range(2):          # 模型偶发断连，重试一次
+        try:
+            raw, _model = await call_role("text", system, payload, {})
+            cleaned = _clean(raw)
+            if cleaned:
+                return cleaned
+        except Exception as exc:       # noqa: BLE001 - 上层统一处理
+            last_error = exc
+    raise RuntimeError(f"模型调用失败：{type(last_error).__name__ if last_error else '空返回'}")
 
 
 async def condense_to_summary(db: Connection, project_id: int, thread_id: str, block_id: str) -> dict:
@@ -60,13 +68,8 @@ async def condense_to_summary(db: Connection, project_id: int, thread_id: str, b
     except Exception:
         summary = ""
     if not summary or len(summary) < 80:
-        # 兜底：用子节标题拼一段总述（保证不阻断）
-        index = "、".join(children[:8]) if children else "（无子节）"
-        summary = (
-            f"本章围绕「{block.get('title')}」展开，覆盖以下 {len(children)} 个方面：{index}。"
-            "总体判断：建设必要性充分、现状存在明确差距、目标与范围清晰、重点难点有对应措施。"
-            "详细论述见下列各节。"
-        )[:SUMMARY_MAX]
+        # 安全策略：模型不可用/返回过短 → **不做任何修改**（用模板顶替 7000 字正文太危险）
+        raise ValueError("模型不可用或返回过短，未对正文做任何修改，请稍后重试")
     summary = summary[: max(SUMMARY_MAX, SUMMARY_MIN + 40)]
     # 旧稿进版本记录（可回滚）
     try:

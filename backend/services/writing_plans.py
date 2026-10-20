@@ -931,6 +931,10 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                      "advice": "本章是目录节点：不单独写正文，正文在下列各节里写"}
     elif is_parent_chapter:
         # 父章只写总述（300–500 字），子节在各自章节里写，不在这里叠加
+        own_words = len(str(content or "").replace(" ", ""))
+        for item in deliverables:
+            if item.get("source") == "system":
+                item["written_words"] = own_words
         for item in deliverables:
             # "总述"那条给 400 字，其余（评分点继承来的要素）在子节里写
             item["target_words"] = 400 if item.get("source") == "system" else 0
