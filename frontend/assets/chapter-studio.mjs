@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v320';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v320';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v320';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v321';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v321';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v321';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1478,7 +1478,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `${todoPaneHtml()}
-      <section data-pane="materials">${gapGroupsHtml()}
+      <section data-pane="materials">${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
+      <details class="cs-mat-manage">
+        <summary>已关联素材与外部依据</summary>
+        <div class="cs-mat-manage-body">
         ${(() => {
         const key = String(active.block_id);
         const body = String(active.content || '');
@@ -1524,7 +1527,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             : '<p class="cs-mat-empty">还没有关联素材。可上传 PDF / Word（自动提取原文与页码），或从项目素材库关联。</p>'}
           <p class="cs-mat-acts">
             ${context.materials.length ? '<button type="button" class="cs-mat-link" data-refresh-materials>刷新解析状态</button>' : ''}
-          </p>`;})()}</section>
+          </p>`;})()}        </div>
+      </details>
+      </section>
       `;
     const asideLayout = get('layout');      // 右栏「编排建议」已移除（章节类型移入计划面板），这里可能为 null
     if (asideLayout) asideLayout.onchange = async event => {

@@ -214,8 +214,12 @@ HARNESS = r"""
   // 素材页签：三分法
   const matPane2 = document.querySelector('[data-pane="materials"]');
   const gapGroups = matPane2 ? [...matPane2.querySelectorAll('.cs-gap-glabel')].map((g) => g.textContent.trim()) : [];
+  const matHasGapTitle = matPane2 ? /素材缺口/.test(matPane2.textContent) : false;
+  const matHasManageFold = matPane2 ? !!matPane2.querySelector('.cs-mat-manage') : false;
   mark('素材页签有缺口三分法分组', gapGroups.length === 0 || gapGroups.some((g) => g.includes('公开资料可补')) || gapGroups.some((g) => g.includes('必须你上传')),
        { groups: gapGroups });
+  mark('素材页签有「素材缺口」总述且已关联内容折叠', matHasGapTitle && matHasManageFold,
+       { gapTitle: matHasGapTitle, manageFold: matHasManageFold });
 
   // T 章头「本章计划」按钮（带待办角标）
   const planBtn = document.querySelector('.cs-plan-btn');

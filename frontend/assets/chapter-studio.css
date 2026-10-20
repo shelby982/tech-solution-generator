@@ -589,3 +589,11 @@
 .cs-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px;
   margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #fee2e2; color: #b91c1c;
   font-size: 10px; font-weight: 600; line-height: 1; }
+
+/* 素材页签：缺口为主（带总述标题），已关联素材/外部依据收进折叠 */
+.cs-mat-manage { margin-top: 12px; border-top: 1px solid #eef2f7; padding-top: 8px; }
+.cs-mat-manage > summary { cursor: pointer; list-style: none; font-size: 11.5px; font-weight: 600; color: #475569; }
+.cs-mat-manage > summary::-webkit-details-marker { display: none; }
+.cs-mat-manage > summary::before { content: '▸'; color: #94a3b8; font-size: 9px; margin-right: 5px; }
+.cs-mat-manage[open] > summary::before { content: '▾'; }
+.cs-mat-manage-body { padding-top: 6px; }
