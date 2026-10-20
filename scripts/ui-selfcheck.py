@@ -215,8 +215,18 @@ HARNESS = r"""
   // T 章头「本章计划」按钮（带待办角标）
   const planBtn = document.querySelector('.cs-plan-btn');
   const badge = planBtn?.querySelector('.cs-plan-badge');
-  mark('章头入口「本章计划」+ 待办角标', !!planBtn && /本章计划/.test(planBtn.textContent) && (!!badge || true),
+  // 徽标必须完整落在按钮内（右边界不越过边框），且按钮右内边距 ≥4px
+  let badgeInside = null, badgePad = null;
+  if (planBtn && badge) {
+    const pb = planBtn.getBoundingClientRect();
+    const cs2 = getComputedStyle(planBtn);
+    badgePad = parseFloat(cs2.paddingRight) || 0;
+    badgeInside = Math.round(pb.right - (parseFloat(cs2.borderRightWidth) || 0) - badge.getBoundingClientRect().right);
+  }
+  mark('章头入口「本章计划」+ 待办角标', !!planBtn && /本章计划/.test(planBtn.textContent),
        { label: planBtn?.textContent?.replace(/\s+/g, ' ').trim(), badge: badge?.textContent?.trim() || null });
+  mark('待办角标不溢出且留白 ≥4px', !badge || (badgeInside !== null && badgeInside >= 0 && badgePad >= 4),
+       { inside: badgeInside, padRight: badgePad });
 
   // U 章节类型已移入计划面板「写法」
   const kindRow = dialog.querySelector('[data-cp-layout]');

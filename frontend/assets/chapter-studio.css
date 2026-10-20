@@ -578,3 +578,9 @@
 .cs-gap-act { font: inherit; font-size: 11px; padding: 1px 8px; border: 1px solid #dbe3ef; background: #fff;
   border-radius: 999px; color: #1d4ed8; cursor: pointer; }
 .cs-gap-why { flex-basis: 100%; font-size: 10.5px; color: #94a3b8; }
+
+/* 章头「本章计划」按钮：徽标与文字用 flex 排列，徽标不再贴边 */
+.cs-plan-slot .cs-plan-btn { display: inline-flex; align-items: center; gap: 6px; }
+.cs-plan-slot .cs-plan-btn .cs-plan-badge { margin-left: 0; }
+.cs-plan-slot .cs-plan-btn:has(.cs-plan-badge) { padding-right: 6px; }
+.cs-plan-badge { font-size: 10px; line-height: 14px; padding: 0 6px; }
