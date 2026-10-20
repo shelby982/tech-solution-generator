@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v326';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v326';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v326';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v327';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v327';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v327';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1347,7 +1347,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }).join('');
     const checks = planBrief?.generationGaps || [];
     const checkGroup = checks.length
-      ? `<div class="cs-todo-group"><p class="cs-todo-glabel"><i class="m-source"></i>依据核对 ${checks.length}</p>
+      ? `<div class="cs-todo-group"><p class="cs-todo-glabel"><i class="m-source"></i>依据核对 ${checks.length}
+            <small>（表格里的【待补充】留在正文，按表填写）</small></p>
           ${checks.map((g) => `<div class="cs-todo-row">
               <span class="cs-todo-idx">·</span>
               <span class="cs-todo-text">${esc(g.text)}</span>

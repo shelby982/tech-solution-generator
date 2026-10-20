@@ -81,3 +81,40 @@ async def load_generation_gaps(db, thread_id: str, block_id: str) -> list[dict]:
     )
     rows = await cursor.fetchall()
     return [{'id': r['id'], 'text': str(r['message']).removeprefix('依据核对：'), 'status': r['status']} for r in rows]
+
+
+_BASIS_KW = ('招标', '规范书', '标准', '政策', '数据', '原文', '依据', '测算', '验收', '评分', '条款', '清单')
+
+
+def classify_placeholders(content: str) -> dict[str, list[str]]:
+    """把正文里的【待补充：xx】分成两类。
+
+    - basis：**依据缺失**（政策/标准/数据/招标原文/验收要求…）→ 应进"待办·依据核对"
+    - table：**表格待填**（占位出现在 Markdown 表格行内）→ 留在正文表格里，不进待办
+    - other：其余（散文里的占位），目前并入 basis，避免丢失线索
+    """
+    import re as _re
+
+    basis: list[str] = []
+    table: list[str] = []
+    for raw in str(content or '').splitlines():
+        line = raw.strip()
+        found = _re.findall(r'【待补充[：:]\s*([^】]+)】', line)
+        if not found:
+            continue
+        in_table = line.startswith('|')
+        for item in found:
+            text = item.strip()
+            if not text:
+                continue
+            if in_table:
+                table.append(text)
+            else:
+                basis.append(text)
+    return {'basis': basis, 'table': table}
+
+
+def looks_like_basis(text: str) -> bool:
+    """缺口是否属"依据缺失"（政策/标准/数据/招标/验收/评分…）。"""
+    value = str(text or '')
+    return any(word in value for word in _BASIS_KW)

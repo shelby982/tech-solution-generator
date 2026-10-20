@@ -32,3 +32,25 @@ def test_keeps_table_placeholders():
 def test_has_pending():
     assert has_pending("### 待核对与补充\n【待补充：x】")
     assert not has_pending("### 一、正文\n正常内容")
+
+
+def test_classify_placeholders_splits_table_and_basis():
+    from services.chapter_cleanup import classify_placeholders
+
+    content = (
+        "本项目缺少招标范围内的专项任务清单。\n"
+        "【待补充：缺少验收标准原文】\n\n"
+        "| 维度 | 现状 |\n| --- | --- |\n| 覆盖范围 | 【待补充：范围】 |\n"
+    )
+    result = classify_placeholders(content)
+    assert "缺少验收标准原文" in result["basis"]
+    assert "范围" in result["table"]
+    assert "范围" not in result["basis"]
+
+
+def test_looks_like_basis():
+    from services.chapter_cleanup import looks_like_basis
+
+    assert looks_like_basis("缺少验收标准原文")
+    assert looks_like_basis("缺少招标文件的任务清单")
+    assert not looks_like_basis("公司名称")
