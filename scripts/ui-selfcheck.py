@@ -194,6 +194,18 @@ HARNESS = r"""
   const hasGroups = todoPane ? !!todoPane.querySelector('.cs-todo-glabel') : false;
   mark('待办页签按模块分组且每条有动作', !!todoPane && (todoRows.length === 0 || (hasGroups && todoActs === todoRows.length)),
        { rows: todoRows.length, groups: hasGroups, acts: todoActs });
+  // 待办页签不得再出现"素材模块"（素材问题归素材页签）
+  const todoHasMaterialGroup = todoPane ? /素材模块/.test(todoPane.textContent) : false;
+  mark('待办页签不含素材模块', !todoHasMaterialGroup, { hasMaterialGroup: todoHasMaterialGroup });
+  // 页签互斥：切到素材时，两个 pane 只能有一个可见
+  const matTabEl = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.dataset.panel === 'materials');
+  matTabEl?.click();
+  await sleep(400);
+  const visiblePanes = [...document.querySelectorAll('[data-pane]')].filter((el) => el.offsetParent !== null).length;
+  const todoHidden = todoPane ? todoPane.offsetParent === null : true;
+  mark('页签切换互斥（切素材时待办隐藏）', visiblePanes <= 1 && todoHidden, { visiblePanes, todoHidden });
+  [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.dataset.panel === 'todo')?.click();
+  await sleep(300);
   // 素材页签：三分法
   const matPane2 = document.querySelector('[data-pane="materials"]');
   const gapGroups = matPane2 ? [...matPane2.querySelectorAll('.cs-gap-glabel')].map((g) => g.textContent.trim()) : [];

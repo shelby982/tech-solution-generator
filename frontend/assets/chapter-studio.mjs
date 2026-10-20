@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v317';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v317';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v317';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v318';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v318';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v318';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1313,13 +1313,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     editor.setRangeText(`\n\n${text}\n\n`,editor.selectionStart,editor.selectionEnd,'end');
     changed();editor.focus();
   };
+  // 素材类问题归「素材」页签（由其缺口三分法承载），待办只保留可"就地处理"的模块
   const TODO_GROUPS = [
-    ['content', '内容'], ['material', '素材'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
+    ['content', '内容'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
   ];
 
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
-    const todos = planBrief?.todo || [];
+    const todos = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material');
     if (!todos.length) {
       return `<section data-pane="todo"><h4>待办</h4>
         <p class="cs-todo-ok">✓ 本章没有待办，可以生成或交付</p></section>`;
@@ -1542,7 +1543,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const unit = block ? unitOf.get(String(block.block_id)) : null;
     const info = unit ? planUnits.get(unit) : null;
     if (!info) { slot.innerHTML = ''; return; }
-    const todoCount = (planBrief?.todo || []).length;
+    const todoCount = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length;
     slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
       + `title="本章计划：要交什么 / 待办 ${todoCount} 项 / 依据与写法 —— 点开查看与处理">`
       + `本章计划${todoCount ? `<span class="cs-plan-badge">待办 ${todoCount}</span>` : ''}</button>`;
