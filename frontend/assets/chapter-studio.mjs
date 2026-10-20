@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v296';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v296';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v296';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v299';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v299';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v299';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -116,7 +116,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const profile = document.profiles || {};
   const draftKey = b => `chapter-draft:${threadId}:${b.id}`;
   host.innerHTML = `
-    <div class="cs-document-head"><div hidden><strong>章节编写</strong><span data-cs="progress"></span></div><details class="cs-delivery"><summary>Word 导出格式</summary>    <div class="cs-document"><label>交付格式 <select data-cs="template">${Object.entries(document.templates).map(([key,t])=>`<option value="${key}" ${key===document.template?'selected':''}>${esc(t.label)}</option>`).join('')}</select></label><span class="cs-muted" data-cs="format-summary"></span><a data-cs="format-sample" target="_blank" rel="noopener">预览样张</a><a data-cs="format-download">Word 样张</a><details class="cs-format-rules"><summary>规则与应用时机</summary><p>编写前确认招标规定的目录与固定表单；本设置在导出时应用，不改变正文。内置格式不包含企业封面或招标指定表单。</p><p>统一正文与标题样式、图题、页码和跨页表头。实际分页以导出排版预览为准；Word 与 LibreOffice 的字体和分页可能存在差异。</p><p data-cs="format-version"></p></details></div>
+    <div class="cs-document-head"><div hidden><strong>章节编写</strong><span data-cs="progress"></span></div>
+      <div class="cs-document" hidden><select data-cs="template">${Object.entries(document.templates).map(([key,tt])=>`<option value="${key}" ${key===document.template?'selected':''}>${esc(tt.label)}</option>`).join('')}</select><span class="cs-muted" data-cs="format-summary"></span><a data-cs="format-sample" target="_blank" rel="noopener"></a></div>
+    </div>
 </details></div>
     <div class="cs-workspace">
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
@@ -1395,13 +1397,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   editor.oninput=changed;
   const paintFormat = () => {
     const preset=document.templates[document.template];
-    get('format-summary').textContent=`A4 · ${preset.font} ${preset.size} 磅 · 1.5 倍行距 · 四边 ${preset.margin} cm`;
-    get('format-version').textContent=`模板版本 ${preset.version.slice(0,12)} · 导出任务固定内容、图片与模板版本`;
-    get('format-sample').href=`/api/studio/templates/${document.template}/sample?format=pdf`;
-    get('format-download').href=`/api/studio/templates/${document.template}/sample?format=docx`;
+    if(!preset)return;
+    // 「Word 导出格式」折叠块已移除：这些节点可能不存在，全部可选链，避免整台编制器崩掉
+    const summary=get('format-summary');if(summary)summary.textContent=`A4 · ${preset.font} ${preset.size} 磅 · 1.5 倍行距 · 四边 ${preset.margin} cm`;
+    const version=get('format-version');if(version)version.textContent=`模板版本 ${preset.version.slice(0,12)} · 导出任务固定内容、图片与模板版本`;
+    const sample=get('format-sample');if(sample)sample.href=`/api/studio/templates/${document.template}/sample?format=pdf`;
+    const download=get('format-download');if(download)download.href=`/api/studio/templates/${document.template}/sample?format=docx`;
   };
   paintFormat();
-  get('template').onchange=async event=>{
+  const templateSelect=get('template');if(templateSelect)templateSelect.onchange=async event=>{
     try { await json(`/api/projects/${projectId}/studio/document`,send('PUT',{thread_id:threadId,template:event.target.value}));document.template=event.target.value;paintFormat();status('交付格式已保存，导出时应用；已生成文件保留原版本。'); }
     catch(error) {event.target.value=document.template;status(error.message);}
   };

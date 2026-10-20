@@ -17,6 +17,24 @@ HARNESS = r"""
   const out = { steps: [] };
   const mark = (name, ok, extra) => out.steps.push({ name, ok, ...(extra || {}) });
 
+  // 0) 编写阶段头部布局：页签在标题行右侧、无「Word 导出格式」
+  for (let i = 0; i < 40 && !document.querySelector('.sr-rail-item[data-stage="4"]'); i++) await sleep(400);
+  document.querySelector('.sr-rail-item[data-stage="4"]')?.click();
+  for (let i = 0; i < 60 && !document.querySelector('.sr-stage[data-stage="4"]'); i++) await sleep(400);
+  const head = document.querySelector('.sr-stage[data-stage="4"] .sr-stage-head');
+  const tabs = head?.querySelector('.sr-subtabs');
+  if (head && tabs) {
+    const h = head.getBoundingClientRect();
+    const t = tabs.getBoundingClientRect();
+    const sameRow = Math.abs((h.top + h.height / 2) - (t.top + t.height / 2)) <= 12;
+    const rightAligned = t.right > h.right - 40;
+    mark('页签在「应答编写」同一行且靠右', sameRow && rightAligned,
+         { sameRow, rightAligned, headRight: Math.round(h.right), tabsRight: Math.round(t.right) });
+  } else {
+    mark('页签在「应答编写」同一行且靠右', false, { note: '未找到头部或页签' });
+  }
+  mark('已去掉「Word 导出格式」', !document.body.textContent.includes('Word 导出格式'), {});
+
   // 1) 进入编写阶段
   document.querySelector('.sr-rail-item[data-stage="4"]')?.click();
   for (let i = 0; i < 60 && !document.querySelector('.cs-node'); i++) await sleep(500);
