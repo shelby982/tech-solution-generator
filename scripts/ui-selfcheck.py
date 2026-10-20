@@ -53,7 +53,7 @@ HARNESS = r"""
   // 3) 打开「本章编写计划」
   document.querySelector('.cs-plan-btn')?.click();
   for (let i = 0; i < 40 && !document.querySelector('[data-cp-sec]'); i++) await sleep(400);
-  const dialog = [...document.querySelectorAll('dialog')].find((d) => d.textContent.includes('本章编写计划'));
+  const dialog = [...document.querySelectorAll('dialog')].find((d) => d.open && (d.classList.contains('cs-cp-dialog') || d.textContent.includes('本章计划')));
   mark('打开本章编写计划', !!dialog);
   if (!dialog) return JSON.stringify(out);
   await sleep(600);
@@ -158,6 +158,13 @@ HARNESS = r"""
   const sections = [...dialog.querySelectorAll('[data-cp-sec]')];
   const allDetails = sections.length > 0 && sections.every((el) => el.tagName === 'DETAILS');
   mark('计划面板不含待办块（待办在右栏）', !dialog.querySelector('[data-cp-sec="todo"]'), {});
+  // 区块序号必须从 1 连续（删块后容易跳号）
+  const idxNums = [...dialog.querySelectorAll('[data-cp-sec] .cs-cp-idx')].map((el) => Number(el.textContent.trim()));
+  const idxOk = idxNums.length > 0 && idxNums.every((n, i) => n === i + 1);
+  mark('计划面板区块序号从 1 连续', idxOk, { numbers: idxNums });
+  // 弹窗标题与章头入口一致（都叫「本章计划」）
+  const dlgTitle = dialog.querySelector('header h3')?.textContent.trim() || '';
+  mark('弹窗标题为「本章计划」', dlgTitle === '本章计划', { title: dlgTitle });
   mark('所有区块可展开收起（结构一致）', allDetails,
        { total: sections.length, details: sections.filter((el) => el.tagName === 'DETAILS').length });
 

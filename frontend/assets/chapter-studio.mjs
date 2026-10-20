@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v316';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v316';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v316';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v317';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v317';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v317';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -370,7 +370,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function openChapterPlan(blockId) {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog cs-cp-dialog';
-    dialog.innerHTML = `<header><h3>本章编写计划</h3><button type="button" aria-label="关闭">×</button></header>
+    dialog.innerHTML = `<header><h3>本章计划</h3><button type="button" aria-label="关闭">×</button></header>
       <div class="cs-plan-body"><p class="cs-muted">正在加载本章计划…</p></div>`;
     globalThis.document.body.append(dialog);
     dialog.querySelector('header button').onclick = () => dialog.close();
@@ -467,7 +467,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
         ${isCatalog ? '' : `<details class="cs-cp-block" data-cp-sec="deliverables" open>
-          <summary><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
+          <summary><b><span class="cs-cp-idx">1</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></summary>
           ${deliverables.length ? deliverables.map((item, index) => {
             const open = index === firstUnmet;
@@ -488,7 +488,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>`}
 
         <details class="cs-cp-block" data-cp-sec="standard">
-          <summary><b><span class="cs-cp-idx">3</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
+          <summary><b><span class="cs-cp-idx">2</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
           <div class="cs-cp-fold-body">
             ${points.map((point) => `<p class="cs-cp-point"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
             ${data.grade_band ? `<details class="cs-cp-sub"><summary>满分档要求（得 8–10 分的要求）</summary>
@@ -504,7 +504,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         <details class="cs-cp-block" data-cp-sec="how">
-          <summary><b><span class="cs-cp-idx">4</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
+          <summary><b><span class="cs-cp-idx">3</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
             <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
           <div class="cs-cp-fold-body cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
@@ -518,7 +518,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
-          <summary><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
+          <summary><b><span class="cs-cp-idx">4</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
           ${isParent ? '<p class="cs-cp-howto">本章只写总述（300–500 字）：先全貌 → 3 个关键结论 → 子节索引，细节见下列各节。</p>' : ''}
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>
