@@ -359,3 +359,19 @@
 .cs-cp-kid-bar i { display: block; height: 100%; background: #60a5fa; }
 .cs-cp-kid em { font-style: normal; font-size: 11px; color: #94a3b8; }
 .cs-cp-kid em.ok { color: #15803d; }
+
+/* 计划弹窗（主次重排）：交付物状态色条 / 还缺什么 / 折叠细节 */
+.cs-cp-del { border-bottom: 1px dashed #f1f5f9; border-left: 3px solid #e2e8f0; padding-left: 8px; }
+.cs-cp-del.tone-ok { border-left-color: #22c55e; }
+.cs-cp-del.tone-warn { border-left-color: #f59e0b; }
+.cs-cp-del.tone-idle { border-left-color: #cbd5e1; }
+.cs-cp-del-status { font-style: normal; font-size: 11px; color: #b45309; flex-shrink: 0; }
+.cs-cp-del.tone-ok .cs-cp-del-status { color: #15803d; }
+.cs-cp-gap { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; font-size: 12.5px; }
+.cs-cp-gap-kind { flex-shrink: 0; font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: #fef3c7; color: #92400e; }
+.cs-cp-gap-text { flex: 1; min-width: 0; color: #334155; }
+.cs-cp-sub-details { margin: 4px 0; }
+.cs-cp-sub-details > summary { cursor: pointer; font-size: 12px; color: #475569; }
+.cs-cp-sub-details .cs-cp-band { margin-top: 4px; }
+
+.cs-cp-note { margin: 4px 0 6px; font-size: 11px; color: #94a3b8; }

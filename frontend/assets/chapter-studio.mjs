@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v284';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v284';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v284';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v286';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v286';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v286';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -395,25 +395,37 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const deliverables = data.deliverables || [];
       const clauses = data.clauses || [];
       const materials = data.materials || [];
-      const selfCheck = (data.self_check || []).filter((item) => !item.ok);
+      const selfCheck = data.self_check || [];
+      const failedChecks = selfCheck.filter((item) => !item.ok);
       const children = data.children || [];
       const guidance = data.guidance || {};
       const points = data.basis?.points || [];
       const pages = data.pages || 0;
-      const missingDeliverables = deliverables.filter((item) => item.status === '未写' || item.status === '不足');
+      const keyPointsBy = data.key_points_by_deliverable || {};
       const isCatalog = !!data.catalog;
       const isParent = children.length > 0 && !isCatalog;
-      // 结论卡：一眼看到的 3 个数字 + 1 个主操作
+      const todo = deliverables.filter((item) => item.status === '未写' || item.status === '不足');
+      const pendingMaterials = materials.filter((item) => item.status !== '已齐');
       const headline = isCatalog
         ? `目录节点 · 下辖 ${children.length} 节（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
         : isParent
-        ? `总述 ${wordPlan.written || 0} / ${wordPlan.total} 字 · 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
-        : `计划 ${pages || '—'} 页 ≈ ${wordPlan.total || '—'} 字 · 已写 ${wordPlan.written || 0} 字（${wordPlan.percent || 0}%）`;
-      const mainAction = isCatalog ? '看子节进度' : (isParent ? '去写总述' : (missingDeliverables.length ? '去补齐缺项' : '去生成正文'));
+          ? `总述 ${wordPlan.written || 0} / ${wordPlan.total} 字 · 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
+          : `计划 ${pages || '—'} 页 ≈ ${wordPlan.total || '—'} 字 · 已写 ${wordPlan.written || 0} 字（${wordPlan.percent || 0}%）`;
+      const mainAction = isCatalog ? '看子节进度' : (isParent ? '去写总述' : (todo.length ? `去补 ${todo.length} 项` : '去生成正文'));
+      // "还缺什么"：素材缺 + 自检未过，统一成可执行条目
+      const gaps = [];
+      pendingMaterials.forEach((item) => gaps.push({
+        kind: '素材', text: `${item.kind}：还差 ${item.need - item.have} 份`, action: '去找', act: 'find',
+      }));
+      failedChecks.forEach((item) => gaps.push({
+        kind: '自检', text: item.text,
+        action: /字数/.test(item.text) ? '去精简' : /来源/.test(item.text) ? '去补来源' : '去处理',
+        act: /来源/.test(item.text) ? 'find' : 'regen',
+      }));
       body.innerHTML = `
         <div class="cs-cp-top">
           <div class="cs-cp-top-main">
-            <h4>${esc(data.title || '')} ${isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
+            <h4>${esc(data.title || '')} ${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
             <p class="cs-cp-top-line">${esc(headline)}</p>
             ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}
               ${isParent ? '<button type="button" class="cs-cp-link" data-cp-condense>精简为总述</button>' : ''}</p>` : ''}
@@ -422,41 +434,57 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
 
         ${isCatalog ? '' : `<section class="cs-cp-block" data-cp-sec="deliverables">
-          <header><b>要交什么</b><em>${deliverables.length} 项${missingDeliverables.length ? ` · 待补 ${missingDeliverables.length}` : ' · 齐'}</em>
+          <header><b>要交什么</b><em>${deliverables.length} 项${todo.length ? ` · 待补 ${todo.length}` : ' · 齐'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></header>
-          ${deliverables.length ? deliverables.map((item) => `<div class="cs-cp-del ${esc(item.status)}">
+          ${(() => {
+            const detected = deliverables.reduce((sum, item) => sum + (item.written_words || 0), 0);
+            const total = wordPlan.written || 0;
+            if (!total || detected >= total * 0.85) return '';
+            return `<p class="cs-cp-note">全章已写 ${total} 字，其中按小节标题能对应到下列交付物的是 ${detected} 字 —— 逐项"已写"为估算值，以正文为准。</p>`;
+          })()}
+          ${deliverables.map((item, index) => `<div class="cs-cp-del tone-${esc(item.status === '达标' ? 'ok' : item.status === '未写' ? 'idle' : 'warn')}">
               <span class="cs-cp-kind">${esc(item.kind_label)}</span>
-              <div class="cs-cp-del-main"><b>${esc(item.title)}</b>
-                <small>${item.target_words ? `目标 ${item.target_words} 字` : '不单独计字'} · 已写 ${item.written_words || 0} 字${item.status !== '达标' ? ` · <i>${esc(item.status)}</i>` : ''}</small></div>
-            </div>`).join('') : '<p class="cs-cp-empty">本章还没有交付物</p>'}
-          ${(data.key_points || []).length ? `<p class="cs-cp-brief">这几项必须答到：${esc((data.key_points || []).join(' / '))}</p>` : ''}
+              <div class="cs-cp-del-main">
+                <b>${esc(item.title)}</b>
+                <small>${item.target_words ? `目标 ${item.target_words} 字 · ` : ''}${item.written_detected === false ? '<i>未检测到对应段落</i>' : `已写 ${item.written_words || 0} 字`}${item.status !== '达标' ? ` · ${esc(item.status)}` : ''}</small>
+                ${(keyPointsBy[index] || []).length ? `<span class="cs-cp-brief">必答：${esc((keyPointsBy[index] || []).join(' / '))}</span>` : ''}
+              </div>
+              <em class="cs-cp-del-status">${esc(item.status)}</em>
+            </div>`).join('') || '<p class="cs-cp-empty">本章还没有交付物</p>'}
         </section>`}
 
+        <section class="cs-cp-block" data-cp-sec="gaps">
+          <header><b>还缺什么</b><em>${gaps.length} 项</em></header>
+          ${gaps.length ? gaps.map((gap) => `<div class="cs-cp-gap">
+              <span class="cs-cp-gap-kind">${esc(gap.kind)}</span>
+              <span class="cs-cp-gap-text">${esc(gap.text)}</span>
+              <button type="button" class="cs-cp-link" data-cp-gap-act="${esc(gap.act)}">${esc(gap.action)}</button>
+            </div>`).join('') : '<p class="cs-cp-ok">没有待补项，可以生成</p>'}
+        </section>
+
         <details class="cs-cp-block" data-cp-sec="standard">
-          <summary><b>按什么标准</b><em>${points.length ? `评分点 ${points.length} 个` : ''}${clauses.length ? ` · 招标条款 ${clauses.length} 条` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length} 条` : ''}</em></summary>
+          <summary><b>按什么标准</b><em>${points.length ? `评分点 ${points.length} 个` : ''}${clauses.length ? ` · 条款 ${clauses.length} 条` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length} 条` : ''}</em></summary>
           ${points.map((point) => `<p class="cs-cp-line"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
-          ${data.grade_band ? `<p class="cs-cp-band">满分档：${esc(data.grade_band.slice(0, 200))}…</p>` : ''}
-          ${clauses.length ? clauses.map((clause) => `<p class="cs-cp-clause">${clause.mandatory ? '<span class="cs-cp-must">强制</span>' : ''}${esc(clause.title)}</p>`).join('')
+          ${data.grade_band ? `<details class="cs-cp-sub-details"><summary>满分档要求（点开看原文）</summary>
+            <p class="cs-cp-band">${esc(data.grade_band)}</p></details>` : ''}
+          ${clauses.length ? `<details class="cs-cp-sub-details"><summary>本章承接的招标条款 ${clauses.length} 条</summary>
+            ${clauses.map((clause) => `<p class="cs-cp-clause">${clause.mandatory ? '<span class="cs-cp-must">强制</span>' : ''}${esc(clause.title)}</p>`).join('')}
+            <button type="button" class="cs-cp-link" data-cp-match-clauses>重新用 AI 匹配</button></details>`
             : `<p class="cs-cp-empty">本章只对评分点负责（无对应招标条款）
                 <button type="button" class="cs-cp-link" data-cp-match-clauses>用 AI 匹配条款</button></p>`}
           ${(guidance.pitfalls || []).length ? `<p class="cs-cp-pitfall">失分点：${esc(guidance.pitfalls.join('；'))}</p>` : ''}
         </details>
 
-        <details class="cs-cp-block" data-cp-sec="verify">
-          <summary><b>怎么补、怎么验</b><em>${materials.filter((m) => m.status !== '已齐').length} 项待补${selfCheck.length ? ` · 自检待修 ${selfCheck.length}` : ' · 自检通过'}</em></summary>
-          ${materials.length ? materials.map((item) => `<div class="cs-cp-mat-row">
-              <span class="cs-cp-dot ${item.status === '已齐' ? 'ok' : ''}"></span>
-              <span class="cs-cp-need-text">${esc(item.kind)} ×${item.need}</span>
-              <small>${esc(item.where)}</small>
-              <em class="${item.status === '已齐' ? 'ok' : ''}">${esc(item.status)}</em>
-              ${item.status === '已齐' ? '' : '<button type="button" class="cs-cp-link" data-cp-find>去找</button>'}
-            </div>`).join('') : ''}
-          ${selfCheck.length ? selfCheck.map((item) => `<p class="cs-cp-check">○ ${esc(item.text)}</p>`).join('') : '<p class="cs-cp-ok">自检全部通过</p>'}
-          ${(guidance.skeleton || []).length ? `<p class="cs-cp-howto">写法：${esc(guidance.skeleton.join(' → '))}；每段首句给判断，表后跟落点句。</p>` : ''}
-          <p class="cs-cp-actions-inline"><button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></p>
+        <details class="cs-cp-block" data-cp-sec="how">
+          <summary><b>怎么写</b><em>结构 / 段落 / 落点</em>
+            <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
+          <div class="cs-cp-write">
+            ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
+            <p><b>段落</b>：每段第一句给判断，后面给依据与数据；表后必跟一段"从表可见…"的落点。</p>
+          </div>
         </details>
 
-        ${isParent ? `<section class="cs-cp-block" data-cp-sec="children">
+        ${isParent || isCatalog ? `<section class="cs-cp-block" data-cp-sec="children">
           <header><b>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></header>
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>
@@ -477,6 +505,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
       });
 
+      body.querySelectorAll('[data-cp-gap-act]').forEach((button) => button.addEventListener('click', () => {
+        if (button.dataset.cpGapAct === 'find') { dialog.close(); openCitationDialog(blockId); return; }
+        dialog.close();
+        void select(blockId);
+        globalThis.setTimeout(() => host.querySelector('[data-action="ai"]')?.click(), 900);
+      }));
       body.querySelectorAll('[data-cp-find]').forEach((button) => button.addEventListener('click', () => {
         dialog.close();
         openCitationDialog(blockId);

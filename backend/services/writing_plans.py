@@ -714,12 +714,14 @@ def _deliverables(requirements: list[dict], content: str) -> list[dict]:
     for requirement in requirements:
         kind = requirement.get("type") or "text"
         title = str(requirement.get("text") or "")
+        written = _written(title) if kind == "text" else 0
         result.append({
             "kind": kind,
             "kind_label": DELIVERABLE_KIND_LABEL.get(kind, "文字"),
             "title": title,
             "brief": [requirement.get("source_label") or ""],
-            "written_words": _written(title) if kind == "text" else 0,
+            "written_words": written,
+            "written_detected": written > 0 if kind == "text" else True,
             "source": requirement.get("source"),
         })
     return result, written_total, segments
@@ -745,6 +747,20 @@ def _word_plan(pages: int, deliverables: list[dict], written_total: int) -> dict
     return {"total": total, "written": written_total,
             "percent": round(written_total / total * 100) if total else 0,
             "over": bool(total and written_total > total * 1.3)}
+
+
+def _split_key_points(key_points: list[str], deliverables: list[dict]) -> dict[int, list[str]]:
+    """把"必须答到的点"按文字交付物顺序均分（如背景→项目由来/建设动因）。"""
+    mapping: dict[int, list[str]] = {}
+    text_indexes = [index for index, item in enumerate(deliverables) if item.get("kind") == "text"]
+    if not key_points or not text_indexes:
+        return mapping
+    per = max(1, -(-len(key_points) // len(text_indexes)))
+    for order, index in enumerate(text_indexes):
+        chunk = key_points[order * per: (order + 1) * per]
+        if chunk:
+            mapping[index] = chunk
+    return mapping
 
 
 def _key_points_from_title(title: str) -> list[str]:
@@ -1006,6 +1022,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "deliverables": deliverables,
         "word_plan": word_plan,
         "key_points": key_points,
+        "key_points_by_deliverable": _split_key_points(key_points, deliverables),
         "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "children": children,
