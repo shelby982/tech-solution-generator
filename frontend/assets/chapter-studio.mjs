@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v373';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v373';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v374';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v374';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1950,13 +1950,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const MODEL_ROLES = [['chief', '主编'], ['text', '文字编写'], ['rewrite', '文字精修'], ['diagram', '图片生成'], ['table', '表格']];
   const modelChoice = {
     read() {
-      try { return JSON.parse(globalThis.localStorage.getItem('cs-model-choice') || '{}'); } catch (e) { return {}; }
+      try { return JSON.parse(globalThis.localStorage.getItem(`cs-model-choice:${projectId}`) || '{}'); } catch (e) { return {}; }
     },
     get(role) { return this.read()[role] || ''; },
     set(role, value) {
       const all = this.read();
       if (value) all[role] = value; else delete all[role];
-      try { globalThis.localStorage.setItem('cs-model-choice', JSON.stringify(all)); } catch (e) { /* ignore */ }
+      try { globalThis.localStorage.setItem(`cs-model-choice:${projectId}`, JSON.stringify(all)); } catch (e) { /* ignore */ }
     },
   };
   let modelOptions = [];

@@ -237,7 +237,8 @@ async def generate_diagram(block_id: int, body: DiagramBody, model: str = ''):
     )
     payload = {'text': body.text, 'prefer_type': wanted}
     try:
-        raw, model = await call_role('diagram', system, payload, {'diagram': model} if model else {})
+        wanted = (getattr(body, 'model', '') or model or '').strip()
+        raw, model = await call_role('diagram', system, payload, {'diagram': wanted} if wanted else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     structure = normalize_model_output(raw, fallback_title=body.title or block.get('title') or '')
@@ -251,6 +252,7 @@ async def generate_diagram(block_id: int, body: DiagramBody, model: str = ''):
 
 
 class TableBody(BaseModel):
+    model: str = Field(default='', max_length=120)     # 本次指定模型（前端 body 传）
     title: str = Field(default='', max_length=120)
     requirement: str = Field(default='', max_length=2000)
     text: str = Field(default='', max_length=8000)
@@ -357,7 +359,8 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
     import asyncio as _aio
     from services.writing_plans import plan_of_block
-    from services.section_outline import SECTION_SYSTEM, build_section_payload, replace_section
+    from services.section_outline import (SECTION_REWRITE_SYSTEM, SECTION_SYSTEM,
+                                          build_section_payload, replace_section)
     from services.block_store import add_revision, update_block_content
     from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
     from infra.llm.clients import stream_openai, stream_claude
@@ -380,6 +383,17 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     payload = build_section_payload(chapter, section, str(block.get('content') or '')[:2000])
     extra_request = str(prompt or '').strip()
     # 用自然语言给模型（直接丢 JSON 会被模型"续写 JSON"）
+    is_rewrite = str(role or '').strip() == 'rewrite'
+    original_text = sectionText if False else ''  # 占位：原文在下面从正文抽取
+    if is_rewrite:
+        try:
+            import re as _re2
+            _body = str(block.get('content') or '')
+            _pat = _re2.compile(r'^##[ \t]+' + _re2.escape(title.strip()) + r'[ \t]*\n([\s\S]*?)(?=^##[ \t]+|\Z)', _re2.M)
+            _m = _pat.search(_body)
+            original_text = (_m.group(1).strip() if _m else '')
+        except Exception:
+            original_text = ''
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
@@ -390,8 +404,10 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         f"本节写法：{json.dumps(payload.get('how') or {}, ensure_ascii=False)}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
         + (f"【本次额外要求】{extra_request}\n" if extra_request else '')
+        + (f"【本节原文】\n{original_text[:4000]}\n" if is_rewrite and original_text else '')
         + f"可用素材（不得编造具体数字）：\n{payload.get('evidence') or '（无）'}\n"
-        "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
+        + ("这是**改写**：在【本节原文】基础上调整，保留引用与数字。" if is_rewrite and original_text
+           else "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。")
     )
 
     configs, index = config_store.get_configs_and_next_index()
@@ -401,7 +417,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     config = next((c for c in configs if model and c.model == model), None) or configs[index % len(configs)]
     stream = stream_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else stream_claude
     options = {'thinking': False} if getattr(config, 'provider', '') == 'deepseek' else {}
-    system_prompt = RULES + '\n' + SECTION_SYSTEM
+    system_prompt = RULES + '\n' + (SECTION_REWRITE_SYSTEM if is_rewrite else SECTION_SYSTEM)
 
     async def events():
         raw = ''
@@ -427,7 +443,21 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         async with get_db() as db:
             await add_revision(db, block_id, before, summary=f'分节生成：{section["title"]}', source='manual')
             await update_block_content(db, block_id, after, status=block.get('status') or 'draft')
-        yield format_sse_event('done', {'title': section['title'], 'content': after,
+        quality = {}
+        if is_rewrite and original_text:
+            import re as _re3
+            before_cites = len(_re3.findall(r'【来源[:：]', original_text))
+            after_cites = len(_re3.findall(r'【来源[:：]', text))
+            before_words = len(_re3.sub(r'\s+', '', original_text))
+            after_words = len(_re3.sub(r'\s+', '', text))
+            warn = []
+            if after_cites < before_cites:
+                warn.append(f'引用少了 {before_cites - after_cites} 处')
+            if before_words and after_words < before_words * 0.8:
+                warn.append(f'字数缩水到 {int(after_words / before_words * 100)}%')
+            quality = {'warnings': warn, 'words_before': before_words, 'words_after': after_words,
+                       'citations_before': before_cites, 'citations_after': after_cites}
+        yield format_sse_event('done', {'title': section['title'], 'content': after, 'quality': quality,
                                        'words': len(_re.sub(r'\s+', '', text)), 'replaced': replaced,
                                        'model': getattr(config, 'model', '')})
 
@@ -500,7 +530,7 @@ async def write_section(block_id: int, body: SectionBody):
 
 
 @router.post('/blocks/{block_id}/studio/table')
-async def generate_table(block_id: int, body: TableBody):
+async def generate_table(block_id: int, body: TableBody, model: str = ''):
     """按本章要求生成一张**有内容的**表格草稿（Markdown）。
 
     产品口径：只输出结构与要点，**不编造具体数据**；缺数据处写【待补充：xx】，
@@ -522,7 +552,8 @@ async def generate_table(block_id: int, body: TableBody):
     )
     payload = {'title': title, 'requirement': requirement, 'text': text[:4000]}
     try:
-        raw, model = await call_role('table', system, payload, {'table': model} if model else {})
+        wanted = (getattr(body, 'model', '') or model or '').strip()
+        raw, model = await call_role('table', system, payload, {'table': wanted} if wanted else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     markdown = _normalize_markdown_table(raw if isinstance(raw, str) else str(raw))
