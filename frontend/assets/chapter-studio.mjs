@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v387';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v387';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v389';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v389';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2176,23 +2176,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return null;
   }
 
-  /** 定位到任务目标（节 + 原句高亮） */
+  /** 定位到任务目标：切到预览 → 找到原句所在段落 → 滚动并高亮 2 秒 */
   function locateTaskTarget(task) {
-    const section = (task.target || {}).section || '';
-    const quote = (task.target || {}).quote || '';
-    if (!section) { status('这条没有定位信息'); return; }
-    locateSectionInEditor(section);
-    if (quote) {
-      const text = String(editor.value || '');
-      const at = text.indexOf(quote.slice(0, 18));
-      if (at >= 0) {
-        editor.focus();
-        editor.setSelectionRange(at, at + quote.length);
-        status(`已定位并选中：${quote.slice(0, 30)}…`);
+    const target = task.target || {};
+    const section = String(target.section || '');
+    const quote = String(target.quote || '');
+    if (!section && !quote) { status('这条没有定位信息，请直接在正文里找'); return; }
+    paintView(true);                                   // 预览态才能高亮
+    const previewEl = host.querySelector('[data-cs="preview"]');
+    if (previewEl) {
+      previewEl.innerHTML = previewContent(editor.value);
+      const blocks = [...previewEl.querySelectorAll('p, li, h2, h3, h4')];
+      const needle = quote.replace(/\s+/g, '').slice(0, 12);
+      const hit = blocks.find((el) => (el.textContent || '').replace(/\s+/g, '').includes(needle))
+        || blocks.find((el) => (el.textContent || '').includes(section));
+      if (hit) {
+        // 同时点亮所属小节标题，便于定位
+        let heading = hit.previousElementSibling;
+        while (heading && !/^H[1-4]$/.test(heading.tagName)) heading = heading.previousElementSibling;
+        if (heading) heading.classList.add('cs-locate-hit');
+        hit.classList.add('cs-locate-hit');
+        try { hit.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
+        globalThis.setTimeout(() => hit.classList.remove('cs-locate-hit'), 4000);
+        const index = blocks.filter((el) => (el.textContent || '').trim()).indexOf(hit) + 1;
+        status(`已定位到正文：${section || '正文'} · 第 ${index} 段 —— 原句「${quote.slice(0, 22)}…」，请改成你选的说法`);
         return;
       }
     }
-    status(`已定位到「${section}」`);
+    status(`已切到预览，但没有精确匹配到原句（${section}）`);
   }
 
   /** 任务动作分发：上传 / 选说法 / 查看 / 定位 / 精简 */
@@ -2213,8 +2224,97 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
-    if (type.startsWith('system_')) { status(`系统任务：${task.title}（在下次生成时自动处理）`); return; }
+    if (type === 'search_now') {
+      const btn = globalThis.document.querySelector('[data-cite-open]');
+      if (btn) { btn.click(); status('已打开检索：把缺的依据逐条搜进本章（查到会自动挂上）'); }
+      else status('已记录：系统会去公开来源检索这些依据');
+      return;
+    }
+    if (type === 'generate_chart' || type === 'write_now' || type === 'fix_now') {
+      await runTaskQuickFix(task, type);
+      return;
+    }
+    if (type.startsWith('system_')) { status(`系统任务：${task.title}`); return; }
     locateTaskTarget(task);
+  }
+
+  /** 卡上候选：直接应用一个改法（服务端按 locator 替换 + 写版本） */
+  async function applyDecideOption(task, label) {
+    const decide = (planBrief?.todoItems || []).find((x) => x.group === 'decide' && x.suggestions?.includes(label))
+      || (planBrief?.todoItems || []).find((x) => x.group === 'decide');
+    const quote = String((decide && decide.sentence) || task.target?.quote || '').trim();
+    let replacement = (String(label).match(/改为「(.+?)」/) || [null, ''])[1]
+      || (String(label).match(/拟按(.+?)。/) || [null, ''])[1];
+    if (!replacement) {
+      if (/删除/.test(label)) replacement = '';
+      else if (/【待确认】/.test(label)) replacement = null;
+    }
+    if (replacement === null || !quote || replacement === undefined) {
+      locateTaskTarget(task);
+      status('这条需要你手动改写，已定位到原句');
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/todo/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block_id: String(active.block_id || ''), task_id: task.id,
+                               section: task.target?.section || '', quote, replacement }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+      const fresh = await json(`/api/blocks/${active.id}/studio`);
+      context = fresh;
+      if (fresh.block) editor.value = fresh.block.content || '';
+      await loadBasis(active.block_id); paintAside();
+      status('已按你选的改法替换并写版本，待办已重算');
+    } catch (error) {
+      status(`应用失败：${error.message}（可点「定位」手动改）`);
+    }
+  }
+
+  /** 任务卡的"现在就做"：生成图表 / 补写该节 / 统一表述 */
+  async function runTaskQuickFix(task, type) {
+    try {
+      if (type === 'generate_chart') {
+        const kind = (task.action.payload || {}).kind;
+        const title = (task.action.payload || {}).title || '';
+        const section = (planBrief?.outline || []).find((s) => (s.deliverables || []).some((d) => d.title === title));
+        if (kind === 'figure') {
+          openFigureAdjustDialog({ id: 'new', kind: 'ai', section: section ? section.title : '',
+                                   title: title || '新图示', type: 'layered', nodes: 0, raw: '' });
+        } else {
+          status('表格生成：请在「插入 → AI 生成表格」里补一张'); showPanel('todo');
+        }
+        return;
+      }
+      if (type === 'write_now') {
+        const title = (task.action.payload || {}).title || '';
+        const section = (planBrief?.outline || []).find((s) => String(s.title).includes(title.replace(/[「」]/g, '')));
+        if (!section) { status('没找到对应节，请在「本章计划」里确认大纲'); return; }
+        status(`正在补写「${section.title}」…`);
+        await streamWriteSection(active.id, section);
+        await loadBasis(active.block_id); paintAside();
+        status('已补写，请核对后保存');
+        return;
+      }
+      if (type === 'fix_now') {
+        const proof = (planBrief?.todoItems || []).find((x) => x.group === 'proof' && x.fix);
+        if (!proof) { status('没有可自动统一的项'); return; }
+        const pairs = (proof.fix.replacements || []);
+        let text = String(editor.value || ''); let n = 0;
+        for (const [find, repl] of pairs) {
+          if (!find || find === repl) continue;
+          const before = text.length;
+          text = text.split(find).join(repl);
+          if (text.length !== before) n += 1;
+        }
+        if (!n) { status('没有可替换的内容'); return; }
+        editor.value = text; changed(); await save();
+        status(`已统一 ${n} 类表述（已写版本，可撤销）`);
+        return;
+      }
+    } catch (error) { status(error.message); }
   }
 
   /** 决策抽屉：把该类所有决定项列出来，逐条选 */
@@ -2281,6 +2381,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <span class="cs-task-impact">${esc(task.impact_text || '')}</span></div>
           ${task.why ? `<p class="cs-task-why">${esc(task.why)}</p>` : ''}
           ${locate ? `<p class="cs-task-loc">${esc(task.target.section || '')}${task.target.quote ? ` · ${esc(String(task.target.quote).slice(0, 28))}` : ''}</p>` : ''}
+          ${(task.options || []).length ? `<div class="cs-task-opts">${task.options.slice(0, 3).map((opt, i) => `
+              <button type="button" class="cs-task-opt" data-task-apply="${esc(task.id)}" data-opt-index="${i}">${esc(opt.label)}</button>`).join('')}
+            </div>` : ''}
           <div class="cs-task-acts">
             <button type="button" class="cs-task-act" data-task-act="${esc(task.action.type)}" data-task-id="${esc(task.id)}">${esc(task.action.label || '去处理')}</button>
             ${locate && (task.action || {}).type !== 'locate' ? `<button type="button" class="cs-todo-ignore" data-task-locate="${esc(task.id)}">定位</button>` : ''}
@@ -2998,6 +3101,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const options=await loadModelOptions();
       const current=modelChoice.get(role)||'';
       openModelPickerDialog(role, options, current);
+      return;
+    }
+    const taskApply=event.target.closest('[data-task-apply]');
+    if(taskApply && active){
+      const task=findDeliveryTask(taskApply.dataset.taskApply);
+      const index=Number(taskApply.dataset.optIndex||0);
+      const option=(task.options||[])[index];
+      if(!task || !option){status('这条没有可选项');return;}
+      await applyDecideOption(task, option.label);
       return;
     }
     const taskIgnore=event.target.closest('[data-task-ignore]');

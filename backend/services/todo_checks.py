@@ -51,16 +51,22 @@ _SENTENCE_SPLIT = re.compile(r"[。；\n]")
 
 
 def _sentences(content: str):
-    """逐句产出 (节标题, 句子)。"""
+    """逐句产出 (节标题, 句子)。表格行不参与（避免把单元格拼成"原句"）。"""
     section = ""
+    paragraph = 0
     for line in str(content or "").splitlines():
-        head = _SECTION_RE.match(line.strip())
+        stripped = line.strip()
+        head = _SECTION_RE.match(stripped)
         if head:
             section = head.group(1).strip()
+            paragraph = 0
             continue
-        for sentence in _SENTENCE_SPLIT.split(line):
+        if not stripped or stripped.startswith("|") or stripped.startswith(":::"):
+            continue
+        paragraph += 1
+        for sentence in _SENTENCE_SPLIT.split(stripped):
             text = sentence.strip()
-            if text:
+            if text and not text.startswith("|"):
                 yield section, text
 
 
@@ -100,7 +106,7 @@ def decision_items(content: str) -> list[dict]:
                     "evidence": f"{section or '正文'}：{sentence[:60]}…（无来源支撑）",
                     "source": "承诺检查", "severity": "block",
                     "action": "decide", "target": f"promise:{word}",
-                    "sentence": sentence,
+                    "sentence": sentence, "section": section,
                     "suggestions": _rewrite_candidates("承诺强度", word),
                 })
         for word in _ABSOLUTE:
@@ -111,7 +117,7 @@ def decision_items(content: str) -> list[dict]:
                     "evidence": f"{section or '正文'}：{sentence[:60]}…（建议给出依据或降级表述）",
                     "source": "表述检查", "severity": "suggest",
                     "action": "decide", "target": f"abs:{word}",
-                    "sentence": sentence,
+                    "sentence": sentence, "section": section,
                     "suggestions": _rewrite_candidates("极限表述", word),
                 })
         for word in _PENDING:
@@ -122,6 +128,13 @@ def decision_items(content: str) -> list[dict]:
                     "evidence": f"{section or '正文'}：{sentence[:60]}…（交付前需确定）",
                     "source": "口径检查", "severity": "block",
                     "action": "decide", "target": f"pending:{word}",
+                    "sentence": sentence,
+                    "section": section,
+                    "suggestions": [
+                        "把这句改成「拟按最小必要原则明确…」",
+                        "保留原句但标注【待确认】",
+                        "删掉这句话",
+                    ],
                 })
         for role in _ROLES:
             if role in sentence:
@@ -298,6 +311,7 @@ def citation_items(content: str) -> list[dict]:
                 "evidence": f"{section or '正文'}：{sentence[:60]}…（建议补【来源：…】）",
                 "source": "引用核对", "severity": "suggest",
                 "action": "locate", "target": key,
+                "sentence": sentence, "section": section,
             })
             break
     return items

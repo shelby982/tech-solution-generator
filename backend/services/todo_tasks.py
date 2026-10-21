@@ -97,33 +97,37 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     if pending_gaps:
         system.append(_task(
             category="system", owner="system",
-            title=f"系统补 {len(pending_gaps)} 条依据",
+            title=f"补 {len(pending_gaps)} 条依据原文",
             dedupe_key="generation-gaps",
-            why="生成时发现这些依据缺失，系统先去公开渠道查；查不到的会转成「需要你提供」",
+            why=("正文引用了这些文件但没取到原文，无法核验条款。" 
+                 "点「现在去查」系统会逐条去公开来源检索，查到的自动挂到本章；"
+                 "查不到的会告诉你只能由你提供"),
             impact="quality",
-            action={"type": "system_search", "label": "查看", "payload": {}},
+            action={"type": "search_now", "label": "现在去查", "payload": {"count": len(pending_gaps)}},
             evidence=[{"label": "缺口", "text": _clip(g.get("text"), _QUOTE_LIMIT)} for g in pending_gaps[:5]],
         ))
 
     # ③ 决定项（口径/承诺/角色）：同类合并成一张卡，抽屉里逐条选
     decide_pool = [d for d in (decisions or []) if d.get("group") == "decide"]
     if decide_pool:
-        section = _first_section(decide_pool, body)
-        quote = _quote_of(decide_pool[0], body)
-        if len(decide_pool) == 1:
-            title = f"定 1 处口径"
-        else:
-            title = f"定 {len(decide_pool)} 处口径"
+        first = decide_pool[0]
+        section = str(first.get("section") or _first_section(decide_pool, body))
+        quote = _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)
         need_user.append(_task(
-            category="decide", owner="user", title=title,
+            category="decide", owner="user",
+            title=(f"定 1 处口径" if len(decide_pool) == 1 else f"定 {len(decide_pool)} 处口径"),
             dedupe_key="decide-batch",
             target={"block_id": block_id, "section": section, "quote": quote},
-            why=_clip(decide_pool[0].get("evidence"), 80) or "这些表述会影响承诺口径，交付前需要确定",
+            why=("这句话把口径留成了「未定」，评委会认为方案没想清楚；改完才能确认本章完成"
+                 if "未定" in str(first.get("title") or "") or "待明确" in quote
+                 else "这句话是承诺口径，交付前需要确定说法"),
             impact="completion_block",
             action={"type": "choose", "label": "选一种说法", "payload": {"count": len(decide_pool)}},
-            options=[{"label": s, "todo_id": _task_id("decide", str(d.get("target") or idx))}
-                     for idx, d in enumerate(decide_pool) for s in (d.get("suggestions") or [])][:8],
-            evidence=[{"label": "原句", "text": _clip(d.get("evidence"), _QUOTE_LIMIT)} for d in decide_pool[:3]],
+            options=[{"label": suggestion, "todo_id": str(item.get("target") or index)}
+                     for index, item in enumerate(decide_pool)
+                     for suggestion in (item.get("suggestions") or [])][:3],
+            evidence=[{"label": "原句", "text": _clip(item.get("sentence") or item.get("evidence"), _QUOTE_LIMIT)}
+                      for item in decide_pool[:3]],
         ))
 
     # ④ 图表缺口：系统生成 → 完成后请你确认
@@ -133,11 +137,11 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         label = "表格" if item.get("kind") == "table" else "图示"
         system.append(_task(
             category="system", owner="system",
-            title=f"系统生成{label}「{_clip(item.get('title'), 10)}」",
+            title=f"生成{label}「{_clip(item.get('title'), 10)}」",
             dedupe_key=f"gen:{item.get('title')}",
-            why="计划要求但正文没有；系统生成后请你确认再插入",
+            why="计划要求这一节有它，但正文里还没有。现在就能生成，生成后你确认再插入正文",
             impact="quality",
-            action={"type": "system_generate", "label": "查看", "payload": {"title": item.get("title")}},
+            action={"type": "generate_chart", "label": "现在生成", "payload": {"title": item.get("title"), "kind": item.get("kind")}},
         ))
 
     # ⑤ 文字不足：系统补写（不占用户待办）
@@ -146,11 +150,11 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             continue
         system.append(_task(
             category="system", owner="system",
-            title=f"系统补写「{_clip(item.get('title'), 10)}」",
+            title=f"补写「{_clip(item.get('title'), 10)}」",
             dedupe_key=f"write:{item.get('title')}",
-            why=f"已写 {item.get('written_words') or 0} / 目标 {item.get('target_words')} 字",
+            why=f"这一节只有 {item.get('written_words') or 0} 字（目标 {item.get('target_words')} 字），点「现在补写」马上写",
             impact="quality",
-            action={"type": "system_write", "label": "查看", "payload": {"title": item.get("title")}},
+            action={"type": "write_now", "label": "现在补写", "payload": {"title": item.get("title")}},
         ))
 
     # ⑥ 术语/数字/引用/格式：系统批量修
@@ -158,11 +162,11 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     if proof_system:
         system.append(_task(
             category="system", owner="system",
-            title=f"系统统一 {len(proof_system)} 处表述",
+            title=f"统一 {len(proof_system)} 处表述",
             dedupe_key="proof-fix",
-            why="术语/引用格式不一致，系统可批量统一，改完可撤销",
+            why="术语/引用格式不一致。点「现在统一」会改正文并写版本，可撤销",
             impact="quality",
-            action={"type": "system_fix", "label": "查看", "payload": {}},
+            action={"type": "fix_now", "label": "现在统一", "payload": {}},
         ))
     # 需要人工核对的（无自动修法）→ 同类合并成一张卡
     manual_proofs = [p for p in (proofs or []) if p.get("group") == "proof" and not p.get("fix")]
@@ -186,9 +190,11 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             category="confirm", owner="user",
             title=(f"核对 {key}" if len(items) == 1 else f"核对 {len(items)} 处{key}"),
             dedupe_key=f"check:{key}",
-            target={"block_id": block_id, "section": _first_section(items, body),
-                    "quote": _quote_of(first, body)},
-            why=_clip(first.get("evidence"), 80),
+            target={"block_id": block_id,
+                    "section": str(first.get("section") or _first_section(items, body)),
+                    "quote": _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)},
+            why=(f"正文引用了《{_policy_name(first)}》但没有【来源：…】，评委无法核实出处"
+                 if "引用" in key else f"这几处{key}不一致，建议统一后再交付"),
             impact="quality",
             action={"type": "locate", "label": "定位", "payload": {}},
             evidence=[{"label": "示例", "text": _clip(i.get("evidence"), _QUOTE_LIMIT)} for i in items[:3]],
@@ -251,3 +257,22 @@ def _short_kind(kind: str) -> str:
             return short
     cleaned = re.sub(r"[（(].*?[)）]", "", str(kind)).strip()
     return _clip(cleaned or "材料", 10)
+
+
+def _clean_quote(sentence: str, body: str) -> str:
+    """原句必须是正文里真实存在的一段（去表格噪音、截断到可定位长度）。"""
+    text = re.sub(r"\s+", "", str(sentence or ""))
+    if not text:
+        return ""
+    compact_body = re.sub(r"\s+", "", str(body or ""))
+    for size in (40, 30, 20, 12):
+        candidate = text[:size]
+        if len(candidate) >= 10 and candidate in compact_body:
+            return candidate
+    return ""
+
+
+def _policy_name(item: dict) -> str:
+    text = str(item.get("title") or "")
+    match = re.search(r"《(.+?)》", text)
+    return match.group(1) if match else "相关政策文件"

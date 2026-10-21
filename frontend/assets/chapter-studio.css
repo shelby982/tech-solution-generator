@@ -841,3 +841,12 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-task-act:hover { background: #eff6ff; }
 .cs-decide-item { border-top: 1px dashed #eef2f7; padding: 8px 0; }
 .cs-decide-item:first-child { border-top: 0; }
+
+/* 待办 v3：卡内候选 + 定位高亮 */
+.cs-task-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.cs-task-opt { text-align: left; border: 1px solid #e2e8f0; background: #f8fafc; color: #1e293b;
+  border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
+.cs-task-opt:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+.cs-locate-hit { background: #fef08a !important; box-shadow: 0 0 0 2px #facc15 inset; border-radius: 3px;
+  animation: csLocatePulse 1.2s ease-in-out 2; }
+@keyframes csLocatePulse { 0%,100% { background-color: #fef08a; } 50% { background-color: #fde68a; } }
