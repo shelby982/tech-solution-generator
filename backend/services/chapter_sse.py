@@ -166,14 +166,28 @@ async def run_job(job_id: str) -> None:
                                        "progress": round(index / total * 100)})
             await emit(job_id, "role", {"role": "text", "state": "working", "model": models.get("text", ""),
                                         "section_index": index})
+            chart_deliverables = [d for d in (section.get("deliverables") or [])
+                                  if d.get("kind") in ("figure", "table")][:2]
+            chart_tasks = []
             for role in ("diagram", "table"):
                 if (section.get("deliverables") or []):
                     await emit(job_id, "role", {"role": role, "state": "queued",
                                                 "model": models.get(role, ""), "section_index": index})
+            # 图表与正文并行（图表不等正文）
+            for deliverable in chart_deliverables:
+                role = "diagram" if deliverable.get("kind") == "figure" else "table"
+                chart_tasks.append(asyncio.create_task(
+                    _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""))))
             text = ""
             async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):
                 text += chunk
                 await emit(job_id, "delta", {"index": index, "text": chunk})
+            charts = [await task for task in chart_tasks] if chart_tasks else []
+            if charts:
+                text, chart_missing = merge_charts(text, charts)
+                for note in chart_missing:
+                    await emit(job_id, "error", {"scope": "chart", "index": index, "message": note,
+                                                 "recoverable": True})
             if len(re.sub(r"\s+", "", text)) < 60:
                 await emit(job_id, "error", {"scope": "section", "index": index, "message": "本节没有生成出可用内容",
                                              "recoverable": True})
@@ -184,9 +198,10 @@ async def run_job(job_id: str) -> None:
                                            "words": len(re.sub(r"\s+", "", text))})
             await emit(job_id, "role", {"role": "text", "state": "done", "model": models.get("text", ""),
                                         "section_index": index})
-            for role in ("diagram", "table"):
-                await emit(job_id, "role", {"role": role, "state": "skipped", "model": models.get(role, ""),
-                                            "section_index": index, "detail": "本版图表生成在 M3 接入"})
+            if not chart_deliverables:
+                for role in ("diagram", "table"):
+                    await emit(job_id, "role", {"role": role, "state": "skipped", "model": models.get(role, ""),
+                                                "section_index": index, "detail": "本节无图表交付物"})
 
         # 落库：base 未被改动才写
         saved, reason = False, ""
@@ -210,6 +225,24 @@ async def run_job(job_id: str) -> None:
         await emit(job_id, "job", {"job_id": job_id, "status": "failed", "stage": "失败", "progress": 0})
 
 
+def _placeholder_hint(section: dict) -> str:
+    """告诉正文 Agent 在需要图表的位置放占位符。"""
+    lines = []
+    for deliverable in section.get("deliverables") or []:
+        kind = deliverable.get("kind")
+        title = str(deliverable.get("title") or "").strip()
+        if not title:
+            continue
+        if kind == "figure":
+            lines.append(f"· 需要一张图「{title}」：在该图应出现的位置单独一行写 [[FIGURE:{title}]]")
+        elif kind == "table":
+            lines.append(f"· 需要一张表「{title}」：在该表应出现的位置单独一行写 [[TABLE:{title}]]")
+    if not lines:
+        return ""
+    return ("图表占位符（必须保留，后端会替换成真实图表；正文要有一句引言指向它）：\n"
+            + "\n".join(lines) + "\n")
+
+
 async def _stream_section(block: dict, section: dict, thread_id: str, model: str):
     """流式写一节（复用分节提示词；模型来自设置解析）。"""
     from agents.chapter_team import RULES
@@ -230,7 +263,8 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
-        "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
+        + _placeholder_hint(section)
+        + "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
     )
     configs = config_store.get_all() or []
     config = next((c for c in configs if model and str(c.model) == model), None) or (configs[0] if configs else None)
@@ -267,3 +301,92 @@ async def recover_stale_jobs() -> int:
                 (row[0],))
         await db.commit()
     return len(rows)
+
+
+# ── 图表生成（M3）：不读正文，只用节计划的要素/列名 + 依据 + 素材 ──────────────
+_PLACEHOLDER_RE = re.compile(r"\[\[(FIGURE|TABLE):([^\]]+)\]\]")
+
+
+async def _generate_chart(job_id: str, index: int, section: dict, deliverable: dict,
+                          thread_id: str, model: str) -> dict:
+    role = "diagram" if deliverable.get("kind") == "figure" else "table"
+    title = str(deliverable.get("title") or "").strip()
+    basis = "；".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or []))
+    elements = deliverable.get("elements") or section.get("points") or []
+    await emit(job_id, "role", {"role": role, "state": "working", "model": model,
+                                "section_index": index, "detail": title})
+    await emit(job_id, "chart", {"role": role, "index": index, "title": title, "state": "working",
+                                 "model": model})
+    try:
+        from agents.chapter_team import call_role
+        if role == "diagram":
+            payload = {
+                "title": title,
+                "type": deliverable.get("type") or "layered",
+                "elements": [str(x) for x in elements][:8],
+                "basis": basis,
+                "requirement": "按上述要素组织成层次/流程/时间线示意图；只用给出的要素，不新增内容、不编数字",
+            }
+            system = ("你是图示 Agent。把给定要素组织成结构清晰的示意图，"
+                      "只输出 `:::diagram type=<layered|flow|timeline> <标题>` + 每行一个节点 + `:::`。"
+                      "节点 3~8 个、每个不超过 30 字，禁止新增要素之外的内容。")
+            raw, used = await call_role("diagram", system, payload, {"diagram": model} if model else {})
+            markdown = str(raw or "").strip()
+            from services.diagrams import parse_diagram
+            lines = markdown.splitlines()
+            if lines and lines[0].startswith(":::diagram"):
+                body = lines[1:-1] if lines[-1].strip() == ":::" else lines[1:]
+                parsed = parse_diagram(lines[0].strip(), body)
+                nodes = parsed.get("nodes") or []
+                checks = {"nodes": len(nodes)}
+                if not 2 <= len(nodes) <= 12:
+                    return {"ok": False, "role": role, "index": index, "title": title,
+                            "state": "failed", "error": f"节点数 {len(nodes)} 不在 2~12", "model": used}
+                markdown = "\n".join([lines[0]] + [str(n.get("label") if isinstance(n, dict) else n) for n in nodes]
+                                      + [":::"])
+        else:
+            cols = deliverable.get("cols") or []
+            payload = {"title": title, "columns": len(cols) or 3, "cols": cols, "basis": basis,
+                       "requirement": "列名按给定 cols；缺数据写【待补充：xx】，不编造数字"}
+            system = ("你是表格 Agent。按给定列名生成一张可直接放进标书的表格；"
+                      "第一行表头用给定列名，行数不超过 10；缺数据写【待补充：xx】；只输出 Markdown 表格。")
+            raw, used = await call_role("table", system, payload, {"table": model} if model else {})
+            markdown = str(raw or "").strip()
+            if "|" not in markdown:
+                return {"ok": False, "role": role, "index": index, "title": title,
+                        "state": "failed", "error": "未生成出表格", "model": used}
+            if not markdown.lstrip().startswith("**表"):
+                markdown = f"**表：{title}**\n\n{markdown}"
+            checks = {"cols": len(cols)}
+        await emit(job_id, "chart", {"role": role, "index": index, "title": title, "state": "done",
+                                     "markdown": markdown, "checks": checks, "model": used})
+        await emit(job_id, "role", {"role": role, "state": "done", "model": used, "section_index": index})
+        return {"ok": True, "role": role, "index": index, "title": title, "markdown": markdown,
+                "model": used, "checks": checks}
+    except Exception as exc:  # noqa: BLE001
+        await emit(job_id, "chart", {"role": role, "index": index, "title": title, "state": "failed",
+                                     "error": str(exc)[:200], "model": model})
+        await emit(job_id, "role", {"role": role, "state": "failed", "model": model, "section_index": index})
+        return {"ok": False, "role": role, "index": index, "title": title, "error": str(exc)[:200]}
+
+
+def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
+    """把图表替换进占位符；返回 (正文, 待补说明)。"""
+    missing: list[str] = []
+    used: set[str] = set()
+    for chart in charts:
+        if not chart.get("ok"):
+            continue
+        pattern = re.compile(r"\[\[(FIGURE|TABLE):" + re.escape(str(chart.get("title"))) + r"\]\]")
+        if pattern.search(text):
+            text = pattern.sub(lambda _m: "\n\n" + chart["markdown"] + "\n\n", text, count=1)
+            used.add(str(chart.get("title")))
+    for match in _PLACEHOLDER_RE.finditer(text):
+        missing.append(match.group(2))
+    text = _PLACEHOLDER_RE.sub("", text)
+    for chart in charts:
+        if chart.get("ok") and str(chart.get("title")) not in used:
+            kind = "图" if chart.get("role") == "diagram" else "表"
+            text = text.rstrip() + "\n\n" + chart["markdown"] + "\n"
+            missing.append(f"{kind}「{chart.get('title')}」正文未留占位（已附在节末）")
+    return re.sub(r"\n{3,}", "\n\n", text), missing

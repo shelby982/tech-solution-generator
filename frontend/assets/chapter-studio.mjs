@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v378';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v378';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v379';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v379';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1897,6 +1897,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         lastIndex = index;
         pending.set(index, (pending.get(index) || '') + String(data.text || ''));
         if (pending.size > 40) flush();
+      });
+      source.addEventListener('chart', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        const kind = data.role === 'diagram' ? '图' : '表';
+        if (data.state === 'working') status(`正在生成${kind}「${data.title || ''}」…`);
+        else if (data.state === 'done') status(`${kind}「${data.title || ''}」已生成 ✓`);
+        else if (data.state === 'failed') status(`${kind}「${data.title || ''}」失败：${data.error || ''}`);
       });
       source.addEventListener('section', (event) => {
         const data = JSON.parse(event.data || '{}');

@@ -62,3 +62,18 @@ def test_runner_emits_events_and_saves(monkeypatch, seeded_block):
     assert any(n == "delta" for n, _ in events)
     assert any(n == "section" and p.get("state") == "done" for n, p in events)
     assert any(n == "done" for n, _ in events)
+
+
+def test_merge_charts_replaces_placeholder_and_reports_missing():
+    from services.chapter_sse import merge_charts
+
+    text = "## 一\n\n如图。\n\n[[FIGURE:对比图]]\n\n如表。\n\n[[TABLE:映射表]]\n"
+    charts = [
+        {"ok": True, "role": "diagram", "title": "对比图", "markdown": ":::diagram type=layered 对比图\n- A\n- B\n:::"},
+        {"ok": True, "role": "table", "title": "另一个表", "markdown": "**表：另一个表**\n\n| A |\n| --- |\n| 1 |"},
+    ]
+    merged, missing = merge_charts(text, charts)
+    assert ":::diagram" in merged                     # 占位符被替换
+    assert "[[TABLE:映射表]]" not in merged            # 无对应图表的占位符被清掉
+    assert any("映射表" in note for note in missing)    # 并记为待补
+    assert any("另一个表" in note for note in missing)  # 无占位的图表附在节末
