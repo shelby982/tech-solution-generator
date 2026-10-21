@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v343';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v343';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v343';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v344';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v344';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v344';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1436,18 +1436,30 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
   }
 
+  /** 让"正在编写"的这一节保持在视野里：首次居中，之后跟随底部 */
+  function keepWritingVisible(previewEl, { center = false } = {}) {
+    if (!previewEl) return;
+    const parts = previewEl.querySelectorAll('.cs-sec-writing');
+    if (!parts.length) return;
+    const target = center ? parts[0] : parts[parts.length - 1];
+    try {
+      target.scrollIntoView({ behavior: center ? 'smooth' : 'auto', block: center ? 'center' : 'nearest' });
+    } catch (e) { /* 老浏览器忽略 */ }
+  }
+
   /** 流式写一节：切到预览 → 高亮该节 → 逐字落入 → 完成后回正文 */
   async function streamWriteSection(blockIdNum, sec, onProgress) {
     const base = String(editor.value || '');
     let acc = '';
     paintView(true);                       // 预览态（可高亮）
-    const renderLive = () => {
+    const renderLive = (center = false) => {
       const previewEl = host.querySelector('[data-cs="preview"]');
       if (!previewEl) return;
       previewEl.innerHTML = previewContent(mergeSectionText(base, sec.title, acc || '正在编写…'));
       highlightWritingSection(previewEl, sec.title);
+      keepWritingVisible(previewEl, { center });
     };
-    renderLive();
+    renderLive(true);                      // 首次：把该节拉到屏幕中央
     const params = new URLSearchParams({
       thread_id: threadId,
       title: sec.title,
@@ -1461,7 +1473,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         source.addEventListener('delta', (event) => {
           try { acc += JSON.parse(event.data).text || ''; } catch (e) { /* ignore */ }
           const now = Date.now();
-          if (now - lastPaint > 120) { lastPaint = now; renderLive(); onProgress && onProgress(acc.length); }
+          if (now - lastPaint > 120) { lastPaint = now; renderLive(false); onProgress && onProgress(acc.length); }
         });
         source.addEventListener('done', (event) => {
           source.close();
@@ -1471,7 +1483,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         });
         source.addEventListener('error', () => { source.close(); reject(new Error('推流中断，请重试')); });
       });
-      if (typeof finalContent === 'string') { editor.value = finalContent; changed && changed(); }
+      if (typeof finalContent === 'string') {
+        editor.value = finalContent;
+        changed && changed();
+        const previewEl = host.querySelector('[data-cs="preview"]');
+        keepWritingVisible(previewEl, { center: false });
+      }
       return finalContent;
     } finally {
       paintView(false);                     // 回到编辑态
@@ -1971,6 +1988,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const label=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
       try{
         status(`正在编写「${sec.title}」…（正文预览区高亮该节）`);
+        secBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`));
         const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
         if(fresh.block)editor.value=fresh.block.content||'';
