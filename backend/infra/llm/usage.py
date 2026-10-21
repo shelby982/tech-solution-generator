@@ -66,3 +66,21 @@ async def emit(record: dict) -> None:
         await sink(record)
     except Exception as e:
         logger.warning(f"LLM 用量记账失败（{e}），已忽略")
+
+
+# 当前调用的更细归属：{"block_id": int|None, "section": str, "role": str}
+_call_ctx: ContextVar[dict] = ContextVar("llm_call_context", default={})
+
+
+def current_call() -> dict:
+    return _call_ctx.get()
+
+
+@contextmanager
+def call_context(*, block_id=None, section="", role="") -> Iterator[None]:
+    """with 块内把后续 LLM 调用归属到"某章某节的某个角色"（留痕用）。"""
+    token = _call_ctx.set({"block_id": block_id, "section": section, "role": role})
+    try:
+        yield
+    finally:
+        _call_ctx.reset(token)

@@ -97,3 +97,33 @@ def test_chart_checks_pass_when_consistent():
     items = chart_items("diagram", markdown, {"title": "对比图"}, "本节从三个层面说明。", ["招标文件-2.2.5"])
     assert [i for i in items if i["title"].endswith("缺依据")] == []
     assert [i for i in items if "层数不一致" in i["title"]] == []
+
+
+def test_job_artifacts_carry_section_records(monkeypatch, seeded_block):
+    """M6：留痕 —— 作业结束后 artifacts 里有节级记录（角色/模型/字数/耗时）。"""
+    import json as _json
+
+    from services import chapter_sse
+
+    async def fake_stream(block, section, thread_id, model):
+        yield "本节正文内容，用于验证留痕。" * 6
+
+    monkeypatch.setattr(chapter_sse, "_stream_section", fake_stream)
+    monkeypatch.setattr(chapter_sse, "emit", lambda *a, **k: asyncio.sleep(0))
+
+    async def main():
+        job_id = await chapter_sse.create_job(29, "t" * 10, int(seeded_block["id"]))
+        await chapter_sse.run_job(job_id)
+        return job_id
+
+    job_id = asyncio.run(main())
+
+    async def read():
+        row = await chapter_sse._job_row(job_id)
+        return _json.loads(row["artifacts"] or "{}")
+
+    artifacts = asyncio.run(read())
+    sections = artifacts.get("sections") or []
+    assert sections and sections[0]["role"] == "text"
+    assert sections[0]["words"] > 0
+    assert "ms" in sections[0]

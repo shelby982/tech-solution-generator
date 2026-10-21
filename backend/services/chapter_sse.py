@@ -153,6 +153,7 @@ async def run_job(job_id: str) -> None:
         base = str(block.get("content") or "")
         draft = base
         all_checks: list[dict] = []
+        section_records: list[dict] = []
         pending = [s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
         total = max(1, len(pending))
         for index, section in enumerate(pending):
@@ -180,9 +181,12 @@ async def run_job(job_id: str) -> None:
                 chart_tasks.append(asyncio.create_task(
                     _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""))))
             text = ""
-            async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):
-                text += chunk
-                await emit(job_id, "delta", {"index": index, "text": chunk})
+            started_at = time.monotonic()
+            from infra.llm.usage import call_context
+            with call_context(block_id=block_pk, section=title, role="text"):
+                async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):
+                    text += chunk
+                    await emit(job_id, "delta", {"index": index, "text": chunk})
             charts = [await task for task in chart_tasks] if chart_tasks else []
             section_checks: list[dict] = []
             if charts:
@@ -208,8 +212,15 @@ async def run_job(job_id: str) -> None:
                 await emit(job_id, "section", {"index": index, "title": title, "state": "failed", "words": 0})
                 continue
             draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
+            words = len(re.sub(r"\s+", "", text))
+            section_records.append({"index": index, "title": title, "role": "text",
+                                    "model": models.get("text", ""), "words": words,
+                                    "ms": int((time.monotonic() - started_at) * 1000),
+                                    "charts": [{"role": c.get("role"), "model": c.get("model"),
+                                                "ok": bool(c.get("ok"))} for c in charts]})
             await emit(job_id, "section", {"index": index, "title": title, "state": "done",
-                                           "words": len(re.sub(r"\s+", "", text))})
+                                           "words": words, "model": models.get("text", ""),
+                                           "ms": section_records[-1]["ms"]})
             await emit(job_id, "role", {"role": "text", "state": "done", "model": models.get("text", ""),
                                         "section_index": index})
             if not chart_deliverables:
@@ -226,13 +237,18 @@ async def run_job(job_id: str) -> None:
             elif (current.get("content") or "") != base:
                 reason = "正文在生成期间被修改，已保留建议稿，不覆盖"
             elif draft != base:
-                await add_revision(db, block_pk, base, summary="按大纲编写整章（chapter_sse）", source="ai")
+                model_note = " ".join(f"{role}={model}" for role, model in (models or {}).items() if model)
+                await add_revision(db, block_pk, base,
+                                   summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai")
                 await update_block_content(db, block_pk, draft)
                 saved = True
                 reason = "已写入正文"
-        await _set_job(job_id, status="done", stage="已完成", content=draft, saved=1 if saved else 0)
+        await _set_job(job_id, status="done", stage="已完成", content=draft, saved=1 if saved else 0,
+                       artifacts=json.dumps({"sections": section_records, "checks": all_checks,
+                                             "models": models}, ensure_ascii=False))
         await emit(job_id, "done", {"content": draft, "saved": saved, "reason": reason,
-                                    "models": models, "checks": all_checks})
+                                    "models": models, "checks": all_checks,
+                                    "sections": section_records})
         await emit(job_id, "job", {"job_id": job_id, "status": "done", "stage": "已完成", "progress": 100})
     except Exception as exc:  # noqa: BLE001
         await _set_job(job_id, status="failed", stage="失败", error=str(exc)[:300])

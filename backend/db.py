@@ -466,6 +466,11 @@ async def init_db(conn: aiosqlite.Connection) -> None:
                        ('preview_error', "TEXT DEFAULT ''")]:
         if name not in export_columns:
             await conn.execute(f'ALTER TABLE document_export_jobs ADD COLUMN {name} {kind}')
+    usage_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(llm_usage)')).fetchall()}
+    for name, kind in [('block_id', 'INTEGER'), ('section', "TEXT DEFAULT ''"), ('role', "TEXT DEFAULT ''")]:
+        if name not in usage_cols:
+            await conn.execute(f'ALTER TABLE llm_usage ADD COLUMN {name} {kind}')
+    await conn.commit()
     cursor = await conn.execute("PRAGMA table_info(blocks)")
     existing_cols = {row[1] for row in await cursor.fetchall()}
     # run_thread_id：该行属于哪一次 workflow run。老库的行留 NULL（不回填），

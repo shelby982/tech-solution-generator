@@ -29,13 +29,22 @@ INSERT INTO llm_usage (
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
     reasoning_tokens, total_tokens,
     project_id, thread_id,
-    ok, error, latency_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ok, error, latency_ms,
+    block_id, section, role
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 async def record(rec: dict) -> None:
-    """把一条用量记录写进 llm_usage。"""
+    """把一条用量记录写进 llm_usage（自动带上当前章节/节/角色）。"""
+    try:
+        from infra.llm.usage import current_call
+        ctx = current_call() or {}
+        for key in ("block_id", "section", "role"):
+            if ctx.get(key) not in (None, "", 0) and not rec.get(key):
+                rec[key] = ctx[key]
+    except Exception:
+        pass
     async with _db.get_db() as conn:
         await conn.execute(
             _INSERT,
@@ -55,6 +64,9 @@ async def record(rec: dict) -> None:
                 1 if rec.get("ok", True) else 0,
                 rec.get("error") or "",
                 rec.get("latency_ms"),
+                rec.get("block_id"),
+                rec.get("section") or "",
+                rec.get("role") or "",
             ),
         )
         await conn.commit()

@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v381';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v381';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v382';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v382';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2022,7 +2022,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           globalThis.document.body.appendChild(dlg);
           dlg.showModal();
         }
+        if (Array.isArray(data.sections)) lastSections = data.sections;
         currentJobId = '';
+        paintAside();
         globalThis.setTimeout(() => { if (slot) slot.innerHTML = ''; }, 5000);
         finish({ started: true, jobId, saved: !!data.saved });
       });
@@ -2162,6 +2164,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 各角色的模型选择（本次/记住），key: text|rewrite|diagram|table|chief */
   const MODEL_ROLES = [['chief', '主编'], ['text', '文字编写'], ['rewrite', '文字精修'], ['diagram', '图片生成'], ['table', '表格']];
   let writingModels = {};          // 服务端生效值：{role: used}
+  let lastSections = [];            // 最近一次作业的节级留痕（模型/字数/耗时）
   let currentJobId = '';           // 当前章节级作业（停止/重试用）
 
   /** 读服务端设置（章节覆盖 + 生效值） */
@@ -2282,6 +2285,21 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<section data-pane="todo"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
   }
 
+  /** 节级留痕：由哪个角色/模型生成、耗时（没有则空） */
+  function sectionTrace(title) {
+    const record = lastSections.find((item) => item.title === title);
+    if (!record) return '';
+    const parts = [`由 ${record.role === 'text' ? '文字' : record.role} ${record.model || ''} 生成`];
+    if (record.words) parts.push(`${record.words} 字`);
+    if (record.ms) parts.push(`${(record.ms / 1000).toFixed(1)}s`);
+    return parts.join(' · ');
+  }
+  function sectionTraceShort(title) {
+    const record = lastSections.find((item) => item.title === title);
+    if (!record || !record.model) return '';
+    return ` · ${record.model.replace(/^deepseek-/, '')}`;
+  }
+
   /** 某节正文的字数（粗略：该 ## 节到下一个 ## 之间） */
   function sectionWordCount(content, title) {
     const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2384,8 +2402,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return `<div class="cs-sec-block">
           <div class="cs-todo-row">
             <span class="cs-todo-idx">${i + 1}</span>
-            <span class="cs-todo-text"><b>${esc(sec.title)}</b>
-              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}</small></span>
+            <span class="cs-todo-text" title="${esc(sectionTrace(sec.title))}"><b>${esc(sec.title)}</b>
+              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}</small></span>
             <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button>
           </div>
           ${figBlock}
