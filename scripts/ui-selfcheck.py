@@ -390,6 +390,12 @@ HARNESS = r"""
     return { ok: outside.length === 0 && dup.length === 0, heads: heads.length, outside, dup };
   })();
   mark('正文标题与大纲一致且不重复', headingCheck.ok, headingCheck);
+  // 正文不得残留旧内容的 ### / #### 标题（内容应只在 ## 大纲节之下）
+  const strayHeads = await (async () => {
+    const text = document.querySelector('.cs-editor')?.value || '';
+    return [...text.matchAll(/^#{3,6}\s+(.+?)\s*$/gm)].map((m) => m[1].trim());
+  })();
+  mark('正文无大纲外的 ### 旧标题', strayHeads.length === 0, { stray: strayHeads.slice(0, 5) });
 
   // Z 正文不得含"待核对与补充"占位块（应留在待办里）
   const edVal = document.querySelector('.cs-editor')?.value || '';

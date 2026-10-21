@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v339';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v339';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v339';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v340';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v340';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v340';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -597,13 +597,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
         <div data-cp-req-edit hidden></div>`;
       bindEvents();
-      if (options.autoWrite && !options._autoStarted) {
-        options._autoStarted = true;
-        globalThis.setTimeout(() => {
-          body.querySelector('[data-cp-write-all]')?.click()
-            || body.querySelector('[data-cp-write-chapter]')?.click();
-        }, 400);
-      }
     };
     const runAction = (action) => {
       if (action === 'find') { dialog.close(); openCitationDialog(blockId); return; }
@@ -1997,13 +1990,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='save') await save();
       if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
-      if(action==='ai'){
-        // 有章节大纲 → 按大纲逐节补写（统一逻辑）；没有 → 走原多 Agent 编制
-        if ((data__outline || []).length && typeof writeChapterFromOutlineRef === 'function') {
-          await writeChapterFromOutlineRef(document.querySelector('[data-action="ai"]'));
-          return;
-        }
-      }
       if(action==='ai'){
         // 统一语义：「编写整章」= 按章节大纲逐节编写（与「进度」页签同一引擎）
         showPanel('ai');

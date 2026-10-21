@@ -8,12 +8,18 @@ from __future__ import annotations
 import re
 
 _HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
+# 任何 >=2 级标题都视为"分节边界"（旧内容的 ### / #### 也要能被识别并移除）
+_ANY_HEADING_RE = re.compile(r"(?m)^#{2,6}\s+(.+?)\s*$")
 
 
 def _split_sections(content: str) -> tuple[str, list[tuple[str, str]]]:
-    """拆成 (前言, [(标题, 该节正文)])。"""
+    """拆成 (前言, [(标题, 该节正文)])。
+
+    任何 >=2 级标题都算边界：`## 大纲节` 是正式节，`###/#### 旧标题` 会被
+    align_to_outline 判为"大纲外内容"从而移除（内容先进 revision）。
+    """
     text = str(content or "")
-    marks = [(m.group(1).strip(), m.start(), m.end()) for m in _HEADING_RE.finditer(text)]
+    marks = [(m.group(1).strip(), m.start(), m.end()) for m in _ANY_HEADING_RE.finditer(text)]
     if not marks:
         return text.strip(), []
     preface = text[: marks[0][1]].strip()
