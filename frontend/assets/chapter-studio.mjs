@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v358';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v358';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v358';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v359';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v359';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v359';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1837,8 +1837,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }).join('');
     return `<section data-pane="ai"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
       <div class="cs-progress-actions">
-        <button type="button" class="cs-todo-act cs-todo-act--primary" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button>
-        <button type="button" class="cs-todo-act" data-fig-review>审阅本章图片 ${figureCount}</button>
+        <button type="button" class="cs-progress-btn" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button>
+        <button type="button" class="cs-progress-btn" data-fig-review>审阅本章图片 ${figureCount}</button>
       </div>
       ${rows}</section>`;
   }
