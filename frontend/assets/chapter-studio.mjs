@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v382';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v382';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v384';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v384';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1424,24 +1424,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 写一节（只影响这一节） */
-  async function writeSectionApi(blockKey, sec) {
-    const resp = await fetch(`/api/blocks/${blockKey}/studio/section`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({thread_id: threadId, title: sec.title, points: sec.points || [], words: sec.words || 900}),
-      signal: AbortSignal.timeout(180000),
-    });
-    const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const detail = out.detail;
-      const message = typeof detail === 'string' ? detail
-        : Array.isArray(detail) ? detail.map((x) => x.msg || JSON.stringify(x)).join('；')
-        : `HTTP ${resp.status}`;
-      throw new Error(message);
-    }
-    return out;
-  }
-
-  /** 把某节在正文里替换为新内容（只影响这一节） */
+    /** 把某节在正文里替换为新内容（只影响这一节） */
   function mergeSectionText(content, title, text) {
     const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 匹配到"下一个 ## 标题"或"字符串结尾"；不要用 \s*$（会在一行末尾就断开，导致内容重复）
@@ -2136,25 +2119,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     } finally {
       paintView(false);                     // 回到编辑态
     }
-  }
-
-  /** 按大纲编写整章：已有内容的节保留，只补未写/待写的节 */
-  async function writeChapterApi(blockKey, blockId, onProgress) {
-    const plan = await fetchChapterPlan(blockKey);
-    const outline = plan.outline || [];
-    if (!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
-    const bodyText = String(editor?.value || '');
-    const escRe2 = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const done = new Set(outline.map((s) => s.title).filter((title) =>
-      sectionWordCount(bodyText, title) >= 20));
-    const missing = outline.filter((s) => !done.has(s.title));
-    if (!missing.length) return { written: 0, total: outline.length, message: '整章已按大纲写完' };
-    for (let i = 0; i < missing.length; i += 1) {
-      onProgress && onProgress(i + 1, missing.length, missing[i].title);
-      const out = await writeSectionApi(blockId, missing[i]);
-      if (out.content !== undefined) { editor.value = out.content; }
-    }
-    return { written: missing.length, total: outline.length };
   }
 
   const TODO_GROUPS = [
@@ -3043,7 +3007,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const headBtnEarly = globalThis.document.querySelector('[data-action="ai"]');
         const headLabelEarly = headBtnEarly ? headBtnEarly.textContent : '';
         const engine = await runChapterWriteJob(slot);
-        if (engine.started) { if (headBtnEarly) headBtnEarly.textContent = headLabelEarly; if (headBtnEarly && headLabelEarly) return; return; }
+        if (engine.started) {
+          if (headBtnEarly && headLabelEarly) headBtnEarly.textContent = headLabelEarly;
+          return;
+        }
+        // 应急通道：章节级作业建不起来（后端旧版本/接口异常）时，退回前端逐节循环
+        status('作业通道不可用，改用逐节编写…');
         const states = { chief: 'running', text: 'idle', diagram: 'idle', table: 'idle' };
         const paintAgents = () => { if (slot) slot.innerHTML = agentBarHtml(states); };
         void loadModelOptions();
