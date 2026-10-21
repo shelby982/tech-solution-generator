@@ -90,6 +90,16 @@ async def stream_chapter_write(project_id: int, job_id: str, thread_id: str = ''
             # 先回放当前状态（SSE 无回放，状态以 job 详情为准）
             yield format_sse_event('job', {"job_id": job_id, "status": row["status"],
                                            "stage": row["stage"], "progress": 0})
+            # 已结束的作业：SSE 无回放，直接补一条终态事件，避免前端等到"中断"
+            if row["status"] in ("done", "failed", "cancelled"):
+                if row["status"] == "done":
+                    yield format_sse_event('done', {"content": row["content"], "saved": bool(row["saved"]),
+                                                   "reason": "内容与现有正文一致，未产生变更" if not row["saved"] else "已写入正文",
+                                                   "models": {}, "checks": []})
+                elif row["status"] == "failed":
+                    yield format_sse_event('error', {"scope": "job", "message": row["error"] or "作业失败",
+                                                    "recoverable": True})
+                return
             last = time.monotonic()
             while True:
                 if row["status"] in ("done", "failed", "cancelled") and queue.empty():

@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v380';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v380';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v381';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v381';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -181,6 +181,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-insert-btn" data-open-insert title="从官方来源 / 素材 / 结构模板插入内容">插入…</button>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
               <button data-action="project-todo">全书待办</button>
+              <button data-action="writing-settings">编写设置</button>
               <button data-action="complete">确认本章完成</button>
               <div class="cs-more-sep"></div>
               <button data-action="export-chapter">导出本章 Word</button>
@@ -1610,7 +1611,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return { applied: true, content: text.replace(sentence, replaced) };
   }
 
-  /** 选模型（按角色）：本次覆盖 + 记住 */
+  /** 选模型（按角色）→ 写「章节覆盖」（仅本章），并刷新生效值 */
   function openModelPickerDialog(role, options, current) {
     const meta = AGENTS[role] || AGENTS.text;
     const label = role === 'rewrite' ? '文字精修' : (meta.name || role);
@@ -1618,24 +1619,93 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.className = 'cs-plan-dialog';
     dlg.innerHTML = `<header><h3>${esc(label)} 用哪个模型</h3><button type="button" data-mp-close>×</button></header>
       <div class="cs-plan-body">
-        <p class="cs-muted">选择后本次生效，并记住下次默认。</p>
+        <p class="cs-muted">保存后仅对**本章**生效（章节覆盖）；要全局生效请用「更多 → 编写设置」。</p>
         <div class="cs-mp-list">
-          <label class="cs-mp-item"><input type="radio" name="mp" value="" ${current ? '' : 'checked'} /> 系统默认（自动轮询）</label>
+          <label class="cs-mp-item"><input type="radio" name="mp" value="" ${current ? '' : 'checked'} /> 跟随项目默认</label>
           ${options.map((m) => `<label class="cs-mp-item"><input type="radio" name="mp" value="${esc(m)}" ${m === current ? 'checked' : ''} />
             <b>${esc(m)}</b><small>${/pro/i.test(m) ? '强 · 精修/规划推荐' : /flash/i.test(m) ? '快 · 日常编写推荐' : '可选'}</small></label>`).join('')}
         </div>
       </div>
       <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-mp-cancel>取消</button>
-        <button type="button" class="cs-cp-primary" data-mp-save>保存</button></footer>`;
-    dlg.addEventListener('click', (event) => {
+        <button type="button" class="cs-cp-primary" data-mp-save>保存（仅本章）</button></footer>`;
+    dlg.addEventListener('click', async (event) => {
       if (event.target.closest('[data-mp-close]') || event.target.closest('[data-mp-cancel]')) { dlg.close(); return; }
-      if (event.target.closest('[data-mp-save]')) {
-        const picked = dlg.querySelector('input[name="mp"]:checked');
-        modelChoice.set(role, picked ? picked.value : '');
-        dlg.close();
+      if (!event.target.closest('[data-mp-save]')) return;
+      const picked = dlg.querySelector('input[name="mp"]:checked');
+      const value = picked ? picked.value : '';
+      dlg.close();
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/writing-settings`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(value ? { settings: { [role]: value } } : { settings: {}, reset: true }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        await loadWritingModels();
         paintAside();
-        status(picked && picked.value ? `已设置为 ${picked.value}` : '已恢复系统默认模型');
+        status(value ? `本章「${label}」已改为 ${value}` : `本章「${label}」已跟随项目默认`);
+      } catch (error) { status(`保存失败：${error.message}`); }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 编写设置（项目默认 + 5 个角色，可设为项目默认/重置本章） */
+  async function openWritingSettingsDialog() {
+    const [models, settingsResp] = await Promise.all([loadModelOptions(), loadWritingModels()]);
+    const info = settingsResp || {};
+    const blockSettings = info.settings || {};
+    const effective = info.effective || {};
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    const roles = [['chief', '主编', '规划/校验'], ['text', '文字', '每节正文'], ['rewrite', '文字精修', '带原文改写'],
+                   ['diagram', '图片', '示意图'], ['table', '表格', '表格']];
+    dlg.innerHTML = `<header><h3>编写设置</h3><button type="button" data-ws-close>×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">章节覆盖优先于项目默认；这里改的是**项目默认**（全项目生效）。</p>
+        <div class="cs-ws-list">
+          ${roles.map(([role, label, duty]) => `<label class="cs-ws-row">
+              <span class="cs-ws-name"><b>${label}</b><small>${duty}</small></span>
+              <select data-ws-role="${role}">
+                ${models.map((m) => `<option value="${esc(m)}" ${((effective[role] || {}).used === m) ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+              </select>
+              ${blockSettings[role] ? `<em class="cs-ws-badge">本章覆盖</em>` : ''}
+            </label>`).join('')}
+        </div>
+        <p class="cs-dim">改完点「设为项目默认」；只影响本章请点头像旁的「换模型」。</p>
+      </div>
+      <footer class="cs-ins-foot">
+        <button type="button" class="cs-cp-ghost" data-ws-reset>重置本章覆盖</button>
+        <button type="button" class="cs-cp-primary" data-ws-save>设为项目默认</button>
+      </footer>`;
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-ws-close]')) { dlg.close(); return; }
+      if (event.target.closest('[data-ws-reset]')) {
+        try {
+          await fetch(`/api/blocks/${active.id}/writing-settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: {}, reset: true }) });
+          await loadWritingModels(); status('已清除本章覆盖，回到项目默认'); dlg.close(); paintAside();
+        } catch (error) { status(error.message); }
+        return;
       }
+      if (!event.target.closest('[data-ws-save]')) return;
+      const settings = {};
+      for (const select of dlg.querySelectorAll('[data-ws-role]')) {
+        if (select.value) settings[select.dataset.wsRole] = select.value;
+      }
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/writing-settings`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings }), signal: AbortSignal.timeout(20000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        await loadWritingModels();
+        dlg.close(); paintAside();
+        status('已设为项目默认（全项目生效）');
+      } catch (error) { status(`保存失败：${error.message}`); }
     });
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
@@ -1839,7 +1909,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!active) return { started: false };
     const states = { chief: 'queued', text: 'queued', diagram: 'queued', table: 'queued' };
     const models = {};
-    const paint = () => { if (slot) slot.innerHTML = agentBarHtml(states, models); };
+    const paint = (running) => {
+      if (!slot) return;
+      slot.innerHTML = agentBarHtml(states, models) + agentActionsHtml(running !== false);
+    };
     paint();
     let jobId = '';
     try {
@@ -1851,6 +1924,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
       jobId = data.job_id;
+      currentJobId = jobId;
       if (!jobId) throw new Error('作业创建失败');
     } catch (error) {
       if (slot) slot.innerHTML = '';
@@ -1882,14 +1956,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const data = JSON.parse(event.data || '{}');
         Object.assign(models, data.models || {});
         states.chief = 'done';
-        paint();
+        paint(true);
         status(`计划就绪：${(data.sections || []).length} 节`);
       });
       source.addEventListener('role', (event) => {
         const data = JSON.parse(event.data || '{}');
         if (data.role && data.state) states[data.role] = data.state === 'queued' ? 'queued' : data.state;
         if (data.model) models[data.role] = data.model;
-        paint();
+        paint(true);
       });
       source.addEventListener('delta', (event) => {
         const data = JSON.parse(event.data || '{}');
@@ -1929,6 +2003,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           paintAside();
         } catch (error) { /* ignore */ }
         status(data.saved ? '整章已写入正文（记得核对）' : (data.reason || '已生成建议稿，未覆盖正文'));
+        if (!data.saved && data.content) {
+          const proposal = data.content;
+          const dlg = globalThis.document.createElement('dialog');
+          dlg.className = 'cs-plan-dialog';
+          dlg.innerHTML = `<header><h3>本次生成的是建议稿</h3><button type="button" data-pp-close>×</button></header>
+            <div class="cs-plan-body"><p class="cs-muted">${esc(data.reason || '正文在生成期间被修改，未自动覆盖')}。
+              可以打开预览后决定是否写入。</p></div>
+            <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-pp-cancel>不写入</button>
+              <button type="button" class="cs-cp-primary" data-pp-apply>写入正文</button></footer>`;
+          dlg.addEventListener('click', async (event) => {
+            if (event.target.closest('[data-pp-close]') || event.target.closest('[data-pp-cancel]')) { dlg.close(); return; }
+            if (!event.target.closest('[data-pp-apply]')) return;
+            editor.value = proposal; changed(); await save(); dlg.close();
+            status('建议稿已写入正文（可从版本回滚）');
+          });
+          dlg.addEventListener('close', () => dlg.remove());
+          globalThis.document.body.appendChild(dlg);
+          dlg.showModal();
+        }
+        currentJobId = '';
         globalThis.setTimeout(() => { if (slot) slot.innerHTML = ''; }, 5000);
         finish({ started: true, jobId, saved: !!data.saved });
       });
@@ -1950,7 +2044,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const meta = AGENTS[role];
       const state = states?.[role] || 'idle';
       const label = { idle: '等待', running: '工作中', done: '完成', skip: '跳过', error: '失败' }[state] || '等待';
-      const model = (models && models[role]) || modelChoice.get(role) || '默认模型';
+      const model = (models && models[role]) || writingModels[role] || modelChoice.get(role) || '生效中';
       return `<div class="cs-agent${state === 'running' ? ' is-running' : ''}${state === 'done' ? ' is-done' : ''}${state === 'error' ? ' is-error' : ''}">
           <span class="cs-agent-icon" style="--agent:${meta.color}">${meta.icon}</span>
           <span class="cs-agent-meta"><b>${meta.name}</b><small>${label} · ${esc(model)}</small></span>
@@ -1959,10 +2053,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }).join('')}</div>`;
   }
 
+  /** 头像条下方的作业操作：停止 / 重试 */
+  function agentActionsHtml(running) {
+    if (!currentJobId) return '';
+    return `<div class="cs-agent-actions">
+        ${running ? '<button type="button" class="cs-agent-op" data-job-stop>停止</button>'
+                  : '<button type="button" class="cs-agent-op" data-job-retry>重试未完成的节</button>'}
+        <small>作业 ${esc(currentJobId.slice(0, 8))}</small>
+      </div>`;
+  }
+
   /** 单角色 logo（重写/图调整时） */
   function agentLogoHtml(role, text) {
     const meta = AGENTS[role] || AGENTS.text;
-    const model = modelChoice.get(role) || '默认模型';
+    const model = writingModels[role] || modelChoice.get(role) || '生效中';
     return `<div class="cs-agent-logo" data-agent-logo="${role}">
         <span class="cs-agent-icon is-pulse" style="--agent:${meta.color}">${meta.icon}</span>
         <span class="cs-agent-meta"><b>${meta.name}</b><small>${esc(text || '')} · ${esc(model)}</small></span>
@@ -2057,6 +2161,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 各角色的模型选择（本次/记住），key: text|rewrite|diagram|table|chief */
   const MODEL_ROLES = [['chief', '主编'], ['text', '文字编写'], ['rewrite', '文字精修'], ['diagram', '图片生成'], ['table', '表格']];
+  let writingModels = {};          // 服务端生效值：{role: used}
+  let currentJobId = '';           // 当前章节级作业（停止/重试用）
+
+  /** 读服务端设置（章节覆盖 + 生效值） */
+  async function loadWritingModels() {
+    if (!active) return {};
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/writing-settings`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
+      const data = await resp.json();
+      const effective = data.effective || {};
+      writingModels = {};
+      for (const [role, info] of Object.entries(effective)) writingModels[role] = info.used || '';
+      return { effective, settings: data.settings || {}, available: data.available || [] };
+    } catch (error) { return {}; }
+  }
+
   const modelChoice = {
     read() {
       try { return JSON.parse(globalThis.localStorage.getItem(`cs-model-choice:${projectId}`) || '{}'); } catch (e) { return {}; }
@@ -2614,6 +2734,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       host.querySelector('[data-action="save"]').disabled=true;
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
       hydrateIgnored();
+      void loadWritingModels().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
       if(localDraftAction(local,block.content||'')!=='none'){
@@ -2733,6 +2854,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       };
       if(secBtn.textContent.trim()==='重写'){ openRewriteDialog(sec, doWrite); }
       else { doWrite(''); }
+      return;
+    }
+    if(event.target.closest('[data-job-stop]') && currentJobId){
+      try{ await fetch(`/api/projects/${projectId}/studio/chapter-writes/${currentJobId}/cancel`,{method:'POST'});
+        status('已停止后续调度；已完成的节保留'); }catch(error){ status(error.message); }
+      return;
+    }
+    if(event.target.closest('[data-job-retry]') && currentJobId){
+      try{ await fetch(`/api/projects/${projectId}/studio/chapter-writes/${currentJobId}/retry`,{method:'POST'});
+        status('已重新排队，只补未写的节'); }catch(error){ status(error.message); }
       return;
     }
     const modelBtn=event.target.closest('[data-agent-model]');
@@ -2976,6 +3107,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
       if(action==='link'){await json(`/api/blocks/${active.id}/studio/materials`,send('PUT',{material_id:Number(button.dataset.id)}));context=await json(`/api/blocks/${active.id}/studio`);paintAside();}
       if(action==='project-todo') { openProjectTodoDialog(); return; }
+      if(action==='writing-settings') { await openWritingSettingsDialog(); return; }
       if(action==='complete') {
         const blockId=active.id;
         button.disabled=true;
