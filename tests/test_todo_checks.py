@@ -100,3 +100,17 @@ def test_delivery_tasks_three_zones_and_verb_titles():
         assert task["impact"] in ("export_block", "completion_block", "quality", "suggestion")
         assert task["impact_text"]
         assert "target" in task
+
+
+def test_todo_states_merge_removes_ignored(monkeypatch):
+    """v3：服务端状态合并 —— 忽略/稍后/已消除的从待办移出。"""
+    from services.todo_states import merge_status
+
+    tasks = {"need_user": [{"id": "a"}, {"id": "b"}], "system": [{"id": "c"}], "suggestion": [],
+             "summary": {"need_user": 2, "system": 1, "suggestion": 0}}
+    merged = merge_status(tasks, {"a": {"status": "ignored", "reason": "", "until_at": None},
+                                  "c": {"status": "snoozed", "reason": "", "until_at": "2030-01-01"}})
+    assert [t["id"] for t in merged["need_user"]] == ["b"]
+    assert merged["system"] == []
+    assert merged["summary"]["need_user"] == 1
+    assert merged["summary"]["ignored"] == 2

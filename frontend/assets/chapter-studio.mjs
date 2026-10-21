@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v386';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v386';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v387';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v387';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1503,51 +1503,51 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.showModal();
   }
 
-  /** 全书待办：跨章阻塞汇总（章级 + 项目级门槛） */
+  /** 全书交付检查（v3 §4.4）：按根因汇总 + 批量入口，不列 96 章 */
   async function openProjectTodoDialog() {
     const dlg = globalThis.document.createElement('dialog');
     dlg.className = 'cs-plan-dialog';
-    dlg.innerHTML = `<header><h3>全书待办</h3><button type="button" data-pt-close>×</button></header>
+    dlg.innerHTML = `<header><h3>全书交付检查</h3><button type="button" data-pt-close>×</button></header>
       <div class="cs-plan-body"><p class="cs-muted">正在汇总…</p></div>`;
-    dlg.addEventListener('click', (event) => {
-      if (event.target.closest('[data-pt-close]')) dlg.close();
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-pt-close]')) { dlg.close(); return; }
+      const batch = event.target.closest('[data-pt-batch]');
+      if (batch) {
+        const kind = batch.dataset.ptBatch;
+        if (kind === 'batch_write') status('批量编写：请一章一章确认（当前引擎不支持跨章批量，避免误覆盖）');
+        else if (kind === 'confirm_list') status('未确认章节：在目录里逐章「确认本章完成」');
+        else if (kind === 'upload_once') showPanel('materials');
+        else if (kind === 'system_search') status('系统会在下次生成时自动补依据');
+        return;
+      }
     });
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
     try {
-      const resp = await fetch(`/api/projects/${projectId}/todo?thread_id=${encodeURIComponent(threadId)}&_=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(60000) });
+      const resp = await fetch(`/api/projects/${projectId}/todo/overview?thread_id=${encodeURIComponent(threadId)}&_=${Date.now()}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(180000) });
       const data = await resp.json();
       if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
-      const gate = data.gate || [];
-      const chapters = data.chapters || [];
       const summary = data.summary || {};
+      const roots = data.roots || [];
       dlg.querySelector('.cs-plan-body').innerHTML = `
-        <p class="cs-muted">共 ${summary.chapters_with_blocking || 0} 章有阻塞 · 合计 ${summary.total_blocking || 0} 项 · 空章节 ${summary.empty_chapters || 0} · 未确认 ${summary.unconfirmed || 0}</p>
-        ${gate.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">项目级</p>${gate.map((g) => `<div class="cs-todo-row"><span class="cs-todo-idx${g.severity === 'block' ? ' is-block' : ''}">•</span>
-            <span class="cs-todo-text"><b>${esc(g.title)}</b><small>${esc(g.evidence || '')}</small></span></div>`).join('')}</div>` : ''}
-        ${chapters.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">按章（阻塞多在前）</p>
-          ${chapters.map((c) => `<div class="cs-todo-row">
-              <span class="cs-todo-idx">${c.blocking}</span>
-              <span class="cs-todo-text"><b>${esc(c.title || '')}</b>
-                <small>${(c.top || []).map((x) => esc(String(x.title || '').slice(0, 24))).join(' · ')}</small></span>
-              <button type="button" class="cs-todo-act" data-pt-jump="${esc(c.block_id || '')}">打开</button>
-            </div>`).join('')}</div>`
-          : '<p class="cs-todo-ok">✓ 没有跨章阻塞项</p>'}`;
-      for (const btn of dlg.querySelectorAll('[data-pt-jump]')) {
-        btn.addEventListener('click', async () => {
-          const blockKey = btn.dataset.ptJump;
-          dlg.close();
-          const node = [...host.querySelectorAll('.cs-node')].find((el) => (el.dataset.block || '') === blockKey);
-          if (node) node.click();
-        });
-      }
+        <p class="cs-muted">空章节 ${summary.empty_chapters || 0} 章 · 未确认 ${summary.unconfirmed_chapters || 0} 章 · 系统待补依据 ${summary.generation_gaps || 0} 条</p>
+        ${roots.length ? roots.map((root) => `<div class="cs-task${root.impact === 'export_block' ? ' is-export' : root.impact === 'completion_block' ? ' is-completion' : ''}">
+            <div class="cs-task-head"><b>${esc(root.title)}</b>
+              <span class="cs-task-impact">${esc({ export_block: '不处理不能导出', completion_block: '不处理不能确认完成', quality: '影响评分', suggestion: '可选优化' }[root.impact] || '')}</span></div>
+            <div class="cs-task-acts">
+              <button type="button" class="cs-task-act" data-pt-batch="${esc(root.action || 'view')}">${
+                root.action === 'batch_write' ? '批量编写…' : root.action === 'upload_once' ? '上传一次，全部生效' :
+                root.action === 'confirm_list' ? '查看清单' : root.action === 'system_search' ? '系统先查' : '查看'}</button>
+            </div>
+          </div>`).join('') : '<p class="cs-todo-ok">✓ 没有跨章阻塞项</p>'}`;
     } catch (error) {
       dlg.querySelector('.cs-plan-body').innerHTML = `<p class="cs-warning">汇总失败：${esc(error.message)}</p>`;
     }
   }
 
-  /** 建议式改写：给出 2~3 个替代表述，选一条就地替换 */
+  /** 建议式改写  /** 建议式改写：给出 2~3 个替代表述，选一条就地替换 */
   function openSuggestionDialog(item) {
     const dlg = globalThis.document.createElement('dialog');
     dlg.className = 'cs-plan-dialog';
@@ -2199,7 +2199,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function runDeliveryAction(task) {
     if (!task) return;
     const type = (task.action || {}).type || '';
-    if (type === 'upload_material') { showPanel('materials'); status(`请上传：${task.title}`); return; }
+    if (type === 'upload_material') {
+      showPanel('materials');
+      status(`请上传：${task.title}；上传后待办会自动复检`);
+      globalThis.setTimeout(async () => {
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/todo/recheck?block_id=${encodeURIComponent(String(active.block_id || ''))}`, { method: 'POST' });
+          if (resp.ok) { await loadBasis(active.block_id); paintAside(); }
+        } catch (error) { /* ignore */ }
+      }, 20000);
+      return;
+    }
     if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
@@ -2231,14 +2241,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const choice = picked ? (item.suggestions || [])[Number(picked.value)] : '';
       dlg.close();
       if (!item || !choice) { status('这条没有候选，请手动修改'); return; }
-      const result = applySuggestion(item.sentence || '', choice);
-      if (!result.applied) { status('没能在正文里定位到这句话，请手动修改'); return; }
-      editor.value = result.content;
-      changed();
-      await save();
-      await loadBasis(active.block_id);
-      paintAside();
-      status('已应用改写，待办已重新计算');
+      const quote = String(item.sentence || '').trim();
+      const replacement = (String(choice).match(/改为「(.+?)」/) || [null, ''])[1];
+      if (!quote || !replacement) { status('这条没有可自动应用的改法，请手动修改'); return; }
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/todo/apply`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ block_id: String(active.block_id || ''), task_id: task.id,
+                                 section: (task.target || {}).section || '', quote, replacement }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        const fresh = await json(`/api/blocks/${active.id}/studio`);
+        context = fresh;
+        if (fresh.block) editor.value = fresh.block.content || '';
+        await loadBasis(active.block_id);
+        paintAside();
+        status('已应用（服务端替换并写版本），待办已重新计算');
+      } catch (error) { status(`应用失败：${error.message}`); }
     });
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
@@ -2980,7 +3001,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     const taskIgnore=event.target.closest('[data-task-ignore]');
-    if(taskIgnore){todoIgnored.add(taskIgnore.dataset.taskIgnore);persistIgnored();paintAside();return;}
+    if(taskIgnore && active){
+      const task = findDeliveryTask(taskIgnore.dataset.taskIgnore);
+      const isBlocking = task && task.impact !== 'suggestion';
+      if (isBlocking && !globalThis.confirm('这条不处理，导出时会再次提醒；确定忽略？')) return;
+      try{
+        await fetch(`/api/projects/${projectId}/todo/state`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({block_id:String(active.block_id||''),task_id:taskIgnore.dataset.taskIgnore,action:'ignore'})});
+        await loadBasis(active.block_id); paintAside();
+        status('已忽略（服务端记录，导出前仍会提醒）');
+      }catch(error){status(error.message);}
+      return;
+    }
     const taskLocate=event.target.closest('[data-task-locate]');
     if(taskLocate && active){
       const task=findDeliveryTask(taskLocate.dataset.taskLocate);
