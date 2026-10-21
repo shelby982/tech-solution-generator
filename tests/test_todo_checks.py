@@ -86,7 +86,7 @@ def test_delivery_tasks_three_zones_and_verb_titles():
     # 标题动词开头、不超过 24 字
     for task in need:
         assert len(task["title"]) <= 24
-        assert task["title"][0] in "上传定核系统精", task["title"]
+        assert task["title"][0] in "上传定核补系统精统一生成", task["title"]
     # 材料缺口 → 上传卡；决定项 → 选择卡；引用 → 核对卡（同类合并）
     assert any(t["action"]["type"] == "upload_material" for t in need)
     assert any(t["action"]["type"] == "choose" for t in need)
@@ -114,3 +114,32 @@ def test_todo_states_merge_removes_ignored(monkeypatch):
     assert merged["system"] == []
     assert merged["summary"]["need_user"] == 1
     assert merged["summary"]["ignored"] == 2
+
+
+def test_citation_paragraph_level_avoids_false_positive():
+    """段末统一标来源是标书常见写法 —— 不能按句子报缺来源（实测踩过的假阳性）。"""
+    from services.todo_checks import citation_items
+
+    content = ("## 一\n\n"
+               "①《中华人民共和国网络安全法》要求保障数据安全；"
+               "②《中华人民共和国数据安全法》要求分类分级。"
+               "上述法律以现行文本为准【来源：网络安全法】【来源：数据安全法】。\n\n"
+               "二、分项目标：同步落实《中华人民共和国网络安全法》要求。\n")
+    items = citation_items(content)
+    # 第一段有来源 → 不报；第二段没有 → 报 1 条
+    assert len(items) == 1
+    assert "网络安全法" in items[0]["title"]
+
+
+def test_tasks_without_locator_are_dropped():
+    """v3 硬规则：带原句但正文里找不到的条目不能进待办。"""
+    from services.todo_tasks import build_delivery_tasks
+
+    payload = build_delivery_tasks(
+        block_id="s1.1", content="## 一\n\n正文里没有那句话。",
+        deliverables=[], material_gaps=[], generation_gaps=[],
+        word_plan={"written": 10, "total": 1000},
+        decisions=[{"group": "decide", "title": "口径未定", "sentence": "这句话并不存在于正文",
+                    "evidence": "## 一：这句话并不存在于正文", "suggestions": ["改"], "target": "x"}],
+        proofs=[], completion=None)
+    assert payload["need_user"] == []

@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v389';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v389';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v390';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v390';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2224,6 +2224,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
+    if (type === 'add_citation') {
+      locateTaskTarget(task);
+      const btn = globalThis.document.querySelector('[data-cite-open]');
+      if (btn) { globalThis.setTimeout(() => btn.click(), 700); status('已定位到这段引用；打开检索，选中来源后会插到引用处'); }
+      else status('已定位到该段引用，请补【来源：…】');
+      return;
+    }
     if (type === 'search_now') {
       const btn = globalThis.document.querySelector('[data-cite-open]');
       if (btn) { btn.click(); status('已打开检索：把缺的依据逐条搜进本章（查到会自动挂上）'); }

@@ -292,15 +292,27 @@ _POLICY_RE = re.compile(r"《[^》]{2,40}》")
 
 
 def citation_items(content: str) -> list[dict]:
-    """正文引用了政策/文件（《…》）但同句没有【来源：…】→ 要你核对。"""
+    """正文引用了政策/文件（《…》）且**整段**都没有【来源：…】才报。
+
+    为什么按段落而不是按句子：标书常见写法是段末统一标来源（
+    「…上述法律以现行文本为准【来源：A】【来源：B】」），
+    按句子判断会有大量假阳性 —— 实测把明明有来源的三部法律全报了。
+    """
     items: list[dict] = []
     seen: set[str] = set()
-    for section, sentence in _sentences(content):
-        if not _POLICY_RE.search(sentence):
+    for line in str(content or "").splitlines():
+        paragraph = line.strip()
+        if not paragraph or paragraph.startswith(("|", ":::", "#")):
             continue
-        if _CITE_RE.search(sentence):
+        if _CITE_RE.search(paragraph):
+            continue                      # 本段已有来源 → 不报
+        if not _POLICY_RE.search(paragraph):
             continue
-        for match in _POLICY_RE.finditer(sentence):
+        section = ""
+        for hit_section, _sentence in _sentences(paragraph):
+            section = hit_section
+            break
+        for match in _POLICY_RE.finditer(paragraph):
             name = match.group(0)
             key = f"cite:{name}"
             if key in seen:
@@ -308,10 +320,10 @@ def citation_items(content: str) -> list[dict]:
             seen.add(key)
             items.append({
                 "group": "proof", "title": f"引用未标来源：{name}",
-                "evidence": f"{section or '正文'}：{sentence[:60]}…（建议补【来源：…】）",
+                "evidence": f"{section or '正文'}：{paragraph[:60]}…（本段没有【来源：…】）",
                 "source": "引用核对", "severity": "suggest",
                 "action": "locate", "target": key,
-                "sentence": sentence, "section": section,
+                "sentence": paragraph, "section": section,
             })
             break
     return items

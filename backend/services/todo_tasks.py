@@ -123,9 +123,9 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
                  else "这句话是承诺口径，交付前需要确定说法"),
             impact="completion_block",
             action={"type": "choose", "label": "选一种说法", "payload": {"count": len(decide_pool)}},
-            options=[{"label": suggestion, "todo_id": str(item.get("target") or index)}
+            options=[{"label": label, "todo_id": str(item.get("target") or index)}
                      for index, item in enumerate(decide_pool)
-                     for suggestion in (item.get("suggestions") or [])][:3],
+                     for label in _derive_options(str(item.get("sentence") or ""), item.get("suggestions") or [])][:3],
             evidence=[{"label": "原句", "text": _clip(item.get("sentence") or item.get("evidence"), _QUOTE_LIMIT)}
                       for item in decide_pool[:3]],
         ))
@@ -186,17 +186,20 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         groups.setdefault(key, []).append(proof)
     for key, items in groups.items():
         first = items[0]
+        is_citation = key == "引用来源"
         need_user.append(_task(
-            category="confirm", owner="user",
-            title=(f"核对 {key}" if len(items) == 1 else f"核对 {len(items)} 处{key}"),
+            category=("confirm" if not is_citation else "supply"), owner="user",
+            title=((f"补 {len(items)} 处引用来源" if len(items) > 1 else "补 1 处引用来源")
+                   if is_citation else (f"核对 {key}" if len(items) == 1 else f"核对 {len(items)} 处{key}")),
             dedupe_key=f"check:{key}",
             target={"block_id": block_id,
                     "section": str(first.get("section") or _first_section(items, body)),
                     "quote": _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)},
-            why=(f"正文引用了《{_policy_name(first)}》但没有【来源：…】，评委无法核实出处"
-                 if "引用" in key else f"这几处{key}不一致，建议统一后再交付"),
+            why=(f"这段引用了《{_policy_name(first)}》却整段没有【来源：…】；评委会问出处，补上来源即可"
+                 if is_citation else f"这几处{key}不一致，建议统一后再交付"),
             impact="quality",
-            action={"type": "locate", "label": "定位", "payload": {}},
+            action=({"type": "add_citation", "label": "去补来源", "payload": {}}
+                    if is_citation else {"type": "locate", "label": "定位", "payload": {}}),
             evidence=[{"label": "示例", "text": _clip(i.get("evidence"), _QUOTE_LIMIT)} for i in items[:3]],
         ))
 
@@ -217,6 +220,9 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     if completion is not None and not completion.get("ok", True) and (need_user or system):
         pass  # 完成条件不单独成卡；顶部状态条展示原因（v3 §5.2）
 
+    # v3 §5.4 硬规则：带定位的条目，原句必须能在正文里逐字找到；找不到就不进待办
+    need_user = [task for task in need_user if _locatable(task, body)]
+    system = [task for task in system if _locatable(task, body)]
     summary = {
         "need_user": len(need_user),
         "system": len(system),
@@ -276,3 +282,35 @@ def _policy_name(item: dict) -> str:
     text = str(item.get("title") or "")
     match = re.search(r"《(.+?)》", text)
     return match.group(1) if match else "相关政策文件"
+
+
+def _derive_options(sentence: str, fallback: list[str]) -> list[str]:
+    """从原句派生"能直接替换的说法"（比通用模板贴合得多）。"""
+    sentence = str(sentence or "").strip()
+    if not sentence:
+        return list(fallback)[:3]
+    # 「X 有待明确」「X 待明确」
+    match = re.search(r"([^，。；：]{2,24}?)(有待明确|待明确|尚未明确)", sentence)
+    if match:
+        subject = match.group(1).strip("，。； ")
+        return [
+            f"改为「拟在实施阶段明确{subject}」",
+            f"改为「{subject}将按实施方案明确」",
+            "删掉这句话",
+        ]
+    # 「保证/确保/100%」承诺
+    for word in ("保证", "确保", "绝不", "100%", "零故障"):
+        if word in sentence:
+            return [f"改为「按合同约定提供」", f"改为「通过措施保障」", "删掉该承诺"]
+    if fallback:
+        return list(fallback)[:3]
+    return ["改成更确定的说法（自己写）", "删掉这句话"]
+
+
+def _locatable(task: dict, body: str) -> bool:
+    """带原句的任务：原句必须能在正文里找到（空白无关）；无原句的任务放行。"""
+    quote = str((task.get("target") or {}).get("quote") or "").strip()
+    if not quote:
+        return True
+    compact = re.sub(r"\s+", "", str(body or ""))
+    return re.sub(r"\s+", "", quote) in compact
