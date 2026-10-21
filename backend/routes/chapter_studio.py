@@ -414,6 +414,8 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
             return
         import re as _re
         text = _re.sub(r'^```[a-z]*\n|```$', '', str(raw).strip()).strip()
+        from services.body_align import strip_invalid_diagrams
+        text, _dropped = strip_invalid_diagrams(text)
         if len(text) < 120:
             yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
             return
@@ -478,6 +480,8 @@ async def write_section(block_id: int, body: SectionBody):
         raise HTTPException(409, str(exc))
     text = str(raw or '').strip()
     text = _re.sub(r'^```[a-z]*\n|```$', '', text).strip()
+    from services.body_align import strip_invalid_diagrams
+    text, _dropped = strip_invalid_diagrams(text)
     if len(text) < 120:
         raise HTTPException(422, '这一节没有生成出可用内容，请重试或补充要点')
     before = str(block.get('content') or '')

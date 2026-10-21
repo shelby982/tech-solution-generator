@@ -43,3 +43,26 @@ def test_normalize_legacy_and_timeline_without_year():
     t = normalize_model_output({"type": "timeline", "nodes": ["A", "B"]})
     assert t["type"] == "flow"          # 没有年份 → 退化为流程
     assert normalize_model_output({"nodes": ["单个"]}) is None
+
+
+def test_strip_invalid_diagrams_keeps_valid():
+    from services.body_align import strip_invalid_diagrams
+
+    content = (
+        "## A\n\n:::diagram type=flow 流程\n采集 -> 展示\n:::\n\n"
+        ":::diagram type=layered 只有一个节点\n- 唯一\n:::\n"
+        ":::diagram type=timeline 演进\n2024 | 试点\n2025 | 推广\n:::"
+    )
+    cleaned, removed = strip_invalid_diagrams(content)
+    assert removed == 1                       # 只移除单节点块
+    assert "type=flow 流程" in cleaned
+    assert "type=timeline 演进" in cleaned
+    assert "只有一个节点" not in cleaned
+
+
+def test_document_model_tolerates_bad_diagram():
+    """渲染侧不再因节点不足抛错（此前会抛"关系图需 2—12 个节点"）。"""
+    from infra.docx.document_model import parse_markdown
+
+    model = parse_markdown("## A\n\n:::diagram type=layered 图\n- 只有一个节点\n:::\n")
+    assert model is not None                  # 不抛错即可

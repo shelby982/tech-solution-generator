@@ -192,8 +192,11 @@ def model_html(blocks):
             lines=[line for line in str(block['text']).splitlines() if line.strip()]
             structure=parse_diagram(':::diagram '+(lines[0] if lines else ''), lines[1:] if len(lines)>1 else lines)
             nodes=[str(n.get('label') or '').strip() for n in structure.get('nodes') or []]
-            if not 2<=len(nodes)<=12:raise ValueError('关系图需 2—12 个节点（以 -> 连接或每行一个节点）')
-            if len(nodes)>10: nodes=nodes[:12]
+            if not nodes:
+                html.append('<p class="cs-muted">（本节图示待补充）</p>');continue
+            if len(nodes)>12: nodes=nodes[:12]
+            if len(nodes)==1:                      # 单节点也不报错：降级为列表
+                html.append('<ul>'+''.join(f'<li>{escape(n)}</li>' for n in nodes)+'</ul>');continue
             html.append('<figure class="cs-diagram">'+''.join(('↓' if i else '')+f'<div>{escape(n)}</div>' for i,n in enumerate(nodes))+f'<figcaption>{escape(block["caption"])}</figcaption></figure>')
         elif kind=='separator':html.append('<hr>')
         else:

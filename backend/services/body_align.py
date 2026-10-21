@@ -81,3 +81,26 @@ def align_to_outline(content: str, outline: list[dict]) -> tuple[str, dict]:
         parts.append(f"## {title}\n\n{body}")
     rebuilt = "\n\n".join(parts).strip() + "\n"
     return rebuilt, {"kept": len(kept), "dropped": dropped, "sections": len(titles)}
+
+
+_DIAGRAM_RE = re.compile(r"(?ms)^:::diagram[^\n]*\n(.*?)\n:::[ \t]*$")
+
+
+def strip_invalid_diagrams(content: str) -> tuple[str, int]:
+    """把节点不足（<2）的 ::diagram 块移出正文，避免渲染/导出报错。返回 (新正文, 移除数)。"""
+    from services.diagrams import parse_diagram
+
+    removed = 0
+
+    def repl(match):
+        nonlocal removed
+        lines = match.group(0).splitlines()
+        st = parse_diagram(lines[0].strip(), match.group(1).splitlines())
+        if len(st.get("nodes") or []) >= 2:
+            return match.group(0)
+        removed += 1
+        return ""
+
+    cleaned = _DIAGRAM_RE.sub(repl, str(content or ""))
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, removed

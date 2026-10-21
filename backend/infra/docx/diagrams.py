@@ -50,8 +50,10 @@ def diagram_png(value):
     from PIL import Image, ImageDraw
     structure = _structure(value)
     dtype, nodes = structure.get('type') or 'flow', structure.get('nodes') or []
-    if not 2 <= len(nodes) <= 12:
-        raise ValueError('图示需包含 2—12 个节点')
+    if not nodes:
+        structure['nodes'] = [{'label': '（图示内容待补充）', 'level': 0}]
+    if len(nodes) > 12:
+        structure['nodes'] = nodes[:12]
     font = _font(24)
     if dtype == 'layered':
         return _layered_png(structure, font)
