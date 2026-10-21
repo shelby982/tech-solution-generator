@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v366';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v366';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v367';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v367';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1325,11 +1325,41 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
     }).join('');
   };
-  async function save() {
-    if(live.active&&live.pending){status('图文表尚未完成，编制进度已保留；完成或移除未完成项后可保存正文。');return false;}
+  let autoSaveTimer = null, saveState = 'idle', savedAt = 0;
+  const fmtClock = (ts) => { try { return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+
+  /** 章头状态胶囊：未保存 / 保存中 / 已保存·时间 / 保存失败 / 已确认完成 */
+  function paintSaveState() {
+    const el = get('chapter-head')?.querySelector('[data-save-state]');
+    if (!el) return;
+    const completed = profile[active?.id]?.writing_status === 'complete';
+    let html = '';
+    if (saveState === 'saving') html = '<span class="cs-save-dot is-saving"></span>保存中…';
+    else if (saveState === 'error') html = '<span class="cs-save-dot is-error"></span>保存失败 <button type="button" class="cs-save-act" data-action="save">重试</button>';
+    else if (completed) html = '<span class="cs-save-dot is-done"></span>已确认完成';
+    else if (dirty) html = '<span class="cs-save-dot is-dirty"></span>未保存 · 刚刚改动 <button type="button" class="cs-save-act" data-action="save">保存</button>';
+    else if (savedAt) html = `<span class="cs-save-dot is-saved"></span>已保存 · ${fmtClock(savedAt)}`;
+    el.innerHTML = html;
+  }
+
+  /** 计划自动保存：停止输入 2 秒后落库 */
+  function scheduleAutoSave() {
+    if (autoSaveTimer) globalThis.clearTimeout(autoSaveTimer);
+    autoSaveTimer = globalThis.setTimeout(async () => {
+      autoSaveTimer = null;
+      if (!dirty || !active) return;
+      if (live.active && live.pending) return;          // AI 未结束不自动保存
+      await save({ auto: true });
+    }, 2000);
+  }
+
+  async function save(options = {}) {
+    const auto = options.auto === true;
+    if(live.active&&live.pending){if(!auto)status('图文表尚未完成，编制进度已保留；完成或移除未完成项后可保存正文。');return false;}
     if (!active || !dirty) return true;
     const block = active, value = editor.value;
-    status('正在保存…');
+    saveState = 'saving'; paintSaveState();
+    if (!auto) status('正在保存…');
     try {
       if(live.active){
         const latest=await json(`/api/projects/${projectId}/blocks?threadId=${encodeURIComponent(threadId)}`);
@@ -1342,20 +1372,27 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (profile[block.id]?.writing_status==='complete') profile[block.id].writing_status='review';
       if (active.id===block.id && editor.value===value) { dirty=false; sessionStorage.removeItem(draftKey(block)); }
       paintTree(); stats();
-      if(active.id===block.id){const savedState=stateOf(block);get('chapter-head').querySelector('span').textContent=savedState==='目录'?'已保存':`已保存 · ${savedState}`;}
+      saveState = 'saved'; savedAt = Date.now();
+      const wasComplete = profile[block.id]?.writing_status === 'review' && stateOf(block) === '草稿';
+      paintSaveState();
       host.querySelector('[data-action="save"]').disabled=!dirty;
-      status(''); return true;
-    } catch (error) { status(`保存失败：${error.message}。本地草稿已保留。`); return false; }
+      if (wasComplete) status('本章已退回待确认（内容有改动）');
+      else status(''); return true;
+    } catch (error) {
+      saveState = 'error'; paintSaveState();
+      status(`保存失败：${error.message}。本地草稿已保留。`); return false;
+    }
   }
   const changed = () => {
     dirty=true;
     if(profile[active.id]?.writing_status==='complete'){
       profile[active.id].writing_status='review';context.profile.writing_status='review';paintTree();stats();
     }
-    get('chapter-head').querySelector('span').textContent='未保存';
+    saveState = 'idle'; paintSaveState();
     host.querySelector('[data-action="save"]').disabled=false;
     sessionStorage.setItem(draftKey(active),JSON.stringify({content:editor.value,base:active.content || ''}));
     status('');
+    scheduleAutoSave();
   };
   const live=mountLiveWriting(get('live'),{editor,render:previewContent,onChange:changed,scope:threadId});
   let previewVisible=false,viewRequest=0,writingBusy=false,pendingCompletion=null;
@@ -2086,7 +2123,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const updated=await json(`/api/blocks/${active.id}/studio`,send('PUT',{layout:context.profile.layout,writing_status:'complete',
       acknowledge_open_items:true,expected_content_hash:check.content_hash}));
     context.profile={...context.profile,...updated};profile[active.id]=context.profile;
-    get('chapter-head').querySelector('span').textContent='已核对完成';
+    saveState='saved'; savedAt=Date.now(); paintSaveState();
     paintTree();stats();get('completion').close();pendingCompletion=null;
     status('本章已确认完成；修改正文后将退回待核对。');
   }
@@ -2207,9 +2244,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span><span class="cs-save-state" data-save-state></span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
       paintPlanAction(block);
       host.querySelector('[data-action="save"]').disabled=true;
+      saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
       if(localDraftAction(local,block.content||'')!=='none'){
@@ -2498,7 +2536,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         if (!c || !Number(c.pages)) return '';
         const gap = Number(c.pages) - pages;
         return `<p class="${gap <= 0.1 ? 'cs-muted' : 'cs-warning'}">字数达标：预算 ${Number(c.pages)} 页 · 已写 ${pages.toFixed(1)} 页（${words} 字）${gap <= 0.1 ? ' ✅ 已达标' : ` ⚠ 差 ${gap.toFixed(1)} 页`}</p>`;
-      })()}<p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
+      })()}<p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${(check.gaps.length||check.issues.length)?'<p class="cs-warning">下面这些问题仍在：你可以先修，也可以「带风险确认完成」（导出前会再提醒）。</p>':''}${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
+          const risky = check.gaps.length || check.issues.length;
+          const confirmBtn = get('completion').querySelector('[data-action="completion-confirm"]');
+          if (confirmBtn) confirmBtn.textContent = risky ? `带风险确认完成（${check.gaps.length + check.issues.length} 项待处理）` : '已核对，确认本章完成';
           get('completion').showModal();
         }finally{button.disabled=false;}
       }
@@ -2515,6 +2556,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
     } catch(error){status(error.name==='TimeoutError'?'请求超时，原正文保留，请重试。':error.message);}
   };
+  const onKeydown = event => {
+    if ((event.metaKey || event.ctrlKey) && String(event.key).toLowerCase() === 's') {
+      event.preventDefault();
+      if (dirty) void save();
+    }
+  };
+  globalThis.document.addEventListener('keydown', onKeydown);
   const beforeUnload = event => {if(dirty){event.preventDefault();event.returnValue='';}};
   window.addEventListener('beforeunload',beforeUnload);
   const controller={host,select,dispose(){disposed=true;team.dispose();window.removeEventListener('beforeunload',beforeUnload);},save};
