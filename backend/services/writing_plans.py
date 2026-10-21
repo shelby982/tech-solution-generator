@@ -1433,8 +1433,9 @@ def build_todo_items(deliverables: list[dict], material_gaps: list[dict], genera
 
     # C 组（要你拍板）/ D 组（要你核对）—— 确定性规则，只报能指到原文的
     try:
-        from services.todo_checks import decision_items, number_items, proofread_items
-        for raw in decision_items(body) + proofread_items(body) + number_items(body):
+        from services.todo_checks import citation_items, decision_items, number_items, proofread_items
+        for raw in (decision_items(body) + proofread_items(body) + number_items(body)
+                    + citation_items(body)):
             entry = _todo_item(raw["group"], raw["title"], raw.get("evidence", ""),
                                source=raw.get("source", ""), action=raw.get("action", "decide"),
                                severity=raw.get("severity", "suggest"), target=raw.get("target", ""))

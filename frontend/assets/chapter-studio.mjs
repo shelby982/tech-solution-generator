@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v379';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v379';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v380';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v380';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1897,6 +1897,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         lastIndex = index;
         pending.set(index, (pending.get(index) || '') + String(data.text || ''));
         if (pending.size > 40) flush();
+      });
+      source.addEventListener('todo', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        const items = data.items || [];
+        if (items.length) status(`发现 ${items.length} 个待核对项：${items[0].title || ''}`);
       });
       source.addEventListener('chart', (event) => {
         const data = JSON.parse(event.data || '{}');

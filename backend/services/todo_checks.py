@@ -272,3 +272,32 @@ def number_items(content: str) -> list[dict]:
             "action": "locate", "target": f"num:{subject}",
         })
     return items
+
+
+# ── D 组补充：引用来源缺失 ──────────────────────────────────────────────────
+_POLICY_RE = re.compile(r"《[^》]{2,40}》")
+
+
+def citation_items(content: str) -> list[dict]:
+    """正文引用了政策/文件（《…》）但同句没有【来源：…】→ 要你核对。"""
+    items: list[dict] = []
+    seen: set[str] = set()
+    for section, sentence in _sentences(content):
+        if not _POLICY_RE.search(sentence):
+            continue
+        if _CITE_RE.search(sentence):
+            continue
+        for match in _POLICY_RE.finditer(sentence):
+            name = match.group(0)
+            key = f"cite:{name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append({
+                "group": "proof", "title": f"引用未标来源：{name}",
+                "evidence": f"{section or '正文'}：{sentence[:60]}…（建议补【来源：…】）",
+                "source": "引用核对", "severity": "suggest",
+                "action": "locate", "target": key,
+            })
+            break
+    return items

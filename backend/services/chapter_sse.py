@@ -152,6 +152,7 @@ async def run_job(job_id: str) -> None:
         # 找出未写的节（实义字数 < 20 视为未写）
         base = str(block.get("content") or "")
         draft = base
+        all_checks: list[dict] = []
         pending = [s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
         total = max(1, len(pending))
         for index, section in enumerate(pending):
@@ -183,11 +184,24 @@ async def run_job(job_id: str) -> None:
                 text += chunk
                 await emit(job_id, "delta", {"index": index, "text": chunk})
             charts = [await task for task in chart_tasks] if chart_tasks else []
+            section_checks: list[dict] = []
             if charts:
                 text, chart_missing = merge_charts(text, charts)
                 for note in chart_missing:
                     await emit(job_id, "error", {"scope": "chart", "index": index, "message": note,
                                                  "recoverable": True})
+                # M4：图表校验（依据可追溯 / 图文矛盾 / 表格列）
+                try:
+                    from services.chart_checks import chart_items
+                    refs = [str((b or {}).get("ref")) for b in (section.get("basis") or []) if (b or {}).get("ref")]
+                    for chart, deliverable in zip([c for c in charts if c.get("ok")], chart_deliverables):
+                        section_checks += chart_items(chart["role"], chart.get("markdown") or "",
+                                                      deliverable, text, refs)
+                except Exception:
+                    pass
+                if section_checks:
+                    all_checks.extend(section_checks)
+                    await emit(job_id, "todo", {"index": index, "items": section_checks})
             if len(re.sub(r"\s+", "", text)) < 60:
                 await emit(job_id, "error", {"scope": "section", "index": index, "message": "本节没有生成出可用内容",
                                              "recoverable": True})
@@ -217,7 +231,8 @@ async def run_job(job_id: str) -> None:
                 saved = True
                 reason = "已写入正文"
         await _set_job(job_id, status="done", stage="已完成", content=draft, saved=1 if saved else 0)
-        await emit(job_id, "done", {"content": draft, "saved": saved, "reason": reason, "models": models})
+        await emit(job_id, "done", {"content": draft, "saved": saved, "reason": reason,
+                                    "models": models, "checks": all_checks})
         await emit(job_id, "job", {"job_id": job_id, "status": "done", "stage": "已完成", "progress": 100})
     except Exception as exc:  # noqa: BLE001
         await _set_job(job_id, status="failed", stage="失败", error=str(exc)[:300])

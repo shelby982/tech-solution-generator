@@ -77,3 +77,23 @@ def test_merge_charts_replaces_placeholder_and_reports_missing():
     assert "[[TABLE:映射表]]" not in merged            # 无对应图表的占位符被清掉
     assert any("映射表" in note for note in missing)    # 并记为待补
     assert any("另一个表" in note for note in missing)  # 无占位的图表附在节末
+
+
+def test_chart_checks_flag_missing_ref_and_layer_conflict():
+    from services.chart_checks import chart_items
+
+    markdown = ":::diagram type=layered 对比图\n合规落实\n数据管理\n权限控制\n安全技术措施\n:::"
+    items = chart_items("diagram", markdown, {"title": "对比图", "type": "layered"},
+                        "本节从三个层面说明。", [])
+    titles = [item["title"] for item in items]
+    assert any("缺依据" in t for t in titles)                 # 无 ref
+    assert any("图文层数不一致" in t for t in titles)          # 正文三层 vs 图 4 节点
+
+
+def test_chart_checks_pass_when_consistent():
+    from services.chart_checks import chart_items
+
+    markdown = ":::diagram type=layered 对比图\n合规落实\n数据管理\n权限控制\n:::"
+    items = chart_items("diagram", markdown, {"title": "对比图"}, "本节从三个层面说明。", ["招标文件-2.2.5"])
+    assert [i for i in items if i["title"].endswith("缺依据")] == []
+    assert [i for i in items if "层数不一致" in i["title"]] == []
