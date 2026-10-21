@@ -79,8 +79,8 @@ HARNESS = r"""
   const primary = [...dialog.querySelectorAll('.cs-cp-primary')];
   const headerPrimary = primary.filter((b) => !b.closest('.cs-cp-footer'));
   const primaryBg = headerPrimary[0] ? getComputedStyle(headerPrimary[0]).backgroundColor : '';
-  mark('主操作唯一且蓝底', headerPrimary.length === 1 && /29, 78, 216|30, 64, 175/.test(primaryBg),
-       { count: headerPrimary.length, bg: primaryBg, label: headerPrimary[0]?.textContent?.trim() });
+  mark('计划面板头部无主操作按钮（只读说明书）', headerPrimary.length === 0,
+       { count: headerPrimary.length });
 
   // C 交付物：只展开一项
   const rows = [...dialog.querySelectorAll('.cs-cp-del')];
@@ -117,8 +117,8 @@ HARNESS = r"""
   // J 待办条数与主操作文案一致
   const todoCount = dialog.querySelectorAll('[data-cp-todo]').length;
   const mainLabel = headerPrimary[0]?.textContent || '';
-  const consistent = /AI 编制本章/.test(mainLabel);
-  mark('计划面板主操作为「AI 编制本章」', consistent, { label: mainLabel.trim() });
+  mark('计划面板无「AI 编制本章」按钮（编写在进度页签）', !/AI 编制本章|编写整章/.test(dialog.querySelector('.cs-cp-footer')?.textContent || ''),
+       { footer: (dialog.querySelector('.cs-cp-footer')?.textContent || '').trim().slice(0, 40) });
 
   // K 交付物展开区在标题下方（不是右侧）
   const openRow = openRows[0];
@@ -152,12 +152,23 @@ HARNESS = r"""
     sameRow = centerDiff <= 14;
     rowDetail = { centerDiff: Math.round(centerDiff) };
   }
-  mark('顶部主按钮与数字行同一行', sameRow, rowDetail);
+  // （计划面板已无顶部主按钮，此规则不再适用）
 
   // N 所有区块都可展开收起（结构一致）
   const sections = [...dialog.querySelectorAll('[data-cp-sec]')];
   const allDetails = sections.length > 0 && sections.every((el) => el.tagName === 'DETAILS');
   mark('计划面板不含待办块（待办在右栏）', !dialog.querySelector('[data-cp-sec="todo"]'), {});
+  // 计划面板只给大纲与要求：不得出现"编写/重写"这类动作
+  const planText = dialog.textContent || '';
+  const noWriteInPlan = !/编写本节|重写本节|编写整章|按大纲生成|按大纲重排/.test(planText);
+  mark('计划面板只给大纲与要求（无编写动作）', noWriteInPlan, { noWriteInPlan });
+  // 进度页签：有"章节编写进度"+ 编写动作
+  const progPane = document.querySelector('[data-pane="ai"]');
+  const hasProgress = progPane ? /章节编写进度/.test(progPane.textContent) : false;
+  const hasWriteBtn = progPane ? !!progPane.querySelector('[data-aside-write-all]') : false;
+  const hasSecBtn = progPane ? !!progPane.querySelector('[data-aside-write-section]') : false;
+  mark('进度页签承载编写进度与动作', hasProgress && hasWriteBtn && hasSecBtn,
+       { hasProgress, hasWriteBtn, hasSecBtn });
   // 区块序号必须从 1 连续（删块后容易跳号）
   const idxNums = [...dialog.querySelectorAll('[data-cp-sec] .cs-cp-idx')].map((el) => Number(el.textContent.trim()));
   const idxOk = idxNums.length > 0 && idxNums.every((n, i) => n === i + 1);
@@ -274,7 +285,7 @@ HARNESS = r"""
     const moreItems = [...toolbar.querySelectorAll('.cs-more-menu button')].map((b) => b.textContent.trim());
     const insertItems = [...toolbar.querySelectorAll('.cs-insert-menu button')].map((b) => b.textContent.trim());
     mark('工具条分组清晰（主操作/视图/插入/更多）',
-         labels.includes('AI 编制本章') && labels.some((l) => l.startsWith('插入')) && labels.some((l) => l.startsWith('更多')) && !dupDiagram,
+         labels.some((l) => l === 'AI 编制本章' || l === '编写整章') && labels.some((l) => l.startsWith('插入')) && labels.some((l) => l.startsWith('更多')) && !dupDiagram,
          { labels, dupDiagram });
     mark('更多菜单只剩确认完成与导出（无质检）', moreItems.length <= 3 && !moreItems.includes('质检清单') && insertItems.length <= 3,
          { more: moreItems, insert: insertItems });

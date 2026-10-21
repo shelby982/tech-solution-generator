@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v336';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v336';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v336';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v339';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v339';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v339';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -170,7 +170,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
         <div class="cs-toolbar">
-          <button data-action="ai" class="cs-primary" title="启动本章编制；在右侧查看进度">AI 编制本章</button>
+          <button data-action="ai" class="cs-primary" title="按章节大纲逐节编写整章（已有内容的节保留）">编写整章</button>
           <button data-action="save" disabled>保存</button>
           <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
           <div class="cs-toolbar-right">
@@ -242,6 +242,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           todo: plan.todo || [],
           gaps: plan.material_gaps || [],
           generationGaps: plan.generation_gaps || [],
+          outline: plan.outline || [],
           pages: plan.pages || 0,
           wordPlan: plan.word_plan || null,
           deliverables: plan.deliverables || [],
@@ -413,7 +414,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 本章编写计划（可执行版）：交付物 / 对内要求 / 字数分配 / 素材清单 / 怎么写 / 自检。
    *  父章额外给"子节统筹"。 */
-  async function openChapterPlan(blockId) {
+  async function openChapterPlan(blockId, options = {}) {
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog cs-cp-dialog';
     dialog.innerHTML = `<header><h3>本章计划</h3><button type="button" aria-label="关闭">×</button></header>
@@ -509,7 +510,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
           <div class="cs-cp-toprow">
             <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
-            <button type="button" class="cs-cp-primary" data-cp-main>AI 编制本章</button>
+
           </div>
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
         </div>
@@ -517,25 +518,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
         <details class="cs-cp-block" data-cp-sec="outline" open>
-          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(() => {
-            const list = data.outline || [];
-            const done = (data.outline_done || []).length;
-            return list.length ? `${list.length} 节${done ? ` · 已写 ${done}` : ''}` : '未生成（0 节）';
-          })()}</em>
-            <button type="button" class="cs-cp-link" data-cp-build-outline>${(data.outline || []).length ? '重新生成' : '生成大纲'}</button>
-            ${(data.outline || []).length ? '<button type="button" class="cs-cp-link" data-cp-align-body title="按大纲顺序重排正文，大纲外的旧内容会移除（可在版本里找回）">按大纲重排</button>' : ''}
-            ${(data.outline || []).length ? '<button type="button" class="cs-cp-link" data-cp-write-all>按大纲生成</button>' : ''}</summary>
+          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节 · 编写进度见右栏「进度」` : '未生成（0 节）'}</em>
+            <button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${(data.outline || []).length ? '重做大纲' : '生成大纲'}</button></summary>
           <div class="cs-cp-fold-body">
-            ${(data.outline || []).length ? (data.outline || []).map((sec, i) => {
-              const written = (data.outline_done || []).includes(sec.title);
-              return `<div class="cs-ol-row">
+            ${(data.outline || []).length ? (data.outline || []).map((sec, i) => `<div class="cs-ol-row">
                 <span class="cs-ol-idx">${i + 1}</span>
                 <span class="cs-ol-main"><b>${esc(sec.title)}</b>
                   <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
                 <span class="cs-ol-meta">${sec.words || 900} 字${sec.need === 'table' ? ' · 表' : sec.need === 'figure' ? ' · 图' : ''}</span>
-                <button type="button" class="cs-cp-link" data-cp-write-section="${i}">${written ? '重写' : '写这节'}</button>
-              </div>`;
-            }).join('') : '<p class="cs-cp-empty">还没有大纲。点「生成大纲」先出 6~10 节，再逐节写。</p>'}
+              </div>`).join('') : '<p class="cs-cp-empty">还没有大纲。点「生成大纲」先出 6~10 节（编写入口在右栏「进度」）。</p>'}
           </div>
         </details>
 
@@ -602,10 +593,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>` : ''}
         <div class="cs-cp-footer">
           <button type="button" class="cs-cp-ghost" data-cp-close>关闭</button>
-          <button type="button" class="cs-cp-primary" data-cp-generate>AI 编制本章</button>
+          <span class="cs-cp-scope">编写与进度见右栏「进度」页签</span>
         </div>
         <div data-cp-req-edit hidden></div>`;
       bindEvents();
+      if (options.autoWrite && !options._autoStarted) {
+        options._autoStarted = true;
+        globalThis.setTimeout(() => {
+          body.querySelector('[data-cp-write-all]')?.click()
+            || body.querySelector('[data-cp-write-chapter]')?.click();
+        }, 400);
+      }
     };
     const runAction = (action) => {
       if (action === 'find') { dialog.close(); openCitationDialog(blockId); return; }
@@ -733,59 +731,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           status(`已生成 ${data.outline.length} 节大纲`);
           await render();
         } catch (error) { status(error.message); btn.disabled = false; btn.textContent = label; }
-      });
-      // 按大纲重排正文（保留同名节、丢弃大纲外旧内容、修复表格）
-      body.querySelector('[data-cp-align-body]')?.addEventListener('click', async (event) => {
-        const btn = event.currentTarget; btn.disabled = true; const label = btn.textContent; btn.textContent = '重排中…';
-        try {
-          const resp = await fetch(`/api/blocks/${active.id}/studio/align-outline`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({thread_id: threadId}), signal: AbortSignal.timeout(60000),
-          });
-          const out = await resp.json().catch(() => ({}));
-          if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
-          if (out.content !== undefined) { editor.value = out.content; changed && changed(); }
-          status(`已按大纲重排：保留 ${out.kept} 节 · 移除 ${out.dropped?.length || 0} 个旧标题 · 修表格 ${out.tables_fixed || 0} 处`);
-          await render();
-        } catch (error) { status(error.message); }
-        btn.disabled = false; btn.textContent = label;
-      });
-      // 写一节（P0-2）
-      const writeSection = async (index) => {
-        const sec = (data.outline || [])[Number(index)];
-        if (!sec) return false;
-        const resp = await fetch(`/api/blocks/${active.id}/studio/section`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({thread_id: threadId, title: sec.title, points: sec.points || [], words: sec.words || 900}),
-          signal: AbortSignal.timeout(180000),
-        });
-        const out = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
-        if (out.content !== undefined) { editor.value = out.content; changed && changed(); }
-        return true;
-      };
-      body.querySelectorAll('[data-cp-write-section]').forEach((btn) => btn.addEventListener('click', async (event) => {
-        const index = Number(event.currentTarget.dataset.cpWriteSection);
-        const el = event.currentTarget; el.disabled = true; const label = el.textContent; el.textContent = '生成中…';
-        try {
-          await writeSection(index);
-          status(`已写入「${(data.outline || [])[index].title}」；记得保存`);
-          await render();
-        } catch (error) { status(error.message); el.disabled = false; el.textContent = label; }
-      }));
-      // 按大纲生成（串行，带进度）
-      body.querySelector('[data-cp-write-all]')?.addEventListener('click', async (event) => {
-        const btn = event.currentTarget; btn.disabled = true;
-        const list = data.outline || [];
-        try {
-          for (let i = 0; i < list.length; i += 1) {
-            btn.textContent = `生成中 ${i + 1}/${list.length}`;
-            await writeSection(i);
-          }
-          status(`已按大纲生成 ${list.length} 节；请核对后保存`);
-          await render();
-        } catch (error) { status(error.message); }
-        btn.disabled = false; btn.textContent = '按大纲生成';
       });
       body.querySelector('[data-cp-layout]')?.addEventListener('change', async (event) => {
         const previous = (context?.profile || {}).layout;
@@ -1455,6 +1400,42 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     changed();editor.focus();
   };
   // 素材类问题归「素材」页签（由其缺口三分法承载），待办只保留可"就地处理"的模块
+  /** 读取本章计划（含大纲） */
+  async function fetchChapterPlan(blockKey) {
+    const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}&_=${Date.now()}`, {cache: 'no-store', signal: AbortSignal.timeout(30000)});
+    return resp.ok ? resp.json() : {};
+  }
+
+  /** 写一节（只影响这一节） */
+  async function writeSectionApi(blockKey, sec) {
+    const resp = await fetch(`/api/blocks/${blockKey}/studio/section`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({thread_id: threadId, title: sec.title, points: sec.points || [], words: sec.words || 900}),
+      signal: AbortSignal.timeout(180000),
+    });
+    const out = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+    return out;
+  }
+
+  /** 按大纲编写整章：已有内容的节保留，只补未写/待写的节 */
+  async function writeChapterApi(blockKey, onProgress) {
+    const plan = await fetchChapterPlan(blockKey);
+    const outline = plan.outline || [];
+    if (!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
+    const bodyText = String(editor?.value || '');
+    const done = new Set(outline.map((s) => s.title).filter((title) =>
+      new RegExp(`^##\\s+${String(title).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*$`, 'm').test(bodyText)));
+    const missing = outline.filter((s) => !done.has(s.title));
+    if (!missing.length) return { written: 0, total: outline.length, message: '整章已按大纲写完' };
+    for (let i = 0; i < missing.length; i += 1) {
+      onProgress && onProgress(i + 1, missing.length, missing[i].title);
+      const out = await writeSectionApi(blockKey, missing[i]);
+      if (out.content !== undefined) { editor.value = out.content; }
+    }
+    return { written: missing.length, total: outline.length };
+  }
+
   const TODO_GROUPS = [
     ['content', '内容'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
   ];
@@ -1496,6 +1477,31 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             </div>`).join('')}</div>`
       : '';
     return `<section data-pane="todo"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
+  }
+
+  /** 右栏「进度」页签：章节编写进度（大纲进度 + 编写动作） */
+  function progressPaneHtml() {
+    const outline = planBrief?.outline || [];
+    const bodyText = String(editor?.value || '');
+    const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const done = new Set(outline.map((s) => s.title).filter((title) =>
+      new RegExp(`^##\\s+${escRe(title)}\\s*$`, 'm').test(bodyText)));
+    if (!outline.length) {
+      return `<section data-pane="ai"><h4>章节编写进度</h4>
+        <p class="cs-todo-ok">还没有章节大纲 · 去章头「本章计划」生成大纲后开始编写</p></section>`;
+    }
+    const rows = outline.map((sec, i) => {
+      const written = done.has(sec.title);
+      return `<div class="cs-todo-row">
+          <span class="cs-todo-idx">${i + 1}</span>
+          <span class="cs-todo-text"><b>${esc(sec.title)}</b>
+            <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? '已写' : '待写'}</small></span>
+          <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写本节' : '编写本节'}</button>
+        </div>`;
+    }).join('');
+    return `<section data-pane="ai"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
+      <div class="cs-progress-actions"><button type="button" class="cs-todo-act cs-todo-act--primary" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button></div>
+      ${rows}</section>`;
   }
 
   /** 右栏「素材」页签：三分法 —— 已有可用 / 公开资料可补 / 必须你上传 */
@@ -1720,6 +1726,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `${todoPaneHtml()}
+      ${progressPaneHtml()}
       <section data-pane="materials">${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
       <details class="cs-mat-manage">
         <summary>已关联素材与外部依据</summary>
@@ -1871,6 +1878,36 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(planButton){await openChapterPlan(String(active?.block_id || ''));return;}
     const chapter=event.target.closest('[data-chapter]');
     if(chapter) {await select(chapter.dataset.chapter);return;}
+    // 「进度」页签：开始/继续编写整章（同一引擎）
+    if(event.target.closest('[data-aside-write-all]') && active){
+      const btn=event.target.closest('[data-aside-write-all]');
+      const label=btn.textContent; btn.disabled=true;
+      try{
+        const result=await writeChapterApi(active.block_id,(i,total,title)=>{btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
+        status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
+        changed && changed();
+        const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
+        if(fresh.block)editor.value=fresh.block.content||'';
+        paintAside();
+      }catch(error){status(error.message);}
+      btn.disabled=false; btn.textContent=label;
+      return;
+    }
+    const secBtn=event.target.closest('[data-aside-write-section]');
+    if(secBtn && active){
+      const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
+      if(!sec) return;
+      const label=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
+      try{
+        const out=await writeSectionApi(active.block_id,sec);
+        if(out.content!==undefined){editor.value=out.content;changed && changed();}
+        const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
+        if(fresh.block)editor.value=fresh.block.content||'';
+        status(`已${label.startsWith('重写')?'重写':'编写'}「${sec.title}」；记得保存`);
+        paintAside();
+      }catch(error){status(error.message);secBtn.disabled=false;secBtn.textContent=label;}
+      return;
+    }
     const asideTodo=event.target.closest('[data-aside-todo]');
     if(asideTodo && active){
       const action=asideTodo.dataset.asideTodo;
@@ -1961,11 +1998,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
-        // 生成闸：本章所属一级目录还没有"已确认"的编写计划 → 先看计划、确认后再生成。
-        // 否则「AI 编制本章」会先跑起来，计划闸形同虚设（产品评审结论）。
-        const unit = active ? unitOf.get(String(active.block_id)) : null;
-        const info = unit ? planUnits.get(unit) : null;
-        paintView(false);status('');showPanel('ai');await team.start();
+        // 有章节大纲 → 按大纲逐节补写（统一逻辑）；没有 → 走原多 Agent 编制
+        if ((data__outline || []).length && typeof writeChapterFromOutlineRef === 'function') {
+          await writeChapterFromOutlineRef(document.querySelector('[data-action="ai"]'));
+          return;
+        }
+      }
+      if(action==='ai'){
+        // 统一语义：「编写整章」= 按章节大纲逐节编写（与「进度」页签同一引擎）
+        showPanel('ai');
+        const btn=document.querySelector('[data-action="ai"]'); const label=btn?btn.textContent:'';
+        try{
+          const result=await writeChapterApi(active?.block_id,(i,total,title)=>{if(btn)btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
+          status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
+          changed && changed();
+          const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
+          if(fresh.block)editor.value=fresh.block.content||'';
+          paintAside();
+        }catch(error){status(error.message);}
+        if(btn&&label)btn.textContent=label;
       }
       if(action==='edit'){
         paintView(false);get('preview').hidden=true;
