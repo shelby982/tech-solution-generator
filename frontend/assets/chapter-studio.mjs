@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v331';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v331';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v331';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v333';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v333';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v333';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -471,6 +471,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const pages = data.pages || 0;
       const keyPointsBy = data.key_points_by_deliverable || {};
       const isCatalog = !!data.catalog;
+    const bodyText = String(editor?.value || '');
+    data.outline_done = (data.outline || [])
+      .map((sec) => sec.title)
+      .filter((title) => new RegExp(`^##\\s+${String(title).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*$`, 'm').test(bodyText));
       const isParent = children.length > 0 && !isCatalog;
       const todoCount = todo.length;
       const doneCount = deliverables.filter((item) => item.status === '达标').length;
@@ -498,8 +502,30 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
 
+        <details class="cs-cp-block" data-cp-sec="outline" open>
+          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(() => {
+            const list = data.outline || [];
+            const done = (data.outline_done || []).length;
+            return list.length ? `${list.length} 节${done ? ` · 已写 ${done}` : ''}` : '未生成（0 节）';
+          })()}</em>
+            <button type="button" class="cs-cp-link" data-cp-build-outline>${(data.outline || []).length ? '重新生成' : '生成大纲'}</button>
+            ${(data.outline || []).length ? '<button type="button" class="cs-cp-link" data-cp-write-all>按大纲生成</button>' : ''}</summary>
+          <div class="cs-cp-fold-body">
+            ${(data.outline || []).length ? (data.outline || []).map((sec, i) => {
+              const written = (data.outline_done || []).includes(sec.title);
+              return `<div class="cs-ol-row">
+                <span class="cs-ol-idx">${i + 1}</span>
+                <span class="cs-ol-main"><b>${esc(sec.title)}</b>
+                  <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
+                <span class="cs-ol-meta">${sec.words || 900} 字${sec.need === 'table' ? ' · 表' : sec.need === 'figure' ? ' · 图' : ''}</span>
+                <button type="button" class="cs-cp-link" data-cp-write-section="${i}">${written ? '重写' : '写这节'}</button>
+              </div>`;
+            }).join('') : '<p class="cs-cp-empty">还没有大纲。点「生成大纲」先出 6~10 节，再逐节写。</p>'}
+          </div>
+        </details>
+
         ${isCatalog ? '' : `<details class="cs-cp-block" data-cp-sec="deliverables" open>
-          <summary><b><span class="cs-cp-idx">1</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
+          <summary><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
             <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></summary>
           ${deliverables.length ? deliverables.map((item, index) => {
             const open = index === firstUnmet;
@@ -520,7 +546,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>`}
 
         <details class="cs-cp-block" data-cp-sec="standard">
-          <summary><b><span class="cs-cp-idx">2</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
+          <summary><b><span class="cs-cp-idx">3</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
           <div class="cs-cp-fold-body">
             ${points.map((point) => `<p class="cs-cp-point"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
             ${data.grade_band ? `<details class="cs-cp-sub"><summary>满分档要求（得 8–10 分的要求）</summary>
@@ -536,7 +562,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         <details class="cs-cp-block" data-cp-sec="how">
-          <summary><b><span class="cs-cp-idx">3</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
+          <summary><b><span class="cs-cp-idx">4</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
             <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
           <div class="cs-cp-fold-body cs-cp-write">
             ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
@@ -550,7 +576,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </details>
 
         ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
-          <summary><b><span class="cs-cp-idx">4</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
+          <summary><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
           ${isParent ? '<p class="cs-cp-howto">本章只写总述（300–500 字）：先全貌 → 3 个关键结论 → 子节索引，细节见下列各节。</p>' : ''}
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>
@@ -677,6 +703,58 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           button.disabled = false;
           button.textContent = '用 AI 匹配条款';
         }
+      });
+      // 生成大纲（P0-1）
+      body.querySelector('[data-cp-build-outline]')?.addEventListener('click', async (event) => {
+        const btn = event.currentTarget; btn.disabled = true; const label = btn.textContent; btn.textContent = '生成中…';
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/studio/outline`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({thread_id: threadId, regenerate: btn.textContent === '重新生成'}), signal: AbortSignal.timeout(180000),
+          });
+          const out = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+          data.outline = out.outline || [];
+          status(`已生成 ${data.outline.length} 节大纲`);
+          await render();
+        } catch (error) { status(error.message); btn.disabled = false; btn.textContent = label; }
+      });
+      // 写一节（P0-2）
+      const writeSection = async (index) => {
+        const sec = (data.outline || [])[Number(index)];
+        if (!sec) return false;
+        const resp = await fetch(`/api/blocks/${active.id}/studio/section`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({thread_id: threadId, title: sec.title, points: sec.points || [], words: sec.words || 900}),
+          signal: AbortSignal.timeout(180000),
+        });
+        const out = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+        if (out.content !== undefined) { editor.value = out.content; changed && changed(); }
+        return true;
+      };
+      body.querySelectorAll('[data-cp-write-section]').forEach((btn) => btn.addEventListener('click', async (event) => {
+        const index = Number(event.currentTarget.dataset.cpWriteSection);
+        const el = event.currentTarget; el.disabled = true; const label = el.textContent; el.textContent = '生成中…';
+        try {
+          await writeSection(index);
+          status(`已写入「${(data.outline || [])[index].title}」；记得保存`);
+          await render();
+        } catch (error) { status(error.message); el.disabled = false; el.textContent = label; }
+      }));
+      // 按大纲生成（串行，带进度）
+      body.querySelector('[data-cp-write-all]')?.addEventListener('click', async (event) => {
+        const btn = event.currentTarget; btn.disabled = true;
+        const list = data.outline || [];
+        try {
+          for (let i = 0; i < list.length; i += 1) {
+            btn.textContent = `生成中 ${i + 1}/${list.length}`;
+            await writeSection(i);
+          }
+          status(`已按大纲生成 ${list.length} 节；请核对后保存`);
+          await render();
+        } catch (error) { status(error.message); }
+        btn.disabled = false; btn.textContent = '按大纲生成';
       });
       body.querySelector('[data-cp-layout]')?.addEventListener('change', async (event) => {
         const previous = (context?.profile || {}).layout;

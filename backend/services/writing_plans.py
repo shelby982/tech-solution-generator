@@ -1154,6 +1154,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "material_gaps": _material_gaps(_materials_plan(requirements, bound_kinds, len(clauses)), requirements),
         "generation_gaps": generation_gaps or [],
+        "outline": (chapter or {}).get("outline") or [],
         "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
                             word_plan, guidance, content, is_parent_chapter, is_catalog),
         "children": children,

@@ -281,6 +281,109 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
     return chr(10).join(out)
 
 
+class OutlineBody(BaseModel):
+    thread_id: str = Field(min_length=8)
+    regenerate: bool = Field(default=False)
+
+
+class SectionBody(BaseModel):
+    thread_id: str = Field(min_length=8)
+    title: str = Field(min_length=1, max_length=60)
+    points: list[str] = Field(default_factory=list)
+    words: int = Field(default=900, ge=400, le=1600)
+
+
+@router.get('/blocks/{block_id}/studio/outline')
+async def get_outline(block_id: int, thread_id: str = ''):
+    """章节大纲（P0-1）：存在就返回，不存在返回空（前端按钮生成）。"""
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+    from services.writing_plans import plan_of_block
+    async with get_db() as db:
+        found = await plan_of_block(db, block['project_id'], thread_id, str(block['block_id']))
+    outline = []
+    if found:
+        for item in found[1].get('chapters') or []:
+            if str(item.get('block_id')) == str(block['block_id']):
+                outline = item.get('outline') or []
+                break
+    return {'outline': outline}
+
+
+@router.post('/blocks/{block_id}/studio/outline')
+async def build_outline(block_id: int, body: OutlineBody):
+    """生成 / 重新生成章节大纲（两级：节 → 要点），并存进计划。"""
+    from services.writing_plans import plan_of_block
+    from services.section_outline import OUTLINE_SYSTEM, fallback_outline, normalize_outline
+    from agents.chapter_team import call_role
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
+    if not found:
+        raise HTTPException(404, '这一章还没有编写计划')
+    plan_id, plan = found
+    chapter = next((item for item in plan.get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
+    if chapter.get('outline') and not body.regenerate:
+        return {'outline': chapter['outline'], 'cached': True}
+
+    sections = None
+    model = ''
+    try:
+        payload = {
+            'chapter': chapter.get('title') or block.get('title') or '',
+            'objective': chapter.get('objective') or '',
+            'pages': chapter.get('pages') or 0,
+            'requirements': [r.get('text') if isinstance(r, dict) else str(r) for r in (chapter.get('requirements') or [])][:10],
+            'tasks': [t.get('title') for t in (chapter.get('tasks') or [])],
+        }
+        raw, model = await call_role('chief', OUTLINE_SYSTEM, payload, {})
+        sections = normalize_outline(raw, chapter)
+    except Exception:
+        sections = fallback_outline(chapter)
+    chapter['outline'] = sections
+    async with get_db() as db:
+        await db.execute("UPDATE writing_plans SET plan = ? WHERE id = ?", (json.dumps(plan, ensure_ascii=False), plan_id))
+        await db.commit()
+    return {'outline': sections, 'model': model, 'cached': False}
+
+
+@router.post('/blocks/{block_id}/studio/section')
+async def write_section(block_id: int, body: SectionBody):
+    """按大纲写**一节**（P0-2），写回正文的 `## 标题` 段。"""
+    from services.writing_plans import plan_of_block
+    from services.section_outline import SECTION_SYSTEM, build_section_payload, replace_section
+    from services.block_store import add_revision, update_block_content
+    from agents.chapter_team import call_role
+    import re as _re
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
+    chapter = {}
+    if found:
+        chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
+    section = {'title': body.title, 'points': body.points, 'words': body.words}
+    evidence = str(block.get('content') or '')[:2000]
+    payload = build_section_payload(chapter, section, evidence)
+    try:
+        raw, model = await call_role('text', SECTION_SYSTEM, payload, {})
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    text = str(raw or '').strip()
+    text = _re.sub(r'^```[a-z]*\n|```$', '', text).strip()
+    if len(text) < 120:
+        raise HTTPException(422, '这一节没有生成出可用内容，请重试或补充要点')
+    before = str(block.get('content') or '')
+    after, replaced = replace_section(before, body.title, text)
+    async with get_db() as db:
+        await add_revision(db, block_id, before, summary=f'分节生成：{body.title}', source='manual')
+        await update_block_content(db, block_id, after, status=block.get('status') or 'draft')
+    words = len(_re.sub(r'\s+', '', text))
+    return {'title': body.title, 'words': words, 'replaced': replaced, 'model': model,
+            'content': after, 'paragraphs': len([p for p in text.split('\n\n') if p.strip()])}
+
+
 @router.post('/blocks/{block_id}/studio/table')
 async def generate_table(block_id: int, body: TableBody):
     """按本章要求生成一张**有内容的**表格草稿（Markdown）。
