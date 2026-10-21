@@ -736,3 +736,18 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-progress-btn:hover { background: #eff6ff; border-color: #bfdbfe; }
 .cs-progress-btn:active { background: #dbeafe; }
 .cs-progress-btn:disabled { color: #94a3b8; background: #f8fafc; cursor: default; }
+
+/* 图片放大查看（审阅图集 → 点缩略图） */
+.cs-fig-zoom { border: 0; padding: 0; background: transparent; max-width: none; max-height: none;
+  display: flex; align-items: center; justify-content: center; }
+.cs-fig-zoom::backdrop { background: rgba(15,23,42,.55); }
+.cs-fig-zoom-inner { background: #fff; border-radius: 12px; box-shadow: 0 24px 60px rgba(15,23,42,.35);
+  width: min(92vw, 1100px); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.cs-fig-zoom-inner header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #eef2f7; }
+.cs-fig-zoom-inner header b { font-size: 13.5px; color: #0f172a; }
+.cs-fig-zoom-inner header span { flex: 1; font-size: 11px; color: #94a3b8; }
+.cs-fig-zoom-close { border: 0; background: transparent; font-size: 20px; line-height: 1; color: #94a3b8; cursor: pointer; }
+.cs-fig-zoom-body { padding: 16px; overflow: auto; display: flex; align-items: center; justify-content: center; }
+.cs-fig-zoom-body .cs-dg { transform: scale(1.15); transform-origin: center; margin: 8px; }
+.cs-fig-zoom-body img { max-width: 100%; max-height: 76vh; object-fit: contain; }
+.cs-fig-thumb[data-zoom-card] { cursor: zoom-in; }

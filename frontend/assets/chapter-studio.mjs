@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v359';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v359';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v359';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v362';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v362';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v362';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1476,7 +1476,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ...pending.map((d) => ({ kind: 'pending', group: 'pending', title: d.title, section: d.section, type: d.type })),
       ].filter((x) => filter === 'all' || x.group === filter);
       grid.innerHTML = items.length ? items.map((f) => `<div class="cs-fig-card">
-          <div class="cs-fig-thumb">${f.kind === 'ai'
+          <div class="cs-fig-thumb" data-zoom-card="${esc(f.id || '')}" title="点击放大">${f.kind === 'ai'
             ? renderDiagramFigure(`:::diagram type=${f.type} ${f.title}`, (f.raw || '').split('\n').slice(1, -1))
             : f.kind === 'material' && f.url
               ? `<img src="${esc(f.url)}" alt="${esc(f.title)}" loading="lazy" />`
@@ -1504,10 +1504,41 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (locate) { dlg.close(); void select(active.block_id); globalThis.setTimeout(() => locateSectionInEditor(locate.dataset.frLocate), 600); return; }
       const view = event.target.closest('[data-fr-view]');
       if (view) { const f = figures.find((x) => x.id === view.dataset.frView); if (f?.url) globalThis.open(f.url, '_blank'); return; }
+      const zoomCard = event.target.closest('[data-zoom-card]');
+      if (zoomCard && !event.target.closest('button')) {
+        const f = figures.find((x) => x.id === zoomCard.dataset.zoomCard);
+        if (f) { openFigureZoom(f); return; }
+      }
       const adjust = event.target.closest('[data-fr-adjust]');
       if (adjust) { const f = figures.find((x) => x.id === adjust.dataset.frAdjust); dlg.close(); if (f) openFigureAdjustDialog(f); }
     });
     render('all');
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 图片放大查看（审阅图集里点缩略图）——用 dialog 保证盖在模态层之上 */
+  function openFigureZoom(figure) {
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-fig-zoom';
+    dlg.innerHTML = `<div class="cs-fig-zoom-inner" data-zoom-inner>
+        <header><b>${esc(figure.title || '图片')}</b><span>${esc(figure.section || '')}</span>
+          <button type="button" class="cs-fig-zoom-close" data-zoom-close aria-label="关闭">×</button></header>
+        <div class="cs-fig-zoom-body"></div>
+      </div>`;
+    const bodyEl = dlg.querySelector('.cs-fig-zoom-body');
+    if (figure.kind === 'material' && figure.url) {
+      bodyEl.innerHTML = `<img src="${esc(figure.url)}" alt="${esc(figure.title)}" />`;
+    } else if (figure.raw) {
+      bodyEl.innerHTML = renderDiagramFigure(`:::diagram type=${figure.type} ${figure.title}`, String(figure.raw).split('\n').slice(1, -1));
+    } else {
+      bodyEl.innerHTML = '<p class="cs-mat-empty">这张图还没有内容</p>';
+    }
+    dlg.addEventListener('click', (event) => {
+      if (event.target.closest('[data-zoom-close]')) { dlg.close(); return; }
+      if (!event.target.closest('[data-zoom-inner]')) dlg.close();   // 点遮罩关闭
+    });
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
