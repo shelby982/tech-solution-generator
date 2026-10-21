@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from routes.upload import router as upload_router
+from routes.writing_settings import router as writing_settings_router
 from routes.config import router as config_router
 from routes.changelog import router as changelog_router
 from routes.projects import router as projects_router
@@ -243,6 +244,7 @@ app.include_router(studio_router,    prefix="/api")
 app.include_router(writing_router,   prefix="/api")
 app.include_router(specs_router,     prefix="/api")
 app.include_router(citations_router, prefix="/api")
+app.include_router(writing_settings_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────

@@ -142,6 +142,18 @@ def _normalize_deliverables(raw, need: str = "") -> list[dict]:
         else:
             dtype = str(item.get("type") or "").strip()
             entry["type"] = dtype if dtype in ("layered", "flow", "timeline") else "layered"
+            elements = []
+            for raw in _clean_list(item.get("elements"))[:8]:
+                text = _clean(raw, 20)
+                if text and text not in elements:
+                    elements.append(text)
+            if not elements:
+                # 旧大纲没有 elements → 由要点派生（不重新生成用户已确认的大纲）
+                for raw in (item.get("points") or [])[:6]:
+                    text = _clean(raw, 20)
+                    if text and text not in elements:
+                        elements.append(text)
+            entry["elements"] = elements[:8]
         out.append(entry)
     if not out:
         out = [{"kind": "text", "title": "正文", "words": 700}]
@@ -162,7 +174,7 @@ OUTLINE_SYSTEM = (
     "只输出 JSON：{\"sections\":[{\"title\":\"…\",\"points\":[\"…\"],\"words\":900,"
     "\"basis\":[{\"type\":\"score_point|clause|policy|material\",\"ref\":\"…\",\"use\":\"…\"}],"
     "\"how\":{\"structure\":\"…\",\"style\":\"…\",\"pitfalls\":[\"…\"]},"
-    "\"deliverables\":[{\"kind\":\"text|table|figure\",\"title\":\"…\",\"words\":600,\"cols\":[\"…\"],\"type\":\"layered|flow|timeline\"}]}]}"
+    "\"deliverables\":[{\"kind\":\"text|table|figure\",\"title\":\"…\",\"words\":600,\"cols\":[\"…\"],\"type\":\"layered|flow|timeline\",\"elements\":[\"图中要素\"]}]}]}"
 )
 
 SECTION_REWRITE_SYSTEM = (
@@ -227,3 +239,24 @@ def replace_section(content: str, title: str, body: str) -> tuple[str, bool]:
             return (text[:start] + f"## {target}\n\n{body.strip()}\n\n" + text[end:]).strip() + "\n", True
     addition = f"## {target}\n\n{body.strip()}"
     return ((text.rstrip() + "\n\n" + addition).strip() + "\n"), False
+
+
+def ensure_outline_elements(outline: list[dict]) -> list[dict]:
+    """读取时给"图类交付物"补齐 elements（旧大纲不重新生成）。"""
+    for section in outline or []:
+        points = section.get("points") or []
+        for deliverable in section.get("deliverables") or []:
+            if deliverable.get("kind") != "figure" or deliverable.get("elements"):
+                continue
+            derived: list[str] = []
+            for raw in list(points)[:6]:
+                text = _clean(raw, 20)
+                if text and text not in derived:
+                    derived.append(text)
+            if not derived:
+                for basis in section.get("basis") or []:
+                    text = _clean((basis or {}).get("ref"), 20)
+                    if text and text not in derived:
+                        derived.append(text)
+            deliverable["elements"] = derived[:8]
+    return outline

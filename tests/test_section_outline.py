@@ -81,3 +81,12 @@ def test_normalize_tables_fixes_separator_and_width():
     assert count >= 1
     assert lines[0].count("|") == 3
     assert all(ln.count("|") == 3 for ln in lines)
+
+
+def test_ensure_outline_elements_derives_from_points():
+    from services.section_outline import ensure_outline_elements
+
+    outline = [{"title": "对比", "points": ["现状：未建立", "目标：完整建立"],
+                "deliverables": [{"kind": "figure", "title": "对比图", "type": "layered"}]}]
+    enriched = ensure_outline_elements(outline)
+    assert enriched[0]["deliverables"][0]["elements"] == ["现状：未建立", "目标：完整建立"]

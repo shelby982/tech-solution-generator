@@ -238,6 +238,14 @@ async def generate_diagram(block_id: int, body: DiagramBody, model: str = ''):
     payload = {'text': body.text, 'prefer_type': wanted}
     try:
         wanted = (getattr(body, 'model', '') or model or '').strip()
+        if not wanted:
+            try:
+                from services.writing_settings import resolve_model
+                async with get_db() as db2:
+                    resolved = await resolve_model(db2, int(block.get('project_id') or 0), int(block_id), 'diagram')
+                wanted = resolved.get('used') or ''
+            except Exception:
+                wanted = ''
         raw, model = await call_role('diagram', system, payload, {'diagram': wanted} if wanted else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
@@ -309,7 +317,8 @@ async def get_outline(block_id: int, thread_id: str = ''):
             if str(item.get('block_id')) == str(block['block_id']):
                 outline = item.get('outline') or []
                 break
-    return {'outline': outline}
+    from services.section_outline import ensure_outline_elements
+    return {'outline': ensure_outline_elements(outline)}
 
 
 @router.post('/blocks/{block_id}/studio/outline')
@@ -553,6 +562,14 @@ async def generate_table(block_id: int, body: TableBody, model: str = ''):
     payload = {'title': title, 'requirement': requirement, 'text': text[:4000]}
     try:
         wanted = (getattr(body, 'model', '') or model or '').strip()
+        if not wanted:
+            try:
+                from services.writing_settings import resolve_model
+                async with get_db() as db2:
+                    resolved = await resolve_model(db2, int(block.get('project_id') or 0), int(block_id), 'table')
+                wanted = resolved.get('used') or ''
+            except Exception:
+                wanted = ''
         raw, model = await call_role('table', system, payload, {'table': wanted} if wanted else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))

@@ -64,6 +64,15 @@ CREATE INDEX IF NOT EXISTS idx_citations_project ON citations(project_id, status
 
 -- 质检发现（落库用于待办/趋势/已处理标记；实时计算仍保留为"当前状态"）
 -- 生成时的事实缺口（"依据核对"待办）——与质检发现分开存，避免被 sync_findings 清掉
+CREATE TABLE IF NOT EXISTS writing_model_settings (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope      TEXT NOT NULL CHECK(scope IN ('project','block')),
+    scope_id   TEXT NOT NULL,
+    settings   TEXT NOT NULL DEFAULT '{}',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(scope, scope_id)
+);
+
 CREATE TABLE IF NOT EXISTS chapter_gaps (
     id          TEXT PRIMARY KEY,
     project_id  INTEGER NOT NULL,
