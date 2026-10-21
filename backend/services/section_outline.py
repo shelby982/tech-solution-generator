@@ -78,7 +78,7 @@ def normalize_outline(raw, chapter: dict) -> list[dict]:
             "need": need,
             "basis": _normalize_basis(item.get("basis")),
             "how": _normalize_how(item.get("how")),
-            "deliverables": _normalize_deliverables(item.get("deliverables"), need),
+            "deliverables": _normalize_deliverables(item.get("deliverables"), need, points),
             "source": "model",
         })
     return sections if len(sections) >= 2 else fallback_outline(chapter)
@@ -122,7 +122,7 @@ def _normalize_how(raw) -> dict:
     return {"structure": _clean(raw.get("structure"), 200), "style": _clean(raw.get("style"), 200), "pitfalls": pitfalls}
 
 
-def _normalize_deliverables(raw, need: str = "") -> list[dict]:
+def _normalize_deliverables(raw, need: str = "", points: list | None = None) -> list[dict]:
     """交付物：文字（字数）/ 表格（列名）/ 图（图型）。"""
     out: list[dict] = []
     for item in _clean_list(raw)[:5]:
@@ -148,6 +148,10 @@ def _normalize_deliverables(raw, need: str = "") -> list[dict]:
                 if text and text not in elements:
                     elements.append(text)
             if not elements:
+                for raw_point in (points or [])[:6]:
+                    text = _clean(raw_point, 20)
+                    if text and text not in elements:
+                        elements.append(text)
                 # 旧大纲没有 elements → 由要点派生（不重新生成用户已确认的大纲）
                 for raw in (item.get("points") or [])[:6]:
                     text = _clean(raw, 20)

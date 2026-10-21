@@ -421,3 +421,51 @@ def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
             text = text.rstrip() + "\n\n" + chart["markdown"] + "\n"
             missing.append(f"{kind}「{chart.get('title')}」正文未留占位（已附在节末）")
     return re.sub(r"\n{3,}", "\n\n", text), missing
+
+
+async def write_sections(job_id: str, block: dict, block_pk: int, sections: list[dict],
+                         thread_id: str, models: dict, draft: str,
+                         on_section_done=None) -> tuple[str, list[dict]]:
+    """逐节写正文（图表并行），返回 (新草稿, 节级留痕)。run_job 与测试共用。"""
+    records: list[dict] = []
+    for index, section in enumerate(sections):
+        row_now = await _job_row(job_id)
+        if row_now and row_now["status"] == "cancelled":
+            break
+        title = str(section.get("title"))
+        await emit(job_id, "role", {"role": "text", "state": "working", "model": models.get("text", ""),
+                                    "section_index": index})
+        chart_deliverables = [d for d in (section.get("deliverables") or [])
+                              if d.get("kind") in ("figure", "table")][:2]
+        chart_tasks = []
+        for deliverable in chart_deliverables:
+            role = "diagram" if deliverable.get("kind") == "figure" else "table"
+            chart_tasks.append(asyncio.create_task(
+                _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""))))
+        text = ""
+        started_at = time.monotonic()
+        async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):
+            text += chunk
+            await emit(job_id, "delta", {"index": index, "text": chunk})
+        charts = [await task for task in chart_tasks] if chart_tasks else []
+        if charts:
+            text, _missing = merge_charts(text, charts)
+        draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
+        records.append({"index": index, "title": title, "role": "text",
+                        "model": models.get("text", ""), "words": len(re.sub(r"\s+", "", text)),
+                        "ms": int((time.monotonic() - started_at) * 1000),
+                        "charts": [{"role": c.get("role"), "model": c.get("model"), "ok": bool(c.get("ok"))}
+                                   for c in charts]})
+        await emit(job_id, "section", {"index": index, "title": title, "state": "done",
+                                      "words": records[-1]["words"], "model": models.get("text", ""),
+                                      "ms": records[-1]["ms"]})
+        if on_section_done:
+            await on_section_done(index, section, text, charts)
+    return draft, records
+
+
+async def _write_sections_for_test(content: str, sections: list[dict], thread_id: str, models: dict):
+    """测试辅助：不落库、不发真实事件，直接跑 write_sections。"""
+    draft, records = await write_sections("test-job", {"content": content}, 1, sections,
+                                          thread_id, models, content)
+    return draft, records
