@@ -217,10 +217,12 @@ HARNESS = r"""
   // 生成时的事实缺口：以"依据核对"分组出现在待办里（正文里不再出现）
   const hasCheckGroup = todoPane ? /依据核对/.test(todoPane.textContent) : false;
   const todoPaneText = (document.querySelector('[data-pane="todo"]') || {}).textContent || '';
-  const hasOwnerGroups = /你要给的|系统去挖的|交付门槛/.test(todoPaneText);
-  mark('待办按责任分组（你要给的/系统去挖的/交付门槛）', hasOwnerGroups, { hasOwnerGroups });
-  const hasAutoFold = /系统可自动修复/.test(todoPaneText);
-  mark('系统可自动修复项折叠（不占待办行）', hasAutoFold, { hasAutoFold });
+  const hasOwnerGroups = /需要你处理|系统处理中|建议优化/.test(todoPaneText);
+  mark('待办按责任分区（需要你处理/系统处理中/建议优化）', hasOwnerGroups, { hasOwnerGroups });
+  const hasAutoFold = /系统处理中（不用你操作）|系统处理中\s*\d+/.test(todoPaneText);
+  mark('系统处理项折叠（不占待办角标）', hasAutoFold, { hasAutoFold });
+  const hasNext = /下一件/.test(todoPaneText) || !!document.querySelector('.cs-task-next');
+  mark('待办有「下一件」置顶卡', hasNext, { hasNext });
   // 页签互斥：切到素材时，两个 pane 只能有一个可见
   const matTabEl = [...document.querySelectorAll('.cs-inspector-tabs [data-panel]')].find((b) => b.dataset.panel === 'materials');
   matTabEl?.click();

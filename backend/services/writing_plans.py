@@ -1166,6 +1166,10 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "todo_items": build_todo_items(deliverables, material_gaps or [], generation_gaps or [],
                                        word_plan, content, is_parent_chapter, is_catalog, completion),
         "todo_groups": TODO_GROUPS,
+        "delivery_tasks": _delivery_tasks_payload(body=content, block_key=str(block_id),
+                                                 deliverables=deliverables, material_gaps=material_gaps,
+                                                 generation_gaps=generation_gaps, word_plan=word_plan,
+                                                 completion=completion, is_catalog=is_catalog),
         "children": children,
         "catalog": is_catalog,
         "has_children": has_children,
@@ -1360,6 +1364,28 @@ def _todo_item(group: str, title: str, evidence: str = "", source: str = "",
                                          "autofix": "一键修复", "go": "去处理"}.get(action, "去处理"),
         "status": "open",
     }
+
+
+def _delivery_tasks_payload(*, body, block_key, deliverables, material_gaps, generation_gaps,
+                            word_plan, completion, is_catalog) -> dict:
+    """v3 可执行交付清单（三区）。复用已有检查结果，只换表达与责任归属。"""
+    if is_catalog:
+        return {"need_user": [], "system": [], "suggestion": [],
+                "summary": {"need_user": 0, "system": 0, "suggestion": 0, "impact_export_block": 0,
+                            "completion_reasons": []}}
+    try:
+        from services.todo_checks import citation_items, decision_items, number_items, proofread_items
+        from services.todo_tasks import build_delivery_tasks
+        decisions = decision_items(body)
+        proofs = proofread_items(body) + number_items(body) + citation_items(body)
+        return build_delivery_tasks(block_id=block_key, content=body, deliverables=deliverables,
+                                    material_gaps=material_gaps, generation_gaps=generation_gaps,
+                                    word_plan=word_plan, decisions=decisions, proofs=proofs,
+                                    completion=completion)
+    except Exception:
+        return {"need_user": [], "system": [], "suggestion": [],
+                "summary": {"need_user": 0, "system": 0, "suggestion": 0, "impact_export_block": 0,
+                            "completion_reasons": []}}
 
 
 def build_todo_items(deliverables: list[dict], material_gaps: list[dict], generation_gaps: list[dict],

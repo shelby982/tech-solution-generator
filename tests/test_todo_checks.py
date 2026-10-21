@@ -58,3 +58,45 @@ def test_term_item_has_fix_payload():
     content = "## 一\n\n营销管理系统运行十年；营销系统覆盖全省。"
     items = proofread_items(content)
     assert items[0].get("fix", {}).get("replacements") == [["营销系统", "营销管理系统"]]
+
+
+def test_delivery_tasks_three_zones_and_verb_titles():
+    """v3：任务卡 —— 三区、动词标题、影响文案、同类合并。"""
+    from services.todo_tasks import build_delivery_tasks
+
+    payload = build_delivery_tasks(
+        block_id="s1.1",
+        content="## 一\n\n采集范围待明确。\n\n《某办法》相关规定。",
+        deliverables=[{"kind": "figure", "title": "对比图", "status": "未写"},
+                      {"kind": "text", "title": "背景", "status": "不足",
+                       "written_words": 6, "target_words": 800}],
+        material_gaps=[{"kind": "我方材料（业绩）", "lack": 1, "availability": "upload",
+                        "purpose": "举证", "reason": "公开渠道没有"}],
+        generation_gaps=[{"text": "缺少测算依据"}],
+        word_plan={"written": 6000, "total": 3000},
+        decisions=[{"group": "decide", "title": "口径未定：出现「待明确」",
+                    "evidence": "## 一：采集范围待明确", "suggestions": ["改为拟实施", "删除"], 
+                    "target": "pending:待明确"}],
+        proofs=[{"group": "proof", "title": "引用未标来源：《某办法》", "evidence": "## 一：《某办法》"}],
+        completion={"ok": False, "reasons": ["4 条要求正文未回应"]},
+    )
+    zones = set(payload)
+    assert {"need_user", "system", "suggestion", "summary"} <= zones
+    need = payload["need_user"]
+    # 标题动词开头、不超过 24 字
+    for task in need:
+        assert len(task["title"]) <= 24
+        assert task["title"][0] in "上传定核系统精", task["title"]
+    # 材料缺口 → 上传卡；决定项 → 选择卡；引用 → 核对卡（同类合并）
+    assert any(t["action"]["type"] == "upload_material" for t in need)
+    assert any(t["action"]["type"] == "choose" for t in need)
+    assert any("引用" in t["title"] for t in need)
+    # 系统任务：依据 + 图表 + 补写，且不计入 need_user
+    assert any("依据" in t["title"] for t in payload["system"])
+    # 篇幅超 → 建议
+    assert any("精简" in t["title"] for t in payload["suggestion"])
+    # 每张卡都有影响文案与定位字段
+    for task in need + payload["system"] + payload["suggestion"]:
+        assert task["impact"] in ("export_block", "completion_block", "quality", "suggestion")
+        assert task["impact_text"]
+        assert "target" in task

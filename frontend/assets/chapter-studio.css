@@ -823,3 +823,21 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
   font-size: 11px; padding: 4px 10px; cursor: pointer; }
 .cs-agent-op:hover { background: #eff6ff; border-color: #bfdbfe; }
 .cs-agent-actions small { color: #94a3b8; font-size: 10px; }
+
+/* 待办 v3：任务卡 */
+.cs-task-next { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 10px; margin: 4px 0 10px; }
+.cs-task { padding: 8px 2px; border-bottom: 1px dashed #f1f5f9; }
+.cs-task:last-child { border-bottom: 0; }
+.cs-task-head { display: flex; align-items: baseline; gap: 8px; }
+.cs-task-head b { font-size: 12px; color: #0f172a; flex: 1; min-width: 0; }
+.cs-task-impact { flex-shrink: 0; font-size: 10px; color: #64748b; background: #f1f5f9; border-radius: 4px; padding: 1px 5px; }
+.cs-task.is-export .cs-task-impact { color: #b91c1c; background: #fef2f2; }
+.cs-task.is-completion .cs-task-impact { color: #b45309; background: #fffbeb; }
+.cs-task-why { margin: 3px 0 0; font-size: 10.5px; color: #94a3b8; line-height: 1.55; }
+.cs-task-loc { margin: 2px 0 0; font-size: 10.5px; color: #64748b; }
+.cs-task-acts { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.cs-task-act { border: 1px solid #bfdbfe; background: #fff; color: #1d4ed8; border-radius: 7px;
+  font-size: 11px; padding: 3px 10px; cursor: pointer; }
+.cs-task-act:hover { background: #eff6ff; }
+.cs-decide-item { border-top: 1px dashed #eef2f7; padding: 8px 0; }
+.cs-decide-item:first-child { border-top: 0; }

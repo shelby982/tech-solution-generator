@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v384';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v384';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v386';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v386';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -249,6 +249,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           gaps: plan.material_gaps || [],
           generationGaps: plan.generation_gaps || [],
           todoItems: plan.todo_items || [],
+          deliveryTasks: plan.delivery_tasks || null,
           outline: plan.outline || [],
           pages: plan.pages || 0,
           wordPlan: plan.word_plan || null,
@@ -2165,6 +2166,121 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return modelOptions;
   }
 
+  /** 在 deliveryTasks 里找一张卡 */
+  function findDeliveryTask(id) {
+    const tasks = planBrief?.deliveryTasks || {};
+    for (const zone of ['need_user', 'system', 'suggestion']) {
+      const hit = (tasks[zone] || []).find((x) => x.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /** 定位到任务目标（节 + 原句高亮） */
+  function locateTaskTarget(task) {
+    const section = (task.target || {}).section || '';
+    const quote = (task.target || {}).quote || '';
+    if (!section) { status('这条没有定位信息'); return; }
+    locateSectionInEditor(section);
+    if (quote) {
+      const text = String(editor.value || '');
+      const at = text.indexOf(quote.slice(0, 18));
+      if (at >= 0) {
+        editor.focus();
+        editor.setSelectionRange(at, at + quote.length);
+        status(`已定位并选中：${quote.slice(0, 30)}…`);
+        return;
+      }
+    }
+    status(`已定位到「${section}」`);
+  }
+
+  /** 任务动作分发：上传 / 选说法 / 查看 / 定位 / 精简 */
+  async function runDeliveryAction(task) {
+    if (!task) return;
+    const type = (task.action || {}).type || '';
+    if (type === 'upload_material') { showPanel('materials'); status(`请上传：${task.title}`); return; }
+    if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
+    if (type === 'locate') { locateTaskTarget(task); return; }
+    if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
+    if (type.startsWith('system_')) { status(`系统任务：${task.title}（在下次生成时自动处理）`); return; }
+    locateTaskTarget(task);
+  }
+
+  /** 决策抽屉：把该类所有决定项列出来，逐条选 */
+  function openDecideDialog(task) {
+    const items = (planBrief?.todoItems || []).filter((x) => x.group === 'decide');
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    dlg.innerHTML = `<header><h3>${esc(task.title)}</h3><button type="button" data-dd-close>×</button></header>
+      <div class="cs-plan-body">
+        ${items.length ? items.map((item, index) => `<div class="cs-decide-item">
+            <p class="cs-task-why">${esc(item.evidence || item.title || '')}</p>
+            <div class="cs-mp-list">${(item.suggestions || []).map((s, i) => `<label class="cs-mp-item">
+                <input type="radio" name="dd-${index}" value="${i}" ${i === 0 ? 'checked' : ''} /><span>${esc(s)}</span></label>`).join('') || '<p class="cs-muted">这条没有候选，请直接在正文里改。</p>'}</div>
+            <button type="button" class="cs-task-act" data-dd-apply="${index}">应用这条</button>
+          </div>`).join('') : '<p class="cs-muted">没有需要决定的项目。</p>'}
+      </div>`;
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-dd-close]')) { dlg.close(); return; }
+      const apply = event.target.closest('[data-dd-apply]');
+      if (!apply) return;
+      const index = Number(apply.dataset.ddApply);
+      const item = items[index];
+      const picked = dlg.querySelector(`input[name="dd-${index}"]:checked`);
+      const choice = picked ? (item.suggestions || [])[Number(picked.value)] : '';
+      dlg.close();
+      if (!item || !choice) { status('这条没有候选，请手动修改'); return; }
+      const result = applySuggestion(item.sentence || '', choice);
+      if (!result.applied) { status('没能在正文里定位到这句话，请手动修改'); return; }
+      editor.value = result.content;
+      changed();
+      await save();
+      await loadBasis(active.block_id);
+      paintAside();
+      status('已应用改写，待办已重新计算');
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 待办 v3：三区（需要你处理 / 系统处理中 / 建议）+ 「下一件」 */
+  function deliveryTasksHtml(tasks) {
+    const need = (tasks.need_user || []).filter((x) => !todoIgnored.has(x.id));
+    const system = (tasks.system || []).filter((x) => !todoIgnored.has(x.id));
+    const suggest = (tasks.suggestion || []).filter((x) => !todoIgnored.has(x.id));
+    const summary = tasks.summary || {};
+    const cardHtml = (task, opts) => {
+      const impactClass = task.impact === 'export_block' ? ' is-export'
+        : task.impact === 'completion_block' ? ' is-completion' : '';
+      const locate = task.target && (task.target.section || task.target.quote);
+      return `<div class="cs-task${impactClass}">
+          <div class="cs-task-head"><b>${esc(task.title)}</b>
+            <span class="cs-task-impact">${esc(task.impact_text || '')}</span></div>
+          ${task.why ? `<p class="cs-task-why">${esc(task.why)}</p>` : ''}
+          ${locate ? `<p class="cs-task-loc">${esc(task.target.section || '')}${task.target.quote ? ` · ${esc(String(task.target.quote).slice(0, 28))}` : ''}</p>` : ''}
+          <div class="cs-task-acts">
+            <button type="button" class="cs-task-act" data-task-act="${esc(task.action.type)}" data-task-id="${esc(task.id)}">${esc(task.action.label || '去处理')}</button>
+            ${locate && (task.action || {}).type !== 'locate' ? `<button type="button" class="cs-todo-ignore" data-task-locate="${esc(task.id)}">定位</button>` : ''}
+            ${opts && opts.ignore ? `<button type="button" class="cs-todo-ignore" data-task-ignore="${esc(task.id)}" title="忽略">×</button>` : ''}
+          </div>
+        </div>`;
+    };
+    const next = need.slice().sort((a, b) => impactRank(a.impact) - impactRank(b.impact))[0];
+    return `<h4>待办 <small>需要你 ${need.length} 件${system.length ? ` · 系统处理 ${system.length}` : ''}</small></h4>
+      ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
+      ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
+        ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}
+      ${system.length ? `<details class="cs-todo-auto"><summary>系统处理中 ${system.length}（不用你操作）</summary>
+        <div class="cs-todo-auto-body">${system.map((x) => cardHtml(x, {})).join('')}</div></details>` : ''}
+      ${suggest.length ? `<details class="cs-todo-auto"><summary>建议优化 ${suggest.length}（不影响交付）</summary>
+        <div class="cs-todo-auto-body">${suggest.map((x) => cardHtml(x, { ignore: true })).join('')}</div></details>` : ''}
+      ${(!need.length && !system.length && !suggest.length) ? '<p class="cs-todo-ok">✓ 距离交付没有待办项</p>' : ''}`;
+  }
+
+  const impactRank = (impact) => ({ export_block: 0, completion_block: 1, quality: 2, suggestion: 3 }[impact] ?? 4);
+
   const todoIgnored = new Set();
   const todoIgnoreKey = () => `cs-todo-ignored-${active?.id || ''}`;
   function hydrateIgnored() {
@@ -2211,13 +2327,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   function paintTodoBadge() {
     const el = host.querySelector('[data-todo-badge]');
     if (!el) return;
+    const tasks = planBrief?.deliveryTasks;
     const items = (planBrief?.todoItems || []).filter((x) => !todoIgnored.has(x.id));
-    const count = items.filter((x) => x.group !== 'auto').length;
+    const count = tasks
+      ? (tasks.need_user || []).filter((x) => !todoIgnored.has(x.id)).length
+      : items.filter((x) => x.group !== 'auto').length;
     el.textContent = count ? String(count) : ''; el.hidden = !count;
   }
 
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
+    if (planBrief?.deliveryTasks) {
+      return `<section data-pane="todo">${deliveryTasksHtml(planBrief.deliveryTasks)}</section>`;
+    }
     if ((planBrief?.todoItems || []).length) {
       return `<section data-pane="todo">${todoItemsHtml()}</section>`;
     }
@@ -2855,6 +2977,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const options=await loadModelOptions();
       const current=modelChoice.get(role)||'';
       openModelPickerDialog(role, options, current);
+      return;
+    }
+    const taskIgnore=event.target.closest('[data-task-ignore]');
+    if(taskIgnore){todoIgnored.add(taskIgnore.dataset.taskIgnore);persistIgnored();paintAside();return;}
+    const taskLocate=event.target.closest('[data-task-locate]');
+    if(taskLocate && active){
+      const task=findDeliveryTask(taskLocate.dataset.taskLocate);
+      if(task) locateTaskTarget(task);
+      return;
+    }
+    const taskAct=event.target.closest('[data-task-act]');
+    if(taskAct && active){
+      const task=findDeliveryTask(taskAct.dataset.taskId);
+      await runDeliveryAction(task);
       return;
     }
     const todo2Ignore=event.target.closest('[data-todo2-ignore]');
