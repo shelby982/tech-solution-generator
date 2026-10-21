@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v333';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v333';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v333';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v334';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v334';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v334';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -36,7 +36,11 @@ function renderDiagramFigure(head, bodyLines) {
     return `<figure class="cs-diagram cs-dg cs-dg-timeline"><div class="cs-dg-axis">${items.map((item) =>
       `<div class="cs-dg-tl"><span class="cs-dg-when">${esc(item.when || '—')}</span><span class="cs-dg-dot"></span><div class="cs-dg-box">${esc(item.label)}</div></div>`).join('')}</div><figcaption>${esc(title)}</figcaption></figure>`;
   }
-  const nodes = lines.join(' ').replaceAll('→', '->').split('->').map((n) => n.trim()).filter(Boolean);
+  // 有箭头按箭头切；没有箭头（旧写法）则每行一个节点
+  const joined = lines.join(' ');
+  const nodes = (joined.includes('->') || joined.includes('→'))
+    ? joined.replaceAll('→', '->').split('->').map((n) => n.trim()).filter(Boolean)
+    : lines.map((line) => line.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
   return `<figure class="cs-diagram cs-dg cs-dg-flow"><div class="cs-dg-axis">${nodes.map((label, i) =>
     `${i ? '<span class="cs-dg-arrow" aria-hidden="true">→</span>' : ''}<div class="cs-dg-box">${esc(label)}</div>`).join('')}</div><figcaption>${esc(title)}</figcaption></figure>`;
 }

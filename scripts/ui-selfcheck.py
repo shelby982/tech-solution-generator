@@ -342,6 +342,32 @@ HARNESS = r"""
   })();
   mark('正文预览区分三种图型渲染', renderCheck.ok, renderCheck);
 
+  // AB 正文里的关系图块必须合规范（否则导出/预览会报"关系图需 2—10 个节点"）
+  const diagramOk = await (async () => {
+    const text = document.querySelector('.cs-editor')?.value || '';
+    const re = /(^|\n):::diagram([^\n]*)\n([\s\S]*?)\n:::/g;
+    let count = 0, bad = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      count += 1;
+      const head = (m[2] || '').trim();
+      const body = (m[3] || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      const type = (/type=(\w+)/.exec(head) || [])[1] || 'flow';
+      let nodes = [];
+      if (type === 'layered') nodes = body.map((x) => x.replace(/^-+\s*/, ''));
+      else if (type === 'timeline') nodes = body.map((x) => (x.split(/[|:：、]/)[1] || x).trim());
+      else {
+        const joined = body.join(' ');
+        nodes = (joined.includes('->') || joined.includes('→'))
+          ? joined.replaceAll('→', '->').split('->').map((x) => x.trim()).filter(Boolean)
+          : body;
+      }
+      if (nodes.length < 2 || nodes.length > 12 || nodes.some((n) => n.length > 60)) bad += 1;
+    }
+    return { ok: bad === 0, count, bad };
+  })();
+  mark('正文关系图块合规（2~12 节点、每节点 ≤60 字）', diagramOk.ok, diagramOk);
+
   // Z 正文不得含"待核对与补充"占位块（应留在待办里）
   const edVal = document.querySelector('.cs-editor')?.value || '';
   const hasPendingBlock = /(^|\n)#{2,4}\s*待核对与补充/.test(edVal);

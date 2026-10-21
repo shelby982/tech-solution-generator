@@ -187,8 +187,13 @@ def model_html(blocks):
             html.append('<div class="spec-table-scroll"><table>'+''.join('<tr>'+''.join(f'<{"th" if i==0 else "td"}>{inline(cell)}</{"th" if i==0 else "td"}>' for cell in row)+'</tr>' for i,row in enumerate(block['rows']))+'</table></div>')
         elif kind=='code':html.append(f'<pre><code>{escape(block["text"])}</code></pre>')
         elif kind=='diagram':
-            nodes=[n.strip() for n in block['text'].replace('→','->').split('->') if n.strip()]
-            if not 2<=len(nodes)<=10 or any(len(n)>60 for n in nodes):raise ValueError('关系图需 2—10 个节点，每节点不超过 60 字')
+            # 统一走 services.diagrams 的解析：支持 type=layered/flow/timeline 与多行写法
+            from services.diagrams import parse_diagram
+            lines=[line for line in str(block['text']).splitlines() if line.strip()]
+            structure=parse_diagram(':::diagram '+(lines[0] if lines else ''), lines[1:] if len(lines)>1 else lines)
+            nodes=[str(n.get('label') or '').strip() for n in structure.get('nodes') or []]
+            if not 2<=len(nodes)<=12:raise ValueError('关系图需 2—12 个节点（以 -> 连接或每行一个节点）')
+            if len(nodes)>10: nodes=nodes[:12]
             html.append('<figure class="cs-diagram">'+''.join(('↓' if i else '')+f'<div>{escape(n)}</div>' for i,n in enumerate(nodes))+f'<figcaption>{escape(block["caption"])}</figcaption></figure>')
         elif kind=='separator':html.append('<hr>')
         else:
