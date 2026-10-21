@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v340';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v340';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v340';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v341';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v341';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v341';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1407,12 +1407,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       signal: AbortSignal.timeout(180000),
     });
     const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const detail = out.detail;
+      const message = typeof detail === 'string' ? detail
+        : Array.isArray(detail) ? detail.map((x) => x.msg || JSON.stringify(x)).join('；')
+        : `HTTP ${resp.status}`;
+      throw new Error(message);
+    }
     return out;
   }
 
   /** 按大纲编写整章：已有内容的节保留，只补未写/待写的节 */
-  async function writeChapterApi(blockKey, onProgress) {
+  async function writeChapterApi(blockKey, blockId, onProgress) {
     const plan = await fetchChapterPlan(blockKey);
     const outline = plan.outline || [];
     if (!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
@@ -1423,7 +1429,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!missing.length) return { written: 0, total: outline.length, message: '整章已按大纲写完' };
     for (let i = 0; i < missing.length; i += 1) {
       onProgress && onProgress(i + 1, missing.length, missing[i].title);
-      const out = await writeSectionApi(blockKey, missing[i]);
+      const out = await writeSectionApi(blockId, missing[i]);
       if (out.content !== undefined) { editor.value = out.content; }
     }
     return { written: missing.length, total: outline.length };
@@ -1876,7 +1882,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const btn=event.target.closest('[data-aside-write-all]');
       const label=btn.textContent; btn.disabled=true;
       try{
-        const result=await writeChapterApi(active.block_id,(i,total,title)=>{btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
+        const result=await writeChapterApi(active.block_id, active.id, (i,total,title)=>{btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
         status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
         changed && changed();
         const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
@@ -1892,7 +1898,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(!sec) return;
       const label=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
       try{
-        const out=await writeSectionApi(active.block_id,sec);
+        const out=await writeSectionApi(active.id,sec);
         if(out.content!==undefined){editor.value=out.content;changed && changed();}
         const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
         if(fresh.block)editor.value=fresh.block.content||'';
@@ -1995,7 +2001,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         showPanel('ai');
         const btn=document.querySelector('[data-action="ai"]'); const label=btn?btn.textContent:'';
         try{
-          const result=await writeChapterApi(active?.block_id,(i,total,title)=>{if(btn)btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
+          const result=await writeChapterApi(active?.block_id, active?.id, (i,total,title)=>{if(btn)btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
           status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
           changed && changed();
           const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
