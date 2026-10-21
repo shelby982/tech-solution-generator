@@ -691,3 +691,38 @@
 h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !important; border-radius: 4px; }
 @keyframes csPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
 .cs-preview .cs-sec-writing::after { content: ' ✍'; animation: csPulse 1.2s infinite; }
+
+/* 大纲逐节展开（依据/写法/交付物） */
+.cs-ol-item { border-bottom: 1px dashed #f1f5f9; }
+.cs-ol-item:last-child { border-bottom: 0; }
+.cs-ol-item > summary { cursor: pointer; list-style: none; }
+.cs-ol-item > summary::-webkit-details-marker { display: none; }
+.cs-ol-detail { padding: 4px 0 10px 26px; }
+.cs-ol-detail p { margin: 0 0 4px; font-size: 11px; color: #475569; line-height: 1.6; }
+.cs-ol-detail p b { display: inline-block; min-width: 42px; color: #1d4ed8; font-weight: 600; }
+
+/* 进度：节块 + 节下图片 + 审稿图集 + 重写弹窗 */
+.cs-sec-block { border-bottom: 1px dashed #f1f5f9; padding-bottom: 2px; }
+.cs-sec-figs { margin: 0 0 6px 24px; }
+.cs-sec-figs > summary { cursor: pointer; list-style: none; font-size: 10.5px; color: #64748b; }
+.cs-sec-figs > summary::-webkit-details-marker { display: none; }
+.cs-fig-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 11px; }
+.cs-fig-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+.cs-fig-meta { flex-shrink: 0; color: #94a3b8; font-size: 10px; }
+.cs-fig-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.cs-fig-pending .cs-fig-main { color: #b45309; }
+.cs-fig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; max-height: 60vh; overflow: auto; padding: 4px 2px; }
+.cs-fig-card { border: 1px solid #eef2f7; border-radius: 10px; padding: 8px; background: #fff; }
+.cs-fig-thumb { height: 120px; overflow: hidden; border-radius: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center; }
+.cs-fig-thumb .cs-dg { margin: 0; border: 0; padding: 4px; transform: scale(.55); transform-origin: center; }
+.cs-fig-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cs-fig-missing { font-size: 11px; color: #94a3b8; }
+.cs-fig-name { margin: 6px 0 2px; font-size: 11.5px; color: #0f172a; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-fig-sub { margin: 0 0 6px; font-size: 10.5px; color: #94a3b8; }
+.cs-fig-card-acts { display: flex; gap: 6px; }
+.cs-rw-facts, .cs-rw-basis { margin: 0 0 6px; font-size: 11px; color: #64748b; }
+.cs-rw-label { display: block; margin: 8px 0 4px; font-size: 11.5px; font-weight: 600; color: #0f172a; }
+.cs-rewrite-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; line-height: 1.6; padding: 8px 10px; border: 1px solid #dbe3ef; border-radius: 8px; resize: vertical; }
+.cs-rw-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.cs-rw-history { margin: 0 0 6px; font-size: 10.5px; color: #94a3b8; }
+.cs-rw-warn { margin: 6px 0 0; font-size: 10.5px; color: #b45309; }

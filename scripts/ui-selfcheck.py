@@ -72,8 +72,9 @@ HARNESS = r"""
   const hasDeliv = !!dialog.querySelector('[data-cp-sec="deliverables"]') || !!dialog.querySelector('[data-cp-sec="children"]');
   const hasFolds = dialog.querySelectorAll('details.cs-cp-block').length;
   const footer = dialog.querySelector('.cs-cp-footer');
-  mark('计划面板区块齐备（交付物/折叠/底部操作）', hasDeliv && hasFolds >= 2 && !!footer,
-       { todoBlockRemoved: !hasTodo, deliverables: hasDeliv, folds: hasFolds, footer: !!footer });
+  const hasOutlineBlock = !!dialog.querySelector('[data-cp-sec="outline"]');
+  mark('计划面板区块齐备（大纲/章节类型/底部操作）', hasOutlineBlock && hasFolds >= 1 && !!footer,
+       { outline: hasOutlineBlock, folds: hasFolds, footer: !!footer });
 
   // B 主操作唯一且是主色
   const primary = [...dialog.querySelectorAll('.cs-cp-primary')];
@@ -186,12 +187,12 @@ HARNESS = r"""
        { buttons: innerBtns.length, tooBig: bigBtns.slice(0, 3).map((b) => b.textContent.trim()) });
 
   // P 序号行与内容区有区分（序号行有浅底 + 边框，内容区无）
-  const summaries = [...dialog.querySelectorAll('[data-cp-sec] > summary')];
+  const summaries = [...dialog.querySelectorAll('.cs-cp-block > summary')];
   const badSummary = summaries.filter((el) => {
     const cs = getComputedStyle(el);
     return cs.backgroundColor === 'rgba(0, 0, 0, 0)' || cs.borderBottomWidth === '0px';
   });
-  mark('序号行与内容区有视觉区分', summaries.length >= 3 && badSummary.length === 0,
+  mark('序号行与内容区有视觉区分', summaries.length >= 2 && badSummary.length === 0,
        { summaries: summaries.length, noTint: badSummary.length });
 
   // S 右栏信息架构：页签 = 待办 / 素材 / 进度（依据已并入计划面板）

@@ -353,7 +353,7 @@ class AlignBody(BaseModel):
 
 
 @router.get('/blocks/{block_id}/studio/section/stream')
-async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900):
+async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = ''):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
     import asyncio as _aio
     from services.writing_plans import plan_of_block
@@ -373,7 +373,12 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     if found:
         chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
     section = {'title': title.strip(), 'points': [p for p in str(points or '').split('||') if p.strip()], 'words': words}
+    # 带上该节的三问（依据/写法/交付物）
+    planned = next((x for x in (chapter.get('outline') or []) if str(x.get('title')) == title.strip()), {})
+    section.update({'basis': planned.get('basis') or [], 'how': planned.get('how') or {},
+                    'deliverables': planned.get('deliverables') or []})
     payload = build_section_payload(chapter, section, str(block.get('content') or '')[:2000])
+    extra_request = str(prompt or '').strip()
     # 用自然语言给模型（直接丢 JSON 会被模型"续写 JSON"）
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
@@ -381,7 +386,11 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本章要求：{'；'.join(payload.get('requirements') or []) or '（无特别要求）'}\n"
-        f"可用素材（不得编造具体数字）：\n{payload.get('evidence') or '（无）'}\n"
+        f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
+        f"本节写法：{json.dumps(payload.get('how') or {}, ensure_ascii=False)}\n"
+        f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
+        + (f"【本次额外要求】{extra_request}\n" if extra_request else '')
+        + f"可用素材（不得编造具体数字）：\n{payload.get('evidence') or '（无）'}\n"
         "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
     )
 
@@ -391,12 +400,12 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     config = configs[index % len(configs)]
     stream = stream_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else stream_claude
     options = {'thinking': False} if getattr(config, 'provider', '') == 'deepseek' else {}
-    prompt = RULES + '\n' + SECTION_SYSTEM
+    system_prompt = RULES + '\n' + SECTION_SYSTEM
 
     async def events():
         raw = ''
         try:
-            async for chunk in stream(config, prompt, user_prompt,
+            async for chunk in stream(config, system_prompt, user_prompt,
                                       call_site='chapter_section_stream', **options):
                 raw += chunk
                 yield format_sse_event('delta', {'text': chunk})

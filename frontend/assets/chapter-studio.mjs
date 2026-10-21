@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v344';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v344';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v344';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v351';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v351';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v351';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -521,65 +521,36 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节 · 编写进度见右栏「进度」` : '未生成（0 节）'}</em>
             <button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${(data.outline || []).length ? '重做大纲' : '生成大纲'}</button></summary>
           <div class="cs-cp-fold-body">
-            ${(data.outline || []).length ? (data.outline || []).map((sec, i) => `<div class="cs-ol-row">
-                <span class="cs-ol-idx">${i + 1}</span>
-                <span class="cs-ol-main"><b>${esc(sec.title)}</b>
-                  <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
-                <span class="cs-ol-meta">${sec.words || 900} 字${sec.need === 'table' ? ' · 表' : sec.need === 'figure' ? ' · 图' : ''}</span>
-              </div>`).join('') : '<p class="cs-cp-empty">还没有大纲。点「生成大纲」先出 6~10 节（编写入口在右栏「进度」）。</p>'}
-          </div>
-        </details>
-
-        ${isCatalog ? '' : `<details class="cs-cp-block" data-cp-sec="deliverables" open>
-          <summary><b><span class="cs-cp-idx">2</span>交付物</b><em>${[...(unmetCount ? [`${unmetCount} 项不足`] : []), ...(unwrittenCount ? [`${unwrittenCount} 项未写`] : []), ...(doneCount ? [`${doneCount} 项达标`] : [])].join(' · ') || '—'}</em>
-            <button type="button" class="cs-cp-link" data-cp-edit-req>改要求</button></summary>
-          ${deliverables.length ? deliverables.map((item, index) => {
-            const open = index === firstUnmet;
-            return `<div class="cs-cp-del tone-${item.status === '达标' ? 'ok' : item.status === '未写' ? 'idle' : 'warn'}" data-index="${index}" ${open ? '' : 'data-collapsed'}>
-                <div class="cs-cp-del-head">
-                  <span class="cs-cp-tri">${open ? '▾' : '▸'}</span>
-                  <span class="cs-cp-kind">${esc(item.kind_label)}</span>
-                  <b>${esc(item.title)}</b>
-                  <span class="cs-cp-del-num">${item.target_words ? `${item.target_words} 字 · ` : ''}${item.written_detected === false ? '未检测到段落' : `已写 ${item.written_words || 0}`}</span>
-                  <span class="cs-cp-del-status">${esc(item.status)}</span>
+            ${(data.outline || []).length ? (data.outline || []).map((sec, i) => {
+              const basis = (sec.basis || []).map((b) => `${esc(b.ref)}${b.use ? `（${esc(b.use)}）` : ''}`).join(' · ');
+              const how = sec.how || {};
+              const deliv = (sec.deliverables || []).map((d) => {
+                if (d.kind === 'text') return `文字 ${d.words || 600} 字`;
+                if (d.kind === 'table') return `表格「${esc(d.title)}」${(d.cols || []).length ? `（${(d.cols || []).map((c) => esc(c)).join('/')}）` : ''}`;
+                return `图示「${esc(d.title)}」（${{layered: '层次图', flow: '流程图', timeline: '时间线'}[d.type] || '层次图'}）`;
+              }).join(' · ');
+              return `<details class="cs-ol-item">
+                <summary class="cs-ol-row">
+                  <span class="cs-ol-idx">${i + 1}</span>
+                  <span class="cs-ol-main"><b>${esc(sec.title)}</b>
+                    <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
+                  <span class="cs-ol-meta">${sec.words || 900} 字</span>
+                </summary>
+                <div class="cs-ol-detail">
+                  <p><b>依据</b>${basis ? esc(basis) : '（继承本章依据）'}</p>
+                  <p><b>写法</b>${esc(how.structure || '（按本节要点展开）')}${how.style ? ` · ${esc(how.style)}` : ''}${(how.pitfalls || []).length ? ` · 避免：${(how.pitfalls || []).map((x) => esc(x)).join('；')}` : ''}</p>
+                  <p><b>交付物</b>${deliv || '文字'}</p>
                 </div>
-                <div class="cs-cp-del-body" ${open ? '' : 'hidden'}>
-                  ${(keyPointsBy[index] || []).length ? `<p class="cs-cp-brief">必答：${esc((keyPointsBy[index] || []).join(' / '))}</p>` : ''}
-                  <p class="cs-cp-del-acts"><button type="button" class="cs-cp-link" data-cp-locate="${index}">定位到正文</button></p>
-                </div>
-              </div>`;
-          }).join('') : '<p class="cs-cp-empty">本章还没有交付物</p>'}
-        </details>`}
-
-        <details class="cs-cp-block" data-cp-sec="standard">
-          <summary><b><span class="cs-cp-idx">3</span>依据与标准</b><em>${points.length ? `评分点 ${points.length}` : ''}${clauses.length ? ` · 招标条款 ${clauses.length}` : ''}${(guidance.pitfalls || []).length ? ` · 失分点 ${(guidance.pitfalls || []).length}` : ''}</em></summary>
-          <div class="cs-cp-fold-body">
-            ${points.map((point) => `<p class="cs-cp-point"><b>${esc(point.label)}（${point.points ?? '—'} 分）</b></p>`).join('')}
-            ${data.grade_band ? `<details class="cs-cp-sub"><summary>满分档要求（得 8–10 分的要求）</summary>
-              <p class="cs-cp-band">${esc(data.grade_band)}</p></details>` : ''}
-            ${clauses.length ? `<details class="cs-cp-sub"><summary>本章承接的招标条款 ${clauses.length} 条</summary>
-                <div class="cs-cp-band" style="padding:8px 12px">
-                ${clauses.map((clause) => `<p class="cs-cp-clause">${clause.mandatory ? '<span class="cs-cp-must">强制</span>' : ''}${esc(clause.title)}</p>`).join('')}
-                <button type="button" class="cs-cp-link" data-cp-match-clauses>重新用 AI 匹配</button></div></details>`
-              : `<p class="cs-cp-empty">本章只对评分点负责（无对应招标条款）
-                  <button type="button" class="cs-cp-link" data-cp-match-clauses>用 AI 匹配条款</button></p>`}
-            ${(guidance.pitfalls || []).length ? `<p class="cs-cp-pitfall">失分点：${esc(guidance.pitfalls.join('；'))}</p>` : ''}
+              </details>`;
+            }).join('') : '<p class="cs-cp-empty">还没有大纲。点「生成大纲」先出 6~10 节（编写入口在右栏「进度」）。</p>'}
           </div>
         </details>
 
-        <details class="cs-cp-block" data-cp-sec="how">
-          <summary><b><span class="cs-cp-idx">4</span>写法要点</b><em>3 条（结构 / 段落 / 落点）</em>
-            <button type="button" class="cs-cp-link" data-cp-open-spec>看写作规范（全局）</button></summary>
-          <div class="cs-cp-fold-body cs-cp-write">
-            ${(guidance.skeleton || []).length ? `<p><b>结构</b>：${esc(guidance.skeleton.join(' → '))}</p>` : ''}
-            <p><b>段落</b>：每段第一句给判断，后面给依据与数据；表后必跟一段"从表可见…"的落点句。</p>
-            <p><b>落点</b>：每个必答点至少一段；引用政策/标准/数据处必须带【来源】。</p>
-            <label class="cs-cp-kind-row">本章类型
-              <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === ((context?.profile || {}).layout || '') ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
-              <span class="cs-dim">决定本章按哪类章节编制（影响提示词与结构）</span>
-            </label>
-          </div>
-        </details>
+
+
+
+
+
 
         ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
           <summary><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
@@ -591,6 +562,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <em class="${child.has_content ? 'ok' : ''}">${child.has_content ? '有正文' : '未开始'}</em>
             </div>`).join('')}
         </details>` : ''}
+        <details class="cs-cp-block" data-cp-sec="layout">
+          <summary><b><span class="cs-cp-idx">2</span>章节类型</b><em>影响生成</em></summary>
+          <div class="cs-cp-fold-body">
+            <label class="cs-cp-kind-row">本章类型
+              <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === ((context?.profile || {}).layout || '') ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+              <span class="cs-dim">决定本章按哪类章节编制（影响提示词与结构）</span>
+            </label>
+          </div>
+        </details>
         <div class="cs-cp-footer">
           <button type="button" class="cs-cp-ghost" data-cp-close>关闭</button>
           <span class="cs-cp-scope">编写与进度见右栏「进度」页签</span>
@@ -1436,6 +1416,194 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
   }
 
+  /** 重写本节前：输入优化方向（提示词） */
+  function openRewriteDialog(sec, onStart) {
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog cs-rewrite-dialog';
+    const history = (sec.prompts || []).slice(-3).reverse();
+    dlg.innerHTML = `<header><h3>重写「${esc(sec.title)}」</h3><button type="button" aria-label="关闭" data-rw-close>×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-rw-facts">目标 ${sec.words || 900} 字 · 交付物 ${(sec.deliverables || []).map((d) => d.title || d.kind).join(' / ') || '正文'}</p>
+        <p class="cs-rw-basis">依据：${(sec.basis || []).map((b) => esc(b.ref)).join(' · ') || '继承本章依据'}</p>
+        <label class="cs-rw-label">优化方向（提示词）</label>
+        <textarea data-rw-input rows="4" placeholder="例：语气更务实，突出广东电网牵头责任；每条政策后补一句“对本项目的含义”">${esc((sec.prompts || []).slice(-1)[0] || '')}</textarea>
+        <div class="cs-rw-chips">
+          ${['更务实', '更技术', '压缩 20%', '扩写 30%', '补一个对比表', '每条措施写到谁做/何时完成'].map((x) => `<button type="button" class="cs-ins-chip" data-rw-chip="${esc(x)}">${esc(x)}</button>`).join('')}
+        </div>
+        ${history.length ? `<p class="cs-rw-history">历史：${history.map((x) => `<button type="button" class="cs-mat-link" data-rw-chip="${esc(x)}">${esc(x.slice(0, 18))}</button>`).join(' ')}</p>` : ''}
+        <p class="cs-rw-warn">此操作会覆盖本节现有内容（已存版本，可回滚）</p>
+      </div>
+      <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-rw-cancel>取消</button>
+        <button type="button" class="cs-cp-primary" data-rw-start>开始重写</button></footer>`;
+    const input = dlg.querySelector('[data-rw-input]');
+    dlg.addEventListener('click', (event) => {
+      const chip = event.target.closest('[data-rw-chip]');
+      if (chip) { input.value = input.value ? `${input.value}；${chip.dataset.rwChip}` : chip.dataset.rwChip; return; }
+      if (event.target.closest('[data-rw-close]') || event.target.closest('[data-rw-cancel]')) { dlg.close(); return; }
+      if (event.target.closest('[data-rw-start]')) {
+        const value = input.value.trim();
+        dlg.close();
+        onStart(value);
+      }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 一屏审阅本章图片（图集） */
+  function openFigureReviewDialog() {
+    const outline = planBrief?.outline || [];
+    const bodyText = String(editor?.value || '');
+    const figures = parseFigures(bodyText);
+    const pending = pendingFigures(outline);
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog cs-fig-review';
+    dlg.innerHTML = `<header><h3>本章图片（${figures.length + pending.length}）</h3><button type="button" aria-label="关闭" data-fr-close>×</button></header>
+      <div class="cs-plan-body">
+        <nav class="cs-ins-tabs">
+          <button type="button" data-fr-filter="all" aria-pressed="true">全部</button>
+          <button type="button" data-fr-filter="ai" aria-pressed="false">AI 生成</button>
+          <button type="button" data-fr-filter="material" aria-pressed="false">素材</button>
+          <button type="button" data-fr-filter="pending" aria-pressed="false">待补</button>
+        </nav>
+        <div class="cs-fig-grid" data-fr-grid></div>
+      </div>`;
+    const grid = dlg.querySelector('[data-fr-grid]');
+    const render = (filter) => {
+      const items = [
+        ...figures.map((f) => ({ ...f, group: f.kind })),
+        ...pending.map((d) => ({ kind: 'pending', group: 'pending', title: d.title, section: d.section, type: d.type })),
+      ].filter((x) => filter === 'all' || x.group === filter);
+      grid.innerHTML = items.length ? items.map((f) => `<div class="cs-fig-card">
+          <div class="cs-fig-thumb">${f.kind === 'ai'
+            ? renderDiagramFigure(`:::diagram type=${f.type} ${f.title}`, (f.raw || '').split('\n').slice(1, -1))
+            : f.kind === 'material' && f.url
+              ? `<img src="${esc(f.url)}" alt="${esc(f.title)}" loading="lazy" />`
+              : '<div class="cs-fig-missing">待补</div>'}</div>
+          <p class="cs-fig-name">${esc(f.title)}</p>
+          <p class="cs-fig-sub">${esc(f.section || '')}${f.kind === 'ai' ? ` · ${{layered:'层次图',flow:'流程图',timeline:'时间线'}[f.type] || '图'} · ${f.nodes || 0} 节点` : f.kind === 'material' ? ' · 素材图' : ' · 待补'}</p>
+          <div class="cs-fig-card-acts">${f.kind === 'ai'
+            ? `<button type="button" class="cs-todo-act" data-fr-adjust="${f.id}">调整</button>`
+            : f.kind === 'material'
+              ? `<button type="button" class="cs-todo-act" data-fr-view="${f.id}">查看</button>`
+              : `<button type="button" class="cs-todo-act" data-fr-create="${esc(f.section)}">生成</button>`}
+            <button type="button" class="cs-todo-act" data-fr-locate="${esc(f.section || '')}">定位</button>
+          </div>
+        </div>`).join('') : '<p class="cs-mat-empty">没有符合条件的图片</p>';
+    };
+    dlg.addEventListener('click', (event) => {
+      if (event.target.closest('[data-fr-close]')) { dlg.close(); return; }
+      const tab = event.target.closest('[data-fr-filter]');
+      if (tab) {
+        for (const b of dlg.querySelectorAll('[data-fr-filter]')) b.setAttribute('aria-pressed', String(b === tab));
+        render(tab.dataset.frFilter);
+        return;
+      }
+      const locate = event.target.closest('[data-fr-locate]');
+      if (locate) { dlg.close(); void select(active.block_id); globalThis.setTimeout(() => locateSectionInEditor(locate.dataset.frLocate), 600); return; }
+      const view = event.target.closest('[data-fr-view]');
+      if (view) { const f = figures.find((x) => x.id === view.dataset.frView); if (f?.url) globalThis.open(f.url, '_blank'); return; }
+      const adjust = event.target.closest('[data-fr-adjust]');
+      if (adjust) { const f = figures.find((x) => x.id === adjust.dataset.frAdjust); dlg.close(); if (f) openFigureAdjustDialog(f); }
+    });
+    render('all');
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 调整 AI 图：提示词 + 图型 → 重新生成 → 替换正文里的该图块 */
+  function openFigureAdjustDialog(figure) {
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    dlg.innerHTML = `<header><h3>调整图片「${esc(figure.title)}」</h3><button type="button" data-fa-close>×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">当前：${{layered:'层次图',flow:'流程图',timeline:'时间线'}[figure.type] || '图'} · ${figure.nodes} 节点 ·
+          依据本节正文重新生成（不改动正文）</p>
+        <textarea data-fa-input rows="4" placeholder="例：改为时间线，按 2024/2025/2026 三个阶段展示；节点不超过 6 个"></textarea>
+        <div class="cs-ins-cols">图型
+          <select data-fa-type>
+            <option value="auto">自动</option><option value="layered">层次图</option>
+            <option value="flow">流程图</option><option value="timeline">时间线</option>
+          </select>
+        </div>
+        <div class="cs-ins-actions"><button type="button" class="cs-cp-ghost" data-fa-cancel>取消</button>
+          <button type="button" class="cs-cp-primary" data-fa-run>重新生成</button></div>
+        <div class="cs-ins-result" data-fa-result></div>
+      </div>`;
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-fa-close]') || event.target.closest('[data-fa-cancel]')) { dlg.close(); return; }
+      if (!event.target.closest('[data-fa-run]')) return;
+      const btn = dlg.querySelector('[data-fa-run]');
+      const result = dlg.querySelector('[data-fa-result]');
+      const hint = dlg.querySelector('[data-fa-input]').value.trim();
+      const type = dlg.querySelector('[data-fa-type]').value;
+      const body = sectionText(editor.value, figure.section).slice(0, 3000);
+      const text = `${body}${hint ? `\n\n【图的要求】${hint}` : ''}`.trim();
+      if (text.length < 10) { result.innerHTML = '<p class="cs-warning">本节内容太少，无法生成图</p>'; return; }
+      btn.disabled = true; btn.textContent = '生成中…';
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/studio/diagram`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text, title: figure.title, type}),
+          signal: AbortSignal.timeout(120000),
+        });
+        const out = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof out.detail === 'string' ? out.detail : `HTTP ${resp.status}`);
+        result.innerHTML = `<pre class="cs-ins-preview">${esc(out.markdown)}</pre>
+          <div class="cs-ins-actions"><button type="button" class="cs-cp-primary" data-fa-apply>替换这张图</button></div>`;
+        result.querySelector('[data-fa-apply]').onclick = () => {
+          const updated = replaceFigureBlock(String(editor.value || ''), figure, out.markdown);
+          editor.value = updated;
+          changed && changed();
+          status('图片已替换（在正文里，记得保存；原图可在版本里找回）');
+          paintAside();
+          dlg.close();
+        };
+        btn.disabled = false; btn.textContent = '重新生成';
+      } catch (error) {
+        result.innerHTML = `<p class="cs-warning">${esc(error.message)}</p>`;
+        btn.disabled = false; btn.textContent = '重新生成';
+      }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 在编辑器里定位到某节标题 */
+  function locateSectionInEditor(title) {
+    const text = String(editor?.value || '');
+    const idx = text.indexOf(`## ${title}`);
+    if (idx < 0) { status('没找到该节标题'); return; }
+    const lineEnd = text.indexOf('\n', idx) === -1 ? text.length : text.indexOf('\n', idx);
+    editor.focus();
+    editor.setSelectionRange(idx, lineEnd);
+    editor.scrollTop = Math.max(0, Math.round(editor.scrollHeight * (idx / Math.max(1, text.length))) - 80);
+    status(`已定位到「${title}」`);
+  }
+
+  /** 取某节正文 */
+  function sectionText(content, title) {
+    const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^##[ \\t]+${esc}[ \\t]*\\n([\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
+    const m = re.exec(String(content || ''));
+    return m ? m[1].trim() : '';
+  }
+
+  /** 替换正文里某个图块（按起始行定位，避免误替换） */
+  function replaceFigureBlock(content, figure, markdown) {
+    const lines = String(content || '').split('\n');
+    const start = (figure.start >= 0 && lines[figure.start] && lines[figure.start].trim().startsWith(':::diagram')) ? figure.start : -1;
+    if (start >= 0) {
+      let end = start + 1;
+      while (end < lines.length && lines[end].trim() !== ':::') end += 1;
+      return [...lines.slice(0, start), ...markdown.split('\n'), ...lines.slice(end + 1)].join('\n');
+    }
+    return `${String(content).replace(/\s*$/, '')}\n\n${markdown}\n`;
+  }
+
   /** 让"正在编写"的这一节保持在视野里：首次居中，之后跟随底部 */
   function keepWritingVisible(previewEl, { center = false } = {}) {
     if (!previewEl) return;
@@ -1448,7 +1616,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 流式写一节：切到预览 → 高亮该节 → 逐字落入 → 完成后回正文 */
-  async function streamWriteSection(blockIdNum, sec, onProgress) {
+  async function streamWriteSection(blockIdNum, sec, onProgress, extraPrompt = '') {
     const base = String(editor.value || '');
     let acc = '';
     paintView(true);                       // 预览态（可高亮）
@@ -1465,6 +1633,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       title: sec.title,
       points: (sec.points || []).join('||'),
       words: String(sec.words || 900),
+      prompt: String(extraPrompt || ''),
     });
     try {
       const finalContent = await new Promise((resolve, reject) => {
@@ -1501,8 +1670,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const outline = plan.outline || [];
     if (!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
     const bodyText = String(editor?.value || '');
+    const escRe2 = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const done = new Set(outline.map((s) => s.title).filter((title) =>
-      new RegExp(`^##\\s+${String(title).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*$`, 'm').test(bodyText)));
+      sectionWordCount(bodyText, title) >= 20));
     const missing = outline.filter((s) => !done.has(s.title));
     if (!missing.length) return { written: 0, total: outline.length, message: '整章已按大纲写完' };
     for (let i = 0; i < missing.length; i += 1) {
@@ -1556,28 +1726,120 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<section data-pane="todo"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
   }
 
+  /** 某节正文的字数（粗略：该 ## 节到下一个 ## 之间） */
+  function sectionWordCount(content, title) {
+    const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^##[ \\t]+${esc}[ \\t]*\\n([\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
+    const m = re.exec(String(content || ''));
+    return m ? m[1].replace(/\s+/g, '').length : 0;
+  }
+
+  /** 交付物里要求、但正文里还没有的图/表（待补） */
+  function pendingFigures(outline) {
+    const bodyText = String(editor?.value || '');
+    const present = parseFigures(bodyText);
+    const pending = [];
+    for (const sec of outline || []) {
+      for (const d of sec.deliverables || []) {
+        if (d.kind !== 'figure') continue;
+        const hit = present.some((f) => f.section === sec.title && String(f.title).includes(String(d.title || '').slice(0, 4)));
+        if (!hit) pending.push({ ...d, section: sec.title });
+      }
+    }
+    return pending;
+  }
+
+  /** 解析正文里的图片：按节归属，区分 AI 生成（:::diagram）与素材（:::figure / ![]()） */
+  function parseFigures(content) {
+    const lines = String(content || '').split('\n');
+    const figures = [];
+    let section = '';
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i].trim();
+      const head = /^##\s+(.+)$/.exec(line);
+      if (head) { section = head[1].trim(); continue; }
+      if (line.startsWith(':::diagram')) {
+        const body = [];
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() !== ':::') { body.push(lines[j]); j += 1; }
+        const m = /^:::diagram(?:\s+type=(\w+))?\s*(.*)$/.exec(line);
+        const type = ['layered', 'flow', 'timeline'].includes(m && m[1]) ? m[1] : 'flow';
+        const title = ((m && m[2]) || '结构关系图').trim();
+        const nodes = type === 'layered'
+          ? body.filter((b) => b.trim()).map((b) => b.replace(/^-+\s*/, ''))
+          : (type === 'timeline'
+              ? body.filter((b) => b.trim()).map((b) => (b.split(/[|:：、]/)[1] || b).trim())
+              : body.join(' ').replaceAll('→', '->').split('->').map((x) => x.trim()).filter(Boolean));
+        figures.push({ id: `fig-${figures.length + 1}`, kind: 'ai', section, type, title, nodes: nodes.length,
+                       start: i, end: j, raw: lines.slice(i, j + 1).join('\n') });
+        i = j;
+        continue;
+      }
+      if (line.startsWith(':::figure')) {
+        const body = [];
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() !== ':::') { body.push(lines[j]); j += 1; }
+        const img = body.join(' ').match(/!\[([^\]]*)\]\(([^)]+)\)/);
+        figures.push({ id: `img-${figures.length + 1}`, kind: 'material', section,
+                       title: (line.slice(9).trim() || (img && img[1]) || '图片'),
+                       url: img ? img[2] : '', start: i, end: j });
+        i = j;
+      }
+    }
+    return figures;
+  }
+
   /** 右栏「进度」页签：章节编写进度（大纲进度 + 编写动作） */
   function progressPaneHtml() {
     const outline = planBrief?.outline || [];
     const bodyText = String(editor?.value || '');
     const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escRe2 = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const done = new Set(outline.map((s) => s.title).filter((title) =>
-      new RegExp(`^##\\s+${escRe(title)}\\s*$`, 'm').test(bodyText)));
+      sectionWordCount(bodyText, title) >= 20));
     if (!outline.length) {
       return `<section data-pane="ai"><h4>章节编写进度</h4>
         <p class="cs-todo-ok">还没有章节大纲 · 去章头「本章计划」生成大纲后开始编写</p></section>`;
     }
+    const figures = parseFigures(bodyText);
+    const figureCount = figures.length + pendingFigures(outline).length;
     const rows = outline.map((sec, i) => {
       const written = done.has(sec.title);
-      return `<div class="cs-todo-row">
-          <span class="cs-todo-idx">${i + 1}</span>
-          <span class="cs-todo-text"><b>${esc(sec.title)}</b>
-            <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? '已写' : '待写'}</small></span>
-          <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写本节' : '编写本节'}</button>
+      const words = written ? sectionWordCount(bodyText, sec.title) : 0;
+      const secFigs = figures.filter((f) => f.section === sec.title);
+      const secPending = pendingFigures([sec]);
+      const figBlock = (secFigs.length || secPending.length)
+        ? `<details class="cs-sec-figs"><summary>🖼 ${secFigs.length + secPending.length}</summary>
+             ${secFigs.map((f) => `<div class="cs-fig-row">
+                 <span class="cs-fig-main" title="${esc(f.title)}">${esc(f.title)}</span>
+                 <span class="cs-fig-meta">${f.kind === 'ai' ? `${({layered:'层次图',flow:'流程图',timeline:'时间线'})[f.type] || '图'} · ${f.nodes} 节点` : '素材图'}</span>
+                 <span class="cs-fig-acts">${f.kind === 'ai'
+                   ? `<button type="button" class="cs-todo-act" data-fig-adjust="${f.id}">调整</button>`
+                   : `<button type="button" class="cs-todo-act" data-fig-view="${f.id}">查看</button>`}
+                   <button type="button" class="cs-todo-act" data-fig-locate="${f.id}">定位</button></span>
+               </div>`).join('')}
+             ${secPending.map((d, k) => `<div class="cs-fig-row cs-fig-pending">
+                 <span class="cs-fig-main">${esc(d.title)}</span>
+                 <span class="cs-fig-meta">待补 · ${d.type === 'table' ? '表格' : '图'}</span>
+                 <span class="cs-fig-acts"><button type="button" class="cs-todo-act" data-fig-create="${i}:${k}">生成</button></span>
+               </div>`).join('')}
+           </details>`
+        : '';
+      return `<div class="cs-sec-block">
+          <div class="cs-todo-row">
+            <span class="cs-todo-idx">${i + 1}</span>
+            <span class="cs-todo-text"><b>${esc(sec.title)}</b>
+              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}</small></span>
+            <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button>
+          </div>
+          ${figBlock}
         </div>`;
     }).join('');
     return `<section data-pane="ai"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
-      <div class="cs-progress-actions"><button type="button" class="cs-todo-act cs-todo-act--primary" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button></div>
+      <div class="cs-progress-actions">
+        <button type="button" class="cs-todo-act cs-todo-act--primary" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button>
+        <button type="button" class="cs-todo-act" data-fig-review>审阅本章图片 ${figureCount}</button>
+      </div>
       ${rows}</section>`;
   }
 
@@ -1797,8 +2059,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // TODO(挂起·编写模块): 技术规范书**关键要求（★标星 / mandatory）**需在「本章编制依据」里
   // 置顶并标星、给出计数。业务口径：挂载是"编写时的参考依据"，不参与目录生成。
   // 详见 docs/design/原型到代码-落点对照.md 「四、【挂起·待办】编写模块：技术规范书关键要求」。
+  let planRetryPending = false;
   const paintAside = () => {
     profile[active.id]=context.profile;paintTree();stats();paintTodoBadge();
+    // 自愈：计划数据还没到（或拉取失败）→ 补拉一次后重绘
+    if (!planBrief && !planRetryPending && active?.block_id) {
+      planRetryPending = true;
+      void loadBasis(active.block_id).then(() => { planRetryPending = false; paintAside(); });
+    }
     const layout = context.layouts[context.profile.layout];
     const basisKey = String(active.block_id);
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
@@ -1981,21 +2249,51 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       btn.disabled=false; btn.textContent=label;
       return;
     }
+    if(event.target.closest('[data-fig-review]')){openFigureReviewDialog();return;}
+    const figAdjust=event.target.closest('[data-fig-adjust]');
+    if(figAdjust && active){
+      const f=parseFigures(String(editor?.value||'')).find(x=>x.id===figAdjust.dataset.figAdjust);
+      if(f) openFigureAdjustDialog(f);
+      return;
+    }
+    const figView=event.target.closest('[data-fig-view]');
+    if(figView && active){
+      const f=parseFigures(String(editor?.value||'')).find(x=>x.id===figView.dataset.figView);
+      if(f?.url) globalThis.open(f.url,'_blank');
+      return;
+    }
+    const figLocate=event.target.closest('[data-fig-locate]');
+    if(figLocate && active){
+      const f=parseFigures(String(editor?.value||'')).find(x=>x.id===figLocate.dataset.figLocate);
+      if(f) locateSectionInEditor(f.section);
+      return;
+    }
+    const figCreate=event.target.closest('[data-fig-create]');
+    if(figCreate && active){
+      const [si]=String(figCreate.dataset.figCreate).split(':');
+      const sec=(planBrief?.outline||[])[Number(si)];
+      if(sec) openFigureAdjustDialog({id:'new',kind:'ai',section:sec.title,title:`${sec.title}图示`,type:'layered',nodes:0,raw:''});
+      return;
+    }
     const secBtn=event.target.closest('[data-aside-write-section]');
     if(secBtn && active){
       const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
       if(!sec) return;
-      const label=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
-      try{
-        status(`正在编写「${sec.title}」…（正文预览区高亮该节）`);
-        secBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`));
-        const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
-        if(fresh.block)editor.value=fresh.block.content||'';
-        status(`已${label.startsWith('重写')?'重写':'编写'}「${sec.title}」；记得保存`);
-        paintAside();
-      }catch(error){status(error.message);}
-      secBtn.disabled=false; secBtn.textContent=label;
+      const doWrite = async (prompt) => {
+        const label0=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
+        try{
+          status(`正在编写「${sec.title}」…（正文预览区高亮该节）`);
+          secBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`),prompt);
+          const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
+          if(fresh.block)editor.value=fresh.block.content||'';
+          status(`已${label0.startsWith('重写')?'重写':'编写'}「${sec.title}」；记得保存`);
+          paintAside();
+        }catch(error){status(error.message);}
+        secBtn.disabled=false; secBtn.textContent=label0;
+      };
+      if(secBtn.textContent.trim()==='重写'){ openRewriteDialog(sec, doWrite); }
+      else { doWrite(''); }
       return;
     }
     const asideTodo=event.target.closest('[data-aside-todo]');
