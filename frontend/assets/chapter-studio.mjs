@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v368';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v368';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v369';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v369';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1760,6 +1760,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   ];
 
   const todoIgnored = new Set();
+  const todoIgnoreKey = () => `cs-todo-ignored-${active?.id || ''}`;
+  function hydrateIgnored() {
+    todoIgnored.clear();
+    try {
+      for (const id of JSON.parse(globalThis.localStorage.getItem(todoIgnoreKey()) || '[]')) todoIgnored.add(id);
+    } catch (e) { /* ignore */ }
+  }
+  function persistIgnored() {
+    try { globalThis.localStorage.setItem(todoIgnoreKey(), JSON.stringify([...todoIgnored])); } catch (e) { /* ignore */ }
+  }
   const TODO_GROUPS_V2 = [
     ['gate', '交付门槛'], ['user', '你要给的'], ['decide', '要你拍板的'],
     ['proof', '要你核对的'], ['search', '系统去挖的'],
@@ -2284,6 +2294,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       paintPlanAction(block);
       host.querySelector('[data-action="save"]').disabled=true;
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
+      hydrateIgnored();
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
       if(localDraftAction(local,block.content||'')!=='none'){
@@ -2406,7 +2417,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     const todo2Ignore=event.target.closest('[data-todo2-ignore]');
-    if(todo2Ignore){todoIgnored.add(todo2Ignore.dataset.todo2Ignore);paintAside();return;}
+    if(todo2Ignore){todoIgnored.add(todo2Ignore.dataset.todo2Ignore);persistIgnored();paintAside();return;}
     const todo2Act=event.target.closest('[data-todo2-act]');
     if(todo2Act && active){
       const action=todo2Act.dataset.todo2Act;
@@ -2597,7 +2608,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         if (!c || !Number(c.pages)) return '';
         const gap = Number(c.pages) - pages;
         return `<p class="${gap <= 0.1 ? 'cs-muted' : 'cs-warning'}">字数达标：预算 ${Number(c.pages)} 页 · 已写 ${pages.toFixed(1)} 页（${words} 字）${gap <= 0.1 ? ' ✅ 已达标' : ` ⚠ 差 ${gap.toFixed(1)} 页`}</p>`;
-      })()}<p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${(check.gaps.length||check.issues.length)?'<p class="cs-warning">下面这些问题仍在：你可以先修，也可以「带风险确认完成」（导出前会再提醒）。</p>':''}${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
+      })()}<p>本章已保存。请核对以下内容，再决定是否标记完成。</p>${(check.gaps.length||check.issues.length)?'<p class="cs-warning">下面这些问题仍在：你可以先修，也可以「带风险确认完成」（导出前会再提醒）。</p>':''}${check.gaps.length?`<details><summary>待补充 ${check.gaps.length} 项 · 查看明细</summary><ul>${check.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details>`:''}${check.issues.length?`<details><summary>AI 检查意见 ${check.issues.length} 项 · 查看明细</summary><ul>${check.issues.map(i=>`<li>${esc(i.point)}${i.suggestion?`：${esc(i.suggestion)}`:''}</li>`).join('')}</ul></details>`:''}${(() => {
+          const blocking = (planBrief?.todoItems || []).filter((x) => x.severity === 'block' && x.group !== 'auto');
+          if (!blocking.length) return '';
+          return `<details open><summary>待办里仍有 ${blocking.length} 项阻塞交付</summary><ul>${blocking.slice(0, 6).map((x) => `<li>${esc(x.title)}${x.group_label ? `（${esc(x.group_label)}）` : ''}</li>`).join('')}${blocking.length > 6 ? `<li>…还有 ${blocking.length - 6} 项</li>` : ''}</ul></details>`;
+        })()}<p class="cs-muted">${esc(check.notice)} 确认仅表示人工核对状态，不会自动修复问题。</p>`;
           const risky = check.gaps.length || check.issues.length;
           const confirmBtn = get('completion').querySelector('[data-action="completion-confirm"]');
           if (confirmBtn) confirmBtn.textContent = risky ? `带风险确认完成（${check.gaps.length + check.issues.length} 项待处理）` : '已核对，确认本章完成';

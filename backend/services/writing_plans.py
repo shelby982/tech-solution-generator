@@ -1431,5 +1431,15 @@ def build_todo_items(deliverables: list[dict], material_gaps: list[dict], genera
                                         "；".join(str(r) for r in reasons[:3]),
                                         source="导出检查", action="go", severity="block", target="completion"))
 
+    # C 组（要你拍板）/ D 组（要你核对）—— 确定性规则，只报能指到原文的
+    try:
+        from services.todo_checks import decision_items, proofread_items
+        for raw in decision_items(body) + proofread_items(body):
+            items.append(_todo_item(raw["group"], raw["title"], raw.get("evidence", ""),
+                                    source=raw.get("source", ""), action=raw.get("action", "decide"),
+                                    severity=raw.get("severity", "suggest"), target=raw.get("target", "")))
+    except Exception:
+        pass
+
     items.sort(key=lambda x: (_GROUP_ORDER.get(x["group"], 9), 0 if x["severity"] == "block" else 1))
     return items
