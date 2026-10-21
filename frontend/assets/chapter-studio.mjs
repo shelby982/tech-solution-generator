@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v351';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v351';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v351';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v354';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v354';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v354';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2231,7 +2231,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const plan=await fetchChapterPlan(active.block_id);
         const outline=plan.outline||[];
         const bodyNow=String(editor.value||'');
-        const doneSet=new Set(outline.map(s=>s.title).filter(title=>new RegExp(`^##\\s+${String(title).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\s*$`,'m').test(bodyNow)));
+        // 「已写」= 该节实义字数 ≥20（排除「（本节待写）」这类占位）
+        const doneSet=new Set(outline.map(s=>s.title).filter(title=>sectionWordCount(bodyNow,title)>=20));
         const missing=outline.filter(s=>!doneSet.has(s.title));
         if(!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
         for(let i=0;i<missing.length;i+=1){
