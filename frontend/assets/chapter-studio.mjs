@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v365';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v365';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v366';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v366';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -192,7 +192,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-live-writing" data-cs="live" hidden></div>
         <div class="cs-preview" data-cs="preview" hidden></div>
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
-        <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
+
       </main>
       <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办<span class="cs-tab-badge" data-todo-badge hidden></span></button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div></aside>
     </div>`;
@@ -2521,8 +2521,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const team={refresh(){},show(){},dispose(){}};   // 「本章编制进度」区块已移除（用户要求）
   currentStudio=controller;
   paintTree();stats();
-  get('jobs').innerHTML=document.jobs.map(j=>`<p data-job="${esc(j.id)}"></p>`).join('')||'<p class="cs-muted">暂无导出任务</p>';
-  for(const job of document.jobs) monitorExport(projectId,job.id,get('jobs').querySelector(`[data-job="${job.id}"]`));
+  // 「最近导出任务」区块已移除（用户要求）
   await select((blocks.find(b=>units.has(b.id)&&!b.content?.trim())||blocks[0])?.id);
   return controller;
 }
