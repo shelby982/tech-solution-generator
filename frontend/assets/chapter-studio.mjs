@@ -1,6 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v364';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v364';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v364';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v365';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v365';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -195,7 +194,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
         <details class="cs-history"><summary>最近导出任务</summary><div data-cs="jobs"></div></details>
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办<span class="cs-tab-badge" data-todo-badge hidden></span></button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div><div class="cs-team" data-cs="team"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办<span class="cs-tab-badge" data-todo-badge hidden></span></button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -2519,32 +2518,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const beforeUnload = event => {if(dirty){event.preventDefault();event.returnValue='';}};
   window.addEventListener('beforeunload',beforeUnload);
   const controller={host,select,dispose(){disposed=true;team.dispose();window.removeEventListener('beforeunload',beforeUnload);},save};
-  const team=mountChapterTeam(get('team'),{projectId,threadId,getActive:()=>active,getModel,beforeStart:save,
-    onState:job=>{const button=host.querySelector('[data-action="ai"]');const running=!!job&&['queued','running'].includes(job.status);writingBusy=running;host.querySelector('[data-add-menu]').hidden=previewVisible||running;button.disabled=running;button.textContent=running?'编制中…':job?.status==='done'?'重新编制本章':'AI 编制本章';},
-    getPreparation:()=>context,
-    onProgress:job=>{
-      if(disposed)return;
-      if(active?.id!==job.block_id||previewVisible)return;
-      if(!live.isActiveFor(job.id)&&(!get('recovery').hidden||dirty||(active.content||'')!==job.base_content))return;
-      if(live.update(job))status(job.status==='done'?'协作编制已完成，人工修改已保留；请核对后保存。':'Agent 协作编制中 · 可编辑已完成内容，图表完成后原位替换。');
-    },
-    onResult:async(job,{automatic=false,base}={})=>{
-      if(disposed||previewVisible)return false;
-      if(automatic && active?.id!==job.block_id)return false;
-      if(automatic&&!get('recovery').hidden)return false;
-      if(live.isActiveFor(job.id)){live.update(job);status('协作编制已完成，请核对图文表与检查意见后保存正文。');return true;}
-      if(!canDisplayResult({dirty,automatic,activeId:active?.id,blockId:job.block_id,currentContent:active?.content||'',base})){
-        status('AI 编制已完成，你的编辑已保留。请先保存当前修改，再从 AI 编制中打开结果。');return false;
-      }
-      if(active?.id!==job.block_id)await select(job.block_id);
-      if(active?.id!==job.block_id)return false;
-      if(job.blocks?.length){live.update(job);status('协作内容已在正文中打开，请核对后保存。');return true;}
-      editor.value=job.content;editor.hidden=false;get('preview').hidden=true;
-      paintView(false);
-      changed();status('AI 内容已显示在正文编辑区 · 尚未保存，请核对后保存正文。');
-      return true;
-    }
-  });
+  const team={refresh(){},show(){},dispose(){}};   // 「本章编制进度」区块已移除（用户要求）
   currentStudio=controller;
   paintTree();stats();
   get('jobs').innerHTML=document.jobs.map(j=>`<p data-job="${esc(j.id)}"></p>`).join('')||'<p class="cs-muted">暂无导出任务</p>';
