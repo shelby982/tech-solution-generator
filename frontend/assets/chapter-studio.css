@@ -751,3 +751,7 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-fig-zoom-body .cs-dg { transform: scale(1.15); transform-origin: center; margin: 8px; }
 .cs-fig-zoom-body img { max-width: 100%; max-height: 76vh; object-fit: contain; }
 .cs-fig-thumb[data-zoom-card] { cursor: zoom-in; }
+
+/* 表格上方的表名 */
+.cs-tbl-cap { margin: 12px 0 4px; font-size: 11.5px; font-weight: 600; color: #334155; text-align: center; }
+.cs-preview .cs-tbl-cap + table, .cs-preview table { margin-top: 2px; }

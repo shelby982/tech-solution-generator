@@ -415,7 +415,9 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         import re as _re
         text = _re.sub(r'^```[a-z]*\n|```$', '', str(raw).strip()).strip()
         from services.body_align import strip_invalid_diagrams
+        from services.body_tables import ensure_table_captions
         text, _dropped = strip_invalid_diagrams(text)
+        text, _captions = ensure_table_captions(text)
         if len(text) < 120:
             yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
             return
@@ -481,7 +483,9 @@ async def write_section(block_id: int, body: SectionBody):
     text = str(raw or '').strip()
     text = _re.sub(r'^```[a-z]*\n|```$', '', text).strip()
     from services.body_align import strip_invalid_diagrams
+    from services.body_tables import ensure_table_captions
     text, _dropped = strip_invalid_diagrams(text)
+    text, _captions = ensure_table_captions(text)
     if len(text) < 120:
         raise HTTPException(422, '这一节没有生成出可用内容，请重试或补充要点')
     before = str(block.get('content') or '')
@@ -523,6 +527,8 @@ async def generate_table(block_id: int, body: TableBody):
     markdown = _normalize_markdown_table(raw if isinstance(raw, str) else str(raw))
     if not markdown:
         raise HTTPException(422, '这次没有生成出表格，请补充一句"表格要表达什么"再试')
+    from services.body_tables import ensure_table_captions
+    markdown, _ = ensure_table_captions(markdown if markdown.lstrip().startswith('**表') else f'**表：{title}**\n\n{markdown}')
     return {'markdown': markdown, 'title': title, 'model': model}
 
 

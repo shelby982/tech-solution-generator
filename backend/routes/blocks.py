@@ -203,6 +203,11 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
         if body.content is not None and body.content != existing.get("content"):
             if existing.get("content") and not await list_revisions(db, block_id):
                 await add_revision(db, block_id, existing["content"], "首次编辑前正文", "baseline")
+            # 表格上方统一补表名（`**表：名**`），保证预览/导出都有表名
+            from services.body_tables import ensure_table_captions
+            content_with_captions, added = ensure_table_captions(body.content)
+            if added:
+                body.content = content_with_captions
             updated = await update_block_content(db, block_id, body.content)
             await add_revision(db, block_id_int=block_id, content=body.content,
                                source="edit", summary="手动编辑")

@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v362';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v362';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v362';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v364';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v364';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v364';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -61,6 +61,8 @@ export function previewContent(value) {
   let text = [];
   const flush = () => { if (text.length) { html.push(specContentHtml(text.join('\n'))); text = []; } };
   for (let index = 0; index < lines.length; index++) {
+    // 表名行：`**表：xxx**` 渲染为表格上方的表名
+    const caption = lines[index].trim().match(/^\*\*表\s*[：:]\s*(.+?)\*\*$/);
     const image = lines[index].trim().match(/^!\[([^\]]*)\]\((\/api\/studio\/materials\/\d+\/image)\)$/);
     const heading = lines[index].match(/^(#{1,6})\s+(.+)$/);
     if (lines[index].startsWith(':::diagram')) {
@@ -69,6 +71,8 @@ export function previewContent(value) {
       const body = [];
       while (++index < lines.length && lines[index].trim() !== ':::') body.push(lines[index]);
       html.push(renderDiagramFigure(head, body));
+    } else if (caption) {
+      flush(); html.push(`<p class="cs-tbl-cap">表：${esc(caption[1])}</p>`);
     } else if (image) {
       flush(); html.push(`<figure><img src="${esc(image[2])}" alt="${esc(image[1])}" loading="lazy"><figcaption>${esc(image[1])}</figcaption></figure>`);
     } else if (heading) {
