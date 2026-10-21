@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v334';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v334';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v334';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v336';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v336';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v336';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -44,6 +44,16 @@ function renderDiagramFigure(head, bodyLines) {
   return `<figure class="cs-diagram cs-dg cs-dg-flow"><div class="cs-dg-axis">${nodes.map((label, i) =>
     `${i ? '<span class="cs-dg-arrow" aria-hidden="true">→</span>' : ''}<div class="cs-dg-box">${esc(label)}</div>`).join('')}</div><figcaption>${esc(title)}</figcaption></figure>`;
 }
+
+// 诊断用：把未捕获异常与堆栈打到控制台，便于定位"null setting"类报错（不影响行为）
+try {
+  globalThis.addEventListener('error', (event) => {
+    if (event?.error) console.error('[chapter-studio] 未捕获异常', event.error);
+  });
+  globalThis.addEventListener('unhandledrejection', (event) => {
+    if (event?.reason) console.error('[chapter-studio] 未处理 Promise', event.reason);
+  });
+} catch (e) { /* ignore */ }
 
 export function previewContent(value) {
   const lines = String(value || '').split('\n');
@@ -513,6 +523,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             return list.length ? `${list.length} 节${done ? ` · 已写 ${done}` : ''}` : '未生成（0 节）';
           })()}</em>
             <button type="button" class="cs-cp-link" data-cp-build-outline>${(data.outline || []).length ? '重新生成' : '生成大纲'}</button>
+            ${(data.outline || []).length ? '<button type="button" class="cs-cp-link" data-cp-align-body title="按大纲顺序重排正文，大纲外的旧内容会移除（可在版本里找回）">按大纲重排</button>' : ''}
             ${(data.outline || []).length ? '<button type="button" class="cs-cp-link" data-cp-write-all>按大纲生成</button>' : ''}</summary>
           <div class="cs-cp-fold-body">
             ${(data.outline || []).length ? (data.outline || []).map((sec, i) => {
@@ -722,6 +733,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           status(`已生成 ${data.outline.length} 节大纲`);
           await render();
         } catch (error) { status(error.message); btn.disabled = false; btn.textContent = label; }
+      });
+      // 按大纲重排正文（保留同名节、丢弃大纲外旧内容、修复表格）
+      body.querySelector('[data-cp-align-body]')?.addEventListener('click', async (event) => {
+        const btn = event.currentTarget; btn.disabled = true; const label = btn.textContent; btn.textContent = '重排中…';
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/studio/align-outline`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({thread_id: threadId}), signal: AbortSignal.timeout(60000),
+          });
+          const out = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+          if (out.content !== undefined) { editor.value = out.content; changed && changed(); }
+          status(`已按大纲重排：保留 ${out.kept} 节 · 移除 ${out.dropped?.length || 0} 个旧标题 · 修表格 ${out.tables_fixed || 0} 处`);
+          await render();
+        } catch (error) { status(error.message); }
+        btn.disabled = false; btn.textContent = label;
       });
       // 写一节（P0-2）
       const writeSection = async (index) => {

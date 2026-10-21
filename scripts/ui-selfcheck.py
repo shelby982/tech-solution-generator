@@ -367,6 +367,18 @@ HARNESS = r"""
     return { ok: bad === 0, count, bad };
   })();
   mark('正文关系图块合规（2~12 节点、每节点 ≤60 字）', diagramOk.ok, diagramOk);
+  // AC 正文 `##` 标题必须来自大纲且不重复
+  const headingCheck = await (async () => {
+    const text = document.querySelector('.cs-editor')?.value || '';
+    const heads = [...text.matchAll(/^##\s+(.+?)\s*$/gm)].map((m) => m[1].trim());
+    const resp = await fetch(`/api/projects/29/chapters/s1.2.1.1/plan?threadId=24840930-be03-4745-99b3-8626200cf5ec&_=${Date.now()}`, {cache: 'no-store'});
+    const plan = await resp.json().catch(() => ({}));
+    const titles = (plan.outline || []).map((x) => String(x.title || '').trim());
+    const outside = titles.length ? heads.filter((h) => !titles.includes(h)) : [];
+    const dup = heads.filter((h, i) => heads.indexOf(h) !== i);
+    return { ok: outside.length === 0 && dup.length === 0, heads: heads.length, outside, dup };
+  })();
+  mark('正文标题与大纲一致且不重复', headingCheck.ok, headingCheck);
 
   // Z 正文不得含"待核对与补充"占位块（应留在待办里）
   const edVal = document.querySelector('.cs-editor')?.value || '';

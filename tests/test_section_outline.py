@@ -54,3 +54,30 @@ def test_build_payload_trims_evidence():
     assert payload["chapter"] == "项目背景"
     assert payload["requirements"] == ["评分点A"]
     assert len(payload["evidence"]) <= 6000
+
+
+def test_align_to_outline_keeps_order_and_drops_old():
+    from services.body_align import align_to_outline
+
+    content = (
+        "前言段落。\n\n## 旧标题A\n\n旧内容A\n\n## 政策导向\n\n正文一\n\n"
+        "## 政策导向\n\n重复的正文一\n\n## 旧标题B\n\n旧内容B\n"
+    )
+    outline = [{"title": "政策导向"}, {"title": "现状差距"}]
+    rebuilt, stats = align_to_outline(content, outline)
+    assert rebuilt.index("## 政策导向") < rebuilt.index("## 现状差距")
+    assert "旧标题A" not in rebuilt and "旧标题B" not in rebuilt
+    assert rebuilt.count("## 政策导向") == 1          # 去重
+    assert "本节待写" in rebuilt                       # 缺的节留占位
+    assert stats["kept"] == 1 and len(stats["dropped"]) == 3
+
+
+def test_normalize_tables_fixes_separator_and_width():
+    from services.body_align import normalize_tables
+
+    content = "| A | B |\n| --- | --- | --- |\n| 1 | 2 |\n| 3 |\n"
+    fixed_text, count = normalize_tables(content)
+    lines = [ln for ln in fixed_text.splitlines() if ln.strip()]
+    assert count >= 1
+    assert lines[0].count("|") == 3
+    assert all(ln.count("|") == 3 for ln in lines)

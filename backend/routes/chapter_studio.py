@@ -348,6 +348,35 @@ async def build_outline(block_id: int, body: OutlineBody):
     return {'outline': sections, 'model': model, 'cached': False}
 
 
+class AlignBody(BaseModel):
+    thread_id: str = Field(min_length=8)
+
+
+@router.post('/blocks/{block_id}/studio/align-outline')
+async def align_body_to_outline(block_id: int, body: AlignBody):
+    """按大纲重排正文：保留同名节、丢弃大纲外旧内容、修复表格（写 revision 可回滚）。"""
+    from services.writing_plans import plan_of_block
+    from services.body_align import align_to_outline, normalize_tables
+    from services.block_store import add_revision, update_block_content
+
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
+    if not found:
+        raise HTTPException(404, '这一章还没有编写计划')
+    chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
+    outline = chapter.get('outline') or []
+    if not outline:
+        raise HTTPException(409, '还没有章节大纲，请先生成大纲')
+    before = str(block.get('content') or '')
+    aligned, stats = align_to_outline(before, outline)
+    aligned, fixed_tables = normalize_tables(aligned)
+    async with get_db() as db:
+        await add_revision(db, block_id, before, summary='按大纲重排正文', source='manual')
+        await update_block_content(db, block_id, aligned, status=block.get('status') or 'draft')
+    return {'content': aligned, **stats, 'tables_fixed': fixed_tables}
+
+
 @router.post('/blocks/{block_id}/studio/section')
 async def write_section(block_id: int, body: SectionBody):
     """按大纲写**一节**（P0-2），写回正文的 `## 标题` 段。"""
