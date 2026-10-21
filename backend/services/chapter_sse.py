@@ -192,9 +192,11 @@ async def run_job(job_id: str) -> None:
         saved, reason = False, ""
         async with get_db() as db:
             current = await get_block(db, block_pk)
-            if (current.get("content") or "") != base:
+            if draft == base:
+                reason = "内容与现有正文一致，未产生变更"
+            elif (current.get("content") or "") != base:
                 reason = "正文在生成期间被修改，已保留建议稿，不覆盖"
-            else:
+            elif draft != base:
                 await add_revision(db, block_pk, base, summary="按大纲编写整章（chapter_sse）", source="ai")
                 await update_block_content(db, block_pk, draft)
                 saved = True
@@ -239,3 +241,29 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
     async for chunk in stream(config, RULES + "\n" + SECTION_SYSTEM, user_prompt,
                               call_site="chapter_sse_text", **options):
         yield chunk
+
+
+async def retry_job(job_id: str) -> bool:
+    """重试：把未完成/失败的作业重新排队并执行（runner 只补未写的节）。"""
+    row = await _job_row(job_id)
+    if not row:
+        return False
+    if row["status"] in ("queued", "running"):
+        return True                                  # 已在跑，直接复用
+    await _set_job(job_id, status="queued", stage="重新排队", error="", saved=0)
+    start_runner(job_id)
+    return True
+
+
+async def recover_stale_jobs() -> int:
+    """服务重启后：把遗留在 queued/running 的章节级作业标为失败（不可恢复）。"""
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT id FROM chapter_writing_jobs WHERE status IN ('queued','running') AND snapshot LIKE '%chapter_sse%'"
+        )).fetchall()
+        for row in rows:
+            await db.execute(
+                "UPDATE chapter_writing_jobs SET status='failed', stage='服务重启中断', error='服务重启' WHERE id=?",
+                (row[0],))
+        await db.commit()
+    return len(rows)

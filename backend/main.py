@@ -193,6 +193,8 @@ async def lifespan(app: FastAPI):
     # 构造 WorkflowRunner 并注入到 routes.workflow
     runner = WorkflowRunner(deps_factory=_build_deps)
     set_workflow_runner(runner)
+    from services.chapter_sse import recover_stale_jobs
+    await recover_stale_jobs()
     from services.chapter_writing import recover_jobs
     await recover_jobs()
     logger.info("WorkflowRunner 已注入")

@@ -68,6 +68,15 @@ async def cancel_chapter_write(project_id: int, job_id: str):
     return {"ok": True}
 
 
+@router.post('/projects/{project_id}/studio/chapter-writes/{job_id}/retry')
+async def retry_chapter_write(project_id: int, job_id: str):
+    row = await chapter_sse._job_row(job_id)
+    if not row or int(row["project_id"]) != int(project_id):
+        raise HTTPException(404, "作业不存在")
+    ok = await chapter_sse.retry_job(job_id)
+    return {"ok": ok, "job_id": job_id}
+
+
 @router.get('/projects/{project_id}/studio/chapter-writes/{job_id}/stream')
 async def stream_chapter_write(project_id: int, job_id: str, thread_id: str = ''):
     row = await chapter_sse._job_row(job_id)

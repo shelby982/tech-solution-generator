@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v374';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v374';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v378';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v378';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1834,14 +1834,111 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     table: { icon: '▦', name: '表格', color: '#059669' },
   };
 
+  /** 章节级 SSE 作业：一条 EventSource 驱动 4 头像与正文流式（v3 M2）。 */
+  async function runChapterWriteJob(slot) {
+    if (!active) return { started: false };
+    const states = { chief: 'queued', text: 'queued', diagram: 'queued', table: 'queued' };
+    const models = {};
+    const paint = () => { if (slot) slot.innerHTML = agentBarHtml(states, models); };
+    paint();
+    let jobId = '';
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/studio/chapter-writes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_id: threadId, block_id: String(active.block_id || ''), settings_override: {} }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+      jobId = data.job_id;
+      if (!jobId) throw new Error('作业创建失败');
+    } catch (error) {
+      if (slot) slot.innerHTML = '';
+      return { started: false, error };
+    }
+    let lastIndex = 0;
+    const pending = new Map();
+    const flush = () => {
+      if (!pending.size) return;
+      const parts = [...pending.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]).join('');
+      const text = parts;
+      pending.clear();
+      if (text) editor.value = String(editor.value || '') + text;
+    };
+    return await new Promise((resolve) => {
+      const source = new EventSource(`/api/projects/${projectId}/studio/chapter-writes/${jobId}/stream`);
+      let finished = false;
+      const finish = (result) => {
+        if (finished) return;
+        finished = true;
+        source.close();
+        resolve(result);
+      };
+      source.addEventListener('job', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        status(`编写中：${data.stage || ''}`);
+      });
+      source.addEventListener('plan', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        Object.assign(models, data.models || {});
+        states.chief = 'done';
+        paint();
+        status(`计划就绪：${(data.sections || []).length} 节`);
+      });
+      source.addEventListener('role', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        if (data.role && data.state) states[data.role] = data.state === 'queued' ? 'queued' : data.state;
+        if (data.model) models[data.role] = data.model;
+        paint();
+      });
+      source.addEventListener('delta', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        const index = Number(data.index || 0);
+        lastIndex = index;
+        pending.set(index, (pending.get(index) || '') + String(data.text || ''));
+        if (pending.size > 40) flush();
+      });
+      source.addEventListener('section', (event) => {
+        const data = JSON.parse(event.data || '{}');
+        flush();
+        status(`已完成第 ${Number(data.index || 0) + 1} 节${data.words ? ` · ${data.words} 字` : ''}`);
+      });
+      source.addEventListener('done', async (event) => {
+        const data = JSON.parse(event.data || '{}');
+        flush();
+        states.chief = 'done'; states.text = 'done'; states.diagram = 'done'; states.table = 'done';
+        paint();
+        try {
+          if (data.content) editor.value = data.content;
+          const fresh = await json(`/api/blocks/${active.id}/studio`);
+          context = fresh;
+          if (fresh.block) editor.value = fresh.block.content || editor.value;
+          await loadBasis(active.block_id);
+          paintAside();
+        } catch (error) { /* ignore */ }
+        status(data.saved ? '整章已写入正文（记得核对）' : (data.reason || '已生成建议稿，未覆盖正文'));
+        globalThis.setTimeout(() => { if (slot) slot.innerHTML = ''; }, 5000);
+        finish({ started: true, jobId, saved: !!data.saved });
+      });
+      source.addEventListener('error', (event) => {
+        if (finished) return;                        // done 之后服务端正常关闭也会触发 error，忽略
+        let message = '';
+        try { message = JSON.parse(event.data || '{}').message || ''; } catch (e) { /* ignore */ }
+        status(message ? `编写失败：${message}` : '作业流中断，可在「更多 → 重新连接」恢复');
+        if (slot) slot.innerHTML = '';
+        finish({ started: true, jobId, error: message || 'stream error' });
+      });
+    });
+  }
+
   /** 编写整章时的 3 个头像（主编 / 图片 / 表格）*/
-  function agentBarHtml(states) {
-    const roles = ['chief', 'diagram', 'table'];
+  function agentBarHtml(states, models) {
+    const roles = ['chief', 'text', 'diagram', 'table'];
     return `<div class="cs-agent-bar">${roles.map((role) => {
       const meta = AGENTS[role];
       const state = states?.[role] || 'idle';
       const label = { idle: '等待', running: '工作中', done: '完成', skip: '跳过', error: '失败' }[state] || '等待';
-      const model = modelChoice.get(role) || '默认模型';
+      const model = (models && models[role]) || modelChoice.get(role) || '默认模型';
       return `<div class="cs-agent${state === 'running' ? ' is-running' : ''}${state === 'done' ? ' is-done' : ''}${state === 'error' ? ' is-error' : ''}">
           <span class="cs-agent-icon" style="--agent:${meta.color}">${meta.icon}</span>
           <span class="cs-agent-meta"><b>${meta.name}</b><small>${label} · ${esc(model)}</small></span>
@@ -2782,7 +2879,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         // 与「进度」页签的「继续编写（补未写）」同一套逻辑：逐节流式写入并高亮
         showPanel('ai');
         const slot = get('agents');
-        const states = { chief: 'running', diagram: 'idle', table: 'idle' };
+        const headBtnEarly = globalThis.document.querySelector('[data-action="ai"]');
+        const headLabelEarly = headBtnEarly ? headBtnEarly.textContent : '';
+        const engine = await runChapterWriteJob(slot);
+        if (engine.started) { if (headBtnEarly) headBtnEarly.textContent = headLabelEarly; if (headBtnEarly && headLabelEarly) return; return; }
+        const states = { chief: 'running', text: 'idle', diagram: 'idle', table: 'idle' };
         const paintAgents = () => { if (slot) slot.innerHTML = agentBarHtml(states); };
         void loadModelOptions();
         paintAgents();
@@ -2802,6 +2903,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             const needsTable = (sec.deliverables || []).some((d) => d.kind === 'table');
             const needsFigure = (sec.deliverables || []).some((d) => d.kind === 'figure');
             states.chief = 'running';
+            states.text = 'running';
             states.table = needsTable ? 'running' : 'skip';
             states.diagram = needsFigure ? 'running' : 'skip';
             paintAgents();
@@ -2816,7 +2918,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               paintAgents();
             }
           }
-          states.chief = 'done'; states.table = 'done'; states.diagram = 'done'; paintAgents();
+          states.chief = 'done'; states.text = 'done'; states.table = 'done'; states.diagram = 'done'; paintAgents();
           globalThis.setTimeout(() => { if (slot) slot.innerHTML = ''; }, 4000);
           const fresh = await json(`/api/blocks/${active.id}/studio`);
           context = fresh;
