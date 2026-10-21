@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from db import get_db
@@ -350,6 +350,74 @@ async def build_outline(block_id: int, body: OutlineBody):
 
 class AlignBody(BaseModel):
     thread_id: str = Field(min_length=8)
+
+
+@router.get('/blocks/{block_id}/studio/section/stream')
+async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900):
+    """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
+    import asyncio as _aio
+    from services.writing_plans import plan_of_block
+    from services.section_outline import SECTION_SYSTEM, build_section_payload, replace_section
+    from services.block_store import add_revision, update_block_content
+    from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
+    from infra.llm.clients import stream_openai, stream_claude
+    from agents.chapter_team import RULES
+    from utils.sse import format_sse_event
+
+    if not str(title or '').strip():
+        raise HTTPException(422, '缺少本节标题')
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        found = await plan_of_block(db, block['project_id'], thread_id, str(block['block_id']))
+    chapter = {}
+    if found:
+        chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
+    section = {'title': title.strip(), 'points': [p for p in str(points or '').split('||') if p.strip()], 'words': words}
+    payload = build_section_payload(chapter, section, str(block.get('content') or '')[:2000])
+    # 用自然语言给模型（直接丢 JSON 会被模型"续写 JSON"）
+    user_prompt = (
+        f"所属章节：{payload.get('chapter') or '本章'}\n"
+        f"本次只写这一节：{payload.get('section')}\n"
+        f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
+        f"目标字数：约 {payload.get('words') or 900} 字\n"
+        f"本章要求：{'；'.join(payload.get('requirements') or []) or '（无特别要求）'}\n"
+        f"可用素材（不得编造具体数字）：\n{payload.get('evidence') or '（无）'}\n"
+        "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
+    )
+
+    configs, index = config_store.get_configs_and_next_index()
+    if not configs:
+        raise HTTPException(409, '生成模型不可用')
+    config = configs[index % len(configs)]
+    stream = stream_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else stream_claude
+    options = {'thinking': False} if getattr(config, 'provider', '') == 'deepseek' else {}
+    prompt = RULES + '\n' + SECTION_SYSTEM
+
+    async def events():
+        raw = ''
+        try:
+            async for chunk in stream(config, prompt, user_prompt,
+                                      call_site='chapter_section_stream', **options):
+                raw += chunk
+                yield format_sse_event('delta', {'text': chunk})
+        except Exception as exc:  # noqa: BLE001
+            yield format_sse_event('error', {'message': str(exc)[:300]})
+            return
+        import re as _re
+        text = _re.sub(r'^```[a-z]*\n|```$', '', str(raw).strip()).strip()
+        if len(text) < 120:
+            yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
+            return
+        before = str(block.get('content') or '')
+        after, replaced = replace_section(before, section['title'], text)
+        async with get_db() as db:
+            await add_revision(db, block_id, before, summary=f'分节生成：{section["title"]}', source='manual')
+            await update_block_content(db, block_id, after, status=block.get('status') or 'draft')
+        yield format_sse_event('done', {'title': section['title'], 'content': after,
+                                       'words': len(_re.sub(r'\s+', '', text)), 'replaced': replaced,
+                                       'model': getattr(config, 'model', '')})
+
+    return StreamingResponse(events(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
 
 
 @router.post('/blocks/{block_id}/studio/align-outline')

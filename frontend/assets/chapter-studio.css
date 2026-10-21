@@ -685,3 +685,9 @@
 .cs-todo-act--primary { border-color: #1d4ed8; background: #1d4ed8; color: #fff; }
 .cs-todo-act--primary:hover { background: #1e40af; }
 .cs-cp-scope { font-size: 10.5px; color: #94a3b8; }
+
+/* 正在编写的节：高亮（预览区） */
+.cs-sec-writing { background: #fffbeb !important; box-shadow: inset 3px 0 0 #f59e0b; transition: background .2s; }
+h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !important; border-radius: 4px; }
+@keyframes csPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+.cs-preview .cs-sec-writing::after { content: ' ✍'; animation: csPulse 1.2s infinite; }

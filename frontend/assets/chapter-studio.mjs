@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v341';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v341';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v341';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v343';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v343';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v343';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1417,6 +1417,67 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return out;
   }
 
+  /** 把某节在正文里替换为新内容（只影响这一节） */
+  function mergeSectionText(content, title, text) {
+    const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 匹配到"下一个 ## 标题"或"字符串结尾"；不要用 \s*$（会在一行末尾就断开，导致内容重复）
+    const re = new RegExp(`(^##[ \\t]+${esc}[ \\t]*\\n?)([\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
+    if (re.test(content)) return content.replace(re, `## ${title}\n\n${text}\n\n`);
+    return `${content.replace(/\s*$/, '')}\n\n## ${title}\n\n${text}`;
+  }
+
+  /** 预览区里点亮正在编写的这一节（标题 + 其后内容） */
+  function highlightWritingSection(hostEl, title) {
+    if (!hostEl) return;
+    const heading = [...hostEl.querySelectorAll('h2,h3,h4')].find((h) => (h.textContent || '').trim() === String(title).trim());
+    if (!heading) return;
+    heading.classList.add('cs-sec-writing');
+    let node = heading.nextElementSibling;
+    while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
+  }
+
+  /** 流式写一节：切到预览 → 高亮该节 → 逐字落入 → 完成后回正文 */
+  async function streamWriteSection(blockIdNum, sec, onProgress) {
+    const base = String(editor.value || '');
+    let acc = '';
+    paintView(true);                       // 预览态（可高亮）
+    const renderLive = () => {
+      const previewEl = host.querySelector('[data-cs="preview"]');
+      if (!previewEl) return;
+      previewEl.innerHTML = previewContent(mergeSectionText(base, sec.title, acc || '正在编写…'));
+      highlightWritingSection(previewEl, sec.title);
+    };
+    renderLive();
+    const params = new URLSearchParams({
+      thread_id: threadId,
+      title: sec.title,
+      points: (sec.points || []).join('||'),
+      words: String(sec.words || 900),
+    });
+    try {
+      const finalContent = await new Promise((resolve, reject) => {
+        const source = new EventSource(`/api/blocks/${blockIdNum}/studio/section/stream?${params.toString()}`);
+        let lastPaint = 0;
+        source.addEventListener('delta', (event) => {
+          try { acc += JSON.parse(event.data).text || ''; } catch (e) { /* ignore */ }
+          const now = Date.now();
+          if (now - lastPaint > 120) { lastPaint = now; renderLive(); onProgress && onProgress(acc.length); }
+        });
+        source.addEventListener('done', (event) => {
+          source.close();
+          let data = {};
+          try { data = JSON.parse(event.data); } catch (e) { /* ignore */ }
+          resolve(data.content || mergeSectionText(base, sec.title, acc));
+        });
+        source.addEventListener('error', () => { source.close(); reject(new Error('推流中断，请重试')); });
+      });
+      if (typeof finalContent === 'string') { editor.value = finalContent; changed && changed(); }
+      return finalContent;
+    } finally {
+      paintView(false);                     // 回到编辑态
+    }
+  }
+
   /** 按大纲编写整章：已有内容的节保留，只补未写/待写的节 */
   async function writeChapterApi(blockKey, blockId, onProgress) {
     const plan = await fetchChapterPlan(blockKey);
@@ -1882,7 +1943,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const btn=event.target.closest('[data-aside-write-all]');
       const label=btn.textContent; btn.disabled=true;
       try{
-        const result=await writeChapterApi(active.block_id, active.id, (i,total,title)=>{btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
+        const plan=await fetchChapterPlan(active.block_id);
+        const outline=plan.outline||[];
+        const bodyNow=String(editor.value||'');
+        const doneSet=new Set(outline.map(s=>s.title).filter(title=>new RegExp(`^##\\s+${String(title).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\s*$`,'m').test(bodyNow)));
+        const missing=outline.filter(s=>!doneSet.has(s.title));
+        if(!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
+        for(let i=0;i<missing.length;i+=1){
+          btn.textContent=`编写中 ${i+1}/${missing.length}`;
+          status(`正在编写「${missing[i].title}」…`);
+          await streamWriteSection(active.id, missing[i]);
+        }
+        const result={written:missing.length,total:outline.length};
         status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
         changed && changed();
         const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
@@ -1898,13 +1970,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(!sec) return;
       const label=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
       try{
-        const out=await writeSectionApi(active.id,sec);
-        if(out.content!==undefined){editor.value=out.content;changed && changed();}
+        status(`正在编写「${sec.title}」…（正文预览区高亮该节）`);
+        await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`));
         const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
         if(fresh.block)editor.value=fresh.block.content||'';
         status(`已${label.startsWith('重写')?'重写':'编写'}「${sec.title}」；记得保存`);
         paintAside();
-      }catch(error){status(error.message);secBtn.disabled=false;secBtn.textContent=label;}
+      }catch(error){status(error.message);}
+      secBtn.disabled=false; secBtn.textContent=label;
       return;
     }
     const asideTodo=event.target.closest('[data-aside-todo]');
