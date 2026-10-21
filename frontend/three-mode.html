@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · Workbench Init State</title>
-    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v369" />
-    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v369" />
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v369" />
+    <link rel="stylesheet" href="./assets/response-outline.css?v=20261016-v370" />
+    <link rel="stylesheet" href="./assets/chapter-studio.css?v=20261016-v370" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v370" />
     <style>
 /* ── 三栏布局 ── */
 .init-layout {
@@ -3350,8 +3350,8 @@ body[data-view="matching"] .match-detail { display: block; }
   body[data-view="editor"] .ws-editor-layout { flex: 1 1 auto; min-height: 0; }
 
 </style>
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v369" />
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v369" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v370" />
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v370" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body data-view="outline" data-modes="outline,matching,editor">
     <div class="workspace-shell">
@@ -4062,16 +4062,16 @@ body[data-view="matching"] .match-detail { display: block; }
         if (skel) skel.hidden = true;
       }, 6000);
     </script>
-    <script type="module" src="./assets/workbench.js?v=20261016-v369"></script>
-    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v369"></script>
+    <script type="module" src="./assets/workbench.js?v=20261016-v370"></script>
+    <script type="module" src="./assets/mode-dispatch.js?v=20261016-v370"></script>
     <!-- 动态 import：失败可捕获并上报（静态 import 失败无法捕获，会让整页静默不执行） -->
     <script type="module">
-      for (const mod of ['./assets/mode-outline.js?v=20261016-v369',
-                        './assets/mode-editor.js?v=20261016-v369']) {
+      for (const mod of ['./assets/mode-outline.js?v=20261016-v370',
+                        './assets/mode-editor.js?v=20261016-v370']) {
         try { await import(mod); }
         catch (err) { window.__bootErrors.push(`模块加载失败 ${mod}：${err?.message || err}`); }
       }
     </script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v369"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v370"></script>
   </body>
 </html>

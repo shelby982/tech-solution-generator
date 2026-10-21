@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v369';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v369';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v370';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v370';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1457,6 +1457,29 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
   }
 
+  /** 导出前的阻塞确认：列出阻塞待办，允许"带风险导出" */
+  function openRiskExportDialog(items) {
+    return new Promise((resolve) => {
+      const dlg = globalThis.document.createElement('dialog');
+      dlg.className = 'cs-plan-dialog';
+      dlg.innerHTML = `<header><h3>还有 ${items.length} 项阻塞交付</h3><button type="button" data-rx-close>×</button></header>
+        <div class="cs-plan-body">
+          <p class="cs-warning">导出的是已保存版本；下面这些阻塞项建议先处理，也可以带风险导出。</p>
+          <ul class="cs-rx-list">${items.slice(0, 8).map((x) => `<li>${esc(x.title)}<small>${esc(x.group_label || '')}${x.evidence ? ` · ${esc(String(x.evidence).slice(0, 50))}` : ''}</small></li>`).join('')}${items.length > 8 ? `<li>…还有 ${items.length - 8} 项</li>` : ''}</ul>
+        </div>
+        <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-rx-cancel>取消</button>
+          <button type="button" class="cs-cp-primary" data-rx-go>带风险导出</button></footer>`;
+      const done = (value) => { dlg.close(); resolve(value); };
+      dlg.addEventListener('click', (event) => {
+        if (event.target.closest('[data-rx-close]') || event.target.closest('[data-rx-cancel]')) { done(false); return; }
+        if (event.target.closest('[data-rx-go]')) done(true);
+      });
+      dlg.addEventListener('close', () => dlg.remove());
+      globalThis.document.body.appendChild(dlg);
+      dlg.showModal();
+    });
+  }
+
   /** 重写本节前：输入优化方向（提示词） */
   function openRewriteDialog(sec, onStart) {
     const dlg = globalThis.document.createElement('dialog');
@@ -2434,6 +2457,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           }
           status('这一项需要手动处理');return;
         }
+        if(action==='decide'){
+          const ev=String(item?.evidence||'');
+          const hit=/^(.+?)：/.exec(ev);
+          const sec=(planBrief?.outline||[]).find(s=>hit && s.title===hit[1]);
+          if(sec){locateSectionInEditor(sec.title);}
+          status(`需要你拍板：${item?.title||''}${item?.evidence?`（${item.evidence.slice(0,60)}）`:''}`);
+          return;
+        }
+        if(action==='locate'){
+          if(item?.fix){
+            const pairs=item.fix.replacements||[];
+            let text=String(editor.value||''); let n=0;
+            for(const [find,repl] of pairs){
+              if(!find||find===repl) continue;
+              const before=text.length;
+              text=text.split(find).join(repl);
+              if(text.length!==before) n+=1;
+            }
+            if(n){editor.value=text;changed();await save();status(`已${item.fix.label||'统一表述'}（共 ${n} 类）；可撤销`);await loadBasis(active.block_id);paintAside();return;}
+            status('没有可自动替换的内容');return;
+          }
+          const ev=String(item?.evidence||'');
+          const hit=/^(.+?)：/.exec(ev);
+          const sec=(planBrief?.outline||[]).find(s=>hit && s.title===hit[1]);
+          if(sec) locateSectionInEditor(sec.title);
+          status(`请核对：${item?.title||''}`);
+          return;
+        }
         if(action==='go'){
           if(/完成条件|正文为空/.test(item?.title||'')){document.querySelector('[data-action="complete"]')?.click();return;}
           status(item?.evidence||item?.title||'请按提示处理');return;
@@ -2625,6 +2676,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
       if(action==='export-chapter'||action==='export-group') {
         if(!await save())return;
+        const blocking=(planBrief?.todoItems||[]).filter(x=>x.severity==='block');
+        if(blocking.length){
+          const ok=await openRiskExportDialog(blocking);
+          if(!ok)return;
+        }
         const scope=action==='export-chapter'?'chapter':'group';
         const selected=exportScope(blocks,active.id,scope);
         status(`正在提交 ${selected.length} 个目录节点的已保存版本…`);

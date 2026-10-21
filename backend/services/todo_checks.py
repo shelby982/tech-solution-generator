@@ -106,7 +106,6 @@ def decision_items(content: str) -> list[dict]:
 _TERM_VARIANTS = (
     ("营销管理系统", "营销系统"),
     ("数智营销一体化平台", "数智化营销一体化平台"),
-    ("人工智能", "AI"),
     ("云原生", "Cloud Native"),
 )
 _CITE_STYLE = (
@@ -129,11 +128,15 @@ def proofread_items(content: str) -> list[dict]:
         if variant in canonical:
             n_variant -= n_canonical
         if n_canonical and n_variant > 0:
+            # 以出现次数多的写法为准（全称优先，其次数量）
+            prefer_canonical = n_canonical >= n_variant
+            keep, change = (canonical, variant) if prefer_canonical else (variant, canonical)
             items.append({
                 "group": "proof", "title": f"术语不统一：「{canonical}」/「{variant}」",
-                "evidence": f"正文出现 {n_canonical} 次「{canonical}」、{n_variant} 次「{variant}」（建议统一）",
+                "evidence": f"正文出现 {n_canonical} 次「{canonical}」、{n_variant} 次「{variant}」（建议统一为「{keep}」）",
                 "source": "术语检查", "severity": "suggest",
-                "action": "locate", "target": f"term:{canonical}",
+                "action": "locate", "target": f"term:{keep}",
+                "fix": {"label": f"统一为「{keep}」", "replacements": [[change, keep]]},
             })
 
     styles = {label: text.count(label) for label, _ in _CITE_STYLE if text.count(label)}
@@ -141,8 +144,91 @@ def proofread_items(content: str) -> list[dict]:
         detail = "；".join(f"{k}×{v}" for k, v in styles.items())
         items.append({
             "group": "proof", "title": "引用格式不统一",
-            "evidence": detail,
+            "evidence": detail + "（建议统一为【来源：…】）",
             "source": "格式检查", "severity": "suggest",
             "action": "locate", "target": "cite-style",
+            "fix": {"label": "统一为【来源：…】", "replacements": [
+                ["[来源:", "【来源："], ["（来源：", "【来源："], ["(来源:", "【来源："]]},
+        })
+    return items
+
+
+# ── D 组补充：数字一致性 ────────────────────────────────────────────────────
+_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(亿|万|千|百|个|项|人|台|套|笔|条|次|分钟|小时|%)")
+# 主语里出现这些词说明是"动作/连接"，不是指标主体（避免"预计达到"这类误报）
+_SUBJECT_STOP = ("达到", "实现", "约", "为", "是", "预计", "超过", "增至", "提升", "缺口",
+                 "预计", "目标", "将", "达到", "可", "需", "要", "从", "到")
+_TABLE_ROW_RE = re.compile(r"^\s*\|(.+?)\|\s*$")
+_TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+# 数字前的"主语"：取紧邻的 2~8 个汉字/字母数字（去掉标点）
+_SUBJECT_RE = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9]{2,8})$")
+
+
+def _normalize_number(value: str, unit: str) -> str:
+    """统一成"数值+单位"，便于比较（14.5亿 与 145000万 视为不同，仅同单位比较）。"""
+    try:
+        num = float(value)
+    except ValueError:
+        return ""
+    return f"{num:g}{unit}"
+
+
+def number_items(content: str) -> list[dict]:
+    """D 组：表格数字需在正文可查 + 同一指标不出现两个数值。"""
+    text = str(content or "")
+    lines = text.splitlines()
+    items: list[dict] = []
+
+    # ① 表格单元格数字必须在正文出现（表是正文的摘要，不能凭空多出数字）
+    body_without_tables = "\n".join(
+        line for line in lines if not _TABLE_ROW_RE.match(line) and not _TABLE_SEP_RE.match(line)
+    )
+    body_compact = re.sub(r"\s+", "", body_without_tables)
+    missing: list[str] = []
+    inside = False
+    for line in lines:
+        if _TABLE_SEP_RE.match(line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not _TABLE_ROW_RE.match(line):
+            inside = False
+            continue
+        for cell in line.strip().strip("|").split("|"):
+            for match in _NUM_RE.finditer(cell):
+                token = f"{match.group(1)}{match.group(2)}"
+                if token not in body_compact:
+                    missing.append(token)
+    if missing:
+        uniq = list(dict.fromkeys(missing))[:6]
+        items.append({
+            "group": "proof", "title": f"表格里有 {len(uniq)} 个数字正文未提及",
+            "evidence": "、".join(uniq) + "（建议在正文点明关键数字并注明来源，评委主要读正文）",
+            "source": "数字核对", "severity": "suggest",
+            "action": "locate", "target": "table-numbers",
+        })
+
+    # ② 同一指标出现两个不同数值
+    by_subject: dict[str, set] = {}
+    for line in body_without_tables.splitlines():
+        for match in _NUM_RE.finditer(line):
+            prefix = line[: match.start()].rstrip()
+            subject_match = _SUBJECT_RE.search(prefix)
+            if not subject_match:
+                continue
+            subject = subject_match.group(1)[-4:]
+            if len(subject) < 3 or any(stop in subject for stop in _SUBJECT_STOP):
+                continue
+            normalized = _normalize_number(match.group(1), match.group(2))
+            if normalized:
+                by_subject.setdefault((subject, match.group(2)), set()).add(normalized)
+    conflicts = {key: values for key, values in by_subject.items() if len(values) >= 2}
+    for (subject, unit), values in list(conflicts.items())[:4]:
+        items.append({
+            "group": "proof", "title": f"同一指标出现不同数值：「{subject}」",
+            "evidence": " / ".join(sorted(values)) + f"（单位：{unit}，请统一口径）",
+            "source": "数字核对", "severity": "suggest",
+            "action": "locate", "target": f"num:{subject}",
         })
     return items

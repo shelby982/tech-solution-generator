@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from services.todo_checks import decision_items, proofread_items
+from services.todo_checks import decision_items, number_items, proofread_items
 
 
 def test_hard_promise_without_citation_is_blocking():
@@ -33,3 +33,28 @@ def test_term_variants_flagged():
 def test_cite_style_mixed_flagged():
     content = "## 一\n\n甲【来源：A】乙[来源: B]"
     assert any("引用格式不统一" in i["title"] for i in proofread_items(content))
+
+
+def test_table_numbers_must_exist_in_body():
+    content = ("## 一\n\n用户规模约 1.2 亿。\n\n| 指标 | 数值 |\n| --- | --- |\n"
+               "| 用户 | 1.2亿 |\n| 效率 | 9000万 |\n")
+    items = number_items(content)
+    assert items and "表格里" in items[0]["title"]
+
+
+def test_same_metric_two_values_conflict():
+    content = "## 一\n\n服务用户数 1.2 亿。\n\n## 二\n\n服务用户数 1.5 亿。\n"
+    items = number_items(content)
+    assert any("不同数值" in i["title"] for i in items)
+
+
+def test_verb_subject_not_treated_as_metric():
+    """「预计达到 0.98 万 / 3.18 万」是两个目标，不是同一指标冲突。"""
+    content = "## 一\n\n2026 年预计达到 0.98 万笔。\n\n## 二\n\n2030 年预计达到 3.18 万笔。\n"
+    assert not any("不同数值" in i["title"] for i in number_items(content))
+
+
+def test_term_item_has_fix_payload():
+    content = "## 一\n\n营销管理系统运行十年；营销系统覆盖全省。"
+    items = proofread_items(content)
+    assert items[0].get("fix", {}).get("replacements") == [["营销系统", "营销管理系统"]]
