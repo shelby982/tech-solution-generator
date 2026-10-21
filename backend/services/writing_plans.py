@@ -1440,6 +1440,9 @@ def build_todo_items(deliverables: list[dict], material_gaps: list[dict], genera
                                severity=raw.get("severity", "suggest"), target=raw.get("target", ""))
             if raw.get("fix"):
                 entry["fix"] = raw["fix"]
+            if raw.get("suggestions"):
+                entry["suggestions"] = raw["suggestions"]
+                entry["sentence"] = raw.get("sentence", "")
             items.append(entry)
     except Exception:
         pass

@@ -22,6 +22,29 @@ _PENDING = ("待定", "暂定", "另行确定", "视情况", "有待明确", "�
 # 角色口径（同一项目里不能一会儿"牵头"一会儿"参与"）
 _ROLES = ("牵头", "参与", "支撑", "配合")
 
+# 建议式改写候选（确定性模板，不调模型）：给出 2~3 个可直接替换的说法
+_REWRITE_CANDIDATES = {
+    "承诺强度": [
+        ("保证", "按招标文件要求提供相应服务（具体以合同约定为准）"),
+        ("确保", "通过如下措施保障"),
+        ("100%", "不低于约定水平"),
+        ("零故障", "高可用运行"),
+        ("7×24", "按合同约定的响应时限"),
+        ("7*24", "按合同约定的响应时限"),
+        ("绝不", "原则上不"),
+        ("全天候", "按约定时段"),
+        ("零中断", "低中断运行"),
+    ],
+    "极限表述": [
+        ("领先", "具备较强"),
+        ("最优", "较优"),
+        ("最佳", "较适合"),
+        ("唯一", "少数可选的"),
+        ("首创", "较早"),
+        ("第一", "较早"),
+    ],
+}
+
 _CITE_RE = re.compile(r"【来源[:：]")
 _SECTION_RE = re.compile(r"^#{2,6}\s+(.+?)\s*$")
 _SENTENCE_SPLIT = re.compile(r"[。；\n]")
@@ -39,6 +62,19 @@ def _sentences(content: str):
             text = sentence.strip()
             if text:
                 yield section, text
+
+
+def _rewrite_candidates(kind: str, word: str) -> list[str]:
+    """给定被标记的词，产出 2~3 个可直接替换的表述。"""
+    pairs = dict(_REWRITE_CANDIDATES.get(kind) or [])
+    base = pairs.get(word)
+    if not base:
+        return []
+    return [
+        f"把「{word}」改为「{base}」",
+        f"把「{word}」改为「{base}」，并补一句依据【来源：…】",
+        "删除该表述，改为客观描述能力与做法",
+    ]
 
 
 def decision_items(content: str) -> list[dict]:
@@ -64,6 +100,8 @@ def decision_items(content: str) -> list[dict]:
                     "evidence": f"{section or '正文'}：{sentence[:60]}…（无来源支撑）",
                     "source": "承诺检查", "severity": "block",
                     "action": "decide", "target": f"promise:{word}",
+                    "sentence": sentence,
+                    "suggestions": _rewrite_candidates("承诺强度", word),
                 })
         for word in _ABSOLUTE:
             if word in sentence and not cited and f"abs:{word}" not in seen:
@@ -73,6 +111,8 @@ def decision_items(content: str) -> list[dict]:
                     "evidence": f"{section or '正文'}：{sentence[:60]}…（建议给出依据或降级表述）",
                     "source": "表述检查", "severity": "suggest",
                     "action": "decide", "target": f"abs:{word}",
+                    "sentence": sentence,
+                    "suggestions": _rewrite_candidates("极限表述", word),
                 })
         for word in _PENDING:
             if word in sentence and f"pending:{word}" not in seen:

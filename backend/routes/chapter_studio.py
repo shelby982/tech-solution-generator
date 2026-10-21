@@ -210,7 +210,7 @@ def normalize_diagram_nodes(raw) -> list[str]:
 
 
 @router.post('/blocks/{block_id}/studio/diagram')
-async def generate_diagram(block_id: int, body: DiagramBody):
+async def generate_diagram(block_id: int, body: DiagramBody, model: str = ''):
     """用户给一段文字 + 期望图型 → 生成结构化信息图（`:::diagram type=…`）。
 
     图型：flow（流程）/ layered（层次）/ timeline（时间线）/ auto（由模型判断）。
@@ -237,7 +237,7 @@ async def generate_diagram(block_id: int, body: DiagramBody):
     )
     payload = {'text': body.text, 'prefer_type': wanted}
     try:
-        raw, model = await call_role('diagram', system, payload, {})
+        raw, model = await call_role('diagram', system, payload, {'diagram': model} if model else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     structure = normalize_model_output(raw, fallback_title=body.title or block.get('title') or '')
@@ -353,7 +353,7 @@ class AlignBody(BaseModel):
 
 
 @router.get('/blocks/{block_id}/studio/section/stream')
-async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = ''):
+async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = ''):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
     import asyncio as _aio
     from services.writing_plans import plan_of_block
@@ -397,7 +397,8 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     configs, index = config_store.get_configs_and_next_index()
     if not configs:
         raise HTTPException(409, '生成模型不可用')
-    config = configs[index % len(configs)]
+    # 本次指定模型优先（用户在弹窗里选的），其次轮询默认
+    config = next((c for c in configs if model and c.model == model), None) or configs[index % len(configs)]
     stream = stream_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else stream_claude
     options = {'thinking': False} if getattr(config, 'provider', '') == 'deepseek' else {}
     system_prompt = RULES + '\n' + SECTION_SYSTEM
@@ -521,7 +522,7 @@ async def generate_table(block_id: int, body: TableBody):
     )
     payload = {'title': title, 'requirement': requirement, 'text': text[:4000]}
     try:
-        raw, model = await call_role('table', system, payload, {})
+        raw, model = await call_role('table', system, payload, {'table': model} if model else {})
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     markdown = _normalize_markdown_table(raw if isinstance(raw, str) else str(raw))
@@ -863,3 +864,58 @@ async def recover_exports():
         rows = await (await db.execute("SELECT id FROM document_export_jobs WHERE status='done' AND preview_status IN ('pending','rendering')")).fetchall()
     for row in rows:
         task=asyncio.create_task(run_preview(row[0]));TASKS.add(task);task.add_done_callback(TASKS.discard)
+
+
+@router.get('/projects/{project_id}/todo')
+async def project_todo(project_id: int, thread_id: str = ''):
+    """全项目待办：跨章的阻塞项汇总（章级 + 项目级门槛）。"""
+    from services.writing_plans import chapter_plan
+    from services.block_store import list_blocks
+
+    async with get_db() as db:
+        blocks = await list_blocks(db, project_id, thread_id or None) if thread_id else await list_blocks(db, project_id)
+        chapters = []
+        gate: list[dict] = []
+        unconfirmed = 0
+        empty = 0
+        for block in blocks or []:
+            if block.get("is_catalog") or block.get("children") or block.get("has_children"):
+                continue
+            try:
+                plan = await chapter_plan(db, project_id, thread_id or "", str(block.get("block_id")))
+            except Exception:
+                continue
+            items = plan.get("todo_items") or []
+            blocking = [item for item in items if item.get("severity") == "block"]
+            status = (block.get("writing_status") or plan.get("status") or "draft")
+            if not (block.get("content") or "").strip():
+                empty += 1
+            if status != "complete":
+                unconfirmed += 1
+            if blocking:
+                chapters.append({
+                    "block_id": block.get("block_id"),
+                    "block_pk": block.get("id"),
+                    "title": block.get("title"),
+                    "status": status,
+                    "blocking": len(blocking),
+                    "top": [{"title": item.get("title"), "group": item.get("group_label")} for item in blocking[:3]],
+                })
+        chapters.sort(key=lambda row: -row["blocking"])
+        if empty:
+            gate.append({"title": f"{empty} 章正文为空", "evidence": "这些章还没有内容，导出会是空章节",
+                         "action": "go", "severity": "block"})
+        if unconfirmed:
+            gate.append({"title": f"{unconfirmed} 章未确认完成", "evidence": "确认完成表示人工核对过；未确认的章导出后仍需复核",
+                         "action": "go", "severity": "suggest"})
+        total_blocking = sum(row["blocking"] for row in chapters)
+    return {
+        "gate": gate,
+        "chapters": chapters[:40],
+        "summary": {
+            "chapters_with_blocking": len(chapters),
+            "total_blocking": total_blocking,
+            "empty_chapters": empty,
+            "unconfirmed": unconfirmed,
+        },
+    }

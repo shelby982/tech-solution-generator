@@ -291,7 +291,8 @@ HARNESS = r"""
     mark('工具条分组清晰（主操作/视图/插入/更多）',
          labels.some((l) => l === 'AI 编制本章' || l === '编写整章') && labels.some((l) => l.startsWith('插入')) && labels.some((l) => l.startsWith('更多')) && !dupDiagram,
          { labels, dupDiagram });
-    mark('更多菜单只剩确认完成与导出（无质检）', moreItems.length <= 3 && !moreItems.includes('质检清单') && insertItems.length <= 3,
+    mark('更多菜单按性质分组（待办/完成/导出，无质检）',
+         moreItems.length <= 4 && !moreItems.includes('质检清单') && insertItems.length <= 3,
          { more: moreItems, insert: insertItems });
   } else {
     mark('工具条分组清晰（主操作/视图/插入/更多）', false, { note: '未找到工具条' });
