@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v367';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v367';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v368';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v368';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -245,6 +245,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           todo: plan.todo || [],
           gaps: plan.material_gaps || [],
           generationGaps: plan.generation_gaps || [],
+          todoItems: plan.todo_items || [],
           outline: plan.outline || [],
           pages: plan.pages || 0,
           wordPlan: plan.word_plan || null,
@@ -1758,17 +1759,52 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     ['content', '内容'], ['source', '来源'], ['budget', '篇幅'], ['figure', '图表'],
   ];
 
+  const todoIgnored = new Set();
+  const TODO_GROUPS_V2 = [
+    ['gate', '交付门槛'], ['user', '你要给的'], ['decide', '要你拍板的'],
+    ['proof', '要你核对的'], ['search', '系统去挖的'],
+  ];
+
+  function todoItemsHtml() {
+    const all = (planBrief?.todoItems || []).filter((x) => x && !todoIgnored.has(x.id));
+    if (!all.length) return '';
+    const main = all.filter((x) => x.group !== 'auto');
+    const auto = all.filter((x) => x.group === 'auto');
+    const groups = TODO_GROUPS_V2.map(([key, label]) => {
+      const rows = main.filter((x) => x.group === key);
+      if (!rows.length) return '';
+      const blocked = rows.some((x) => x.severity === 'block');
+      return `<div class="cs-todo-group"><p class="cs-todo-glabel">${label} ${rows.length}${blocked ? ' · <b class="cs-todo-block">阻塞</b>' : ''}</p>
+        ${rows.map((x) => `<div class="cs-todo-row">
+            <span class="cs-todo-idx${x.severity === 'block' ? ' is-block' : ''}">•</span>
+            <span class="cs-todo-text"><b>${esc(x.title)}</b>${x.evidence ? `<small>${esc(x.evidence)}</small>` : ''}
+              <small class="cs-todo-src">来自：${esc(x.source || '系统')}${x.severity === 'block' ? ' · 阻塞交付' : ''}</small></span>
+            <button type="button" class="cs-todo-act" data-todo2-act="${esc(x.action)}" data-todo2-id="${esc(x.id)}">${esc(x.action_label)}</button>
+            <button type="button" class="cs-todo-ignore" data-todo2-ignore="${esc(x.id)}" title="忽略这一条">×</button>
+          </div>`).join('')}</div>`;
+    }).join('');
+    const autoHtml = auto.length ? `<details class="cs-todo-auto"><summary>系统可自动修复 ${auto.length} 项</summary>
+        ${auto.map((x) => `<div class="cs-todo-row"><span class="cs-todo-idx">·</span>
+            <span class="cs-todo-text"><b>${esc(x.title)}</b>${x.evidence ? `<small>${esc(x.evidence)}</small>` : ''}</span>
+            <button type="button" class="cs-todo-act" data-todo2-act="${esc(x.action)}" data-todo2-id="${esc(x.id)}">${esc(x.action_label)}</button></div>`).join('')}
+      </details>` : '';
+    return `<h4>待办 <small>${main.length} 项${auto.length ? ` · 可自动修 ${auto.length}` : ''}</small></h4>${groups || '<p class="cs-todo-ok">✓ 没有需要你处理的事项</p>'}${autoHtml}`;
+  }
+
   /** 右栏「待办」页签标题上的计数徽标（口径与待办页签一致，排除素材类） */
   function paintTodoBadge() {
     const el = host.querySelector('[data-todo-badge]');
     if (!el) return;
-    const count = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material').length + ((planBrief?.generationGaps || []).length);
-    el.textContent = String(count);
-    el.hidden = !count;
+    const items = (planBrief?.todoItems || []).filter((x) => !todoIgnored.has(x.id));
+    const count = items.filter((x) => x.group !== 'auto').length;
+    el.textContent = count ? String(count) : ''; el.hidden = !count;
   }
 
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
+    if ((planBrief?.todoItems || []).length) {
+      return `<section data-pane="todo">${todoItemsHtml()}</section>`;
+    }
     const todos = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material');
     if (!todos.length) {
       return `<section data-pane="todo"><h4>待办</h4>
@@ -2367,6 +2403,31 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       };
       if(secBtn.textContent.trim()==='重写'){ openRewriteDialog(sec, doWrite); }
       else { doWrite(''); }
+      return;
+    }
+    const todo2Ignore=event.target.closest('[data-todo2-ignore]');
+    if(todo2Ignore){todoIgnored.add(todo2Ignore.dataset.todo2Ignore);paintAside();return;}
+    const todo2Act=event.target.closest('[data-todo2-act]');
+    if(todo2Act && active){
+      const action=todo2Act.dataset.todo2Act;
+      const item=(planBrief?.todoItems||[]).find(x=>x.id===todo2Act.dataset.todo2Id);
+      try{
+        if(action==='upload'){showPanel('materials');return;}
+        if(action==='search'){document.querySelector('[data-cite-open]')?.click();return;}
+        if(action==='autofix'){
+          const hit=/「(.+?)」/.exec(item?.title||'');
+          if(hit){
+            const plan=await fetchChapterPlan(active.block_id);
+            const sec=(plan.outline||[]).find(s=>s.title===hit[1])||(plan.outline||[]).find(s=>hit[1].includes(s.title));
+            if(sec){status(`正在补写「${sec.title}」…`);await streamWriteSection(active.id,sec);await loadBasis(active.block_id);paintAside();return;}
+          }
+          status('这一项需要手动处理');return;
+        }
+        if(action==='go'){
+          if(/完成条件|正文为空/.test(item?.title||'')){document.querySelector('[data-action="complete"]')?.click();return;}
+          status(item?.evidence||item?.title||'请按提示处理');return;
+        }
+      }catch(error){status(error.message);}
       return;
     }
     const asideTodo=event.target.closest('[data-aside-todo]');

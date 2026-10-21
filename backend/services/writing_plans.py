@@ -1143,6 +1143,12 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                 "written_pages": round(len(child_content) / 250, 1),
                 "has_content": bool(child_content),
             })
+    material_gaps = _material_gaps(_materials_plan(requirements, bound_kinds, len(clauses)), requirements)
+    try:
+        completion = chapter_completion({"requirements": requirements, "materials": material_gaps,
+                                        "figures_plan": figures_plan, "deliverables": deliverables}, [])
+    except Exception:
+        completion = None
     return {
         "grade_band": grade_band,
         "clauses": clauses,
@@ -1152,11 +1158,14 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "key_points_by_deliverable": _split_key_points(key_points, deliverables),
         "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
-        "material_gaps": _material_gaps(_materials_plan(requirements, bound_kinds, len(clauses)), requirements),
+        "material_gaps": material_gaps,
         "generation_gaps": generation_gaps or [],
         "outline": (chapter or {}).get("outline") or [],
         "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
                             word_plan, guidance, content, is_parent_chapter, is_catalog),
+        "todo_items": build_todo_items(deliverables, material_gaps or [], generation_gaps or [],
+                                       word_plan, content, is_parent_chapter, is_catalog, completion),
+        "todo_groups": TODO_GROUPS,
         "children": children,
         "catalog": is_catalog,
         "has_children": has_children,
@@ -1310,3 +1319,117 @@ __all__ = ["plan_units", "build_plan", "load_plan", "confirm_plan", "_writable_n
            "update_requirements", "requirement_coverage", "chapter_needs", "bind_snippets",
            "needs_for_prompt", "plan_of_block", "chapter_plan", "update_figures_plan",
            "confirm_chapter_plan", "chapter_completion"]
+
+
+# ---------------------------------------------------------------------------
+# 统一待办（v2）：按"谁来消除"分组
+#   A user   你要给的（上传/填写）
+#   B search 系统去挖的（一键检索）
+#   C decide 要你拍板的（选项）
+#   D proof  要你核对的（定位）
+#   E auto   系统自己修的（折叠 + 一键修复）
+#   F gate   交付门槛（阻塞导出）
+# ---------------------------------------------------------------------------
+
+TODO_GROUPS = {
+    "user": "你要给的",
+    "search": "系统去挖的",
+    "decide": "要你拍板的",
+    "proof": "要你核对的",
+    "auto": "系统可自动修复",
+    "gate": "交付门槛",
+}
+
+_GROUP_ORDER = {"gate": 0, "user": 1, "decide": 2, "search": 3, "proof": 4, "auto": 5}
+
+
+def _todo_item(group: str, title: str, evidence: str = "", source: str = "",
+               action: str = "", action_label: str = "", severity: str = "suggest",
+               target: str = "") -> dict:
+    return {
+        "id": f"{group}:{(target or title)[:40]}",
+        "group": group,
+        "group_label": TODO_GROUPS.get(group, group),
+        "title": title,
+        "evidence": evidence,
+        "source": source,
+        "severity": severity,          # block=阻塞交付 / suggest=建议
+        "action": action,
+        "action_label": action_label or {"upload": "上传", "search": "一键检索",
+                                         "decide": "去选择", "locate": "定位",
+                                         "autofix": "一键修复", "go": "去处理"}.get(action, "去处理"),
+        "status": "open",
+    }
+
+
+def build_todo_items(deliverables: list[dict], material_gaps: list[dict], generation_gaps: list[dict],
+                     word_plan: dict, content: str, is_parent: bool, is_catalog: bool,
+                     completion: dict | None = None) -> list[dict]:
+    """把已有的检查结果重排成"按责任分组"的统一待办。"""
+    if is_catalog:
+        return []
+    items: list[dict] = []
+    body = str(content or "").strip()
+
+    # A 你要给的 / B 系统去挖的 —— 素材缺口三分法直接映射
+    for gap in material_gaps or []:
+        kind = str(gap.get("kind") or "材料")
+        lack = int(gap.get("lack") or 0)
+        if not lack:
+            continue
+        if gap.get("availability") == "upload":
+            items.append(_todo_item(
+                "user", f"补 {lack} 份「{kind}」", gap.get("purpose") or gap.get("reason") or "",
+                source="素材", action="upload", severity="block", target=kind))
+        else:
+            hint = "、".join(gap.get("suggestions") or []) or "官方来源"
+            items.append(_todo_item(
+                "search", f"「{kind}」缺 {lack} 份", f"可查：{hint}",
+                source="素材", action="search", target=kind))
+
+    # B 系统去挖的 —— 依据核对缺口
+    for gap in generation_gaps or []:
+        text = str(gap.get("text") or "").strip()
+        if not text:
+            continue
+        items.append(_todo_item("search", text, "生成时发现该依据缺失，公开渠道可能可补",
+                                source="依据核对", action="search", target=text[:30]))
+
+    # E 系统自己修的 —— 交付物没写够 / 图表缺
+    for item in deliverables or []:
+        title = str(item.get("title") or "")
+        if not title or item.get("source") == "system":
+            continue
+        status = item.get("status")
+        if status not in ("未写", "不足"):
+            continue
+        if item.get("kind") == "text":
+            items.append(_todo_item("auto", f"「{title}」字数不足",
+                                    f"已写 {item.get('written_words') or 0} / 目标 {item.get('target_words')} 字",
+                                    source="计划", action="autofix", target=title))
+        else:
+            label = "表格" if item.get("kind") == "table" else "图示"
+            items.append(_todo_item("auto", f"缺{label}「{title}」", "计划要求但正文没有",
+                                    source="计划", action="autofix", target=title))
+
+    # E 系统自己修的 —— 篇幅超建议
+    written = int(word_plan.get("written") or 0)
+    target = int(word_plan.get("total") or 0)
+    if target and written > target * 1.5:
+        items.append(_todo_item("auto", f"篇幅超建议（{written} / {target} 字）", "可一键精简",
+                                source="计划", action="autofix", target="budget"))
+
+    # F 交付门槛
+    if not body:
+        items.append(_todo_item("gate", "正文为空，不能确认完成", "先编写或生成本章",
+                                source="导出检查", action="go", severity="block", target="empty"))
+    if completion is not None:
+        if not completion.get("ok", True):
+            reasons = completion.get("reasons") or []
+            if reasons:
+                items.append(_todo_item("gate", f"还有 {len(reasons)} 项未满足完成条件",
+                                        "；".join(str(r) for r in reasons[:3]),
+                                        source="导出检查", action="go", severity="block", target="completion"))
+
+    items.sort(key=lambda x: (_GROUP_ORDER.get(x["group"], 9), 0 if x["severity"] == "block" else 1))
+    return items
