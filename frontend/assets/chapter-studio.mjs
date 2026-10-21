@@ -1,6 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v354';
-import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v354';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v354';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v358';
+import {mountChapterTeam,canDisplayResult} from './chapter-team.mjs?v=20261016-v358';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v358';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2387,18 +2387,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
-        // 统一语义：「编写整章」= 按章节大纲逐节编写（与「进度」页签同一引擎）
+        // 与「进度」页签的「继续编写（补未写）」同一套逻辑：逐节流式写入并高亮
         showPanel('ai');
-        const btn=document.querySelector('[data-action="ai"]'); const label=btn?btn.textContent:'';
-        try{
-          const result=await writeChapterApi(active?.block_id, active?.id, (i,total,title)=>{if(btn)btn.textContent=`编写中 ${i}/${total}`;status(`正在编写「${title}」…`);});
-          status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
-          changed && changed();
-          const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
-          if(fresh.block)editor.value=fresh.block.content||'';
+        const headBtn = globalThis.document.querySelector('[data-action="ai"]');
+        const headLabel = headBtn ? headBtn.textContent : '';
+        try {
+          const plan = await fetchChapterPlan(active.block_id);
+          const outline = plan.outline || [];
+          if (!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
+          const bodyNow = String(editor.value || '');
+          const missing = outline.filter((sec) => sectionWordCount(bodyNow, sec.title) < 20);
+          if (!missing.length) { status('整章已按大纲写完；要改某节请用「进度 → 重写」'); return; }
+          for (let i = 0; i < missing.length; i += 1) {
+            if (headBtn) headBtn.textContent = `编写中 ${i + 1}/${missing.length}`;
+            status(`正在编写「${missing[i].title}」…（${i + 1}/${missing.length}）`);
+            await streamWriteSection(active.id, missing[i]);
+          }
+          const fresh = await json(`/api/blocks/${active.id}/studio`);
+          context = fresh;
+          if (fresh.block) editor.value = fresh.block.content || '';
           paintAside();
-        }catch(error){status(error.message);}
-        if(btn&&label)btn.textContent=label;
+          status(`已按大纲编写 ${missing.length} 节；请核对后保存`);
+        } catch (error) {
+          console.log('[chapter-studio] 编写整章失败', error);
+          status(error && error.message ? error.message : String(error));
+        } finally {
+          if (headBtn && headLabel) headBtn.textContent = headLabel;
+        }
+        return;
       }
       if(action==='edit'){
         paintView(false);get('preview').hidden=true;
