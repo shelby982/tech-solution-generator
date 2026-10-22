@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v391';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v391';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v393';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v393';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2176,7 +2176,43 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return null;
   }
 
-  /** 定位到任务目标：切到预览 → 找到原句所在段落 → 滚动并高亮 2 秒 */
+  let locateObserver = null, locateTimer = null;
+
+  /** 在预览里持续贴高亮：即使预览被重新渲染也会重新找到并点亮（4 秒） */
+  function paintLocateHighlight(needle, section) {
+    const previewEl = host.querySelector('[data-cs="preview"]');
+    if (!previewEl) return false;
+    const blocks = [...previewEl.querySelectorAll('p, li, h2, h3, h4, td')];
+    const normalized = (el) => (el.textContent || '').replace(/\s+/g, '');
+    const hit = (needle && blocks.find((el) => normalized(el).includes(needle)))
+      || (section && blocks.find((el) => normalized(el) === section.replace(/\s+/g, '')));
+    if (!hit) return false;
+    previewEl.querySelectorAll('.cs-locate-hit').forEach((el) => el.classList.remove('cs-locate-hit'));
+    hit.classList.add('cs-locate-hit');
+    let heading = hit;
+    while (heading && !/^H[1-4]$/.test(heading.tagName)) heading = heading.previousElementSibling;
+    if (heading) heading.classList.add('cs-locate-hit');
+    try { hit.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
+    return true;
+  }
+
+  function startLocateHighlight(needle, section) {
+    if (locateObserver) { locateObserver.disconnect(); locateObserver = null; }
+    if (locateTimer) { globalThis.clearTimeout(locateTimer); locateTimer = null; }
+    paintLocateHighlight(needle, section);
+    const previewEl = host.querySelector('[data-cs="preview"]');
+    if (previewEl && globalThis.MutationObserver) {
+      locateObserver = new globalThis.MutationObserver(() => paintLocateHighlight(needle, section));
+      locateObserver.observe(previewEl, { childList: true, subtree: true });
+    }
+    locateTimer = globalThis.setTimeout(() => {
+      if (locateObserver) { locateObserver.disconnect(); locateObserver = null; }
+      const el = host.querySelector('[data-cs="preview"]');
+      el?.querySelectorAll('.cs-locate-hit').forEach((node) => node.classList.remove('cs-locate-hit'));
+    }, 6000);
+  }
+
+  /** 定位到任务目标：切到预览 → 找到原句所在段落 → 滚动并高亮 */
   function locateTaskTarget(task) {
     const target = task.target || {};
     const section = String(target.section || '');
@@ -2184,27 +2220,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!section && !quote) { status('这条没有定位信息，请直接在正文里找'); return; }
     paintView(true);                                   // 预览态才能高亮
     const previewEl = host.querySelector('[data-cs="preview"]');
-    if (previewEl) {
-      previewEl.innerHTML = previewContent(editor.value);
-      const blocks = [...previewEl.querySelectorAll('p, li, h2, h3, h4')];
-      const needle = quote.replace(/\s+/g, '').slice(0, 12);
-      const hit = (needle
-          && blocks.find((el) => (el.textContent || '').replace(/\s+/g, '').includes(needle)))
-        || (section && blocks.find((el) => (el.textContent || '').includes(section)));
-      if (hit) {
-        // 同时点亮所属小节标题，便于定位
-        let heading = hit.previousElementSibling;
-        while (heading && !/^H[1-4]$/.test(heading.tagName)) heading = heading.previousElementSibling;
-        if (heading) heading.classList.add('cs-locate-hit');
-        hit.classList.add('cs-locate-hit');
-        try { hit.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
-        globalThis.setTimeout(() => hit.classList.remove('cs-locate-hit'), 4000);
-        const index = blocks.filter((el) => (el.textContent || '').trim()).indexOf(hit) + 1;
-        status(`已定位到正文：${section || '正文'} · 第 ${index} 段 —— 原句「${quote.slice(0, 22)}…」，请改成你选的说法`);
-        return;
-      }
+    if (previewEl && !previewEl.innerHTML.trim()) previewEl.innerHTML = previewContent(editor.value);
+    // 兜底一：编辑态直接选中原句（textarea 里能被看见，且能立刻改）
+    const rawText = String(editor.value || '');
+    const at = rawText.indexOf(quote) >= 0 ? rawText.indexOf(quote) : rawText.indexOf(quote.slice(0, 14));
+    if (at >= 0) {
+      editor.focus();
+      editor.setSelectionRange(at, at + Math.min(quote.length, 60));
+      const ratio = at / Math.max(1, rawText.length);
+      editor.scrollTop = Math.max(0, Math.round((editor.scrollHeight - editor.clientHeight) * ratio));
     }
-    status(`已切到预览，但没匹配到原句${section ? `（${section}）` : ''}；原句：${quote.slice(0, 24)}…`);
+    const needle = quote.replace(/\s+/g, '').slice(0, 10);
+    globalThis.setTimeout(() => {
+      const ok = paintLocateHighlight(needle, section);
+      startLocateHighlight(needle, section);
+      if (ok) {
+        status(`已定位到「${section || '正文'}」，正文里已选中这句（预览中黄色高亮）：${quote.slice(0, 22)}…`);
+      } else {
+        status(`已切到预览，但没匹配到原句${section ? `（${section}）` : ''}；可手动搜：${quote.slice(0, 24)}…`);
+      }
+    }, 60);
   }
 
   /** 任务动作分发：上传 / 选说法 / 查看 / 定位 / 精简 */
