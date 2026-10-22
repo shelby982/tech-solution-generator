@@ -157,3 +157,44 @@ async def project_overview(project_id: int, thread_id: str = ''):
              "impact": "quality"},
         ],
     }
+
+
+# ── 交付门（P0）：内部语法 / 内部术语 / 占位符 ────────────────────────────
+class GateFixBody(BaseModel):
+    apply: bool = True
+
+
+@router.get('/blocks/{block_id}/delivery-gate')
+async def delivery_gate(block_id: int):
+    """章级交付门：返回 blocking 清单（带 locator）+ 可自动修数量。"""
+    from services.block_store import get_block
+    from services.delivery_gate import scan
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    result = scan(block.get("content") or "")
+    return {"block_id": block_id, "block_code": block.get("block_id"),
+            **result}
+
+
+@router.post('/blocks/{block_id}/delivery-gate/fix')
+async def delivery_gate_fix(block_id: int, body: GateFixBody):
+    """一键清理：删内部语法残留、替换内部术语（写 revision，可回滚）。"""
+    from services.block_store import add_revision, get_block, update_block_content
+    from services.delivery_gate import auto_fix, scan
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    before = block.get("content") or ""
+    after, changed, changes = auto_fix(before)
+    if changed:
+        async with get_db() as db:
+            await add_revision(db, block_id, before, summary="交付门：自动清理内部语法/术语", source="ai")
+            await update_block_content(db, block_id, after)
+    remaining = scan(after)
+    return {"changed": changed, "changes": changes, "content": after,
+            "remaining": remaining["summary"], "blocking": remaining["blocking"]}

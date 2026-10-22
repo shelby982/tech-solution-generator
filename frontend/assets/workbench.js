@@ -1,12 +1,12 @@
-import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20261016-v394';
+import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20261016-v395';
 // 章节状态/依据徽标与「素材库」共用一份投影（同一棵目录树，四个环节都一样）
-import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20261016-v394';
+import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20261016-v395';
 // 左栏章节树：**三个模式共用一份**行标记（2026-10-13 归一）。
 // 此前编辑器侧自己拼 `.doc-outline-item`、大纲侧拼 `.ot-row`，是两套实现；
 // 数据投影本就共用（workspace-model），这里把标记也收敛掉。
 // 行上仍保留 `doc-outline-item` 类与 data-block-id 属性，兼容 mode-editor.js 里
 // 既有的 10 处选择器（改动面最小化）。
-import {chapterNode, renderChapterTree, chapterBadgesHtml} from './chapter-tree.mjs?v=20261016-v394';
+import {chapterNode, renderChapterTree, chapterBadgesHtml} from './chapter-tree.mjs?v=20261016-v395';
 // 左栏树的**唯一宿主**：由 mode-dispatch 在模式切换时把 #blocks-list 搬到当前模式的
 // 左栏位置。归一前这里是 `.doc-outline`，与大纲侧 `#blocks-list` 各渲一棵（实测
 // .ot-node 有 120 个 = 两棵各 60）。动态解析而不是加载时捕获，就是为了让宿主可搬。

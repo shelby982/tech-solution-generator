@@ -143,3 +143,28 @@ def test_tasks_without_locator_are_dropped():
                     "evidence": "## 一：这句话并不存在于正文", "suggestions": ["改"], "target": "x"}],
         proofs=[], completion=None)
     assert payload["need_user"] == []
+
+
+def test_delivery_gate_scans_and_fixes():
+    """P0 交付门：内部语法/术语/占位符 三类硬门 + 可自动清理。"""
+    from services.delivery_gate import auto_fix, scan
+
+    # 合法图块（≥2 节点）不算语法残留；未闭合块才算
+    content = ("## 一\n\n本项目由任务包已确认的结论构成，评分点要求深入。\n\n"
+               ":::diagram type=layered 对比图\n甲\n乙\n:::\n\n"
+               ":::diagram type=flow 未闭合图\n甲\n\n"
+               "正文还有【待补充：招标文件条款编号】。\n")
+    result = scan(content)
+    kinds = result["summary"]["by_kind"]
+    assert kinds["syntax"] >= 1, result["summary"]      # 只有未闭合块
+    assert kinds["term"] >= 2 and kinds["placeholder"] == 1
+    assert result["summary"]["blocking"] == result["summary"]["auto_fixable"] + result["summary"]["manual"]
+
+    fixed, changed, _changes = auto_fix(content)
+    assert changed > 0
+    assert ":::diagram type=layered 对比图" in fixed        # 合法图块必须保住
+    assert "未闭合图" not in fixed or ":::diagram type=flow" not in fixed
+    assert "任务包" not in fixed and "招标文件" in fixed
+    remaining = scan(fixed)["summary"]
+    assert remaining["by_kind"]["syntax"] == 0 and remaining["by_kind"]["term"] == 0
+    assert remaining["by_kind"]["placeholder"] == 1        # 占位符需人工处理
