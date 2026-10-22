@@ -88,9 +88,8 @@ def test_delivery_tasks_three_zones_and_verb_titles():
     for task in need:
         assert len(task["title"]) <= 24
         assert task["title"][0] in "上传定核补系统精统一生成", task["title"]
-    # 材料缺口 → 上传卡；决定项 → 选择卡；引用 → 核对卡（同类合并）
-    assert any(t["action"]["type"] == "upload_material" for t in need)
-    assert any(t["action"]["type"] == "choose" for t in need)
+    # 只有"招标硬性要求的材料"才会进 upload 卡；口径类由系统按默认写法处理，不进用户待办
+    assert all(t["action"]["type"] in ("upload_material",) for t in need)
     # 产品原则：系统能做的**不进待办**（只保留上传材料/定口径/确认完成）
     assert not any("引用" in t["title"] for t in need)
     assert system_tasks == []

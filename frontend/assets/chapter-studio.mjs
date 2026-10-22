@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v409';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v409';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v410';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v410';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2806,6 +2806,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ? `<div class="cs-readiness ${score >= 90 ? 'is-ok' : score >= 70 ? 'is-warn' : 'is-bad'}">
            <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
       : '';
+    if (!need.length) {
+      return `${scoreHtml}<h4>待办</h4><p class="cs-todo-ok">✓ 本章没有需要你处理的事，可以直接「确认本章完成」<br><span class="cs-dim">如需调整，用「更多 → 重新编写本模块…」给提示词重写</span></p>`;
+    }
     return `${scoreHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>

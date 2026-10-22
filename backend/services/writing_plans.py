@@ -934,6 +934,39 @@ def _self_check(deliverables: list[dict], word_plan: dict, clauses: list[dict],
     return items
 
 
+# 招标文件"硬性要求提供的材料"（只有这些才进待办）
+_MANDATORY_PATTERNS = (
+    ("业绩", ("业绩合同", "业绩证明", "类似项目业绩", "同类项目业绩")),
+    ("资质", ("资质证书", "营业执照", "体系认证", "认证证书")),
+    ("财务", ("财务报告", "审计报告", "财务报表", "资信证明")),
+    ("人员", ("社保", "人员证书", "项目经理证书", "职称证书")),
+    ("检测", ("检测报告", "测试报告", "评测报告")),
+    ("承诺", ("承诺函", "授权书", "法定代表人")),
+)
+# 出现这些词，说明该条要求"提交/提供材料"
+_MATERIAL_VERBS = ("提供", "提交", "附上", "复印件", "扫描件", "证明材料", "须提供", "应提供")
+
+
+def _required_materials(requirements: list[dict], clauses: list[dict]) -> list[dict]:
+    """从招标要求里找出**必须由投标人提供**的材料（只有这些才进待办）。
+
+    依据：要求正文里既出现"提供/提交/复印件…"这类动词，又出现具体材料名。
+    """
+    text = " ".join(
+        [str(item.get("text") or "") + " " + " ".join(str(b) for b in (item.get("basis") or []))
+         for item in (requirements or [])]
+        + [str(item.get("title") or "") for item in (clauses or [])]
+    )
+    found: list[dict] = []
+    for kind, keywords in _MANDATORY_PATTERNS:
+        for keyword in keywords:
+            if keyword in text and any(verb in text for verb in _MATERIAL_VERBS):
+                found.append({"kind": kind, "keyword": keyword,
+                              "reason": f"招标要求要求提供「{keyword}」（不提供会影响资格/得分）"})
+                break
+    return found
+
+
 # 章节内容 → 需要的材料（只有真的需要才要，不再每个章节都塞"业绩材料"）
 _MATERIAL_RULES = (
     ("业绩", ("业绩", "案例", "类似项目", "成功案例", "实施经验")),
@@ -959,7 +992,8 @@ def _needed_materials(requirements: list[dict], sections: list[dict] | None) -> 
 
 
 def _materials_plan(requirements: list[dict], bound_kinds: dict[str, int],
-                    clause_count: int, sections: list[dict] | None = None) -> list[dict]:
+                    clause_count: int, sections: list[dict] | None = None,
+                    sections_clauses: list[dict] | None = None) -> list[dict]:
     """素材清单：需要什么料、已有多少、缺多少。
 
     注意：这里**只列真的需要**的材料。以前无条件给每章塞"我方材料（数据/案例/业绩）"，
@@ -972,15 +1006,9 @@ def _materials_plan(requirements: list[dict], bound_kinds: dict[str, int],
     if clause_count:
         plan.append({"kind": "招标条款原文", "purpose": "逐条响应对内要求", "need": clause_count,
                      "have": clause_count, "where": "已解析（技术规范书）"})
-    for kind in _needed_materials(requirements, sections):
-        purpose = {
-            "业绩": "用于业绩/案例类小节举证",
-            "资质": "用于资格与能力类小节",
-            "数据": "用于现状描述与指标类小节",
-            "测评": "用于安全现状与合规差距",
-            "合同": "用于履约与业绩证明",
-        }.get(kind, "用于本章举证")
-        plan.append({"kind": kind, "purpose": purpose, "need": 1,
+    # 只列**招标硬性要求提供**的材料；其余（现状数据/案例等）由系统写成概括表述，不进待办
+    for item in _required_materials(requirements, sections_clauses or []):
+        plan.append({"kind": item["kind"], "purpose": item["reason"], "need": 1,
                      "have": bound_kinds.get("我方材料", 0), "where": "素材池上传/关联"})
     for item in plan:
         item["status"] = "已齐" if item["have"] >= item["need"] else f"缺 {item['need'] - item['have']}"
@@ -1185,7 +1213,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                 "has_content": bool(child_content),
             })
     outline_sections = (chapter or {}).get("outline") or []
-    materials_plan = _materials_plan(requirements, bound_kinds, len(clauses), outline_sections)
+    materials_plan = _materials_plan(requirements, bound_kinds, len(clauses), outline_sections, clauses)
     material_gaps = _material_gaps(materials_plan, requirements)
     try:
         completion = chapter_completion({"requirements": requirements, "materials": material_gaps,

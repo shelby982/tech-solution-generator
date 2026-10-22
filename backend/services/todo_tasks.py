@@ -120,12 +120,12 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
 
     # ③ 决定项（口径/承诺/角色）：同类合并成一张卡，抽屉里逐条选
     decide_pool = [d for d in (decisions or []) if d.get("group") == "decide"]
-    if decide_pool:
+    if decide_pool and _DECIDE_TO_SYSTEM:
         first = decide_pool[0]
         section = str(first.get("section") or _first_section(decide_pool, body))
         quote = _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)
-        need_user.append(_task(
-            category="decide", owner="user",
+        system.append(_task(
+            category="decide", owner="system",
             title=(f"定 1 处口径" if len(decide_pool) == 1 else f"定 {len(decide_pool)} 处口径"),
             dedupe_key="decide-batch",
             target={"block_id": block_id, "section": section, "quote": quote},
@@ -340,6 +340,9 @@ def _quote_of(item: dict, body: str) -> str:
     quote = re.sub(r"^.*?：", "", quote)
     return _clip(quote, _QUOTE_LIMIT)
 
+
+# 口径类：正文已不允许出现"待明确"，系统按默认说法写 → 不进用户待办
+_DECIDE_TO_SYSTEM = True
 
 _MATERIAL_SHORT = (
     ("业绩", "业绩材料"), ("案例", "案例材料"), ("资质", "资质证书"), ("合同", "合同/验收材料"),
