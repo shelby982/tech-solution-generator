@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v416';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v416';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v418';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v418';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -251,7 +251,63 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     } catch (error) { materialLib = null; }
   }
 
-  /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（折叠） ③ 上传 */
+  /** 素材库（统一管理弹窗）：上传 + 我上传的 + 联网搜索的 + 外部依据 + 应用到本章 */
+  async function openMaterialAdminDialog() {
+    await loadMaterialLibrary();
+    const lib = materialLib || { confirmed: [], counts: {}, citations: {} };
+    const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
+    const uploadItems = (lib.confirmed || []).filter((item) => item.source_type !== 'web');
+    const webItems = (lib.confirmed || []).filter((item) => item.source_type === 'web');
+    const rowHtml = (items) => items.slice(0, 40).map((item) => `
+      <label class="cs-ml-item is-pick">
+        <input type="checkbox" data-ml-pick="${pickId(item)}" />
+        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+          <p>${esc(String(item.text || '').slice(0, 70))}…</p>
+          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
+      </label>`).join('');
+
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    dlg.innerHTML = `<header><h3>素材库</h3><button type="button" data-madmin-close>×</button></header>
+      <div class="cs-plan-body">
+        <div class="cs-madmin-upload">
+          <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" data-madmin-file />
+          <span class="cs-dim">上传后自动解析成片段，可直接应用到本章</span>
+        </div>
+        <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索素材…" /></div>
+        <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
+        <div class="cs-ml-list">${rowHtml(uploadItems) || '<p class="cs-muted">还没有上传素材</p>'}</div>
+        <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
+        <div class="cs-ml-list">${rowHtml(webItems) || '<p class="cs-muted">还没有联网搜索的素材</p>'}</div>
+      </div>
+      <footer class="cs-ins-foot">
+        <button type="button" class="cs-cp-ghost" data-madmin-close2>关闭</button>
+        <button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button>
+      </footer>`;
+    dlg.addEventListener('click', (event) => {
+      if (event.target.closest('[data-madmin-close]') || event.target.closest('[data-madmin-close2]')) { dlg.close(); return; }
+    });
+    dlg.addEventListener('change', async (event) => {
+      const input = event.target.closest('[data-madmin-file]');
+      if (!input || !input.files?.length) return;
+      for (const file of input.files) {
+        status(`正在上传 ${file.name}…`);
+        try {
+          const form = new FormData();
+          form.append('file', file);
+          await json(`/api/blocks/${active.id}/studio/materials`, { method: 'POST', body: form });
+        } catch (error) { status(`${file.name}：${error.message}`); return; }
+      }
+      await loadMaterialLibrary(); dlg.close();
+      status('已上传，解析完成后可在素材库里选择应用到本章');
+      paintAside();
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（弹窗） */
   function materialLibraryHtml() {
     const lib = materialLib || { confirmed: [], pending: [], bound: [], citations: { points: [], missing: [], summary: {} } };
     const citations = lib.citations || { points: [], missing: [], summary: {} };
@@ -309,19 +365,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       </label>`).join('') : `<p class="cs-muted">${empty}</p>`);
 
     return `<div class="cs-ml">
-      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4></div>
+      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4>
+        <button type="button" class="cs-gate-act" data-material-admin>素材库</button></div>
       <p class="cs-ml-sum">招标文件 ${byKind.upload || 0} · 联网来源 ${byKind.web || 0} · 法规标准 ${byKind.doc || 0}</p>
       ${pointsHtml || '<p class="cs-muted">正文里还没有【来源：…】标注</p>'}
       ${missingHtml}
-      <details class="cs-ml-fold">
-        <summary>素材库（${lib.counts?.confirmed || 0} 段）— 选择素材应用到本章</summary>
-        <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索素材…" /></div>
-        <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
-        <div class="cs-ml-list">${pickHtml(uploadItems, '还没有上传素材')}</div>
-        <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
-        <div class="cs-ml-list">${pickHtml(webItems, '还没有联网搜索的素材')}</div>
-        <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button></div>
-      </details>
     </div>`;
   }
 
@@ -3383,56 +3431,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     get('aside').innerHTML = `${todoPaneHtml()}
       ${progressPaneHtml()}
       <section data-pane="materials">${materialRequestsHtml()}${materialLibraryHtml()}${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
-      <details class="cs-mat-manage">
-        <summary>已关联素材与外部依据</summary>
-        <div class="cs-mat-manage-body">
-        ${(() => {
-        const key = String(active.block_id);
-        const body = String(active.content || '');
-        // 来源"有没有被正文用到"：完整标题（去站点后缀、≥12 字）或 URL 出现在正文里（前 10 字会误判）
-        const norm = (text) => String(text || '').split('_')[0].replace(/\s+/g, '');
-        const usedOf = (c) => {
-          const k = norm(c.title);
-          if (k.length >= 12 && norm(body).includes(k)) return true;
-          return !!(c.url && body.includes(String(c.url)));
-        };
-        const linked = citationInfo.rows.filter((c) => (c.links || []).includes(key) || !c.block_id);
-        const unused = linked.filter((c) => !usedOf(c));
-        return `<div class="cs-material-head"><h4>外部依据 <b>${linked.length}</b>${linked.length ? `<small>已引用 ${linked.length - unused.length} · 未引用 ${unused.length}</small>` : ''}</h4>
-            <button type="button" class="cs-mat-add" data-add-citation="${esc(key)}">添加官方来源</button></div>
-          ${linked.map((c) => {
-            const segmentCount = (c.segments || []).length;
-            const selectedCount = (c.selected || []).length;
-            const used = usedOf(c);
-            return `<div class="cs-mat-card">
-                <div class="cs-mat-card-top">
-                  <p class="cs-mat-title">${esc(c.title || c.url)}</p>
-                  <span class="cs-mat-tag ${used ? 'ok' : ''}">${used ? '已引用' : '未引用'}</span>
-                </div>
-                <p class="cs-mat-meta">${esc(c.publisher || c.domain || '')}${c.published_at ? ` · ${esc(c.published_at)}` : ''} · 关联 ${(c.links || []).length} 章</p>
-                <p class="cs-mat-acts">
-                  <button type="button" class="cs-mat-link" data-cite-segments="${esc(c.id)}">${segmentCount ? `片段 ${segmentCount}${selectedCount ? `（已选 ${selectedCount}）` : ''}` : '提取片段'}</button>
-                  ${c.url ? `<a class="cs-mat-link" href="${esc(c.url)}" target="_blank" rel="noreferrer">打开原文</a>` : ''}
-                </p></div>`;
-          }).join('')
-            || '<p class="cs-mat-empty">本章还没有关联外部依据。外部信息必须可核验，二手内容不采。</p>'}
-          ${unused.length ? '<p class="cs-mat-warn">这些来源还没被正文引用：重新生成本章即可用上。</p>' : ''}
-          <div class="cs-material-head cs-material-head--sub"><h4>本章素材 <b>${context.materials.length}</b></h4>
-            <label class="cs-mat-add">上传素材<input data-cs="upload" type="file" hidden /></label></div>
-          ${context.materials.length
-            ? context.materials.map((m) => `<div class="cs-mat-card">
-                <p class="cs-mat-title">${esc(m.filename)}</p>
-                <p class="cs-mat-meta">${esc(m.parse_status || '待解析')} · ${Math.max(1, Math.round((m.file_size || 0) / 1024))} KB${m.confirmed ? ' · 已核对' : ''}</p>
-                <p class="cs-mat-acts">
-                  ${m.parse_status === 'done' ? `<button type="button" class="cs-mat-link" data-material="insert" data-id="${m.id}">${m.image_url ? '插入图片' : '引用原文摘录'}</button>` : ''}
-                  <button type="button" class="cs-mat-link" data-material="confirm" data-id="${m.id}">${m.confirmed ? '取消核对' : '标记已核对'}</button>
-                  <button type="button" class="cs-mat-link" data-material="unlink" data-id="${m.id}">移除关联</button>
-                </p></div>`).join('')
-            : '<p class="cs-mat-empty">还没有关联素材。可上传 PDF / Word（自动提取原文与页码），或从项目素材库关联。</p>'}
-          <p class="cs-mat-acts">
-            ${context.materials.length ? '<button type="button" class="cs-mat-link" data-refresh-materials>刷新解析状态</button>' : ''}
-          </p>`;})()}        </div>
-      </details>
       </section>
       `;
     const asideLayout = get('layout');      // 右栏「编排建议」已移除（章节类型移入计划面板），这里可能为 null
@@ -3640,6 +3638,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       await applyDecideOption(task, option.label);
       return;
     }
+    if(event.target.closest('[data-material-admin]')){ await openMaterialAdminDialog(); return; }
     const citeLocate=event.target.closest('[data-cite-locate]');
     if(citeLocate){
       const [section, quote] = String(citeLocate.dataset.citeLocate||'').split('|');
@@ -3657,6 +3656,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const data=await resp.json().catch(()=>({}));
         if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
         await loadMaterialLibrary(); paintAside();
+        host.querySelectorAll('dialog').forEach((d) => d.close());
         status(`已把 ${data.added||ids.length} 段素材应用到本章`);
       }catch(error){status(`应用失败：${error.message}`);}
       return;
