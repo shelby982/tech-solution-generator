@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v390';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v390';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v391';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v391';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2188,8 +2188,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       previewEl.innerHTML = previewContent(editor.value);
       const blocks = [...previewEl.querySelectorAll('p, li, h2, h3, h4')];
       const needle = quote.replace(/\s+/g, '').slice(0, 12);
-      const hit = blocks.find((el) => (el.textContent || '').replace(/\s+/g, '').includes(needle))
-        || blocks.find((el) => (el.textContent || '').includes(section));
+      const hit = (needle
+          && blocks.find((el) => (el.textContent || '').replace(/\s+/g, '').includes(needle)))
+        || (section && blocks.find((el) => (el.textContent || '').includes(section)));
       if (hit) {
         // 同时点亮所属小节标题，便于定位
         let heading = hit.previousElementSibling;
@@ -2203,7 +2204,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         return;
       }
     }
-    status(`已切到预览，但没有精确匹配到原句（${section}）`);
+    status(`已切到预览，但没匹配到原句${section ? `（${section}）` : ''}；原句：${quote.slice(0, 24)}…`);
   }
 
   /** 任务动作分发：上传 / 选说法 / 查看 / 定位 / 精简 */
@@ -2383,11 +2384,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const impactClass = task.impact === 'export_block' ? ' is-export'
         : task.impact === 'completion_block' ? ' is-completion' : '';
       const locate = task.target && (task.target.section || task.target.quote);
+      const occ = task.occurrences || [];
+      const occurrenceHint = occ.length > 1 ? `<p class="cs-task-loc">共 ${occ.length} 处：${occ.map((o, i) => `第${i + 1}处（${esc(o.section || '正文')}）`).join(' · ')}</p>` : '';
       return `<div class="cs-task${impactClass}">
           <div class="cs-task-head"><b>${esc(task.title)}</b>
             <span class="cs-task-impact">${esc(task.impact_text || '')}</span></div>
           ${task.why ? `<p class="cs-task-why">${esc(task.why)}</p>` : ''}
-          ${locate ? `<p class="cs-task-loc">${esc(task.target.section || '')}${task.target.quote ? ` · ${esc(String(task.target.quote).slice(0, 28))}` : ''}</p>` : ''}
+          ${locate ? `<p class="cs-task-loc">${esc(task.target.section || '正文')}${task.target.quote ? ` · ${esc(String(task.target.quote).slice(0, 28))}` : ''}</p>` : ''}
+          ${occurrenceHint}
+          ${occ.length > 1 ? `<div class="cs-task-acts"><button type="button" class="cs-todo-ignore" data-task-next="${esc(task.id)}">下一处 →</button></div>` : ''}
           ${(task.options || []).length ? `<div class="cs-task-opts">${task.options.slice(0, 3).map((opt, i) => `
               <button type="button" class="cs-task-opt" data-task-apply="${esc(task.id)}" data-opt-index="${i}">${esc(opt.label)}</button>`).join('')}
             </div>` : ''}
@@ -3130,6 +3135,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         await loadBasis(active.block_id); paintAside();
         status('已忽略（服务端记录，导出前仍会提醒）');
       }catch(error){status(error.message);}
+      return;
+    }
+    const taskNext=event.target.closest('[data-task-next]');
+    if(taskNext && active){
+      const task=findDeliveryTask(taskNext.dataset.taskNext);
+      const occ=(task && task.occurrences) || [];
+      if(occ.length){
+        taskNext._cursor = ((taskNext._cursor || 0) + 1) % occ.length;
+        const o = occ[taskNext._cursor];
+        locateTaskTarget({ ...task, target: { ...(task.target||{}), section: o.section, quote: o.quote } });
+        taskNext.textContent = `下一处 →（第 ${taskNext._cursor + 1}/${occ.length}）`;
+      }
       return;
     }
     const taskLocate=event.target.closest('[data-task-locate]');

@@ -300,18 +300,19 @@ def citation_items(content: str) -> list[dict]:
     """
     items: list[dict] = []
     seen: set[str] = set()
+    section = ""
     for line in str(content or "").splitlines():
         paragraph = line.strip()
-        if not paragraph or paragraph.startswith(("|", ":::", "#")):
+        head = _SECTION_RE.match(paragraph)
+        if head:
+            section = head.group(1).strip()          # 记住当前所属节（定位要用）
+            continue
+        if not paragraph or paragraph.startswith(("|", ":::")):
             continue
         if _CITE_RE.search(paragraph):
             continue                      # 本段已有来源 → 不报
         if not _POLICY_RE.search(paragraph):
             continue
-        section = ""
-        for hit_section, _sentence in _sentences(paragraph):
-            section = hit_section
-            break
         for match in _POLICY_RE.finditer(paragraph):
             name = match.group(0)
             key = f"cite:{name}"

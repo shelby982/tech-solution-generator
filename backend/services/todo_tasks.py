@@ -48,6 +48,7 @@ def _task(*, category: str, owner: str, title: str, **fields) -> dict:
         "options": fields.pop("options", []),
         "evidence": fields.pop("evidence", []),
         "dedupe_key": fields.pop("dedupe_key", ""),
+        "occurrences": fields.pop("occurrences", []),
         "status": "open",
     }
     task["impact_text"] = IMPACT_TEXT.get(task["impact"], "")
@@ -195,6 +196,9 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             target={"block_id": block_id,
                     "section": str(first.get("section") or _first_section(items, body)),
                     "quote": _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)},
+            occurrences=[{"section": str(x.get("section") or _first_section([x], body)),
+                          "quote": _clean_quote(str(x.get("sentence") or ""), body) or _quote_of(x, body)}
+                         for x in items],
             why=(f"这段引用了《{_policy_name(first)}》却整段没有【来源：…】；评委会问出处，补上来源即可"
                  if is_citation else f"这几处{key}不一致，建议统一后再交付"),
             impact="quality",
