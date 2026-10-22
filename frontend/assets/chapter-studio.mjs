@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v415';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v415';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v416';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v416';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -268,8 +268,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const kindLabel = { upload: '招标文件', web: '联网来源', doc: '法规/标准', unknown: '未匹配' };
     const kindClass = { upload: 'is-upload', web: 'is-web', doc: 'is-doc', unknown: 'is-unknown' };
     const pointsHtml = [...groups.entries()].map(([sectionName, points]) => `
-      <div class="cs-cite-group">
-        <p class="cs-cite-sec">${esc(sectionName)}</p>
+      <details class="cs-cite-group">
+        <summary class="cs-cite-sec"><span>${esc(sectionName)}</span>
+          <em>引用 ${points.length} 处</em></summary>
+        <div class="cs-cite-body-list">
         ${points.map((point) => `<div class="cs-cite-row">
           <span class="cs-cite-kind ${kindClass[point.kind] || 'is-unknown'}">${esc(kindLabel[point.kind] || '来源')}</span>
           <div class="cs-cite-body">
@@ -279,17 +281,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           </div>
           <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(sectionName)}|${esc(String(point.quote || ''))}">定位</button>
         </div>`).join('')}
-      </div>`).join('');
+        </div>
+      </details>`).join('');
     const missingHtml = (citations.missing || []).length ? `
-      <div class="cs-cite-missing">
-        <p class="cs-cite-sec">未标来源（${citations.missing.length} 处）</p>
+      <details class="cs-cite-group is-missing-group">
+        <summary class="cs-cite-sec"><span>未标来源</span><em>${citations.missing.length} 处</em></summary>
+        <div class="cs-cite-body-list">
         ${(citations.missing || []).slice(0, 6).map((item) => `<div class="cs-cite-row is-missing">
           <span class="cs-cite-kind is-missing">缺来源</span>
           <div class="cs-cite-body"><p class="cs-cite-quote">${esc(String(item.quote || '').slice(0, 50))}</p>
             <small>${esc(item.section || '正文')} 第 ${item.paragraph} 段</small></div>
           <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(item.section || '')}|${esc(String(item.quote || ''))}">定位</button>
         </div>`).join('')}
-      </div>` : '';
+        </div>
+      </details>` : '';
 
     // ② 素材库（折叠）：按来源类型分区
     const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
