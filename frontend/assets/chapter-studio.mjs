@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v405';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v405';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v406';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v406';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2403,12 +2403,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         editor.value = data.content || editor.value;
         context = await json(`/api/blocks/${active.id}/studio`);
         await loadBasis(active.block_id); paintAside();
-        await showProposalBar(`已补齐 ${data.changes.length} 处引用`, (data.changes || []).join(' · '), async () => {
-          await save();
-          status('已保留并保存');
-        }, async () => {
-          await restoreLastRevision();
-        });
+        await save();
+        status(`已补齐引用（${(data.changes || []).join(' · ')}）并保存`);
       } catch (error) { status(`补齐失败：${error.message}`); }
       return;
     }
@@ -2423,13 +2419,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         : '重写本节：把「拟/将/待/有待」等含糊表述改成明确做法或指标，保留原有引用与数字。';
       status(`系统正在按契约重写「${section.title}」…`);
       await streamWriteSection(active.id, section, null, extra, 'rewrite');
-      await showProposalBar(`已重写「${section.title}」（未保存）`, '这版是否保留？', async () => {
-        await save();
-        await loadBasis(active.block_id); paintAside();
-        status('已保留并保存');
-      }, async () => {
-        await restoreLastRevision();
-      });
+      await save();
+      await loadBasis(active.block_id); paintAside();
+      status(`已重写「${section.title}」并保存（不满意：更多 → 版本历史可回退）`);
       return;
     }
     if (type === 'generate_chart' || type === 'write_now' || type === 'fix_now') {
@@ -2479,6 +2471,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function runTaskQuickFix(task, type) {
     try {
       if (type === 'generate_chart') {
+      await generateAndInsertChart(task);
+      return;
+    }
+    if (type === 'generate_chart_legacy') {
         const kind = (task.action.payload || {}).kind;
         const title = (task.action.payload || {}).title || '';
         const section = (planBrief?.outline || []).find((s) => (s.deliverables || []).some((d) => d.title === title));
@@ -2497,12 +2493,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         status(`正在补写「${section.title}」…`);
         await streamWriteSection(active.id, section);
         await loadBasis(active.block_id); paintAside();
-        await showProposalBar(`已补写「${section.title}」（未保存）`, '这版内容要不要留在正文？', async () => {
-          await save();
-          status('已保留并保存');
-        }, async () => {
-          await restoreLastRevision();
-        });
+        await save();
+        status('已补写并保存（不满意：更多 → 版本历史可回退）');
         return;
       }
       if (type === 'fix_now') {
@@ -2571,6 +2563,107 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
+  }
+
+  /** 「重新编写本模块…」：选范围 + 填提示词 + 强度 → 直接重写并保存（优化的唯一入口） */
+  async function openRecomposeDialog() {
+    const outline = planBrief?.outline || [];
+    if (!outline.length) { status('还没有大纲：请先生成「本章计划」'); return; }
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    dlg.innerHTML = `<header><h3>重新编写本模块</h3><button type="button" data-rc-close>×</button></header>
+      <div class="cs-plan-body">
+        <label class="cs-field"><span>重写范围</span>
+          <select data-rc-scope>
+            ${outline.map((sec, index) => `<option value="${index}">第 ${index + 1} 节 · ${esc(sec.title)}</option>`).join('')}
+          </select></label>
+        <label class="cs-field"><span>提示词（怎么改）</span>
+          <textarea data-rc-prompt rows="4" placeholder="例如：写得更具体，把每个目标加上指标与验收口径；语言更简洁；补充安全设计细节…"></textarea></label>
+        <label class="cs-field"><span>改动强度</span>
+          <select data-rc-strength>
+            <option value="conservative">保守：只改表述，不动结构</option>
+            <option value="normal" selected>正常：按提示词改写这一节</option>
+            <option value="aggressive">大改：可以重排结构与篇幅</option>
+          </select></label>
+        <p class="cs-muted">重写会覆盖这一节，并自动保存；不满意可在「更多 → 版本历史」回退。</p>
+      </div>
+      <footer class="cs-ins-foot">
+        <button type="button" class="cs-cp-ghost" data-rc-cancel>取消</button>
+        <button type="button" class="cs-cp-primary" data-rc-go>开始重写</button>
+      </footer>`;
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-rc-close]') || event.target.closest('[data-rc-cancel]')) { dlg.close(); return; }
+      if (!event.target.closest('[data-rc-go]')) return;
+      const index = Number(dlg.querySelector('[data-rc-scope]').value || 0);
+      const prompt = String(dlg.querySelector('[data-rc-prompt]').value || '').trim();
+      const strength = dlg.querySelector('[data-rc-strength]').value;
+      const section = outline[index];
+      dlg.close();
+      const extra = [prompt, strength === 'conservative' ? '保持现有结构与篇幅，只改表述。'
+        : strength === 'aggressive' ? '可以重排结构、调整篇幅，但必须保留引用与数字。' : ''].filter(Boolean).join(' ');
+      status(`正在按提示词重写「${section.title}」…`);
+      try {
+        await streamWriteSection(active.id, section, null, extra, 'rewrite');
+        await save();
+        await loadBasis(active.block_id); paintAside();
+        status(`已重写「${section.title}」并保存`);
+      } catch (error) { status(`重写失败：${error.message}`); }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  /** 「生成表格/图示」：系统直接生成并插入正文（不留占位、不需确认） */
+  async function generateAndInsertChart(task) {
+    const payload = task.action?.payload || {};
+    const title = String(payload.title || '');
+    const kind = String(payload.kind || '');
+    const sectionTitle = String(task.target?.section || '');
+    const role = kind === 'figure' ? 'diagram' : 'table';
+    status(`正在生成${role === 'diagram' ? '图示' : '表格'}「${title}」并插入正文…`);
+    try {
+      const body = {
+        block_id: active.id,
+        thread_id: threadId,
+        title,
+        section: sectionTitle,
+        role,
+        deliverable: { kind, title, type: payload.type || 'layered', nodes: payload.nodes || 0 },
+      };
+      const resp = await fetch(`/api/projects/${projectId}/studio/${role === 'diagram' ? 'diagram' : 'table'}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          signal: AbortSignal.timeout(180000) });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+      const markdown = data.markdown || data.content || '';
+      if (!markdown) throw new Error('没有生成出内容');
+      let text = String(editor.value || '');
+      // ① 有占位就替换占位；② 否则插入到该节末尾（并补引用句）
+      const placeholder = new RegExp(`\\[\\[(FIGURE|TABLE):${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`);
+      if (placeholder.test(text)) {
+        text = text.replace(placeholder, markdown);
+      } else {
+        text = insertIntoSection(text, sectionTitle, markdown);
+      }
+      text = ensureChartReference(text, sectionTitle, markdown);
+      editor.value = text;
+      changed();
+      await save();
+      await loadBasis(active.block_id); paintAside();
+      status(`已生成并插入「${title}」（不满意：更多 → 版本历史回退）`);
+    } catch (error) {
+      status(`生成失败：${error.message}（该处已按完整文字处理，章节仍可交付）`);
+    }
+  }
+
+  /** 把 markdown 插到某节末尾 */
+  function insertIntoSection(content, sectionTitle, markdown) {
+    const text = String(content || '');
+    if (!sectionTitle) return `${text.trimEnd()}\n\n${markdown}\n`;
+    const pattern = new RegExp(`(^##[ \\t]+${String(sectionTitle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\n[\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
+    if (!pattern.test(text)) return `${text.trimEnd()}\n\n${markdown}\n`;
+    return text.replace(pattern, (all) => `${all.trimEnd()}\n\n${markdown}\n\n`);
   }
 
   /** 系统产出的确认条：保留 / 撤销（不静默改稿） */
@@ -2655,7 +2748,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ? `<div class="cs-readiness ${score >= 90 ? 'is-ok' : score >= 70 ? 'is-warn' : 'is-bad'}">
            <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
       : '';
-    return `${scoreHtml}<h4>待办 <small>需要你 ${need.length} 件${system.length ? ` · 系统处理 ${system.length}` : ''}</small></h4>
+    return `${scoreHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
         ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}
@@ -3666,6 +3759,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
       if(action==='link'){await json(`/api/blocks/${active.id}/studio/materials`,send('PUT',{material_id:Number(button.dataset.id),section:pendingMaterialSection||''}));pendingMaterialSection='';context=await json(`/api/blocks/${active.id}/studio`);paintAside();}
       if(action==='project-todo') { openProjectTodoDialog(); return; }
+      if(action==='recompose') { await openRecomposeDialog(); return; }
       if(action==='writing-settings') { await openWritingSettingsDialog(); return; }
       if(action==='complete') {
         const blockId=active.id;

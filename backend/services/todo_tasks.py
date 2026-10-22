@@ -297,6 +297,10 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     hard = sum(1 for task in need_user if task["impact"] in ("export_block", "completion_block"))
     soft = sum(1 for task in need_user if task["impact"] not in ("export_block", "completion_block"))
     score = max(0, 100 - hard * 12 - soft * 4 - len(system) * 1)
+    # 产品原则：系统能做的**不进待办**（用户在计划里点一次「按计划编写」即可）。
+    # 待办只留"只有人能给的东西"：上传材料 / 定口径 / 确认完成。
+    system = [task for task in system
+              if str(task.get("action", {}).get("type")) in ("confirm_complete",)]
     summary = {
         "readiness": score,
         "readiness_text": ("可以交付" if score >= 90 else "接近可交付" if score >= 70

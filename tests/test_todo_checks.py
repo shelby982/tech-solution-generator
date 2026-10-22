@@ -91,10 +91,11 @@ def test_delivery_tasks_three_zones_and_verb_titles():
     # 材料缺口 → 上传卡；决定项 → 选择卡；引用 → 核对卡（同类合并）
     assert any(t["action"]["type"] == "upload_material" for t in need)
     assert any(t["action"]["type"] == "choose" for t in need)
-    # 引用来源改由"系统先查"（system 区），用户区不再出现
-    assert any("引用" in t["title"] for t in (need + system_tasks))
-    # 系统任务：依据 + 图表 + 补写，且不计入 need_user
-    assert any("依据" in t["title"] for t in payload["system"])
+    # 产品原则：系统能做的**不进待办**（只保留上传材料/定口径/确认完成）
+    assert not any("引用" in t["title"] for t in need)
+    assert system_tasks == []
+    # 系统任务不再进待办（生成时自动完成）；need_user 只保留人才能给的
+    assert payload["summary"]["need_user"] >= 1
     # 篇幅超 → 建议
     assert any("精简" in t["title"] for t in payload["suggestion"])
     # 每张卡都有影响文案与定位字段

@@ -246,6 +246,12 @@ async def run_job(job_id: str) -> None:
                 # 正文净化：不留任何"待补充"字眼（用户要求：可以浅，但必须完整）
                 from services.placeholder_purge import purge as purge_placeholders
                 draft, purged_items = purge_placeholders(draft)
+                # 系统自动补齐：政策文号 / 等级保护标准号（确定性信息，不需要用户点）
+                from services.citation_enrich import enrich as enrich_citations
+                draft, cite_changes = enrich_citations(draft)
+                # 内部语法/术语也一并清掉，交付版本就是干净版本
+                from services.delivery_gate import auto_fix as gate_auto_fix
+                draft, _gate_changed, _ = gate_auto_fix(draft)
                 model_note = " ".join(f"{role}={model}" for role, model in (models or {}).items() if model)
                 await add_revision(db, block_pk, base,
                                    summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai")
@@ -426,8 +432,18 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
         return {"ok": False, "role": role, "index": index, "title": title, "error": str(exc)[:200]}
 
 
+_CHART_FALLBACK = {
+    "FIGURE": ("如上所述，相关维度与取值以招标文件及批复要求为准。"),
+    "TABLE": ("如上表所示，具体要求与指标以招标文件及批复要求为准。"),
+}
+
+
 def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
-    """把图表替换进占位符；返回 (正文, 待补说明)。"""
+    """把图表替换进占位符；返回 (正文, 说明)。
+
+    **产品原则：正文不留任何占位。** 图表没生成出来时，把占位替换成一句
+    完整的文字表述（该节仍可交付），而不是留下 `[[FIGURE:x]]` 让用户补。
+    """
     missing: list[str] = []
     used: set[str] = set()
     for chart in charts:
@@ -437,8 +453,11 @@ def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
         if pattern.search(text):
             text = pattern.sub(lambda _m: "\n\n" + chart["markdown"] + "\n\n", text, count=1)
             used.add(str(chart.get("title")))
+    # 没生成出来的占位 → 替换成完整文字（不留空位，也不进待办）
     for match in _PLACEHOLDER_RE.finditer(text):
-        missing.append(match.group(2))
+        kind = match.group(1)
+        missing.append(f"{'图' if kind == 'FIGURE' else '表'}「{match.group(2)}」未能生成，已降级为文字表述")
+        text = text.replace(match.group(0), _CHART_FALLBACK.get(kind, "具体内容以招标文件要求为准。"))
     text = _PLACEHOLDER_RE.sub("", text)
     for chart in charts:
         if chart.get("ok") and str(chart.get("title")) not in used:
