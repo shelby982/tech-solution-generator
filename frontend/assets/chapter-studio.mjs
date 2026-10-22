@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v419';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v419';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v420';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v420';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -275,10 +275,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <span class="cs-dim">上传后自动解析成片段，可直接应用到本章</span>
         </div>
         <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索素材…" /></div>
-        <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
-        <div class="cs-ml-list">${rowHtml(uploadItems) || '<p class="cs-muted">还没有上传素材</p>'}</div>
-        <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
-        <div class="cs-ml-list">${rowHtml(webItems) || '<p class="cs-muted">还没有联网搜索的素材</p>'}</div>
+        <div class="cs-madmin-cols">
+          <section class="cs-madmin-col">
+            <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
+            <div class="cs-ml-list">${rowHtml(uploadItems) || '<p class="cs-muted">还没有上传素材</p>'}</div>
+          </section>
+          <section class="cs-madmin-col">
+            <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
+            <div class="cs-ml-list">${rowHtml(webItems) || '<p class="cs-muted">还没有联网搜索的素材</p>'}</div>
+          </section>
+        </div>
       </div>
       <footer class="cs-ins-foot">
         <button type="button" class="cs-cp-ghost" data-madmin-close2>关闭</button>

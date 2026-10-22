@@ -963,3 +963,9 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-cite-group.is-missing-group { border-color: #fde68a; background: #fffbeb; }
 .cs-cite-group.is-missing-group > summary.cs-cite-sec { color: #92400e; }
 .cs-cite-body-list { padding: 0 7px 7px; }
+
+/* 素材库弹窗：我上传的 / 联网搜索的 左右两列 */
+.cs-madmin-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.cs-madmin-col { min-width: 0; }
+.cs-madmin-col .cs-ml-list { max-height: 340px; overflow: auto; }
+@media (max-width: 720px) { .cs-madmin-cols { grid-template-columns: 1fr; } }
