@@ -1161,6 +1161,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "material_gaps": material_gaps,
         "generation_gaps": generation_gaps or [],
         "outline": (chapter or {}).get("outline") or [],
+        "practiceOverrides": await _practice_overrides(db, project_id, block_id),
         "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
                             word_plan, guidance, content, is_parent_chapter, is_catalog),
         "todo_items": build_todo_items(deliverables, material_gaps or [], generation_gaps or [],
@@ -1482,3 +1483,14 @@ def build_todo_items(deliverables: list[dict], material_gaps: list[dict], genera
 
     items.sort(key=lambda x: (_GROUP_ORDER.get(x["group"], 9), 0 if x["severity"] == "block" else 1))
     return items
+
+
+async def _practice_overrides(db, project_id: int, block_id: str) -> dict[str, str]:
+    """每节的"写法"覆盖（= 该节提示词）。"""
+    try:
+        rows = await (await db.execute(
+            "SELECT section, practice FROM section_practices WHERE project_id=? AND block_id=?",
+            (project_id, block_id or ""))).fetchall()
+        return {row[0]: row[1] for row in rows if row[1]}
+    except Exception:
+        return {}

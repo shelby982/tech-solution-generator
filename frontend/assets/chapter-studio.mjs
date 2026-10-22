@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v407';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v407';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v408';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v408';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -233,6 +233,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
   let basisInfo = null;
   let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
+
+  /** 这一节的"写法"（= 该节提示词）：优先用保存过的覆盖值，否则用系统默认 */
+  function practiceOf(section) {
+    const saved = (planBrief?.practiceOverrides || {})[String(section.title)];
+    if (saved) return saved;
+    const how = section.how || {};
+    const parts = [how.structure, how.style, (how.pitfalls || []).length ? `避免：${(how.pitfalls || []).join('、')}` : '']
+      .filter(Boolean);
+    return parts.length ? parts.join('\n') : '（按本节要点展开，先结论后分点，落到本项目具体工作）';
+  }
+
+  /** 保存某节写法（批量编写时按此执行） */
+  async function saveSectionPractice(index) {
+    const outline = planBrief?.outline || [];
+    const section = outline[index];
+    const area = host.querySelector(`[data-ol-how="${index}"]`);
+    if (!section || !area) return;
+    const text = String(area.value || '').trim();
+    try {
+      await json(`/api/projects/${projectId}/chapters/${encodeURIComponent(active.block_id)}/plan/practice`, {
+        method: 'PUT',
+        body: { section: section.title, practice: text },
+      });
+      planBrief = planBrief || {};
+      planBrief.practiceOverrides = { ...(planBrief.practiceOverrides || {}), [String(section.title)]: text };
+      status(`已保存「${section.title}」的写法；点「按写法批量编写」即按此执行`);
+    } catch (error) { status(`保存失败：${error.message}`); }
+  }
 
   /** 依据 ↔ 正文对应 + 本章计划摘要（待办数）。 */
   async function loadBasis(blockKey) {
@@ -530,6 +558,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节 · 编写进度见右栏「进度」` : '未生成（0 节）'}</em>
             <button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${(data.outline || []).length ? '重做大纲' : '生成大纲'}</button></summary>
           <div class="cs-cp-fold-body">
+            ${(data.outline || []).length ? `<div class="cs-ol-batch">
+              <button type="button" class="cs-cp-primary" data-ol-batch-write>按写法批量编写本章</button>
+              <span class="cs-dim">按每节的「写法」逐节生成（可先调整写法再点）</span>
+            </div>` : ''}
             ${(data.outline || []).length ? (data.outline || []).map((sec, i) => {
               const basis = (sec.basis || []).map((b) => `${esc(b.ref)}${b.use ? `（${esc(b.use)}）` : ''}`).join(' · ');
               const how = sec.how || {};
@@ -546,8 +578,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                   <span class="cs-ol-meta">${sec.words || 900} 字</span>
                 </summary>
                 <div class="cs-ol-detail">
-                  <p><b>依据</b>${basis ? esc(basis) : '（继承本章依据）'}</p>
-                  <p><b>写法</b>${esc(how.structure || '（按本节要点展开）')}${how.style ? ` · ${esc(how.style)}` : ''}${(how.pitfalls || []).length ? ` · 避免：${(how.pitfalls || []).map((x) => esc(x)).join('；')}` : ''}</p>
+                  <div class="cs-ol-how">
+                    <p class="cs-ol-how-title"><b>写法</b><span class="cs-dim">（这一节怎么写 = 该节的提示词，可改）</span></p>
+                    <textarea class="cs-ol-how-text" data-ol-how="${i}" rows="4">${esc(practiceOf(sec))}</textarea>
+                    <div class="cs-ol-how-acts">
+                      <button type="button" class="cs-cp-ghost" data-ol-how-reset="${i}">恢复默认</button>
+                      <button type="button" class="cs-cp-primary" data-ol-how-save="${i}">保存写法</button>
+                    </div>
+                  </div>
                   <p><b>交付物</b>${deliv || '文字'}</p>
                 </div>
               </details>`;
@@ -3490,6 +3528,29 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const option=(task.options||[])[index];
       if(!task || !option){status('这条没有可选项');return;}
       await applyDecideOption(task, option.label);
+      return;
+    }
+    const olBatch=event.target.closest('[data-ol-batch-write]');
+    if(olBatch){
+      host.querySelectorAll('dialog').forEach((d) => d.close());
+      const headBtn = globalThis.document.querySelector('[data-action="ai"]');
+      if(headBtn){ headBtn.click(); }
+      else { status('请用章头的「编写整章」按写法批量生成'); }
+      return;
+    }
+    const howSave=event.target.closest('[data-ol-how-save]');
+    if(howSave){ await saveSectionPractice(Number(howSave.dataset.olHowSave || 0)); return; }
+    const howReset=event.target.closest('[data-ol-how-reset]');
+    if(howReset){
+      const index=Number(howReset.dataset.olHowReset||0);
+      const area=host.querySelector(`[data-ol-how="${index}"]`);
+      const section=(planBrief?.outline||[])[index];
+      if(area && section){
+        const how=section.how||{};
+        const parts=[how.structure, how.style, (how.pitfalls||[]).length?`避免：${(how.pitfalls||[]).join('、')}`:''].filter(Boolean);
+        area.value = parts.length ? parts.join('\n') : '（按本节要点展开，先结论后分点，落到本项目具体工作）';
+        status('已恢复系统默认写法（点「保存写法」生效）');
+      }
       return;
     }
     const taskFallback=event.target.closest('[data-task-fallback]');

@@ -160,6 +160,15 @@ CREATE INDEX IF NOT EXISTS idx_writing_specs_key ON writing_specs(key, version D
 
 -- 技术评分点一级目录的编写计划：先规划、确认、再并发生成（P0）。
 -- 单位 = 「技术评分项应答」评分根下的一级子目录；plan 里存整棵子树的叶子计划。
+CREATE TABLE IF NOT EXISTS section_practices (
+    project_id INTEGER NOT NULL,
+    block_id   TEXT NOT NULL,          -- 章节编码（s1.2.1.1）
+    section    TEXT NOT NULL,          -- 节标题
+    practice   TEXT NOT NULL DEFAULT '',  -- 该节"写法"（= 生成时用的提示词）
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, block_id, section)
+);
+
 CREATE TABLE IF NOT EXISTS writing_plans (
     id TEXT PRIMARY KEY,
     project_id INTEGER NOT NULL,

@@ -239,3 +239,17 @@ async def citation_enrich(block_id: int):
         await add_revision(db, block_id, before, summary="系统补齐引用：文号/标准号", source="ai")
         await update_block_content(db, block_id, after)
     return {"changed": True, "changes": changes, "content": after}
+
+
+class PracticeBody(BaseModel):
+    section: str = Field(min_length=1)
+    practice: str = ""
+
+
+@router.put('/projects/{project_id}/chapters/{block_code}/plan/practice')
+async def save_section_practice(project_id: int, block_code: str, body: PracticeBody):
+    """保存某节"写法"（= 该节提示词）；清空则恢复系统默认。"""
+    from services.section_practice import save_practice
+
+    await _chapter_block(project_id, block_code)
+    return await save_practice(project_id, block_code, body.section, body.practice)

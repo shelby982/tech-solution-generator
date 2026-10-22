@@ -408,6 +408,13 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
             original_text = ''
     from services.section_contract import contract_for as _contract_for
     _contract = _contract_for(title)
+    _practice = ''
+    if not extra_request:
+        try:
+            from services.section_practice import practice_of as _practice_of
+            _practice = await _practice_of(block['project_id'], block['block_id'], title)
+        except Exception:
+            _practice = ''
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
@@ -417,6 +424,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节写法：{json.dumps(payload.get('how') or {}, ensure_ascii=False)}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
+        + (f"【本节写法（按计划执行）】{_practice}\n" if _practice else "")
         + (f"【本节硬性要求】{_contract}\n" if _contract else "")
         + (f"【本次额外要求】{extra_request}\n" if extra_request else '')
         + (f"【本节原文】\n{original_text[:4000]}\n" if is_rewrite and original_text else '')

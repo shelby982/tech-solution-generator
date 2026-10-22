@@ -885,3 +885,14 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-task-materials ul { margin: 0 0 4px; padding-left: 16px; }
 .cs-task-materials li { font-size: 10.5px; color: #475569; line-height: 1.55; }
 .cs-task-mat-meta { margin: 2px 0 0; font-size: 10px; color: #94a3b8; line-height: 1.5; }
+
+/* 写法（每节提示词）编辑 */
+.cs-ol-how { margin: 0 0 6px; }
+.cs-ol-how-title { margin: 0 0 4px; display: flex; align-items: baseline; gap: 6px; }
+.cs-ol-how-text { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 7px;
+  padding: 7px 9px; font-size: 11.5px; line-height: 1.6; color: #334155; background: #fff; resize: vertical;
+  font-family: inherit; }
+.cs-ol-how-text:focus { outline: none; border-color: #93c5fd; box-shadow: 0 0 0 2px rgba(147,197,253,.25); }
+.cs-ol-how-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.cs-ol-batch { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 10px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; }
