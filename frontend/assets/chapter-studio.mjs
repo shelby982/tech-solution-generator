@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v399';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v399';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v401';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v401';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2168,7 +2168,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     bar.innerHTML = `<span class="cs-gate-dot"></span>
       <span class="cs-gate-text">本章有 <b>${total}</b> 处不能交付的内容：${parts.join(' · ')}（导出前必须清零）</span>
       ${summary.auto_fixable ? `<button type="button" class="cs-gate-act" data-gate-fix>一键清理 ${summary.auto_fixable} 处</button>` : ''}
-      <button type="button" class="cs-gate-act" data-gate-show>查看清单</button>`;
+      <button type="button" class="cs-gate-act" data-gate-show>在待办里处理</button>`;
   }
 
   /** 交付门清单：列出每条（节 + 原句），可定位 */
@@ -2461,6 +2461,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
+    if (type === 'gate_fix') { await runGateFix(); return; }
+    if (type === 'gate_placeholder') {
+      await refreshDeliveryGate();
+      openGateDialog();
+      return;
+    }
     if (type === 'add_citation') {
       locateTaskTarget(task);
       const btn = globalThis.document.querySelector('[data-cite-open]');
@@ -3401,7 +3407,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     if(event.target.closest('[data-gate-fix]')){ await runGateFix(); return; }
-    if(event.target.closest('[data-gate-show]')){ openGateDialog(); return; }
+    if(event.target.closest('[data-gate-show]')){ showPanel('todo'); status('已切到待办：交付门的问题都在「需要你处理 / 系统处理中」里'); return; }
     const modelBtn=event.target.closest('[data-agent-model]');
     if(modelBtn){
       event.preventDefault();
@@ -3748,8 +3754,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='export-chapter'||action==='export-group') {
         if(!await save())return;
         await refreshDeliveryGate();
-        const gate = await openGateBlockDialog();
-        if (gate === 'cancel') return;
+        const gateState = (gateInfo || {}).summary || {};
+        if ((gateState.blocking || 0) > 0) {
+          // 交付门未清零 → 用待办同一套阻塞确认（可以带风险导出）
+          const blocking = (planBrief?.deliveryTasks?.need_user || []).filter((x) => x.impact === 'export_block');
+          const ok = await openRiskExportDialog(
+            blocking.length ? blocking
+                            : [{ title: `${gateState.blocking} 处不能交付的内容`, group_label: '交付门', evidence: '占位符/内部语法/内部术语' }],
+          );
+          if (!ok) return;
+        }
         const blocking=(planBrief?.todoItems||[]).filter(x=>x.severity==='block');
         if(blocking.length){
           const ok=await openRiskExportDialog(blocking);

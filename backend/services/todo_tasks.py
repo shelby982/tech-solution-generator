@@ -237,6 +237,33 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             action={"type": "condense_preview", "label": "预览精简", "payload": {"target": target}},
         ))
 
+    # ⑦b 交付门并入（内部语法/术语→系统可一键清理；占位符→需要你补）
+    try:
+        from services.delivery_gate import scan as gate_scan
+        gate = gate_scan(body)
+        kinds = (gate.get("summary") or {}).get("by_kind") or {}
+        if kinds.get("placeholder"):
+            need_user.append(_task(
+                category="supply", owner="user",
+                title=f"补 {kinds['placeholder']} 处待补充内容",
+                dedupe_key="gate:placeholder",
+                why="正文里有【待补充：…】占位。要么补上真材料，要么删掉这句断言，否则导出会被判「没做完」",
+                impact="export_block",
+                action={"type": "gate_placeholder", "label": "逐条处理", "payload": {"count": kinds["placeholder"]}},
+            ))
+        auto = (kinds.get("syntax") or 0) + (kinds.get("term") or 0)
+        if auto:
+            system.append(_task(
+                category="system", owner="system",
+                title=f"清理 {auto} 处不能交付的写法",
+                dedupe_key="gate:auto",
+                why="内部语法残留（图块标记/type=）与内部术语（任务包/评分点）会让评委看出未整理；系统可一键清理并写版本",
+                impact="quality",
+                action={"type": "gate_fix", "label": "一键清理", "payload": {"count": auto}},
+            ))
+    except Exception:
+        pass
+
     # ⑧ 确认完成（未确认时给一张"确认"卡，而不是门槛列表）
     if completion is not None and not completion.get("ok", True) and (need_user or system):
         pass  # 完成条件不单独成卡；顶部状态条展示原因（v3 §5.2）
