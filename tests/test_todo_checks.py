@@ -243,3 +243,20 @@ def test_purge_keeps_complete_sentences_only():
     after, _ = purge("## 一\n\n本节重点包括【待补充：条款原文】。\n\n正文结论明确。\n")
     assert "本节重点包括" not in after
     assert "正文结论明确" in after
+
+
+def test_citation_enrich_adds_doc_numbers_and_standard():
+    """引用补齐：政策文号与等级保护标准号由系统补（确定性信息）。"""
+    from services.citation_enrich import enrich
+
+    content = ("## 项目政策依据梳理\n\n"
+               "《中华人民共和国网络安全法》要求履行安全保护义务。\n"
+               "本项目按网络安全等级保护相关要求实施。\n")
+    after, changes = enrich(content)
+    assert any("补文号" in c for c in changes)
+    assert "主席令第五十三号" in after
+    assert any("补标准号" in c for c in changes)
+    assert "GB/T 22239-2019" in after
+    # 已有文号时不再重复补
+    again, changes_again = enrich(after)
+    assert changes_again == []

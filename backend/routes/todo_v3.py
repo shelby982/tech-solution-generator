@@ -219,3 +219,23 @@ async def delivery_gate_fix(block_id: int, body: GateFixBody):
     remaining = scan(after)
     return {"changed": changed, "changes": changes, "content": after,
             "remaining": remaining["summary"], "blocking": remaining["blocking"]}
+
+
+@router.post('/blocks/{block_id}/studio/citation-enrich')
+async def citation_enrich(block_id: int):
+    """系统补齐引用：政策文号 + 等级保护标准号（确定性信息，不用模型）。"""
+    from services.block_store import add_revision, get_block, update_block_content
+    from services.citation_enrich import enrich
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    before = block.get("content") or ""
+    after, changes = enrich(before)
+    if not changes:
+        return {"changed": False, "changes": [], "content": before}
+    async with get_db() as db:
+        await add_revision(db, block_id, before, summary="系统补齐引用：文号/标准号", source="ai")
+        await update_block_content(db, block_id, after)
+    return {"changed": True, "changes": changes, "content": after}

@@ -193,6 +193,17 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         groups.setdefault(key, []).append(proof)
     for key, items in groups.items():
         first = items[0]
+        if key == "引用格式":
+            system.append(_task(
+                category="system", owner="system",
+                title="补引用文号与标准号",
+                dedupe_key="cite:enrich",
+                why=("政策的文号、等级保护的标准号都是确定信息，系统直接补齐并写版本；"
+                     "补完给你确认，不满意可撤销"),
+                impact="quality",
+                action={"type": "enrich_citation", "label": "系统补齐", "payload": {}},
+            ))
+            continue
         if key in ("指标", "表述"):
             # 这两类系统能按小节契约重写，不需要用户手动改
             system.append(_task(

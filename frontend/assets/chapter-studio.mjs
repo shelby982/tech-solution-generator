@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v404';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v404';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v405';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v405';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2391,6 +2391,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const btn = globalThis.document.querySelector('[data-cite-open]');
       if (btn) { btn.click(); status('已打开检索：把缺的依据逐条搜进本章（查到会自动挂上）'); }
       else status('已记录：系统会去公开来源检索这些依据');
+      return;
+    }
+    if (type === 'enrich_citation') {
+      status('系统正在补齐引用文号/标准号…');
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/studio/citation-enrich`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        if (!data.changed) { status('引用信息已完整，无需补齐'); return; }
+        editor.value = data.content || editor.value;
+        context = await json(`/api/blocks/${active.id}/studio`);
+        await loadBasis(active.block_id); paintAside();
+        await showProposalBar(`已补齐 ${data.changes.length} 处引用`, (data.changes || []).join(' · '), async () => {
+          await save();
+          status('已保留并保存');
+        }, async () => {
+          await restoreLastRevision();
+        });
+      } catch (error) { status(`补齐失败：${error.message}`); }
       return;
     }
     if (type === 'rewrite_now') {
