@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v408';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v408';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v409';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v409';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -555,7 +555,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
         <details class="cs-cp-block" data-cp-sec="outline" open>
-          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节 · 编写进度见右栏「进度」` : '未生成（0 节）'}</em>
+          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节` : '未生成（0 节）'}</em>
             <button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${(data.outline || []).length ? '重做大纲' : '生成大纲'}</button></summary>
           <div class="cs-cp-fold-body">
             ${(data.outline || []).length ? `<div class="cs-ol-batch">
@@ -618,10 +618,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             </label>
           </div>
         </details>
-        <div class="cs-cp-footer">
-          <button type="button" class="cs-cp-ghost" data-cp-close>关闭</button>
-          <span class="cs-cp-scope">编写与进度见右栏「进度」页签</span>
-        </div>
+
         <div data-cp-req-edit hidden></div>`;
       bindEvents();
     };
