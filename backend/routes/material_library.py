@@ -33,13 +33,47 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
     sql += " ORDER BY mc.material_id DESC, mc.chunk_index LIMIT ?"
     args.append(max(1, min(200, limit)))
     async with get_db() as db:
+        # 搜索来源的片段：首次访问时按 citations.segments 懒生成（默认待确认）
+        try:
+            cites = await (await db.execute(
+                "SELECT id, title, segments FROM citations WHERE project_id=?", (project_id,))).fetchall()
+            for cite in cites:
+                have = (await (await db.execute(
+                    "SELECT COUNT(*) FROM citation_chunks WHERE citation_id=?", (cite[0],))).fetchone())[0]
+                if have:
+                    continue
+                import json as _json
+                try:
+                    segments = _json.loads(cite[2] or "[]")
+                except Exception:
+                    segments = []
+                for index, seg in enumerate(segments or []):
+                    text = str((seg or {}).get("content") or "").strip()
+                    if len(text) < 20:
+                        continue
+                    await db.execute(
+                        "INSERT OR IGNORE INTO citation_chunks (citation_id, chunk_index, heading, content, status) "
+                        "VALUES (?,?,?,?, 'pending')",
+                        (cite[0], index, str((seg or {}).get("heading") or cite[1] or "")[:80], text[:1200]))
+            await db.commit()
+        except Exception:
+            pass
         rows = await (await db.execute(sql, args)).fetchall()
+        cite_rows = await (await db.execute(
+            "SELECT cc.id, c.id, cc.chunk_index, cc.heading, cc.content, cc.status, c.domain "
+            "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+            "WHERE c.project_id=? AND cc.status=? ORDER BY cc.id DESC LIMIT ?",
+            (project_id, status, max(1, min(200, limit))))).fetchall()
         counts = {}
         for state in ("confirmed", "pending"):
-            counts[state] = (await (await db.execute(
+            file_count = (await (await db.execute(
                 "SELECT COUNT(*) FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
                 "WHERE m.project_id=? AND m.deleted_at IS NULL AND COALESCE(mc.status,'confirmed')=?",
                 (project_id, state))).fetchone())[0]
+            cite_count = (await (await db.execute(
+                "SELECT COUNT(*) FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+                "WHERE c.project_id=? AND cc.status=?", (project_id, state))).fetchone())[0]
+            counts[state] = file_count + cite_count
         files = await (await db.execute(
             "SELECT m.id, m.filename, m.role, m.parse_status, "
             "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id) AS chunks, "
@@ -47,8 +81,14 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
             "FROM materials m WHERE m.project_id=? AND m.deleted_at IS NULL ORDER BY m.id DESC",
             (project_id,))).fetchall()
     items = [{"chunk_id": row[0], "material_id": row[1], "index": row[2], "page": row[3],
-              "text": row[4], "status": row[5] or "confirmed", "filename": row[6], "role": row[7]}
+              "text": row[4], "status": row[5] or "confirmed", "filename": row[6], "role": row[7],
+              "chunk_kind": "file"}
              for row in rows]
+    for row in cite_rows:
+        items.append({"chunk_id": row[0], "material_id": 0, "index": row[2], "page": 0,
+                      "text": row[4], "status": row[5], "filename": row[3] or (row[6] or "公开来源"),
+                      "role": "cite", "chunk_kind": "cite"})
+    items.sort(key=lambda item: (item["status"] != status, item["chunk_id"]), reverse=False)
     return {"items": items, "counts": counts,
             "files": [{"id": r[0], "filename": r[1], "role": r[2], "parse_status": r[3],
                        "chunks": r[4], "confirmed": r[5]} for r in files]}
@@ -65,15 +105,25 @@ async def confirm_chunks(project_id: int, body: ChunkActionBody):
     if not body.chunk_ids:
         return {"changed": 0}
     status = {"confirm": "confirmed", "reject": "rejected", "pending": "pending"}[body.action]
+    cite_ids = [int(cid) for cid in body.chunk_ids if int(cid) < 0]      # 负数 = 搜索片段（-id）
+    file_ids = [int(cid) for cid in body.chunk_ids if int(cid) > 0]
+    changed = 0
     async with get_db() as db:
-        placeholders = ",".join("?" for _ in body.chunk_ids)
-        cur = await db.execute(
-            f"UPDATE material_chunks SET status=?, confirmed_at=CURRENT_TIMESTAMP "
-            f"WHERE id IN ({placeholders}) AND material_id IN "
-            f"(SELECT id FROM materials WHERE project_id=? AND deleted_at IS NULL)",
-            [status, *body.chunk_ids, project_id])
+        for cid in cite_ids:
+            cur = await db.execute(
+                "UPDATE citation_chunks SET status=?, confirmed_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND citation_id IN (SELECT id FROM citations WHERE project_id=?)",
+                (status, -cid, project_id))
+            changed += cur.rowcount or 0
+        if file_ids:
+            placeholders = ",".join("?" for _ in file_ids)
+            cur = await db.execute(
+                f"UPDATE material_chunks SET status=?, confirmed_at=CURRENT_TIMESTAMP "
+                f"WHERE id IN ({placeholders}) AND material_id IN "
+                f"(SELECT id FROM materials WHERE project_id=? AND deleted_at IS NULL)",
+                [status, *file_ids, project_id])
+            changed += cur.rowcount or 0
         await db.commit()
-        changed = cur.rowcount or 0
     return {"changed": changed, "status": status}
 
 
@@ -83,13 +133,20 @@ async def bound(block_id: int):
     async with get_db() as db:
         rows = await (await db.execute(
             "SELECT b.chunk_id, mc.material_id, b.section, b.mode, 1, "
-            "       mc.chunk_index, mc.page, mc.content, m.filename "
+            "       mc.chunk_index, mc.page, mc.content, m.filename, COALESCE(b.chunk_kind,'file') "
             "FROM chapter_material_chunks b JOIN material_chunks mc ON mc.id=b.chunk_id "
-            "LEFT JOIN materials m ON m.id=mc.material_id WHERE b.block_id=?",
+            "LEFT JOIN materials m ON m.id=mc.material_id "
+            "WHERE b.block_id=? AND COALESCE(b.chunk_kind,'file')='file'",
             (block_id,))).fetchall()
+        cite_rows = await (await db.execute(
+            "SELECT b.chunk_id, 0, b.section, b.mode, 1, cc.chunk_index, 0, cc.content, cc.heading, 'cite' "
+            "FROM chapter_material_chunks b JOIN citation_chunks cc ON cc.id=ABS(b.chunk_id) "
+            "WHERE b.block_id=? AND b.chunk_kind='cite'", (block_id,))).fetchall()
+        rows = list(rows) + list(cite_rows)
     return {"items": [{"chunk_id": r[0], "material_id": r[1], "section": r[2] or "", "mode": r[3] or "cite",
                        "confirmed": bool(r[4]), "index": r[5], "page": r[6],
-                       "text": r[7] or "", "filename": r[8] or ""} for r in rows]}
+                       "text": r[7] or "", "filename": r[8] or "", "chunk_kind": r[9] or "file"}
+                      for r in rows]}
 
 
 class BindBody(BaseModel):
@@ -110,17 +167,25 @@ async def bind(block_id: int, body: BindBody):
             raise HTTPException(404, "章节不存在")
         added = 0
         for chunk_id in body.chunk_ids:
-            row = await (await db.execute(
-                "SELECT mc.id, mc.material_id, COALESCE(mc.status,'confirmed') FROM material_chunks mc "
-                "JOIN materials m ON m.id=mc.material_id "
-                "WHERE mc.id=? AND m.project_id=? AND m.deleted_at IS NULL",
-                (chunk_id, block["project_id"]))).fetchone()
-            if not row or row[2] != "confirmed":
+            if int(chunk_id) < 0:                          # 负数 = 搜索片段
+                row = await (await db.execute(
+                    "SELECT cc.id, 0, cc.status FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+                    "WHERE cc.id=? AND c.project_id=?", (-int(chunk_id), block["project_id"]))).fetchone()
+                kind = "cite"
+            else:
+                row = await (await db.execute(
+                    "SELECT mc.id, mc.material_id, COALESCE(mc.status,'confirmed') FROM material_chunks mc "
+                    "JOIN materials m ON m.id=mc.material_id "
+                    "WHERE mc.id=? AND m.project_id=? AND m.deleted_at IS NULL",
+                    (chunk_id, block["project_id"]))).fetchone()
+                kind = "file"
+            if not row or (row[2] or "confirmed") != "confirmed":
                 continue                                    # 未确认的素材不能用
             await db.execute(
-                "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode) VALUES (?,?,?,?) "
-                "ON CONFLICT(block_id, chunk_id) DO UPDATE SET section=excluded.section, mode=excluded.mode",
-                (block_id, chunk_id, body.section, body.mode))
+                "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode, chunk_kind) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(block_id, chunk_id) DO UPDATE SET "
+                "section=excluded.section, mode=excluded.mode, chunk_kind=excluded.chunk_kind",
+                (block_id, int(chunk_id), body.section, body.mode, kind))
             added += 1
         await db.commit()
     return {"added": added}

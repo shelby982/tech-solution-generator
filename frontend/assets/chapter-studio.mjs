@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v412';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v412';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v413';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v413';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -261,17 +261,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button>
       </div>`).join('') : '<p class="cs-todo-ok">本章还没有引用素材</p>';
 
+    const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
+    const sourceLabel = (item) => (item.chunk_kind === 'cite' ? `公开来源 · ${item.filename || ''}` : `文件 · ${item.filename || ''}`);
     const libHtml = (lib.confirmed || []).length ? lib.confirmed.slice(0, 40).map((item) => `
       <label class="cs-ml-item is-pick">
-        <input type="checkbox" data-ml-pick="${item.chunk_id}" />
-        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+        <input type="checkbox" data-ml-pick="${pickId(item)}" />
+        <div class="cs-ml-body"><b>${esc(sourceLabel(item))}</b>
           <p>${esc(String(item.text || '').slice(0, 80))}…</p>
-          <small>${item.page ? `第 ${item.page} 页` : '无页码'}</small></div>
-      </label>`).join('') : '<p class="cs-muted">素材库还是空的：上传文件后逐段确认，确认的片段才会出现在这里。</p>';
+          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
+      </label>`).join('') : '<p class="cs-muted">素材库还是空的：上传文件或搜索来源后逐段确认，确认的片段才会出现在这里。</p>';
 
     const pendHtml = (lib.pending || []).length ? lib.pending.slice(0, 40).map((item) => `
       <label class="cs-ml-item is-pick">
-        <input type="checkbox" data-ml-pending="${item.chunk_id}" />
+        <input type="checkbox" data-ml-pending="${(item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id)}" />
         <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
           <p>${esc(String(item.text || '').slice(0, 80))}…</p>
           <small>${item.page ? `第 ${item.page} 页` : '无页码'}</small></div>

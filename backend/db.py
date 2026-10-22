@@ -137,6 +137,17 @@ CREATE TABLE IF NOT EXISTS citation_searches (
 CREATE INDEX IF NOT EXISTS idx_citation_searches_block ON citation_searches(project_id, block_id, created_at);
 
 -- 引用 → 章节 的多对多关联（一条官方依据常被多章引用；citations.block_id 保留为"首个关联"）
+CREATE TABLE IF NOT EXISTS citation_chunks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    citation_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    heading    TEXT NOT NULL DEFAULT '',
+    content    TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'pending',   -- pending | confirmed | rejected
+    confirmed_at TEXT,
+    UNIQUE(citation_id, chunk_index)
+);
+
 CREATE TABLE IF NOT EXISTS citation_links (
     citation_id TEXT NOT NULL,
     block_id TEXT NOT NULL,
@@ -510,6 +521,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN chunk_id INTEGER")
     if material_cols and 'mode' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN mode TEXT DEFAULT 'cite'")
+    cmc_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_material_chunks)')).fetchall()}
+    if cmc_cols and 'chunk_kind' not in cmc_cols:
+        await conn.execute("ALTER TABLE chapter_material_chunks ADD COLUMN chunk_kind TEXT DEFAULT 'file'")
     await conn.commit()
     usage_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(llm_usage)')).fetchall()}
     for name, kind in [('block_id', 'INTEGER'), ('section', "TEXT DEFAULT ''"), ('role', "TEXT DEFAULT ''")]:
