@@ -53,7 +53,7 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
                         continue
                     await db.execute(
                         "INSERT OR IGNORE INTO citation_chunks (citation_id, chunk_index, heading, content, status) "
-                        "VALUES (?,?,?,?, 'pending')",
+                        "VALUES (?,?,?,?, 'confirmed')",
                         (cite[0], index, str((seg or {}).get("heading") or cite[1] or "")[:80], text[:1200]))
             await db.commit()
         except Exception:
@@ -62,8 +62,8 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
         cite_rows = await (await db.execute(
             "SELECT cc.id, c.id, cc.chunk_index, cc.heading, cc.content, cc.status, c.domain "
             "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
-            "WHERE c.project_id=? AND cc.status=? ORDER BY cc.id DESC LIMIT ?",
-            (project_id, status, max(1, min(200, limit))))).fetchall()
+            "WHERE c.project_id=? AND (cc.status=? OR ?='confirmed') ORDER BY cc.id DESC LIMIT ?",
+            (project_id, status, status, max(1, min(200, limit))))).fetchall()
         counts = {}
         for state in ("confirmed", "pending"):
             file_count = (await (await db.execute(
@@ -82,12 +82,12 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
             (project_id,))).fetchall()
     items = [{"chunk_id": row[0], "material_id": row[1], "index": row[2], "page": row[3],
               "text": row[4], "status": row[5] or "confirmed", "filename": row[6], "role": row[7],
-              "chunk_kind": "file"}
+              "chunk_kind": "file", "source_type": "upload"}
              for row in rows]
     for row in cite_rows:
         items.append({"chunk_id": row[0], "material_id": 0, "index": row[2], "page": 0,
                       "text": row[4], "status": row[5], "filename": row[3] or (row[6] or "公开来源"),
-                      "role": "cite", "chunk_kind": "cite"})
+                      "role": "cite", "chunk_kind": "cite", "source_type": "web"})
     items.sort(key=lambda item: (item["status"] != status, item["chunk_id"]), reverse=False)
     return {"items": items, "counts": counts,
             "files": [{"id": r[0], "filename": r[1], "role": r[2], "parse_status": r[3],
@@ -179,8 +179,8 @@ async def bind(block_id: int, body: BindBody):
                     "WHERE mc.id=? AND m.project_id=? AND m.deleted_at IS NULL",
                     (chunk_id, block["project_id"]))).fetchone()
                 kind = "file"
-            if not row or (row[2] or "confirmed") != "confirmed":
-                continue                                    # 未确认的素材不能用
+            if not row or (row[2] or "confirmed") == "rejected":
+                continue                                    # 丢弃的素材不可用（方案 C：解析即可用）
             await db.execute(
                 "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode, chunk_kind) "
                 "VALUES (?,?,?,?,?) ON CONFLICT(block_id, chunk_id) DO UPDATE SET "
@@ -197,3 +197,93 @@ async def unbind(block_id: int, chunk_id: int):
         await db.execute("DELETE FROM chapter_material_chunks WHERE block_id=? AND chunk_id=?", (block_id, chunk_id))
         await db.commit()
     return {"removed": True}
+
+
+_CITE_IN_BODY = None
+
+
+@router.get('/blocks/{block_id}/citations')
+async def chapter_citations(block_id: int):
+    """本章「引用清单」：正文里每处【来源：X】→ 对应素材、所在小节与段落、状态。"""
+    import re as _re
+
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        body = str(block["content"] or "")
+        bound = await (await db.execute(
+            "SELECT b.chunk_id, b.section, b.mode, COALESCE(b.chunk_kind,'file') "
+            "FROM chapter_material_chunks b WHERE b.block_id=?", (block_id,))).fetchall()
+
+    # 素材索引：label → {kind, 位置, 原文}
+    labels: dict[str, dict] = {}
+    for chunk_id, section, mode, kind in bound:
+        if kind == "cite":
+            row = await (await db.execute(
+                "SELECT cc.heading, cc.content FROM citation_chunks cc WHERE cc.id=?",
+                (abs(int(chunk_id)),))).fetchone()
+            if row:
+                labels[row[0][:40]] = {"kind": "web", "locator": row[0][:40],
+                                       "excerpt": row[1][:200], "chunk_id": chunk_id}
+        else:
+            row = await (await db.execute(
+                "SELECT mc.page, mc.content, m.filename FROM material_chunks mc "
+                "JOIN materials m ON m.id=mc.material_id WHERE mc.id=?", (int(chunk_id),))).fetchone()
+            if row:
+                labels[(row[2] or "")[:40]] = {"kind": "upload",
+                                               "locator": f"{row[2]} 第 {row[0]} 页",
+                                               "excerpt": row[1][:200], "chunk_id": chunk_id}
+
+    # 正文引用点：按小节 + 段落
+    points: list[dict] = []
+    section = ""
+    paragraph = 0
+    for line in body.splitlines():
+        head = _re.match(r"^#{2,6}\s+(.+?)\s*$", line)
+        if head:
+            section, paragraph = head.group(1).strip(), 0
+            continue
+        if not line.strip() or line.strip().startswith("|"):
+            continue
+        paragraph += 1
+        for match in _re.finditer(r"【来源[:：]([^】]{1,60})】", line):
+            label = match.group(1).strip()
+            info = labels.get(label[:40]) or {}
+            if not info:
+                if any(word in label for word in ("招标文件", "技术规范", "需求文件", "采购文件")):
+                    info = {"kind": "upload", "locator": label, "excerpt": ""}
+                elif _re.search(r"(法|条例|办法|规定|标准|规范)$", label) or label.startswith("中华人民共和国"):
+                    info = {"kind": "doc", "locator": label, "excerpt": ""}
+                elif "http" in label or "www." in label:
+                    info = {"kind": "web", "locator": label, "excerpt": ""}
+            points.append({
+                "section": section, "paragraph": paragraph, "source_label": label,
+                "kind": info.get("kind") or "unknown",
+                "locator": info.get("locator") or label,
+                "excerpt": info.get("excerpt") or "",
+                "chunk_id": info.get("chunk_id"),
+                "quote": line.strip()[:60],
+                "state": "ok" if info else "unverified",
+            })
+    # 未标来源：含数字/政策名但该段没有【来源】
+    missing: list[dict] = []
+    section, paragraph = "", 0
+    for line in body.splitlines():
+        head = _re.match(r"^#{2,6}\s+(.+?)\s*$", line)
+        if head:
+            section, paragraph = head.group(1).strip(), 0
+            continue
+        if not line.strip() or line.strip().startswith("|"):
+            continue
+        paragraph += 1
+        if "【来源" in line:
+            continue
+        if _re.search(r"(\d+(?:\.\d+)?\s*%|《[^》]{2,30}》|等级保护|标准号|GB/T)", line):
+            missing.append({"section": section, "paragraph": paragraph,
+                            "quote": line.strip()[:70], "state": "missing"})
+    by_kind = {"upload": 0, "web": 0, "doc": 0, "unknown": 0}
+    for point in points:
+        by_kind[point["kind"]] = by_kind.get(point["kind"], 0) + 1
+    return {"points": points, "missing": missing[:20],
+            "summary": {"citations": len(points), "missing": len(missing), "by_kind": by_kind}}

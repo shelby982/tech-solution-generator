@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v414';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v414';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v415';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v415';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -240,55 +240,83 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function loadMaterialLibrary() {
     if (!active) return;
     try {
-      const [lib, pend, boundList] = await Promise.all([
+      const [citeList, lib, pend, boundList] = await Promise.all([
+        fetch(`/api/blocks/${active.id}/citations`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=confirmed&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=pending&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/blocks/${active.id}/materials/bound`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
       ]);
-      materialLib = { confirmed: lib?.items || [], counts: lib?.counts || {}, pending: pend?.items || [], bound: boundList?.items || [] };
+      materialLib = { confirmed: lib?.items || [], counts: lib?.counts || {}, pending: pend?.items || [],
+                      bound: boundList?.items || [], citations: citeList || { points: [], missing: [], summary: {} } };
     } catch (error) { materialLib = null; }
   }
 
-  /** 素材模块（M1）：本章素材 / 素材库 / 待确认 */
+  /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（折叠） ③ 上传 */
   function materialLibraryHtml() {
-    const lib = materialLib || { confirmed: [], pending: [], bound: [], counts: {} };
-    const bound = lib.bound || [];
-    const boundsHtml = bound.length ? bound.map((item) => `
-      <div class="cs-ml-item">
-        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
-          <p>${esc(String(item.text || '').slice(0, 90))}…</p>
-          <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(item.mode === 'context' ? '仅作上下文' : item.mode === 'paste' ? '粘贴原文' : '引用来源')}</small></div>
-        <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button>
-      </div>`).join('') : '<p class="cs-todo-ok">本章还没有引用素材</p>';
+    const lib = materialLib || { confirmed: [], pending: [], bound: [], citations: { points: [], missing: [], summary: {} } };
+    const citations = lib.citations || { points: [], missing: [], summary: {} };
+    const summary = citations.summary || {};
+    const byKind = summary.by_kind || {};
 
+    // ① 引用清单：按小节分组
+    const groups = new Map();
+    for (const point of (citations.points || [])) {
+      const key = point.section || '（正文）';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(point);
+    }
+    const kindLabel = { upload: '招标文件', web: '联网来源', doc: '法规/标准', unknown: '未匹配' };
+    const kindClass = { upload: 'is-upload', web: 'is-web', doc: 'is-doc', unknown: 'is-unknown' };
+    const pointsHtml = [...groups.entries()].map(([sectionName, points]) => `
+      <div class="cs-cite-group">
+        <p class="cs-cite-sec">${esc(sectionName)}</p>
+        ${points.map((point) => `<div class="cs-cite-row">
+          <span class="cs-cite-kind ${kindClass[point.kind] || 'is-unknown'}">${esc(kindLabel[point.kind] || '来源')}</span>
+          <div class="cs-cite-body">
+            <p class="cs-cite-label">${esc(point.source_label)}</p>
+            <p class="cs-cite-quote">${esc(String(point.quote || '').slice(0, 46))}</p>
+            <small>第 ${point.paragraph} 段${point.locator && point.locator !== point.source_label ? ` · ${esc(point.locator)}` : ''}</small>
+          </div>
+          <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(sectionName)}|${esc(String(point.quote || ''))}">定位</button>
+        </div>`).join('')}
+      </div>`).join('');
+    const missingHtml = (citations.missing || []).length ? `
+      <div class="cs-cite-missing">
+        <p class="cs-cite-sec">未标来源（${citations.missing.length} 处）</p>
+        ${(citations.missing || []).slice(0, 6).map((item) => `<div class="cs-cite-row is-missing">
+          <span class="cs-cite-kind is-missing">缺来源</span>
+          <div class="cs-cite-body"><p class="cs-cite-quote">${esc(String(item.quote || '').slice(0, 50))}</p>
+            <small>${esc(item.section || '正文')} 第 ${item.paragraph} 段</small></div>
+          <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(item.section || '')}|${esc(String(item.quote || ''))}">定位</button>
+        </div>`).join('')}
+      </div>` : '';
+
+    // ② 素材库（折叠）：按来源类型分区
     const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
-    const sourceLabel = (item) => (item.chunk_kind === 'cite' ? `公开来源 · ${item.filename || ''}` : `文件 · ${item.filename || ''}`);
-    const libHtml = (lib.confirmed || []).length ? lib.confirmed.slice(0, 40).map((item) => `
+    const uploadItems = (lib.confirmed || []).filter((item) => item.source_type !== 'web');
+    const webItems = (lib.confirmed || []).filter((item) => item.source_type === 'web');
+    const pickHtml = (items, empty) => (items.length ? items.slice(0, 30).map((item) => `
       <label class="cs-ml-item is-pick">
         <input type="checkbox" data-ml-pick="${pickId(item)}" />
-        <div class="cs-ml-body"><b>${esc(sourceLabel(item))}</b>
-          <p>${esc(String(item.text || '').slice(0, 80))}…</p>
-          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
-      </label>`).join('') : '<p class="cs-muted">素材库还是空的：上传文件或搜索来源后逐段确认，确认的片段才会出现在这里。</p>';
-
-    const pendHtml = (lib.pending || []).length ? lib.pending.slice(0, 40).map((item) => `
-      <label class="cs-ml-item is-pick">
-        <input type="checkbox" data-ml-pending="${(item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id)}" />
         <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
-          <p>${esc(String(item.text || '').slice(0, 80))}…</p>
-          <small>${item.page ? `第 ${item.page} 页` : '无页码'}</small></div>
-      </label>`).join('') : '<p class="cs-todo-ok">没有待确认的片段</p>';
+          <p>${esc(String(item.text || '').slice(0, 70))}…</p>
+          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
+      </label>`).join('') : `<p class="cs-muted">${empty}</p>`);
 
     return `<div class="cs-ml">
-      <div class="cs-ml-head"><h4>本章素材 <small>${bound.length}</small></h4></div>
-      ${boundsHtml}
-      <div class="cs-ml-head"><h4>素材库 <small>${lib.counts?.confirmed || 0} 段已确认</small></h4></div>
-      <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索已确认素材…" /></div>
-      <div class="cs-ml-list" data-ml-list>${libHtml}</div>
-      <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button></div>
-      ${(lib.pending || []).length ? `<div class="cs-ml-head"><h4>待确认 <small>${lib.counts?.pending || 0} 段</small></h4></div>
-        <div class="cs-ml-list">${pendHtml}</div>
-        <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-confirm>确认引用所选片段</button></div>` : ''}
+      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4></div>
+      <p class="cs-ml-sum">招标文件 ${byKind.upload || 0} · 联网来源 ${byKind.web || 0} · 法规标准 ${byKind.doc || 0}</p>
+      ${pointsHtml || '<p class="cs-muted">正文里还没有【来源：…】标注</p>'}
+      ${missingHtml}
+      <details class="cs-ml-fold">
+        <summary>素材库（${lib.counts?.confirmed || 0} 段）— 选择素材应用到本章</summary>
+        <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索素材…" /></div>
+        <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
+        <div class="cs-ml-list">${pickHtml(uploadItems, '还没有上传素材')}</div>
+        <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
+        <div class="cs-ml-list">${pickHtml(webItems, '还没有联网搜索的素材')}</div>
+        <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button></div>
+      </details>
     </div>`;
   }
 
@@ -3605,6 +3633,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const option=(task.options||[])[index];
       if(!task || !option){status('这条没有可选项');return;}
       await applyDecideOption(task, option.label);
+      return;
+    }
+    const citeLocate=event.target.closest('[data-cite-locate]');
+    if(citeLocate){
+      const [section, quote] = String(citeLocate.dataset.citeLocate||'').split('|');
+      locateTaskTarget({ target: { section, quote } });
       return;
     }
     const mlApply=event.target.closest('[data-ml-apply]');

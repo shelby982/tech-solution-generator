@@ -927,3 +927,24 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-ml-body p { margin: 2px 0; font-size: 11px; color: #1e293b; line-height: 1.5; }
 .cs-ml-body small { font-size: 10px; color: #94a3b8; }
 .cs-ml-acts { display: flex; justify-content: flex-end; margin: 6px 0 0; }
+
+/* 素材页签：本章引用清单（主视图） */
+.cs-ml-sum { margin: 0 0 8px; font-size: 10.5px; color: #64748b; }
+.cs-cite-group { margin: 0 0 10px; }
+.cs-cite-sec { margin: 0 0 5px; font-size: 11px; font-weight: 600; color: #334155; }
+.cs-cite-row { display: flex; align-items: flex-start; gap: 7px; padding: 6px 8px; margin-bottom: 4px;
+  background: #fff; border: 1px solid #eef2f7; border-radius: 8px; }
+.cs-cite-row.is-missing { background: #fffbeb; border-color: #fde68a; }
+.cs-cite-kind { flex-shrink: 0; font-size: 9.5px; padding: 1px 6px; border-radius: 999px; line-height: 1.6; }
+.cs-cite-kind.is-upload { background: #e0f2fe; color: #0369a1; }
+.cs-cite-kind.is-web { background: #dcfce7; color: #15803d; }
+.cs-cite-kind.is-doc { background: #f1f5f9; color: #475569; }
+.cs-cite-kind.is-missing { background: #fef3c7; color: #b45309; }
+.cs-cite-kind.is-unknown { background: #f3e8ff; color: #7e22ce; }
+.cs-cite-body { flex: 1; min-width: 0; }
+.cs-cite-label { margin: 0; font-size: 10.5px; color: #1e293b; font-weight: 600; }
+.cs-cite-quote { margin: 1px 0 0; font-size: 10.5px; color: #475569; line-height: 1.5; }
+.cs-cite-body small { font-size: 9.5px; color: #94a3b8; }
+.cs-cite-missing { margin: 10px 0 0; }
+.cs-ml-fold { margin: 10px 0 0; border-top: 1px dashed #e2e8f0; padding-top: 8px; }
+.cs-ml-fold summary { font-size: 11px; color: #475569; cursor: pointer; }
