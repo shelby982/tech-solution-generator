@@ -185,6 +185,15 @@ CREATE TABLE IF NOT EXISTS chapter_studio (
     writing_status TEXT NOT NULL DEFAULT 'draft',
     confirmed_hash TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS chapter_material_chunks (
+    block_id   INTEGER NOT NULL,
+    chunk_id   INTEGER NOT NULL,
+    section    TEXT NOT NULL DEFAULT '',
+    mode       TEXT NOT NULL DEFAULT 'cite',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (block_id, chunk_id)
+);
+
 CREATE TABLE IF NOT EXISTS chapter_materials (
     block_id INTEGER NOT NULL REFERENCES blocks(id),
     material_id INTEGER NOT NULL REFERENCES materials(id),
@@ -487,9 +496,20 @@ async def init_db(conn: aiosqlite.Connection) -> None:
                        ('preview_error', "TEXT DEFAULT ''")]:
         if name not in export_columns:
             await conn.execute(f'ALTER TABLE document_export_jobs ADD COLUMN {name} {kind}')
+    # 素材库 M1：解析片段的状态（待确认/已确认），章节绑定加 chunk 与方式
+    chunk_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(material_chunks)')).fetchall()}
+    if chunk_cols:
+        if 'status' not in chunk_cols:
+            await conn.execute("ALTER TABLE material_chunks ADD COLUMN status TEXT DEFAULT 'confirmed'")
+        if 'confirmed_at' not in chunk_cols:
+            await conn.execute("ALTER TABLE material_chunks ADD COLUMN confirmed_at TEXT")
     material_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_materials)')).fetchall()}
     if material_cols and 'section' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN section TEXT DEFAULT ''")
+    if material_cols and 'chunk_id' not in material_cols:
+        await conn.execute("ALTER TABLE chapter_materials ADD COLUMN chunk_id INTEGER")
+    if material_cols and 'mode' not in material_cols:
+        await conn.execute("ALTER TABLE chapter_materials ADD COLUMN mode TEXT DEFAULT 'cite'")
     await conn.commit()
     usage_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(llm_usage)')).fetchall()}
     for name, kind in [('block_id', 'INTEGER'), ('section', "TEXT DEFAULT ''"), ('role', "TEXT DEFAULT ''")]:

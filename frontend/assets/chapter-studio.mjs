@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v411';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v411';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v412';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v412';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -233,6 +233,62 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
   let basisInfo = null;
   let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
+
+  let materialLib = null;
+
+  /** 拉素材库数据（项目级素材 + 本章引用） */
+  async function loadMaterialLibrary() {
+    if (!active) return;
+    try {
+      const [lib, pend, boundList] = await Promise.all([
+        fetch(`/api/projects/${projectId}/materials/library?status=confirmed&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
+        fetch(`/api/projects/${projectId}/materials/library?status=pending&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
+        fetch(`/api/blocks/${active.id}/materials/bound`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
+      ]);
+      materialLib = { confirmed: lib?.items || [], counts: lib?.counts || {}, pending: pend?.items || [], bound: boundList?.items || [] };
+    } catch (error) { materialLib = null; }
+  }
+
+  /** 素材模块（M1）：本章素材 / 素材库 / 待确认 */
+  function materialLibraryHtml() {
+    const lib = materialLib || { confirmed: [], pending: [], bound: [], counts: {} };
+    const bound = lib.bound || [];
+    const boundsHtml = bound.length ? bound.map((item) => `
+      <div class="cs-ml-item">
+        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+          <p>${esc(String(item.text || '').slice(0, 90))}…</p>
+          <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(item.mode === 'context' ? '仅作上下文' : item.mode === 'paste' ? '粘贴原文' : '引用来源')}</small></div>
+        <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button>
+      </div>`).join('') : '<p class="cs-todo-ok">本章还没有引用素材</p>';
+
+    const libHtml = (lib.confirmed || []).length ? lib.confirmed.slice(0, 40).map((item) => `
+      <label class="cs-ml-item is-pick">
+        <input type="checkbox" data-ml-pick="${item.chunk_id}" />
+        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+          <p>${esc(String(item.text || '').slice(0, 80))}…</p>
+          <small>${item.page ? `第 ${item.page} 页` : '无页码'}</small></div>
+      </label>`).join('') : '<p class="cs-muted">素材库还是空的：上传文件后逐段确认，确认的片段才会出现在这里。</p>';
+
+    const pendHtml = (lib.pending || []).length ? lib.pending.slice(0, 40).map((item) => `
+      <label class="cs-ml-item is-pick">
+        <input type="checkbox" data-ml-pending="${item.chunk_id}" />
+        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+          <p>${esc(String(item.text || '').slice(0, 80))}…</p>
+          <small>${item.page ? `第 ${item.page} 页` : '无页码'}</small></div>
+      </label>`).join('') : '<p class="cs-todo-ok">没有待确认的片段</p>';
+
+    return `<div class="cs-ml">
+      <div class="cs-ml-head"><h4>本章素材 <small>${bound.length}</small></h4></div>
+      ${boundsHtml}
+      <div class="cs-ml-head"><h4>素材库 <small>${lib.counts?.confirmed || 0} 段已确认</small></h4></div>
+      <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索已确认素材…" /></div>
+      <div class="cs-ml-list" data-ml-list>${libHtml}</div>
+      <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button></div>
+      ${(lib.pending || []).length ? `<div class="cs-ml-head"><h4>待确认 <small>${lib.counts?.pending || 0} 段</small></h4></div>
+        <div class="cs-ml-list">${pendHtml}</div>
+        <div class="cs-ml-acts"><button type="button" class="cs-cp-primary" data-ml-confirm>确认引用所选片段</button></div>` : ''}
+    </div>`;
+  }
 
   /** 素材页签顶部：本章"需要你上传的材料"（招标硬性要求才有；没有就不显示） */
   function materialRequestsHtml() {
@@ -3291,7 +3347,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `${todoPaneHtml()}
       ${progressPaneHtml()}
-      <section data-pane="materials">${materialRequestsHtml()}${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
+      <section data-pane="materials">${materialRequestsHtml()}${materialLibraryHtml()}${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
       <details class="cs-mat-manage">
         <summary>已关联素材与外部依据</summary>
         <div class="cs-mat-manage-body">
@@ -3399,6 +3455,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       hydrateIgnored();
       void loadWritingModels().then(() => paintAside());
       void autoCleanChapter();
+      void loadMaterialLibrary().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
       if(localDraftAction(local,block.content||'')!=='none'){
@@ -3546,6 +3603,44 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const option=(task.options||[])[index];
       if(!task || !option){status('这条没有可选项');return;}
       await applyDecideOption(task, option.label);
+      return;
+    }
+    const mlApply=event.target.closest('[data-ml-apply]');
+    if(mlApply && active){
+      const ids=[...host.querySelectorAll('[data-ml-pick]:checked')].map((el)=>Number(el.dataset.mlPick));
+      if(!ids.length){status('先在素材库里勾选要用的片段');return;}
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/materials/bind`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({chunk_ids:ids,section:'',mode:'cite'})});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        await loadMaterialLibrary(); paintAside();
+        status(`已把 ${data.added||ids.length} 段素材应用到本章`);
+      }catch(error){status(`应用失败：${error.message}`);}
+      return;
+    }
+    const mlConfirm=event.target.closest('[data-ml-confirm]');
+    if(mlConfirm){
+      const ids=[...host.querySelectorAll('[data-ml-pending]:checked')].map((el)=>Number(el.dataset.mlPending));
+      if(!ids.length){status('先勾选要确认的片段');return;}
+      try{
+        const resp=await fetch(`/api/projects/${projectId}/materials/chunks`,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({chunk_ids:ids,action:'confirm'})});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        await loadMaterialLibrary(); paintAside();
+        status(`已确认 ${data.changed||ids.length} 段为素材`);
+      }catch(error){status(`确认失败：${error.message}`);}
+      return;
+    }
+    const mlUnbind=event.target.closest('[data-ml-unbind]');
+    if(mlUnbind && active){
+      try{
+        await fetch(`/api/blocks/${active.id}/materials/bound/${mlUnbind.dataset.mlUnbind}`,{method:'DELETE'});
+        await loadMaterialLibrary(); paintAside();
+        status('已从本章移除该素材');
+      }catch(error){status(error.message);}
       return;
     }
     const olBatch=event.target.closest('[data-ol-batch-write]');

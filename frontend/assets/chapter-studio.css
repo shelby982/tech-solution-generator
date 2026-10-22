@@ -908,3 +908,22 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-mat-request ul { margin: 0 0 4px; padding-left: 16px; }
 .cs-mat-request li { font-size: 10.5px; color: #78350f; line-height: 1.55; }
 .cs-mat-request-meta { margin: 0 0 4px; font-size: 10px; color: #a16207; }
+
+/* 素材库（M1） */
+.cs-ml { margin: 0 0 10px; }
+.cs-ml-head { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 5px; }
+.cs-ml-head h4 { margin: 0; font-size: 11.5px; color: #334155; }
+.cs-ml-head h4 small { font-weight: 400; color: #94a3b8; margin-left: 4px; }
+.cs-ml-search { margin: 0 0 6px; }
+.cs-ml-search input { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 7px;
+  padding: 5px 8px; font-size: 11px; }
+.cs-ml-list { display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow: auto; }
+.cs-ml-item { display: flex; align-items: flex-start; gap: 7px; padding: 7px 8px; background: #fff;
+  border: 1px solid #eef2f7; border-radius: 8px; }
+.cs-ml-item.is-pick { cursor: pointer; }
+.cs-ml-item.is-pick:hover { border-color: #bfdbfe; }
+.cs-ml-body { flex: 1; min-width: 0; }
+.cs-ml-body b { display: block; font-size: 10.5px; color: #475569; }
+.cs-ml-body p { margin: 2px 0; font-size: 11px; color: #1e293b; line-height: 1.5; }
+.cs-ml-body small { font-size: 10px; color: #94a3b8; }
+.cs-ml-acts { display: flex; justify-content: flex-end; margin: 6px 0 0; }
