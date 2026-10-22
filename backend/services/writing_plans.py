@@ -1376,8 +1376,9 @@ def _delivery_tasks_payload(*, body, block_key, deliverables, material_gaps, gen
     try:
         from services.todo_checks import citation_items, decision_items, number_items, proofread_items
         from services.todo_tasks import build_delivery_tasks
+        from services.section_contract import check_chapter as contract_check
         decisions = decision_items(body)
-        proofs = proofread_items(body) + number_items(body) + citation_items(body)
+        proofs = proofread_items(body) + number_items(body) + citation_items(body) + contract_check(body)
         return build_delivery_tasks(block_id=block_key, content=body, deliverables=deliverables,
                                     material_gaps=material_gaps, generation_gaps=generation_gaps,
                                     word_plan=word_plan, decisions=decisions, proofs=proofs,
@@ -1459,9 +1460,10 @@ def build_todo_items(deliverables: list[dict], material_gaps: list[dict], genera
 
     # C 组（要你拍板）/ D 组（要你核对）—— 确定性规则，只报能指到原文的
     try:
+        from services.section_contract import check_chapter as contract_check
         from services.todo_checks import citation_items, decision_items, number_items, proofread_items
         for raw in (decision_items(body) + proofread_items(body) + number_items(body)
-                    + citation_items(body)):
+                    + citation_items(body) + contract_check(body)):
             entry = _todo_item(raw["group"], raw["title"], raw.get("evidence", ""),
                                source=raw.get("source", ""), action=raw.get("action", "decide"),
                                severity=raw.get("severity", "suggest"), target=raw.get("target", ""))

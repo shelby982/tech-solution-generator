@@ -860,3 +860,9 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-gate-act { border: 1px solid #fcd34d; background: #fff; color: #b45309; border-radius: 6px;
   font-size: 10.5px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
 .cs-gate-act:hover { background: #fef3c7; }
+
+/* 系统产出确认条 */
+.cs-proposal-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 7px 10px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; font-size: 11px; color: #1e40af; }
+.cs-proposal-title { font-weight: 600; }
+.cs-proposal-desc { flex: 1; color: #3b82f6; }

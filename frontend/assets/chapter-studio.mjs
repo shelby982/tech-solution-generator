@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v397';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v397';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v398';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v398';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2539,7 +2539,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         status(`正在补写「${section.title}」…`);
         await streamWriteSection(active.id, section);
         await loadBasis(active.block_id); paintAside();
-        status('已补写，请核对后保存');
+        await showProposalBar(`已补写「${section.title}」（未保存）`, '这版内容要不要留在正文？', async () => {
+          await save();
+          status('已保留并保存');
+        }, async () => {
+          await restoreLastRevision();
+        });
         return;
       }
       if (type === 'fix_now') {
@@ -2608,6 +2613,52 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.addEventListener('close', () => dlg.remove());
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
+  }
+
+  /** 系统产出的确认条：保留 / 撤销（不静默改稿） */
+  function showProposalBar(title, desc, onKeep, onRevert) {
+    return new Promise((resolve) => {
+      const bar = host.querySelector('[data-cs="proposal"]') || (() => {
+        const el = globalThis.document.createElement('div');
+        el.className = 'cs-proposal-bar';
+        el.dataset.cs = 'proposal';
+        host.querySelector('.cs-toolbar')?.after(el);
+        return el;
+      })();
+      bar.hidden = false;
+      bar.innerHTML = `<span class="cs-proposal-title">${esc(title)}</span>
+        <span class="cs-proposal-desc">${esc(desc || '')}</span>
+        <button type="button" class="cs-gate-act" data-proposal-keep>保留</button>
+        <button type="button" class="cs-gate-act" data-proposal-revert>撤销这版</button>`;
+      const finish = async (keep) => {
+        bar.hidden = true; bar.innerHTML = '';
+        try { keep ? await onKeep() : await onRevert(); } catch (error) { status(error.message); }
+        resolve(keep);
+      };
+      bar.addEventListener('click', (event) => {
+        if (event.target.closest('[data-proposal-keep]')) void finish(true);
+        if (event.target.closest('[data-proposal-revert]')) void finish(false);
+      });
+    });
+  }
+
+  /** 撤销最近一次 AI 写入（恢复上一版本） */
+  async function restoreLastRevision() {
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/revisions`, { cache: 'no-store' });
+      const data = await resp.json();
+      const revisions = data.revisions || data || [];
+      const target = revisions[0];
+      const rn = target && (target.revision_no ?? target.rev_no ?? target.rn);
+      if (!rn) { status('没有可撤销的版本'); return; }
+      const restore = await fetch(`/api/blocks/${active.id}/revisions/${rn}/restore`, { method: 'POST' });
+      if (!restore.ok) throw new Error(`HTTP ${restore.status}`);
+      const fresh = await json(`/api/blocks/${active.id}/studio`);
+      context = fresh;
+      if (fresh.block) editor.value = fresh.block.content || '';
+      await loadBasis(active.block_id); paintAside();
+      status('已撤销这版，恢复到上一个版本');
+    } catch (error) { status(`撤销失败：${error.message}`); }
   }
 
   /** 待办 v3：三区（需要你处理 / 系统处理中 / 建议）+ 「下一件」 */

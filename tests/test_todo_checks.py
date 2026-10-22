@@ -168,3 +168,32 @@ def test_delivery_gate_scans_and_fixes():
     remaining = scan(fixed)["summary"]
     assert remaining["by_kind"]["syntax"] == 0 and remaining["by_kind"]["term"] == 0
     assert remaining["by_kind"]["placeholder"] == 1        # 占位符需人工处理
+
+
+def test_section_contract_checks():
+    """小节契约：现状缺事实、目标无指标、行业复述法条 → 都能判出来。"""
+    from services.section_contract import check_chapter, contract_for, kind_of
+
+    assert kind_of("行业发展背景分析") == "industry"
+    assert kind_of("项目目标体系") == "goal"
+    assert "指标名" in contract_for("项目目标体系")
+
+    filler = "整体运行尚不规范，管理水平有待提升，各方协同不足，流程仍需梳理完善。" * 3
+    content = (f"## 项目现状描述\n\n{filler}\n\n"
+               "## 项目目标体系\n\n完成平台建设，落实合规要求，实现管理提升与流程规范，持续优化运营效率。\n\n"
+               "## 行业发展背景分析\n\n"
+               "《甲法》要求…《乙法》要求…《丙法》要求…行业持续演进，同业普遍加强数据治理与安全建设。\n")
+    items = check_chapter(content)
+    titles = [i["title"] for i in items]
+    assert any("现状节缺事实" in t for t in titles)
+    assert any("目标节没有量化指标" in t for t in titles)
+    assert any("行业节在复述政策条文" in t for t in titles)
+
+
+def test_contract_result_has_no_quantified_target():
+    """真实章节：目标节确实没有量化指标（内容审核抓到的同一问题）。"""
+    from services.section_contract import check_chapter
+
+    body = "## 项目目标体系\n\n" + "完成信息化系统建设，通过安全合规验收，落实分类分级与权限控制。" * 6
+    items = check_chapter(body)
+    assert any("量化指标" in i["title"] for i in items)

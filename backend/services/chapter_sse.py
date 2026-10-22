@@ -293,10 +293,13 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
                                          "how": section.get("how") or {},
                                          "deliverables": section.get("deliverables") or []},
                                     str(block.get("content") or "")[:2000])
+    from services.section_contract import contract_for
+    contract = contract_for(section.get("title") or "")
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
-        f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
+        + (f"【本节硬性要求】{contract}\n" if contract else "")
+        + f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"

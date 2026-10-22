@@ -182,6 +182,8 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             key = "数字"
         elif "列数" in title or "表格" in title:
             key = "表格"
+        elif "指标" in title or "量化" in title:
+            key = "指标"
         else:
             key = "表述"
         groups.setdefault(key, []).append(proof)
@@ -191,16 +193,21 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         need_user.append(_task(
             category=("confirm" if not is_citation else "supply"), owner="user",
             title=((f"补 {len(items)} 处引用来源" if len(items) > 1 else "补 1 处引用来源")
-                   if is_citation else (f"核对 {key}" if len(items) == 1 else f"核对 {len(items)} 处{key}")),
+                   if is_citation else
+                   (("补目标节的量化指标" if len(items) == 1 else f"补 {len(items)} 节的目标指标")
+                    if key == "指标" else
+                    ("核对 1 处表述" if len(items) == 1 else f"核对 {len(items)} 处{key}"))),
             dedupe_key=f"check:{key}",
             target={"block_id": block_id,
                     "section": str(first.get("section") or _first_section(items, body)),
-                    "quote": _clean_quote(str(first.get("sentence") or ""), body) or _quote_of(first, body)},
+                    "quote": _clean_quote(str(first.get("sentence") or ""), body)},
             occurrences=[{"section": str(x.get("section") or _first_section([x], body)),
-                          "quote": _clean_quote(str(x.get("sentence") or ""), body) or _quote_of(x, body)}
+                          "quote": _clean_quote(str(x.get("sentence") or ""), body)}
                          for x in items],
             why=(f"这段引用了《{_policy_name(first)}》却整段没有【来源：…】；评委会问出处，补上来源即可"
-                 if is_citation else f"这几处{key}不一致，建议统一后再交付"),
+                 if is_citation else
+                 ("目标节通篇没有可验收的数值（%，个，项，小时…）。每个目标给「指标名+目标值+验收口径」才拿得到分"
+                  if key == "指标" else f"这几处{key}不一致，建议统一后再交付")),
             impact="quality",
             action=({"type": "add_citation", "label": "去补来源", "payload": {}}
                     if is_citation else {"type": "locate", "label": "定位", "payload": {}}),
