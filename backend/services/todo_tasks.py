@@ -49,6 +49,10 @@ def _task(*, category: str, owner: str, title: str, **fields) -> dict:
         "evidence": fields.pop("evidence", []),
         "dedupe_key": fields.pop("dedupe_key", ""),
         "occurrences": fields.pop("occurrences", []),
+        "materials_required": fields.pop("materials_required", []),
+        "material_usage": fields.pop("material_usage", ""),
+        "material_format": fields.pop("material_format", ""),
+        "fallback": fields.pop("fallback", None),
         "status": "open",
     }
     task["impact_text"] = IMPACT_TEXT.get(task["impact"], "")
@@ -72,16 +76,22 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         if not lack:
             continue
         if gap.get("availability") == "upload":
+            spec = _material_spec(kind)
             need_user.append(_task(
                 category="upload", owner="user",
                 title=f"上传 {lack} 份{_short_kind(kind)}",
                 dedupe_key=f"material:{kind}",
                 target={"block_id": block_id, "section": gap.get("section", ""), "quote": ""},
-                why=gap.get("purpose") or "评分点要求举证，公开渠道没有这类材料",
+                why=gap.get("purpose") or "评分要求需要举证，公开渠道没有这类材料",
                 impact="completion_block",
                 action={"type": "upload_material", "label": "上传",
                         "payload": {"kind": kind, "lack": lack}},
                 evidence=[{"label": "缺口", "text": gap.get("reason") or ""}],
+                materials_required=spec["required"],
+                material_usage=spec["usage"],
+                material_format=spec["format"],
+                fallback={"type": "soften_claim", "label": "没有这份材料，改成概括表述",
+                          "payload": {"kind": kind}},
             ))
         else:
             system.append(_task(
@@ -296,7 +306,7 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     # 交付就绪度：硬阻塞重罚，建议轻罚（0~100）
     hard = sum(1 for task in need_user if task["impact"] in ("export_block", "completion_block"))
     soft = sum(1 for task in need_user if task["impact"] not in ("export_block", "completion_block"))
-    score = max(0, 100 - hard * 12 - soft * 4 - len(system) * 1)
+    score = max(0, 100 - hard * 8 - soft * 5)
     # 产品原则：系统能做的**不进待办**（用户在计划里点一次「按计划编写」即可）。
     # 待办只留"只有人能给的东西"：上传材料 / 定口径 / 确认完成。
     system = [task for task in system
@@ -395,3 +405,49 @@ def _locatable(task: dict, body: str) -> bool:
         return True
     compact = re.sub(r"\s+", "", str(body or ""))
     return re.sub(r"\s+", "", quote) in compact
+
+
+# ── 材料规格：说清"要什么 / 用在哪 / 什么格式 / 没有怎么办"────────────────
+_MATERIAL_SPECS = {
+    "业绩": {
+        "required": [
+            "中标通知书 或 合同关键页（首页+甲乙方+金额+签订日期+盖章页）",
+            "验收报告 或 用户使用证明（可脱敏，能看出项目与时间）",
+            "客户单位出具的项目证明（盖章）—— 可选，能加分",
+        ],
+        "usage": "用于「业绩/案例」类小节的举证，以及评分表中「类似项目经验」项",
+        "format": "PDF 或清晰扫描件（JPG/PNG），单份 ≤20MB；关键页不要遮挡甲乙方、金额、日期",
+    },
+    "资质": {
+        "required": ["营业执照", "相关资质证书（有效期内）", "体系认证证书（如有）"],
+        "usage": "用于「投标人资格」「资质能力」类小节",
+        "format": "PDF/扫描件，需含证书编号与有效期",
+    },
+    "数据": {
+        "required": ["现有系统/业务的数据清单或统计表（脱敏即可）", "关键指标口径说明"],
+        "usage": "用于「现状描述」「目标指标」类小节",
+        "format": "Excel/PDF；无需逐条明细，给出维度与口径即可",
+    },
+    "测评": {
+        "required": ["等级保护备案证明", "最近一次测评报告结论页"],
+        "usage": "用于「安全现状」「合规差距」类小节",
+        "format": "PDF；可只提供结论页",
+    },
+    "合同": {
+        "required": ["合同关键页（甲乙方、金额、工期、签订日期）"],
+        "usage": "用于「业绩」「履约能力」类小节",
+        "format": "PDF/扫描件",
+    },
+}
+
+
+def _material_spec(kind: str) -> dict:
+    text = str(kind or "")
+    for key, spec in _MATERIAL_SPECS.items():
+        if key in text:
+            return spec
+    return {
+        "required": [f"与「{_clip(text, 16)}」相关的证明材料（可脱敏）"],
+        "usage": "用于本章对应小节的举证",
+        "format": "PDF/扫描件，单份 ≤20MB",
+    }

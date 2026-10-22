@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v406';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v406';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v407';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v407';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2408,6 +2408,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       } catch (error) { status(`补齐失败：${error.message}`); }
       return;
     }
+    if (type === 'soften_claim') {
+      const sectionTitle = String(task.target?.section || '');
+      const outline = planBrief?.outline || [];
+      const section = outline.find((sec) => String(sec.title) === sectionTitle) || outline[0];
+      if (!section) { status('没找到对应小节'); return; }
+      status(`系统正在把「${section.title}」里需要举证的地方改成概括表述…`);
+      try {
+        await streamWriteSection(active.id, section, null,
+          '把本节中需要业绩/材料举证的地方改为概括表述（例如"我方具备同类项目实施经验"），不要留任何占位符，也不要编造具体项目名称与数字；保留其余内容。',
+          'rewrite');
+        await save();
+        await loadBasis(active.block_id); paintAside();
+        status('已改为概括表述并保存（之后补到材料可再重写这一节）');
+      } catch (error) { status(`改写失败：${error.message}`); }
+      return;
+    }
     if (type === 'rewrite_now') {
       const key = (task.action.payload || {}).key || '';
       const want = key === '指标' ? '目标' : '差距';
@@ -2734,8 +2750,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${(task.options || []).length ? `<div class="cs-task-opts">${task.options.slice(0, 3).map((opt, i) => `
               <button type="button" class="cs-task-opt" data-task-apply="${esc(task.id)}" data-opt-index="${i}">${esc(opt.label)}</button>`).join('')}
             </div>` : ''}
+          ${(task.materials_required || []).length ? `<div class="cs-task-materials">
+            <p class="cs-task-mat-title">需要你上传：</p>
+            <ul>${task.materials_required.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>
+            ${task.material_usage ? `<p class="cs-task-mat-meta">用在哪：${esc(task.material_usage)}</p>` : ''}
+            ${task.material_format ? `<p class="cs-task-mat-meta">格式：${esc(task.material_format)}</p>` : ''}
+          </div>` : ''}
           <div class="cs-task-acts">
             <button type="button" class="cs-task-act" data-task-act="${esc(task.action.type)}" data-task-id="${esc(task.id)}">${esc(task.action.label || '去处理')}</button>
+            ${task.fallback ? `<button type="button" class="cs-todo-ignore" data-task-fallback="${esc(task.id)}">${esc(task.fallback.label || '没有这份材料')}</button>` : ''}
             ${locate && (task.action || {}).type !== 'locate' ? `<button type="button" class="cs-todo-ignore" data-task-locate="${esc(task.id)}">定位</button>` : ''}
             ${opts && opts.ignore ? `<button type="button" class="cs-todo-ignore" data-task-ignore="${esc(task.id)}" title="忽略">×</button>` : ''}
           </div>
@@ -3467,6 +3490,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const option=(task.options||[])[index];
       if(!task || !option){status('这条没有可选项');return;}
       await applyDecideOption(task, option.label);
+      return;
+    }
+    const taskFallback=event.target.closest('[data-task-fallback]');
+    if(taskFallback && active){
+      const task=findDeliveryTask(taskFallback.dataset.taskFallback);
+      if(task) await runDeliveryAction(task);
       return;
     }
     const taskIgnore=event.target.closest('[data-task-ignore]');
