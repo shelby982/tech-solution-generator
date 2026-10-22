@@ -951,12 +951,15 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 
 /* 引用清单：按模块折叠 */
 .cs-cite-group { margin: 0 0 6px; border: 1px solid #eef2f7; border-radius: 8px; background: #fff; }
-.cs-cite-group > summary.cs-cite-sec { display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 9px; margin: 0; cursor: pointer; font-size: 11px; color: #334155; list-style: none; }
+/* 三个 flex 子项（::before 标记 / 名称 / 计数）用 space-between 会把名称挤到中间 → 改用 grid 左对齐 */
+.cs-cite-group > summary.cs-cite-sec { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center; gap: 6px; padding: 7px 9px; margin: 0; cursor: pointer; font-size: 11px;
+  color: #334155; list-style: none; text-align: left; }
+.cs-cite-group > summary.cs-cite-sec > span { text-align: left; }
 .cs-cite-group > summary.cs-cite-sec::-webkit-details-marker { display: none; }
-.cs-cite-group > summary.cs-cite-sec::before { content: '▸'; margin-right: 5px; color: #94a3b8; font-size: 10px; }
+.cs-cite-group > summary.cs-cite-sec::before { content: '▸'; color: #94a3b8; font-size: 10px; }
 .cs-cite-group[open] > summary.cs-cite-sec::before { content: '▾'; }
-.cs-cite-group > summary.cs-cite-sec em { font-style: normal; font-size: 10px; color: #64748b; }
+.cs-cite-group > summary.cs-cite-sec em { font-style: normal; font-size: 10px; color: #64748b; text-align: right; }
 .cs-cite-group.is-missing-group { border-color: #fde68a; background: #fffbeb; }
 .cs-cite-group.is-missing-group > summary.cs-cite-sec { color: #92400e; }
 .cs-cite-body-list { padding: 0 7px 7px; }
