@@ -184,6 +184,10 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             key = "表格"
         elif "指标" in title or "量化" in title:
             key = "指标"
+        elif str(proof.get("source") or "") == "引用格式":
+            key = "引用格式"
+        elif str(proof.get("source") or "") == "表述强度":
+            key = "表述"
         else:
             key = "表述"
         groups.setdefault(key, []).append(proof)
@@ -196,7 +200,9 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
                    if is_citation else
                    (("补目标节的量化指标" if len(items) == 1 else f"补 {len(items)} 节的目标指标")
                     if key == "指标" else
-                    ("核对 1 处表述" if len(items) == 1 else f"核对 {len(items)} 处{key}"))),
+                    ("补引用文号或标准号" if key == "引用格式" else
+                     (f"改 {len(items)} 处模糊表述" if key == "表述" else
+                      ("核对 1 处表述" if len(items) == 1 else f"核对 {len(items)} 处{key}"))))),
             dedupe_key=f"check:{key}",
             target={"block_id": block_id,
                     "section": str(first.get("section") or _first_section(items, body)),
@@ -207,7 +213,11 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
             why=(f"这段引用了《{_policy_name(first)}》却整段没有【来源：…】；评委会问出处，补上来源即可"
                  if is_citation else
                  ("目标节通篇没有可验收的数值（%，个，项，小时…）。每个目标给「指标名+目标值+验收口径」才拿得到分"
-                  if key == "指标" else f"这几处{key}不一致，建议统一后再交付")),
+                  if key == "指标" else
+                  ("政策缺文号、等级保护缺标准号、引用招标文件没到条款级 —— 这些都是评委核对依据时的扣分点"
+                   if key == "引用格式" else
+                   ("「拟/将/待」这类模糊表述会被认为没想清楚；建议挑关键的几处改成明确做法与指标"
+                    if key == "表述" else f"这几处{key}不一致，建议统一后再交付")))),
             impact="quality",
             action=({"type": "add_citation", "label": "去补来源", "payload": {}}
                     if is_citation else {"type": "locate", "label": "定位", "payload": {}}),
@@ -234,7 +244,14 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
     # v3 §5.4 硬规则：带定位的条目，原句必须能在正文里逐字找到；找不到就不进待办
     need_user = [task for task in need_user if _locatable(task, body)]
     system = [task for task in system if _locatable(task, body)]
+    # 交付就绪度：硬阻塞重罚，建议轻罚（0~100）
+    hard = sum(1 for task in need_user if task["impact"] in ("export_block", "completion_block"))
+    soft = sum(1 for task in need_user if task["impact"] not in ("export_block", "completion_block"))
+    score = max(0, 100 - hard * 12 - soft * 4 - len(system) * 1)
     summary = {
+        "readiness": score,
+        "readiness_text": ("可以交付" if score >= 90 else "接近可交付" if score >= 70
+                           else "还需处理" if score >= 40 else "不可交付"),
         "need_user": len(need_user),
         "system": len(system),
         "suggestion": len(suggestion),

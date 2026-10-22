@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v398';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v398';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v399';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v399';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2691,7 +2691,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>`;
     };
     const next = need.slice().sort((a, b) => impactRank(a.impact) - impactRank(b.impact))[0];
-    return `<h4>待办 <small>需要你 ${need.length} 件${system.length ? ` · 系统处理 ${system.length}` : ''}</small></h4>
+    const score = summary.readiness;
+    const scoreText = summary.readiness_text || '';
+    const scoreHtml = (typeof score === 'number')
+      ? `<div class="cs-readiness ${score >= 90 ? 'is-ok' : score >= 70 ? 'is-warn' : 'is-bad'}">
+           <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
+      : '';
+    return `${scoreHtml}<h4>待办 <small>需要你 ${need.length} 件${system.length ? ` · 系统处理 ${system.length}` : ''}</small></h4>
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
         ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}

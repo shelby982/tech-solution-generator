@@ -197,3 +197,22 @@ def test_contract_result_has_no_quantified_target():
     body = "## 项目目标体系\n\n" + "完成信息化系统建设，通过安全合规验收，落实分类分级与权限控制。" * 6
     items = check_chapter(body)
     assert any("量化指标" in i["title"] for i in items)
+
+
+def test_weak_phrasing_and_citation_format():
+    """弱表述与引用格式：真实存在的两类扣分点要能判出来。"""
+    from services.todo_checks import citation_format_items, weak_phrasing_items
+
+    weak = weak_phrasing_items(
+        "## 一\n\n数据分类分级规则将按实施方案明确。\n\n拟在实施阶段明确权限控制。\n" + "拟将待" * 10)
+    titles = [i["title"] for i in weak]
+    assert any("含糊承诺" in t for t in titles)
+    assert any("模糊表述偏多" in t for t in titles)
+
+    fmt = citation_format_items(
+        "## 一\n\n《中华人民共和国网络安全法》要求…按网络安全等级保护要求实施。\n"
+        "【来源：招标文件-项目背景与建设依据】\n")
+    fmt_titles = [i["title"] for i in fmt]
+    assert any("缺文号" in t for t in fmt_titles)
+    assert any("标准号" in t for t in fmt_titles)
+    assert any("条款级" in t for t in fmt_titles)

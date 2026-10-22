@@ -328,3 +328,97 @@ def citation_items(content: str) -> list[dict]:
             })
             break
     return items
+
+# ── 弱表述（P1）：技术标里"拟/将/待"太多 = 没想清楚 ──────────────────────
+# 强逃避式表述（承诺强度不足，值得阻塞提醒）
+_WEAK_STRONG = ("将按实施方案明确", "拟在实施阶段明确", "有待明确", "待明确", "视情况",
+                "原则上", "尚需研究", "另行确定")
+# 一般弱表述
+_WEAK_SOFT = ("拟", "将", "待", "尚需", "有待", "适当")
+_WEAK_SENT = re.compile(r"[。；\n]")
+
+
+def weak_phrasing_items(content: str) -> list[dict]:
+    """收集模糊承诺表述，按"处"合并成一张卡（正文能定位）。"""
+    items: list[dict] = []
+    strong_hits: list[dict] = []
+    soft_count = 0
+    section = ""
+    for line in str(content or "").splitlines():
+        head = _SECTION_RE.match(line.strip())
+        if head:
+            section = head.group(1).strip()
+            continue
+        paragraph = line.strip()
+        if not paragraph or paragraph.startswith(("|", ":::", "#")):
+            continue
+        soft_count += sum(paragraph.count(word) for word in _WEAK_SOFT)
+        # 强逃避式：整句给「候选改法」
+        for sentence in _WEAK_SENT.split(paragraph):
+            text = sentence.strip()
+            if not text:
+                continue
+            for word in _WEAK_STRONG:
+                if word in text:
+                    strong_hits.append({"sentence": text, "section": section, "word": word})
+                    break
+    if strong_hits:
+        items.append({
+            "group": "decide", "severity": "block",
+            "title": f"改 {len(strong_hits)} 处含糊承诺",
+            "evidence": "含「" + "」「".join(sorted({h["word"] for h in strong_hits})[:3]) + "」等表述",
+            "source": "表述强度", "action": "decide",
+            "sentence": strong_hits[0]["sentence"], "section": strong_hits[0]["section"],
+            "suggestions": [
+                "改为明确的指标或做法（写明谁在何时交付什么）",
+                "改为「按实施方案细化」但补一句交付物与时间点",
+                "删掉这句",
+            ],
+            "occurrences": strong_hits[:6],
+        })
+    if soft_count >= 8:
+        items.append({
+            "group": "proof", "severity": "suggest",
+            "title": f"本章模糊表述偏多（{soft_count} 处「拟/将/待…」）",
+            "evidence": "技术标里过多模糊表述会被认为「没想清楚」；建议挑关键的 5~10 处改硬",
+            "source": "表述强度", "action": "locate",
+        })
+    return items
+
+
+# ── 引用格式（P1）：文号 / 标准号 / 条款级 ────────────────────────────────
+_LAW_CITE = re.compile(r"《([^》]{2,40})》")
+_STD_RE = re.compile(r"(GB/T|GB|GBZ)\s*\d{3,5}(?:[-—]\d{4})?")
+_CLAUSE_RE = re.compile(r"(第\s*\d+\s*条|技术规范书\s*\d+(?:\.\d+)*)")
+_KNOWN_LAWS = ("中华人民共和国网络安全法", "中华人民共和国数据安全法", "中华人民共和国个人信息保护法")
+
+
+def citation_format_items(content: str) -> list[dict]:
+    """引用格式：政策缺文号、提等级保护但无标准号、引用招标无条款级。"""
+    text = str(content or "")
+    items: list[dict] = []
+
+    cited_laws = {m.group(1) for m in _LAW_CITE.finditer(text)}
+    known = [law for law in _KNOWN_LAWS if any(law in name for name in cited_laws)]
+    if known and not re.search(r"(主席令|国务院令|第\s*\d+\s*号)", text):
+        items.append({
+            "group": "proof", "severity": "suggest",
+            "title": f"政策引用缺文号（{len(known)} 部法律）",
+            "evidence": "只写了法律名称与施行日期，没有发文机关/文号；评委核对依据时会打折",
+            "source": "引用格式", "action": "locate",
+        })
+    if "等级保护" in text and not _STD_RE.search(text):
+        items.append({
+            "group": "proof", "severity": "suggest",
+            "title": "提到等级保护却没有标准号",
+            "evidence": "应给 GB/T 22239（安全要求）/ GB/T 28448（测评要求）等标准号",
+            "source": "引用格式", "action": "locate",
+        })
+    if "【来源：招标文件" in text and not _CLAUSE_RE.search(text):
+        items.append({
+            "group": "proof", "severity": "suggest",
+            "title": "引用招标文件但没到条款级",
+            "evidence": "只标了「招标文件-xx」；建议到条款级（技术规范书 X.X / 第 X 条）",
+            "source": "引用格式", "action": "locate",
+        })
+    return items
