@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v401';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v401';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v403';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v403';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -172,7 +172,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
-        <div class="cs-gate-bar" data-cs="gate" hidden></div>
+
         <div class="cs-agent-slot" data-cs="agents"></div>
         <div class="cs-toolbar">
           <button data-action="ai" class="cs-primary" title="按章节大纲逐节编写整章（已有内容的节保留）">编写整章</button>
@@ -1445,43 +1445,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
   }
 
-  /** 导出前交付门：硬门未清零 → 一键清理 / 带风险导出 / 取消 */
-  function openGateBlockDialog() {
-    const summary = (gateInfo || {}).summary || {};
-    const total = summary.blocking || 0;
-    if (!total) return Promise.resolve('pass');
-    return new Promise((resolve) => {
-      const items = (gateInfo || {}).blocking || [];
-      const dlg = globalThis.document.createElement('dialog');
-      dlg.className = 'cs-plan-dialog';
-      dlg.innerHTML = `<header><h3>导出前检查：${total} 处不能交付</h3><button type="button" data-gb-close>×</button></header>
-        <div class="cs-plan-body">
-          <p class="cs-warning">内部语法残留、内部术语、未清零的占位符，评委一眼就能看出"没做完"。建议先清零再导出。</p>
-          <ul class="cs-rx-list">${items.slice(0, 8).map((i) => `<li>${esc(i.title)}<small>${esc(i.section || '本章')} · ${esc(String(i.quote || '').slice(0, 46))}</small></li>`).join('')}
-            ${items.length > 8 ? `<li>…还有 ${items.length - 8} 处</li>` : ''}</ul>
-        </div>
-        <footer class="cs-ins-foot">
-          <button type="button" class="cs-cp-ghost" data-gb-cancel>取消</button>
-          ${summary.auto_fixable ? `<button type="button" class="cs-cp-ghost" data-gb-fix>一键清理 ${summary.auto_fixable} 处并继续</button>` : ''}
-          <button type="button" class="cs-cp-primary" data-gb-risk>带风险导出</button>
-        </footer>`;
-      const done = (value) => { dlg.close(); resolve(value); };
-      dlg.addEventListener('click', async (event) => {
-        if (event.target.closest('[data-gb-close]') || event.target.closest('[data-gb-cancel]')) { done('cancel'); return; }
-        if (event.target.closest('[data-gb-risk]')) { done('risk'); return; }
-        if (event.target.closest('[data-gb-fix]')) {
-          dlg.close();
-          await runGateFix();
-          const left = ((gateInfo || {}).summary || {}).blocking || 0;
-          resolve(left ? 'risk' : 'pass');
-        }
-      });
-      dlg.addEventListener('close', () => dlg.remove());
-      globalThis.document.body.appendChild(dlg);
-      dlg.showModal();
-    });
-  }
-
   /** 导出前的阻塞确认：列出阻塞待办，允许"带风险导出" */
   function openRiskExportDialog(items) {
     return new Promise((resolve) => {
@@ -2143,6 +2106,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let gateInfo = null;
   let pendingMaterialSection = '';      // 从待办「上传」进入时，记住要绑定到哪一节
 
+  /** 打开章节时：系统静默清理内部语法/术语（不需要用户点），有清理则刷新正文 */
+  async function autoCleanChapter() {
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/delivery-gate/auto`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) { await refreshDeliveryGate(); return; }
+      const data = await resp.json();
+      if (data.changed) {
+        editor.value = data.content || editor.value;
+        context = await json(`/api/blocks/${active.id}/studio`);
+        status(`已自动清理 ${data.changes?.length || 0} 类内部写法（可回滚）`);
+      }
+      gateInfo = { summary: data.remaining, blocking: data.blocking || [] };
+      paintGateBar();
+    } catch (error) {
+      await refreshDeliveryGate();
+    }
+  }
+
   /** 拉章级交付门（内部语法/术语/占位符），在编辑区上方提示 */
   async function refreshDeliveryGate() {
     if (!active) return;
@@ -2154,6 +2135,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   function paintGateBar() {
+    // 交付门已并入待办：不再单独显示提醒条，此处保留空实现（数据供导出前检查用）
     const bar = host.querySelector('[data-cs="gate"]');
     if (!bar) return;
     const summary = (gateInfo || {}).summary || {};
@@ -2169,74 +2151,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <span class="cs-gate-text">本章有 <b>${total}</b> 处不能交付的内容：${parts.join(' · ')}（导出前必须清零）</span>
       ${summary.auto_fixable ? `<button type="button" class="cs-gate-act" data-gate-fix>一键清理 ${summary.auto_fixable} 处</button>` : ''}
       <button type="button" class="cs-gate-act" data-gate-show>在待办里处理</button>`;
-  }
-
-  /** 交付门清单：列出每条（节 + 原句），可定位 */
-  function openGateDialog() {
-    const items = (gateInfo || {}).blocking || [];
-    const dlg = globalThis.document.createElement('dialog');
-    dlg.className = 'cs-plan-dialog';
-    dlg.innerHTML = `<header><h3>交付门清单（${items.length} 处）</h3><button type="button" data-gd-close>×</button></header>
-      <div class="cs-plan-body">
-        <p class="cs-muted">这些内容会让评委看出"没做完"：内部语法残留、内部术语、未清零的占位符。导出前必须清零。</p>
-        ${items.length ? items.map((item, index) => `<div class="cs-task">
-            <div class="cs-task-head"><b>${esc(item.title)}</b>
-              <span class="cs-task-impact">${esc(item.section || '本章')}</span></div>
-            <p class="cs-task-why">原句：${esc(item.quote || '')}</p>
-            <div class="cs-task-acts">
-              ${item.fixable ? `<button type="button" class="cs-task-act" data-gd-fix-one="${index}">清理这处</button>` : ''}
-              <button type="button" class="cs-task-act" data-gd-locate="${index}">定位</button>
-            </div>
-          </div>`).join('') : '<p class="cs-todo-ok">✓ 本章可以交付</p>'}
-      </div>
-      <footer class="cs-ins-foot">
-        ${(gateInfo || {}).summary?.auto_fixable ? '<button type="button" class="cs-cp-ghost" data-gd-fix-all>一键清理可自动项</button>' : ''}
-        <button type="button" class="cs-cp-ghost" data-gd-close2>关闭</button>
-      </footer>`;
-    dlg.addEventListener('click', async (event) => {
-      if (event.target.closest('[data-gd-close]') || event.target.closest('[data-gd-close2]')) { dlg.close(); return; }
-      if (event.target.closest('[data-gd-fix-all]')) {
-        dlg.close();
-        await runGateFix();
-        return;
-      }
-      const locate = event.target.closest('[data-gd-locate]');
-      if (locate) {
-        const item = items[Number(locate.dataset.gdLocate)];
-        dlg.close();
-        locateTaskTarget({ target: { section: item.section, quote: item.quote } });
-        return;
-      }
-      const fixOne = event.target.closest('[data-gd-fix-one]');
-      if (fixOne) {
-        const item = items[Number(fixOne.dataset.gdFixOne)];
-        dlg.close();
-        await runGateFix(item);
-      }
-    });
-    dlg.addEventListener('close', () => dlg.remove());
-    globalThis.document.body.appendChild(dlg);
-    dlg.showModal();
-  }
-
-  /** 执行一键清理（全部或单条）；写版本、刷新正文与提醒条 */
-  async function runGateFix(single) {
-    try {
-      const resp = await fetch(`/api/blocks/${active.id}/delivery-gate/fix`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apply: true }), signal: AbortSignal.timeout(30000),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
-      if (data.content !== undefined) editor.value = data.content;
-      context = await json(`/api/blocks/${active.id}/studio`);
-      await refreshDeliveryGate();
-      paintAside();
-      const left = (data.remaining || {}).blocking || 0;
-      status(left
-        ? `已清理可自动修复项；还剩 ${left} 处需你处理（占位符）`
-        : '本章交付门已清零，可以导出');
-    } catch (error) { status(`清理失败：${error.message}`); }
   }
 
   /** 让"正在编写"的这一节保持在视野里：首次居中，之后跟随底部 */
@@ -2461,10 +2375,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'choose') { locateTaskTarget(task); openDecideDialog(task); return; }
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
-    if (type === 'gate_fix') { await runGateFix(); return; }
     if (type === 'gate_placeholder') {
-      await refreshDeliveryGate();
-      openGateDialog();
+      showPanel('todo');
+      status('在待办里逐条处理：占位符需要你补资料，或删掉这句断言');
       return;
     }
     if (type === 'add_citation') {
@@ -3274,7 +3187,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
       hydrateIgnored();
       void loadWritingModels().then(() => paintAside());
-      void refreshDeliveryGate();
+      void autoCleanChapter();
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
       if(localDraftAction(local,block.content||'')!=='none'){
@@ -3406,8 +3319,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         status('已重新排队，只补未写的节'); }catch(error){ status(error.message); }
       return;
     }
-    if(event.target.closest('[data-gate-fix]')){ await runGateFix(); return; }
-    if(event.target.closest('[data-gate-show]')){ showPanel('todo'); status('已切到待办：交付门的问题都在「需要你处理 / 系统处理中」里'); return; }
     const modelBtn=event.target.closest('[data-agent-model]');
     if(modelBtn){
       event.preventDefault();

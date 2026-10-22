@@ -251,16 +251,7 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
                 impact="export_block",
                 action={"type": "gate_placeholder", "label": "逐条处理", "payload": {"count": kinds["placeholder"]}},
             ))
-        auto = (kinds.get("syntax") or 0) + (kinds.get("term") or 0)
-        if auto:
-            system.append(_task(
-                category="system", owner="system",
-                title=f"清理 {auto} 处不能交付的写法",
-                dedupe_key="gate:auto",
-                why="内部语法残留（图块标记/type=）与内部术语（任务包/评分点）会让评委看出未整理；系统可一键清理并写版本",
-                impact="quality",
-                action={"type": "gate_fix", "label": "一键清理", "payload": {"count": auto}},
-            ))
+        # 内部语法/内部术语：系统会在保存与生成时**自动清理**，不出现在待办里（不需要用户参与）
     except Exception:
         pass
 

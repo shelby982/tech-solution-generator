@@ -203,6 +203,11 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
         if body.content is not None and body.content != existing.get("content"):
             if existing.get("content") and not await list_revisions(db, block_id):
                 await add_revision(db, block_id, existing["content"], "首次编辑前正文", "baseline")
+            # 交付门：内部语法残留 / 内部术语 —— 系统**自动清理**，不打扰用户
+            from services.delivery_gate import auto_fix as gate_auto_fix
+            cleaned, gate_changed, _ = gate_auto_fix(body.content)
+            if gate_changed:
+                body.content = cleaned
             # 表格上方统一补表名（`**表：名**`），保证预览/导出都有表名
             from services.body_tables import ensure_table_captions
             content_with_captions, added = ensure_table_captions(body.content)

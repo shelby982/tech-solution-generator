@@ -258,7 +258,12 @@ async def test_job_freezes_model_and_template_and_preview_does_not_save_editor(e
 
 async def test_invalid_markdown_and_external_images_fail_before_export_queue(env):
     c=env.client;bid=env.block['id']
-    for text in (':::diagram 缺少结尾\nA -> B','![远程](https://example.com/a.png)'):
-        await c.put(f'/api/blocks/{bid}',json={'content':text})
-        assert (await c.post(f'/api/projects/{env.pid}/studio/exports',json={'thread_id':'tech'})).status_code==422
+    # ① 内部语法残留：保存时**系统自动清理**（不再等到导出才报错）
+    await c.put(f'/api/blocks/{bid}',json={'content':':::diagram 缺少结尾\nA -> B'})
+    saved = (await c.get(f'/api/blocks/{bid}')).json()
+    assert ':::diagram' not in (saved.get('content') or '')
+
+    # ② 外部图片：仍然必须在导出前被拦住
+    await c.put(f'/api/blocks/{bid}',json={'content':'![远程](https://example.com/a.png)'})
+    assert (await c.post(f'/api/projects/{env.pid}/studio/exports',json={'thread_id':'tech'})).status_code==422
     assert env.queued==[]
