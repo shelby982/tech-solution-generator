@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v393';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v393';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v394';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v394';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2212,34 +2212,55 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }, 6000);
   }
 
-  /** 定位到任务目标：切到预览 → 找到原句所在段落 → 滚动并高亮 */
+  /** 定位到任务目标：**留在编辑区**选中原句并滚到那一行；已在预览则同时点亮该段 */
   function locateTaskTarget(task) {
     const target = task.target || {};
     const section = String(target.section || '');
     const quote = String(target.quote || '');
     if (!section && !quote) { status('这条没有定位信息，请直接在正文里找'); return; }
-    paintView(true);                                   // 预览态才能高亮
-    const previewEl = host.querySelector('[data-cs="preview"]');
-    if (previewEl && !previewEl.innerHTML.trim()) previewEl.innerHTML = previewContent(editor.value);
-    // 兜底一：编辑态直接选中原句（textarea 里能被看见，且能立刻改）
-    const rawText = String(editor.value || '');
-    const at = rawText.indexOf(quote) >= 0 ? rawText.indexOf(quote) : rawText.indexOf(quote.slice(0, 14));
-    if (at >= 0) {
-      editor.focus();
-      editor.setSelectionRange(at, at + Math.min(quote.length, 60));
-      const ratio = at / Math.max(1, rawText.length);
-      editor.scrollTop = Math.max(0, Math.round((editor.scrollHeight - editor.clientHeight) * ratio));
-    }
-    const needle = quote.replace(/\s+/g, '').slice(0, 10);
-    globalThis.setTimeout(() => {
-      const ok = paintLocateHighlight(needle, section);
-      startLocateHighlight(needle, section);
-      if (ok) {
-        status(`已定位到「${section || '正文'}」，正文里已选中这句（预览中黄色高亮）：${quote.slice(0, 22)}…`);
-      } else {
-        status(`已切到预览，但没匹配到原句${section ? `（${section}）` : ''}；可手动搜：${quote.slice(0, 24)}…`);
+
+    const text = String(editor.value || '');
+    // 1) 在正文里按原句定位（允许空白差异）
+    let at = quote ? text.indexOf(quote) : -1;
+    if (at < 0 && quote) {
+      const compact = text.replace(/\s+/g, '');
+      const needle = quote.replace(/\s+/g, '').slice(0, 12);
+      const compactAt = compact.indexOf(needle);
+      if (compactAt >= 0) {
+        // 把"去空白后的位置"映射回原文位置
+        let seen = 0, index = 0;
+        for (; index < text.length; index += 1) {
+          if (!/\s/.test(text[index])) {
+            if (seen === compactAt) break;
+            seen += 1;
+          }
+        }
+        at = index;
       }
-    }, 60);
+    }
+    // 2) 找不到原句 → 退到"节标题"
+    if (at < 0 && section) at = text.indexOf(`## ${section}`);
+    if (at < 0) {
+      status(`没在正文里找到这句话（${section || '本章'}）；原句：${quote.slice(0, 24)}… 可手动搜索`);
+      return;
+    }
+
+    // 3) 留在编辑态并选中（可见、可直接改）
+    paintView(false);
+    editor.hidden = false;
+    editor.focus();
+    const end = at + Math.min(quote ? quote.length : (section ? section.length + 3 : 20), 200);
+    editor.setSelectionRange(at, end);
+    // 4) 滚动到选区附近（按比例估算，textarea 无法直接滚到行）
+    const ratio = at / Math.max(1, text.length);
+    editor.scrollTop = Math.max(0, Math.round((editor.scrollHeight - editor.clientHeight) * ratio) - 60);
+    // 5) 若用户本来就在预览里，也把预览那段点亮（不强制切预览）
+    if (previewVisible) {
+      const previewEl = host.querySelector('[data-cs="preview"]');
+      if (previewEl && !previewEl.innerHTML.trim()) previewEl.innerHTML = previewContent(text);
+      startLocateHighlight(quote.replace(/\s+/g, '').slice(0, 10), section);
+    }
+    status(`已定位并选中：${section || '正文'} · 原句「${quote.slice(0, 26) || section}…」—— 可直接改`);
   }
 
   /** 任务动作分发：上传 / 选说法 / 查看 / 定位 / 精简 */
