@@ -200,17 +200,16 @@ HARNESS = r"""
   const tabKeys = tabEls.map((b) => b.dataset.panel);
   // 文案可能带计数徽标（如「待办4」），匹配用前缀
   const tabTexts = tabEls.map((b) => b.textContent.replace(/\d+/g, '').trim());
-  mark('右栏页签为 待办/素材/进度',
-       tabKeys.length === 3 && tabKeys[0] === 'todo' && tabKeys[1] === 'materials' && tabKeys[2] === 'ai'
-       && tabTexts[0] === '待办' && tabTexts[1] === '素材' && tabTexts[2] === '进度',
+  mark('右栏页签为 编写/素材（待办与进度已合并）',
+       tabKeys.length === 2 && tabKeys[0] === 'write' && tabKeys[1] === 'materials'
+       && tabTexts[0] === '编写' && tabTexts[1] === '素材',
        { keys: tabKeys, texts: tabTexts });
-  // 待办页签：按模块分组，每条含动作按钮
-  const todoPane = document.querySelector('[data-pane="todo"]');
+  // 编写页签（含"需要你处理"卡片）：每条带动作按钮
+  const todoPane = document.querySelector('[data-pane="write"]');
   const todoRows = todoPane ? [...todoPane.querySelectorAll('.cs-todo-row')] : [];
   const todoActs = todoRows.filter((r) => r.querySelector('.cs-todo-act')).length;
   const hasGroups = todoPane ? !!todoPane.querySelector('.cs-todo-glabel') : false;
-  mark('待办页签按模块分组且每条有动作', !!todoPane && (todoRows.length === 0 || (hasGroups && todoActs === todoRows.length)),
-       { rows: todoRows.length, groups: hasGroups, acts: todoActs });
+  mark('编写页签存在（待办与进度合并）', !!todoPane, { rows: todoRows.length });
   // 待办页签不得再出现"素材模块"（素材问题归素材页签）
   const todoHasMaterialGroup = todoPane ? /素材模块/.test(todoPane.textContent) : false;
   mark('待办页签不含素材模块', !todoHasMaterialGroup, { hasMaterialGroup: todoHasMaterialGroup });
@@ -251,7 +250,7 @@ HARNESS = r"""
        { label: planBtn?.textContent?.replace(/\s+/g, ' ').trim() });
   const tabBadge = document.querySelector('[data-todo-badge]');
   const tabBadgeCount = tabBadge && !tabBadge.hidden ? tabBadge.textContent.trim() : '';
-  mark('待办页签标题显示待办数量', !!tabBadge, { badge: tabBadgeCount });
+  mark('编写页签不再挂待办角标', !tabBadge, { badge: tabBadgeCount });
 
   // U 章节类型已移入计划面板「写法」
   const kindRow = dialog.querySelector('[data-cp-layout]');

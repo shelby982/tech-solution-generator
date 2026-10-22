@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v410';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v410';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v411';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v411';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -198,7 +198,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
 
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="todo"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="todo" aria-pressed="true">待办<span class="cs-tab-badge" data-todo-badge hidden></span></button><button data-panel="materials" aria-pressed="false">素材</button><button data-panel="ai" aria-pressed="false">进度</button></nav><div data-cs="aside"></div></aside>
+      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="write"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="write" aria-pressed="true">编写</button><button data-panel="materials" aria-pressed="false">素材</button></nav><div data-cs="aside"></div></aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
@@ -233,6 +233,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
   let basisInfo = null;
   let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
+
+  /** 素材页签顶部：本章"需要你上传的材料"（招标硬性要求才有；没有就不显示） */
+  function materialRequestsHtml() {
+    const tasks = (planBrief?.deliveryTasks?.need_user || [])
+      .filter((task) => task.category === 'upload' || task.action?.type === 'upload_material');
+    if (!tasks.length) return '';
+    return `<div class="cs-mat-requests">
+      <h4>本章需要你上传 <small>${tasks.length} 份（招标要求提供）</small></h4>
+      ${tasks.map((task) => `<div class="cs-mat-request">
+        <div class="cs-mat-request-head"><b>${esc(task.title)}</b>
+          <button type="button" class="cs-gate-act" data-task-act="${esc(task.action.type)}" data-task-id="${esc(task.id)}">上传</button></div>
+        <p class="cs-mat-request-why">${esc(task.why || '')}</p>
+        ${(task.materials_required || []).length ? `<ul>${task.materials_required.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}
+        ${task.material_format ? `<p class="cs-mat-request-meta">格式：${esc(task.material_format)}</p>` : ''}
+        ${task.fallback ? `<button type="button" class="cs-todo-ignore" data-task-fallback="${esc(task.id)}">${esc(task.fallback.label)}</button>` : ''}
+      </div>`).join('')}
+    </div>`;
+  }
 
   /** 这一节的"写法"（= 该节提示词）：优先用保存过的覆盖值，否则用系统默认 */
   function practiceOf(section) {
@@ -2411,7 +2429,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
     if (type === 'gate_placeholder') {
-      showPanel('todo');
+      showPanel('write');
       status('在待办里逐条处理：占位符需要你补资料，或删掉这句断言');
       return;
     }
@@ -2533,7 +2551,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           openFigureAdjustDialog({ id: 'new', kind: 'ai', section: section ? section.title : '',
                                    title: title || '新图示', type: 'layered', nodes: 0, raw: '' });
         } else {
-          status('表格生成：请在「插入 → AI 生成表格」里补一张'); showPanel('todo');
+          status('表格生成：请在「插入 → AI 生成表格」里补一张'); showPanel('write');
         }
         return;
       }
@@ -2879,14 +2897,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
     if (planBrief?.deliveryTasks) {
-      return `<section data-pane="todo">${deliveryTasksHtml(planBrief.deliveryTasks)}</section>`;
+      return `<section data-pane="write">${deliveryTasksHtml(planBrief.deliveryTasks)}</section>`;
     }
     if ((planBrief?.todoItems || []).length) {
-      return `<section data-pane="todo">${todoItemsHtml()}</section>`;
+      return `<section data-pane="write">${todoItemsHtml()}</section>`;
     }
     const todos = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material');
     if (!todos.length) {
-      return `<section data-pane="todo"><h4>待办</h4>
+      return `<section data-pane="write"><h4>待办</h4>
         <p class="cs-todo-ok">✓ 本章没有待办，可以生成或交付</p></section>`;
     }
     const groups = TODO_GROUPS.map(([key, label]) => {
@@ -2909,7 +2927,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <button type="button" class="cs-todo-act" data-gap-abate="${esc(g.id)}">去核对</button>
             </div>`).join('')}</div>`
       : '';
-    return `<section data-pane="todo"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
+    return `<section data-pane="write"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
   }
 
   /** 节级留痕：由哪个角色/模型生成、耗时（没有则空） */
@@ -2999,7 +3017,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const done = new Set(outline.map((s) => s.title).filter((title) =>
       sectionWordCount(bodyText, title) >= 20));
     if (!outline.length) {
-      return `<section data-pane="ai"><h4>章节编写进度</h4>
+      return `<section data-pane="write"><h4>章节编写进度</h4>
         <p class="cs-todo-ok">还没有章节大纲 · 去章头「本章计划」生成大纲后开始编写</p></section>`;
     }
     const figures = parseFigures(bodyText);
@@ -3036,7 +3054,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${figBlock}
         </div>`;
     }).join('');
-    return `<section data-pane="ai"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
+    return `<section data-pane="write"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
       <div class="cs-progress-actions">
         <button type="button" class="cs-progress-btn" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button>
         <button type="button" class="cs-progress-btn" data-fig-review>审阅本章图片 ${figureCount}</button>
@@ -3273,7 +3291,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `${todoPaneHtml()}
       ${progressPaneHtml()}
-      <section data-pane="materials">${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
+      <section data-pane="materials">${materialRequestsHtml()}${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
       <details class="cs-mat-manage">
         <summary>已关联素材与外部依据</summary>
         <div class="cs-mat-manage-body">
@@ -3741,7 +3759,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
         // 与「进度」页签的「继续编写（补未写）」同一套逻辑：逐节流式写入并高亮
-        showPanel('ai');
+        showPanel('write');
         const slot = get('agents');
         // 代价预估：先算待写节数，让用户知道要花多少
         try {
