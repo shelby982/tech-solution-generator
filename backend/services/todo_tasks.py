@@ -193,9 +193,37 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         groups.setdefault(key, []).append(proof)
     for key, items in groups.items():
         first = items[0]
+        if key in ("指标", "表述"):
+            # 这两类系统能按小节契约重写，不需要用户手动改
+            system.append(_task(
+                category="system", owner="system",
+                title=("补目标节的量化指标" if key == "指标" else f"改 {len(items)} 处模糊表述"),
+                dedupe_key=f"rewrite:{key}",
+                why=("目标节没有可验收数值，系统会按「指标名+目标值+验收口径」重写这一节，改完给你确认再保留"
+                     if key == "指标" else
+                     "「拟/将/待」这类表述会被认为没想清楚，系统按小节契约重写这几处，改完给你确认再保留"),
+                impact="quality",
+                action={"type": "rewrite_now", "label": "系统重写", "payload": {"key": key}},
+                options=[],
+            ))
+            continue
         is_citation = key == "引用来源"
+        if is_citation:
+            system.append(_task(
+                category="system", owner="system",
+                title=(f"补 {len(items)} 处引用来源" if len(items) > 1 else "补 1 处引用来源"),
+                dedupe_key="cite:auto",
+                why=(f"这段引用了《{_policy_name(first)}》却没有【来源：…】。系统先去检索可信来源并插入；"
+                     "查不到的才会转成「需要你提供」"),
+                impact="quality",
+                action={"type": "search_now", "label": "现在去查", "payload": {"count": len(items)}},
+                occurrences=[{"section": str(x.get("section") or ""),
+                              "quote": _clean_quote(str(x.get("sentence") or ""), body)}
+                             for x in items],
+            ))
+            continue
         need_user.append(_task(
-            category=("confirm" if not is_citation else "supply"), owner="user",
+            category="confirm", owner="user",
             title=((f"补 {len(items)} 处引用来源" if len(items) > 1 else "补 1 处引用来源")
                    if is_citation else
                    (("补目标节的量化指标" if len(items) == 1 else f"补 {len(items)} 节的目标指标")
@@ -242,15 +270,7 @@ def build_delivery_tasks(*, block_id: str, content: str, deliverables: list[dict
         from services.delivery_gate import scan as gate_scan
         gate = gate_scan(body)
         kinds = (gate.get("summary") or {}).get("by_kind") or {}
-        if kinds.get("placeholder"):
-            need_user.append(_task(
-                category="supply", owner="user",
-                title=f"补 {kinds['placeholder']} 处待补充内容",
-                dedupe_key="gate:placeholder",
-                why="正文里有【待补充：…】占位。要么补上真材料，要么删掉这句断言，否则导出会被判「没做完」",
-                impact="export_block",
-                action={"type": "gate_placeholder", "label": "逐条处理", "payload": {"count": kinds["placeholder"]}},
-            ))
+        # 占位符已由系统在保存/生成时**自动净化**（正文不再出现"待补充"），不再生成待办卡
         # 内部语法/内部术语：系统会在保存与生成时**自动清理**，不出现在待办里（不需要用户参与）
     except Exception:
         pass

@@ -83,6 +83,7 @@ def test_delivery_tasks_three_zones_and_verb_titles():
     zones = set(payload)
     assert {"need_user", "system", "suggestion", "summary"} <= zones
     need = payload["need_user"]
+    system_tasks = payload["system"]
     # 标题动词开头、不超过 24 字
     for task in need:
         assert len(task["title"]) <= 24
@@ -90,7 +91,8 @@ def test_delivery_tasks_three_zones_and_verb_titles():
     # 材料缺口 → 上传卡；决定项 → 选择卡；引用 → 核对卡（同类合并）
     assert any(t["action"]["type"] == "upload_material" for t in need)
     assert any(t["action"]["type"] == "choose" for t in need)
-    assert any("引用" in t["title"] for t in need)
+    # 引用来源改由"系统先查"（system 区），用户区不再出现
+    assert any("引用" in t["title"] for t in (need + system_tasks))
     # 系统任务：依据 + 图表 + 补写，且不计入 need_user
     assert any("依据" in t["title"] for t in payload["system"])
     # 篇幅超 → 建议
@@ -216,3 +218,28 @@ def test_weak_phrasing_and_citation_format():
     assert any("缺文号" in t for t in fmt_titles)
     assert any("标准号" in t for t in fmt_titles)
     assert any("条款级" in t for t in fmt_titles)
+
+
+def test_placeholder_purge_removes_all_placeholders():
+    """正文净化：不允许任何"待补充"字眼；能删就删，删完整句，并记录分类。"""
+    from services.placeholder_purge import classify, purge
+
+    content = ("## 项目现状描述\n\n业务运行基本状态表现为有业务、有流程，但规范化程度不足。"
+               "业务量以【待补充：项目单位现有业务量、岗位设置与运行统计】为准。\n\n"
+               "安全防护以常规技术措施为主，等级保护落实情况【待补充：现有系统等级保护备案与测评情况】。\n\n"
+               "招标文件具体条款编号、发文机关及文号标注为【待补充：招标文件对应条款原文及发文机关、文号】。\n")
+    after, removed = purge(content)
+    for word in ("待补充", "待补事实", "待确认", "待核实"):
+        assert word not in after, after
+    groups = classify(removed)
+    assert groups["summary"]["upload"] >= 1
+    assert groups["summary"]["search"] >= 1
+
+
+def test_purge_keeps_complete_sentences_only():
+    """删掉占位后若句子残缺（以连接词结尾）→ 整句删掉，不留病句。"""
+    from services.placeholder_purge import purge
+
+    after, _ = purge("## 一\n\n本节重点包括【待补充：条款原文】。\n\n正文结论明确。\n")
+    assert "本节重点包括" not in after
+    assert "正文结论明确" in after

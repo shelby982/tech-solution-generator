@@ -243,6 +243,9 @@ async def run_job(job_id: str) -> None:
             elif (current.get("content") or "") != base:
                 reason = "正文在生成期间被修改，已保留建议稿，不覆盖"
             elif draft != base:
+                # 正文净化：不留任何"待补充"字眼（用户要求：可以浅，但必须完整）
+                from services.placeholder_purge import purge as purge_placeholders
+                draft, purged_items = purge_placeholders(draft)
                 model_note = " ".join(f"{role}={model}" for role, model in (models or {}).items() if model)
                 await add_revision(db, block_pk, base,
                                    summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai")

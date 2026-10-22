@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v403';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v403';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v404';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v404';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2391,6 +2391,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const btn = globalThis.document.querySelector('[data-cite-open]');
       if (btn) { btn.click(); status('已打开检索：把缺的依据逐条搜进本章（查到会自动挂上）'); }
       else status('已记录：系统会去公开来源检索这些依据');
+      return;
+    }
+    if (type === 'rewrite_now') {
+      const key = (task.action.payload || {}).key || '';
+      const want = key === '指标' ? '目标' : '差距';
+      const outline = planBrief?.outline || [];
+      const section = outline.find((sec) => String(sec.title).includes(want)) || outline[0];
+      if (!section) { status('没找到对应小节，请先在「本章计划」确认大纲'); return; }
+      const extra = key === '指标'
+        ? '重写本节：每个目标必须给出「指标名 + 目标值/阈值 + 验收口径 + 测量方法」，保留原有引用与数字。'
+        : '重写本节：把「拟/将/待/有待」等含糊表述改成明确做法或指标，保留原有引用与数字。';
+      status(`系统正在按契约重写「${section.title}」…`);
+      await streamWriteSection(active.id, section, null, extra, 'rewrite');
+      await showProposalBar(`已重写「${section.title}」（未保存）`, '这版是否保留？', async () => {
+        await save();
+        await loadBasis(active.block_id); paintAside();
+        status('已保留并保存');
+      }, async () => {
+        await restoreLastRevision();
+      });
       return;
     }
     if (type === 'generate_chart' || type === 'write_now' || type === 'fix_now') {

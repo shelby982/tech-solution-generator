@@ -450,6 +450,9 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         from services.body_tables import ensure_table_captions
         text, _dropped = strip_invalid_diagrams(text)
         text, _captions = ensure_table_captions(text)
+        # 正文净化：不留"待补充"字眼（可以浅，但必须完整）
+        from services.placeholder_purge import purge as purge_placeholders
+        text, _purged = purge_placeholders(text)
         if len(text) < 120:
             yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
             return

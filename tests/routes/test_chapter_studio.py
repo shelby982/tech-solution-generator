@@ -81,11 +81,13 @@ async def test_complete_requires_real_content_and_content_change_invalidates_com
 
 async def test_complete_requires_explicit_acknowledgement_and_unchanged_content(env):
     c=env.client;bid=env.block['id']
+    # 正文净化：保存时自动清掉"待补充"占位（内容可以浅，但必须完整）
     await c.put(f'/api/blocks/{bid}',json={'content':'实施方案。\n【待补充：测试报告】'})
+    saved=(await c.get(f'/api/blocks/{bid}')).json()
+    assert '待补充' not in (saved.get('content') or '')
     check=(await c.get(f'/api/blocks/{bid}/studio/completion-check')).json()
-    assert len(check['gaps'])==1 and not check['running']
+    assert not check['running'] and len(check['gaps'])==0
     request={'layout':'solution','writing_status':'complete','expected_content_hash':check['content_hash']}
-    assert (await c.put(f'/api/blocks/{bid}/studio',json=request)).status_code==409
     request['acknowledge_open_items']=True
     assert (await c.put(f'/api/blocks/{bid}/studio',json=request)).status_code==200
     await c.put(f'/api/blocks/{bid}',json={'content':'修改后的方案'})
