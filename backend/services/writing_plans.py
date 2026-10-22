@@ -793,6 +793,10 @@ _PUBLIC_HINTS = {
 _UPLOAD_WORDS = ("业绩", "案例", "资质", "证书", "合同", "验收", "客户", "内部", "取证", "截图", "证明")
 
 
+# 这些材料只可能来自项目单位/我方，公开渠道没有
+_SELF_ONLY_KINDS = ("数据", "业绩", "资质", "测评", "合同", "内部")
+
+
 def _material_gaps(materials: list[dict], requirements: list[dict]) -> list[dict]:
     """素材缺口三分法：已有可用 / 公开资料可补 / 必须你上传。
 
@@ -808,9 +812,10 @@ def _material_gaps(materials: list[dict], requirements: list[dict]) -> list[dict
         lack = max(0, need - have)
         if not lack:
             continue
-        if any(word in kind for word in _UPLOAD_WORDS):
+        if any(word in kind for word in _UPLOAD_WORDS) or kind in _SELF_ONLY_KINDS:
             availability, suggestions = "upload", []
-            reason = "评分点要求举证，公开渠道没有这类材料"
+            reason = ("属于项目单位自身情况，公开渠道没有，需要你上传或确认" if kind in _SELF_ONLY_KINDS
+                      else "评分要求需要举证，公开渠道没有这类材料")
         elif any(word in kind for word in _PUBLIC_HINTS):
             availability = "public"
             suggestions = next(v for k, v in _PUBLIC_HINTS.items() if k in kind)
@@ -929,9 +934,37 @@ def _self_check(deliverables: list[dict], word_plan: dict, clauses: list[dict],
     return items
 
 
+# 章节内容 → 需要的材料（只有真的需要才要，不再每个章节都塞"业绩材料"）
+_MATERIAL_RULES = (
+    ("业绩", ("业绩", "案例", "类似项目", "成功案例", "实施经验")),
+    ("资质", ("资质", "证书", "认证", "资格")),
+    ("数据", ("现状", "业务量", "规模", "运行统计", "清单", "台账", "指标")),
+    ("测评", ("等级保护", "测评", "备案", "合规检查")),
+    ("合同", ("合同", "履约", "验收")),
+)
+
+
+def _needed_materials(requirements: list[dict], sections: list[dict] | None) -> list[str]:
+    """按本章各节的标题/要点判断"真的需要哪些材料"。"""
+    text = " ".join(
+        [str(item.get("title") or "") + " " + " ".join(str(x) for x in (item.get("points") or []))
+         for item in (sections or [])]
+        + [str(item.get("title") or "") for item in (requirements or [])]
+    )
+    kinds: list[str] = []
+    for kind, keywords in _MATERIAL_RULES:
+        if any(word in text for word in keywords):
+            kinds.append(kind)
+    return kinds
+
+
 def _materials_plan(requirements: list[dict], bound_kinds: dict[str, int],
-                    clause_count: int) -> list[dict]:
-    """素材清单：需要什么料、已有多少、缺多少。"""
+                    clause_count: int, sections: list[dict] | None = None) -> list[dict]:
+    """素材清单：需要什么料、已有多少、缺多少。
+
+    注意：这里**只列真的需要**的材料。以前无条件给每章塞"我方材料（数据/案例/业绩）"，
+    导致"项目背景现状目标"这种章节也弹"上传业绩材料"——那是错的。
+    """
     plan = []
     if any(item.get("type") == "text" for item in requirements):
         plan.append({"kind": "政策/制度原文", "purpose": "支撑政策依据类表述", "need": 2,
@@ -939,8 +972,16 @@ def _materials_plan(requirements: list[dict], bound_kinds: dict[str, int],
     if clause_count:
         plan.append({"kind": "招标条款原文", "purpose": "逐条响应对内要求", "need": clause_count,
                      "have": clause_count, "where": "已解析（技术规范书）"})
-    plan.append({"kind": "我方材料（数据/案例/业绩）", "purpose": "提供现状数据与佐证", "need": 1,
-                 "have": bound_kinds.get("我方材料", 0), "where": "素材池上传/关联"})
+    for kind in _needed_materials(requirements, sections):
+        purpose = {
+            "业绩": "用于业绩/案例类小节举证",
+            "资质": "用于资格与能力类小节",
+            "数据": "用于现状描述与指标类小节",
+            "测评": "用于安全现状与合规差距",
+            "合同": "用于履约与业绩证明",
+        }.get(kind, "用于本章举证")
+        plan.append({"kind": kind, "purpose": purpose, "need": 1,
+                     "have": bound_kinds.get("我方材料", 0), "where": "素材池上传/关联"})
     for item in plan:
         item["status"] = "已齐" if item["have"] >= item["need"] else f"缺 {item['need'] - item['have']}"
     return plan
@@ -1143,7 +1184,9 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                 "written_pages": round(len(child_content) / 250, 1),
                 "has_content": bool(child_content),
             })
-    material_gaps = _material_gaps(_materials_plan(requirements, bound_kinds, len(clauses)), requirements)
+    outline_sections = (chapter or {}).get("outline") or []
+    materials_plan = _materials_plan(requirements, bound_kinds, len(clauses), outline_sections)
+    material_gaps = _material_gaps(materials_plan, requirements)
     try:
         completion = chapter_completion({"requirements": requirements, "materials": material_gaps,
                                         "figures_plan": figures_plan, "deliverables": deliverables}, [])
@@ -1156,13 +1199,13 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "word_plan": word_plan,
         "key_points": key_points,
         "key_points_by_deliverable": _split_key_points(key_points, deliverables),
-        "materials": _materials_plan(requirements, bound_kinds, len(clauses)),
+        "materials": materials_plan,
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "material_gaps": material_gaps,
         "generation_gaps": generation_gaps or [],
         "outline": (chapter or {}).get("outline") or [],
         "practiceOverrides": await _practice_overrides(db, project_id, block_id),
-        "todo": _build_todo(deliverables, _materials_plan(requirements, bound_kinds, len(clauses)),
+        "todo": _build_todo(deliverables, materials_plan,
                             word_plan, guidance, content, is_parent_chapter, is_catalog),
         "todo_items": build_todo_items(deliverables, material_gaps or [], generation_gaps or [],
                                        word_plan, content, is_parent_chapter, is_catalog, completion),
