@@ -478,6 +478,10 @@ async def init_db(conn: aiosqlite.Connection) -> None:
                        ('preview_error', "TEXT DEFAULT ''")]:
         if name not in export_columns:
             await conn.execute(f'ALTER TABLE document_export_jobs ADD COLUMN {name} {kind}')
+    material_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_materials)')).fetchall()}
+    if material_cols and 'section' not in material_cols:
+        await conn.execute("ALTER TABLE chapter_materials ADD COLUMN section TEXT DEFAULT ''")
+    await conn.commit()
     usage_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(llm_usage)')).fetchall()}
     for name, kind in [('block_id', 'INTEGER'), ('section', "TEXT DEFAULT ''"), ('role', "TEXT DEFAULT ''")]:
         if name not in usage_cols:

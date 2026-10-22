@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v395';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v395';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v397';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v397';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1869,7 +1869,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         result.innerHTML = `<pre class="cs-ins-preview">${esc(out.markdown)}</pre>
           <div class="cs-ins-actions"><button type="button" class="cs-cp-primary" data-fa-apply>替换这张图</button></div>`;
         result.querySelector('[data-fa-apply]').onclick = () => {
-          const updated = replaceFigureBlock(String(editor.value || ''), figure, out.markdown);
+          let updated = replaceFigureBlock(String(editor.value || ''), figure, out.markdown);
+          updated = ensureChartReference(updated, figure.section, out.markdown);
           editor.value = updated;
           changed && changed();
           status('图片已替换（在正文里，记得保存；原图可在版本里找回）');
@@ -1899,6 +1900,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     status(`已定位到「${title}」`);
   }
 
+  /** 插入图表后，确保本节正文有一句引用（"如表/图所示"），否则图/表是孤立的 */
+  function ensureChartReference(content, sectionTitle, chartMarkdown) {
+    const text = String(content || '');
+    if (!sectionTitle) return text;
+    const section = sectionText(text, sectionTitle);
+    if (!section) return text;
+    const isTable = String(chartMarkdown || '').trim().startsWith('**表');
+    if (/如(下)?[表图]|见[表图]|[表图]\s*\d/.test(section)) return text;   // 已有引用
+    const line = isTable ? '如下表所示，' : '如下图所示，';
+    // 在该节正文的第一段末尾补一句
+    const pattern = new RegExp(`(^##[ \\t]+${String(sectionTitle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\n)([\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
+    return text.replace(pattern, (all, head, body) => `${head}${body.trimEnd()}\n\n${line}\n\n`);
+  }
+
   /** 取某节正文 */
   function sectionText(content, title) {
     const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1925,6 +1940,33 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     diagram: { icon: '🖼', name: '图片', color: '#d97706' },
     table: { icon: '▦', name: '表格', color: '#059669' },
   };
+
+  /** 「编写整章」代价预估：节数 / 图表数 / 预计调用与时长 */
+  function confirmChapterWriteCost(sections, charts, calls) {
+    return new Promise((resolve) => {
+      const dlg = globalThis.document.createElement('dialog');
+      dlg.className = 'cs-plan-dialog';
+      const minutes = Math.max(1, Math.round(calls * 0.6));
+      dlg.innerHTML = `<header><h3>开始编写整章？</h3><button type="button" data-cw-cancel2>×</button></header>
+        <div class="cs-plan-body">
+          <p>本章还有 <b>${sections}</b> 节没写${charts ? `，其中需要生成 <b>${charts}</b> 个图表` : ''}。</p>
+          <p class="cs-muted">预计调用模型 <b>${calls}</b> 次，耗时约 <b>${minutes}</b> 分钟；中途可「停止」，已完成的节会保留。</p>
+          <p class="cs-muted">生成结果先落在草稿区，确认后再保存进正文。</p>
+        </div>
+        <footer class="cs-ins-foot">
+          <button type="button" class="cs-cp-ghost" data-cw-cancel>取消</button>
+          <button type="button" class="cs-cp-primary" data-cw-go>开始编写</button>
+        </footer>`;
+      const done = (value) => { dlg.close(); resolve(value); };
+      dlg.addEventListener('click', (event) => {
+        if (event.target.closest('[data-cw-cancel]') || event.target.closest('[data-cw-cancel2]')) { done(false); return; }
+        if (event.target.closest('[data-cw-go]')) done(true);
+      });
+      dlg.addEventListener('close', () => dlg.remove());
+      globalThis.document.body.appendChild(dlg);
+      dlg.showModal();
+    });
+  }
 
   /** 章节级 SSE 作业：一条 EventSource 驱动 4 头像与正文流式（v3 M2）。 */
   async function runChapterWriteJob(slot) {
@@ -2099,6 +2141,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   let gateInfo = null;
+  let pendingMaterialSection = '';      // 从待办「上传」进入时，记住要绑定到哪一节
 
   /** 拉章级交付门（内部语法/术语/占位符），在编辑区上方提示 */
   async function refreshDeliveryGate() {
@@ -2404,6 +2447,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!task) return;
     const type = (task.action || {}).type || '';
     if (type === 'upload_material') {
+      pendingMaterialSection = String((task.target || {}).section || '');
       showPanel('materials');
       status(`请上传：${task.title}；上传后待办会自动复检`);
       globalThis.setTimeout(async () => {
@@ -3503,6 +3547,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         // 与「进度」页签的「继续编写（补未写）」同一套逻辑：逐节流式写入并高亮
         showPanel('ai');
         const slot = get('agents');
+        // 代价预估：先算待写节数，让用户知道要花多少
+        try {
+          const plan = await fetchChapterPlan(active.block_id);
+          const outline = plan.outline || [];
+          const bodyNow = String(editor.value || '');
+          const pending = outline.filter((sec) => sectionWordCount(bodyNow, sec.title) < 20);
+          if (!outline.length) { status('还没有章节大纲：请先在「本章计划」生成大纲'); return; }
+          if (!pending.length) { status('整章已按大纲写完；要改某节请用「进度 → 重写」'); return; }
+          const charts = pending.reduce((sum, sec) => sum + (sec.deliverables || []).filter((d) => d.kind !== 'text').length, 0);
+          const calls = pending.length + charts;
+          const ok = await confirmChapterWriteCost(pending.length, charts, calls);
+          if (!ok) return;
+        } catch (error) {
+          status(`无法预估编写量：${error.message}`);
+          return;
+        }
         const headBtnEarly = globalThis.document.querySelector('[data-action="ai"]');
         const headLabelEarly = headBtnEarly ? headBtnEarly.textContent : '';
         const engine = await runChapterWriteJob(slot);
@@ -3591,7 +3651,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const materials=await json(`/api/projects/${projectId}/materials`);
         get('library').innerHTML=materials.filter(m=>m.role==='source'&&!context.materials.some(x=>x.id===m.id)).map(m=>`<button data-action="link" data-id="${m.id}">${esc(m.filename)}</button>`).join('')||'<p class="cs-muted">没有可关联素材，可直接上传。</p>';
       }
-      if(action==='link'){await json(`/api/blocks/${active.id}/studio/materials`,send('PUT',{material_id:Number(button.dataset.id)}));context=await json(`/api/blocks/${active.id}/studio`);paintAside();}
+      if(action==='link'){await json(`/api/blocks/${active.id}/studio/materials`,send('PUT',{material_id:Number(button.dataset.id),section:pendingMaterialSection||''}));pendingMaterialSection='';context=await json(`/api/blocks/${active.id}/studio`);paintAside();}
       if(action==='project-todo') { openProjectTodoDialog(); return; }
       if(action==='writing-settings') { await openWritingSettingsDialog(); return; }
       if(action==='complete') {

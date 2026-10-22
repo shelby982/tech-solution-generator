@@ -192,8 +192,14 @@ async def run_job(job_id: str) -> None:
             if charts:
                 text, chart_missing = merge_charts(text, charts)
                 for note in chart_missing:
-                    await emit(job_id, "error", {"scope": "chart", "index": index, "message": note,
-                                                 "recoverable": True})
+                    placeholder_item = {
+                        "group": "auto", "severity": "block",
+                        "title": f"图表占位未闭环：{note[:40]}",
+                        "evidence": f"第 {index + 1} 节「{title}」",
+                        "source": "占位符检查", "action": "autofix",
+                    }
+                    all_checks.append(placeholder_item)
+                    await emit(job_id, "todo", {"index": index, "items": [placeholder_item]})
                 # M4：图表校验（依据可追溯 / 图文矛盾 / 表格列）
                 try:
                     from services.chart_checks import chart_items
@@ -395,6 +401,19 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
         return {"ok": True, "role": role, "index": index, "title": title, "markdown": markdown,
                 "model": used, "checks": checks}
     except Exception as exc:  # noqa: BLE001
+        # 失败重试一次（图示换图型；表格换更明确的指令），仍失败才报
+        try:
+            await emit(job_id, "chart", {"role": role, "index": index, "title": title,
+                                         "state": "retrying", "model": model})
+            retry_deliverable = dict(deliverable)
+            if role == "diagram":
+                retry_deliverable["type"] = "flow" if deliverable.get("type") != "flow" else "layered"
+            retry = await _generate_chart(job_id, index, section, retry_deliverable, thread_id, model)
+            if retry.get("ok"):
+                retry["retried"] = True
+                return retry
+        except Exception:  # noqa: BLE001
+            pass
         await emit(job_id, "chart", {"role": role, "index": index, "title": title, "state": "failed",
                                      "error": str(exc)[:200], "model": model})
         await emit(job_id, "role", {"role": role, "state": "failed", "model": model, "section_index": index})

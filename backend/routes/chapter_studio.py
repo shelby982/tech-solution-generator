@@ -159,6 +159,7 @@ async def save_studio(block_id: int, body: ProfileBody):
 
 class LinkBody(BaseModel):
     material_id: int
+    section: str = ''            # 绑定到哪一节（空=整章）
     confirmed: bool = False
 
 
@@ -172,9 +173,11 @@ async def link_material(block_id: int, body: LinkBody):
             raise HTTPException(404, '仅可关联当前项目的自有素材')
         if body.confirmed and mat['parse_status'] != 'done':
             raise HTTPException(409, '请等待素材解析完成后再核对')
-        await db.execute('''INSERT INTO chapter_materials(block_id, material_id, confirmed) VALUES(?,?,?)
-            ON CONFLICT(block_id, material_id) DO UPDATE SET confirmed=excluded.confirmed''',
-            (block_id, body.material_id, int(body.confirmed)))
+        section = str(getattr(body, 'section', '') or '').strip()[:60]
+        await db.execute('''INSERT INTO chapter_materials(block_id, material_id, confirmed, section) VALUES(?,?,?,?)
+            ON CONFLICT(block_id, material_id) DO UPDATE SET confirmed=excluded.confirmed,
+              section=CASE WHEN excluded.section<>'' THEN excluded.section ELSE chapter_materials.section END''',
+            (block_id, body.material_id, int(body.confirmed), section))
         await db.execute("UPDATE chapter_studio SET writing_status='review' WHERE block_id=? AND writing_status='complete'", (block_id,))
         await db.commit()
     return {'linked': True}
