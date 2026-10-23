@@ -463,3 +463,95 @@ async def recommend_materials(block_id: int, section: str = "", limit: int = 10)
     return {"section": profile["title"], "types_wanted": profile["types_wanted"],
             "keywords": sorted(profile["keywords"])[:20],
             "items": picked, "pool": len(pool)}
+
+
+@router.get('/blocks/{block_id}/citations/{chunk_kind}/{chunk_id}/excerpt')
+async def citation_excerpt(block_id: int, chunk_kind: str, chunk_id: int):
+    """引用点「看原文」：取片段原文 + 出处（页码 / URL）。"""
+    async with get_db() as db:
+        if chunk_kind == "cite":
+            row = await (await db.execute(
+                "SELECT cc.content, cc.heading, c.url, c.publisher, c.published_at "
+                "FROM citation_chunks cc LEFT JOIN citations c ON c.id=cc.citation_id WHERE cc.id=?",
+                (chunk_id,))).fetchone()
+            if not row:
+                raise HTTPException(404, "片段不存在")
+            return {"text": row[0], "title": row[1], "url": row[2] or "",
+                    "publisher": row[3] or "", "published_at": row[4] or "", "page": 0}
+        row = await (await db.execute(
+            "SELECT mc.content, mc.page, m.filename, m.id FROM material_chunks mc "
+            "JOIN materials m ON m.id=mc.material_id WHERE mc.id=?", (chunk_id,))).fetchone()
+    if not row:
+        raise HTTPException(404, "片段不存在")
+    return {"text": row[0], "title": row[2], "url": "", "publisher": "",
+            "published_at": "", "page": row[1], "material_id": row[3]}
+
+
+class FillCitationBody(BaseModel):
+    section: str = ""
+    quote: str = ""
+    chunk_kind: str = "file"
+    chunk_id: int = 0
+    source_label: str = ""
+
+
+@router.post('/blocks/{block_id}/citations/fill')
+async def fill_citation(block_id: int, body: FillCitationBody):
+    """把某处"未标来源"补成【来源：X】：定位原句 → 追加来源标注 → 写版本。"""
+    from services.block_store import add_revision, update_block_content
+
+    if not body.quote:
+        raise HTTPException(422, "缺少原句")
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        label = body.source_label
+        if not label and body.chunk_id:
+            if body.chunk_kind == "cite":
+                row = await (await db.execute(
+                    "SELECT heading, content FROM citation_chunks WHERE id=?", (body.chunk_id,))).fetchone()
+                label = (row[0] if row else "")[:40]
+            else:
+                row = await (await db.execute(
+                    "SELECT mc.page, m.filename FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
+                    "WHERE mc.id=?", (body.chunk_id,))).fetchone()
+                if row:
+                    label = f"{row[1]}（第 {row[0]} 页）"[:60]
+        label = (label or "招标文件").strip()
+        before = str(block["content"] or "")
+        quote = str(body.quote).strip()
+        at = before.find(quote)
+        if at < 0:
+            raise HTTPException(409, "原句已变化，请重新核对")
+        insert_at = at + len(quote)
+        after = before[:insert_at] + f"【来源：{label}】" + before[insert_at:]
+        await add_revision(db, block_id, before, summary="补充引用来源", source="ai")
+        await update_block_content(db, block_id, after)
+    return {"ok": True, "label": label, "content": after}
+
+
+class SwapCitationBody(BaseModel):
+    old_label: str = ""
+    new_label: str = ""
+
+
+@router.post('/blocks/{block_id}/citations/swap')
+async def swap_citation(block_id: int, body: SwapCitationBody):
+    """换来源：把正文里的【来源：旧】替换为【来源：新】。"""
+    from services.block_store import add_revision, update_block_content
+
+    if not body.old_label or not body.new_label:
+        raise HTTPException(422, "缺少原/新来源")
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        before = str(block["content"] or "")
+        old = f"【来源：{body.old_label}】"
+        if old not in before:
+            raise HTTPException(409, "正文里找不到该来源标注")
+        after = before.replace(old, f"【来源：{body.new_label}】", 1)
+        await add_revision(db, block_id, before, summary="替换引用来源", source="ai")
+        await update_block_content(db, block_id, after)
+    return {"ok": True, "content": after}

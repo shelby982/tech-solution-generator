@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v424';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v424';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v425';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v425';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -436,6 +436,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <p class="cs-cite-quote">${esc(String(point.quote || '').slice(0, 46))}</p>
             <small>第 ${point.paragraph} 段${point.locator && point.locator !== point.source_label ? ` · ${esc(point.locator)}` : ''}</small>
           </div>
+          ${point.chunk_id ? `<button type="button" class="cs-todo-ignore" data-cite-excerpt="${esc(point.kind === 'web' ? 'cite' : 'file')}|${point.chunk_id}">看原文</button>` : ''}
           <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(sectionName)}|${esc(String(point.quote || ''))}">定位</button>
         </div>`).join('')}
         </div>
@@ -448,6 +449,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <span class="cs-cite-kind is-missing">缺来源</span>
           <div class="cs-cite-body"><p class="cs-cite-quote">${esc(String(item.quote || '').slice(0, 50))}</p>
             <small>${esc(item.section || '正文')} 第 ${item.paragraph} 段</small></div>
+          <button type="button" class="cs-todo-ignore" data-cite-fill="${esc(item.section || '')}|${esc(String(item.quote || ''))}">补来源</button>
           <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(item.section || '')}|${esc(String(item.quote || ''))}">定位</button>
         </div>`).join('')}
         </div>
@@ -3770,6 +3772,43 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     if(event.target.closest('[data-material-admin]')){ await openMaterialAdminDialog(); return; }
+    const fillBtn=event.target.closest('[data-cite-fill]');
+    if(fillBtn){
+      const [section, quote] = String(fillBtn.dataset.citeFill||'').split('|');
+      const label = globalThis.prompt('补哪个来源？（可写「招标文件（第X页）」或来源名）', '招标文件');
+      if(!label) return;
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/citations/fill`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({section,quote,source_label:label})});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        const fresh=await json(`/api/blocks/${active.id}/studio`);
+        context=fresh; if(fresh.block) editor.value=fresh.block.content||'';
+        await loadMaterialLibrary(); paintAside();
+        status(`已补来源：${data.label}`);
+      }catch(error){status(`补来源失败：${error.message}`);}
+      return;
+    }
+    const exBtn=event.target.closest('[data-cite-excerpt]');
+    if(exBtn){
+      const [kind, id]=String(exBtn.dataset.citeExcerpt||'').split('|');
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/citations/${kind}/${id}/excerpt`);
+        const data=await resp.json();
+        if(!resp.ok)throw new Error(data.detail||'读取失败');
+        const dlg=globalThis.document.createElement('dialog');
+        dlg.className='cs-plan-dialog';
+        dlg.innerHTML=`<header><h3>原��</h3><button type="button" data-ex-close>×</button></header>
+          <div class="cs-plan-body"><p class="cs-muted">${esc(data.title||'')}${data.page?` · 第 ${data.page} 页`:''}${data.url?` · ${esc(data.url)}`:''}</p>
+          <pre class="cs-excerpt-text">${esc(String(data.text||'').slice(0,1200))}</pre></div>
+          <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-ex-close2>关闭</button></footer>`;
+        dlg.addEventListener('click',(event)=>{ if(event.target.closest('[data-ex-close]')||event.target.closest('[data-ex-close2]'))dlg.close(); });
+        dlg.addEventListener('close',()=>dlg.remove());
+        globalThis.document.body.appendChild(dlg); dlg.showModal();
+      }catch(error){status(`看原文失败：${error.message}`);}
+      return;
+    }
     const recBtn=event.target.closest('[data-mrec]');
     if(recBtn && active){
       const [rawId, kind] = String(recBtn.dataset.mrec||'').split('|');
