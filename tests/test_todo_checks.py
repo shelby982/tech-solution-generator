@@ -313,3 +313,24 @@ def test_generation_path_normalizes_tables():
     assert fixed.count('---|') == 3                       # 与表头 3 列一致
     from infra.docx.document_model import parse_markdown
     assert sum(1 for block in parse_markdown(fixed) if block['type'] == 'table') == 1
+
+
+def test_chunk_boilerplate_and_html_stripping():
+    """素材价值：HTML 标签要剥掉；封面/表单类片段要标 boilerplate，且不推荐给政策类小节。"""
+    from services.chunk_quality import is_boilerplate, strip_html, tag_of
+    from services.material_match import recommend, section_profile
+
+    assert strip_html("a<br>b") == "a\nb"
+    assert is_boilerplate("（标准文件范本）招标人：X公司 招标代理机构：Y公司")
+    assert "boilerplate" in tag_of("投标文件格式：投标人：（盖单位公章）法定代表人：")
+
+    profile = section_profile({"title": "项目政策依据梳理",
+                               "points": ["政策依据"], "deliverables": [{"kind": "text"}]})
+    pool = [
+        {"chunk_id": 1, "text": "投标文件格式：投标人：（盖单位公章）", "role": "main_rfp",
+         "source_kind": "file", "tags": ["boilerplate", "policy"]},
+        {"chunk_id": 2, "text": "本项目适用的政策依据以《网络安全法》为主线，要求在方案中逐条落实。",
+         "role": "main_rfp", "source_kind": "file", "tags": ["policy"]},
+    ]
+    ranked = recommend(profile, pool, limit=2, min_score=0.01)
+    assert ranked and ranked[0]["chunk_id"] == 2

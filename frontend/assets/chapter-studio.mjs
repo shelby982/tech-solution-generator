@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v433';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v433';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v434';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v434';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -571,8 +571,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ${candidates.map((c, i) => `<label class="cs-ol-mat-row">
         <input type="checkbox" data-ol-mat="${index}" data-mat-chunk="${c.chunk_id}" ${c.confirmed ? 'checked' : ''} />
         <span class="cs-ol-mat-body">
-          <span class="cs-ol-mat-text">${esc(String(c.text || '').slice(0, 60))}…</span>
-          <small>${c.source_kind === 'web' ? '联网' : '文件'}${c.page ? ` · 第 ${c.page} 页` : ''} · ${esc(c.reason || '')}</small>
+          <span class="cs-ol-mat-text">${esc(String(c.text || '').slice(0, 90))}${(c.text || '').length > 90 ? '…' : ''}</span>
+          <small>${(c.tags || []).includes('boilerplate') ? '⚠ 表单/范本类 · ' : ''}${c.source_kind === 'web' ? '联网' : '文件'}${c.page ? ` · 第 ${c.page} 页` : ''} · ${esc(c.reason || '')}</small>
+          ${(c.text || '').length > 90 ? `<details class="cs-ol-mat-more"><summary>看全文</summary><p>${esc(c.text)}</p></details>` : ''}
         </span>
       </label>`).join('')}
       <div class="cs-ol-mat-acts">
@@ -2997,7 +2998,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <input type="checkbox" data-smat="${c.chunk_id}" ${c.confirmed ? 'checked' : ''} />
             <span class="cs-ol-mat-body">
               <span class="cs-ol-mat-text">${esc(String(c.text || '').slice(0, 70))}…</span>
-              <small>${c.source_kind === 'web' ? '联网' : '文件'}${c.page ? ` · 第 ${c.page} 页` : ''} · ${esc(c.reason || '')}</small>
+              <small>${(c.tags || []).includes('boilerplate') ? '⚠ 表单/范本类 · ' : ''}${c.source_kind === 'web' ? '联网' : '文件'}${c.page ? ` · 第 ${c.page} 页` : ''} · ${esc(c.reason || '')}</small>
             </span>
           </label>`).join('') : '<p class="cs-muted">素材库没有匹配到片段：本节会写概括表述</p>'}
       </div>

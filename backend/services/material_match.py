@@ -131,6 +131,16 @@ def score_chunk(profile: dict, chunk: dict, semantic: float | None = None) -> tu
              + 0.15 * coverage + 0.12 * trust)
     if not hits and not covered and sexp < 0.12:
         score *= 0.4                       # 关键词/要点/语义都弱 → 强降权
+    # 低价值片段（封面/表单/资格清单/模板）：除"要资格业绩"的节外，几乎不推荐
+    tags = set(chunk.get("tags") or [])
+    if "boilerplate" in tags and "qualification" not in types_wanted:
+        score *= 0.2
+    # 信息量：正文型（有句子、有长度）优先于清单碎片
+    body = str(chunk.get("text") or "")
+    if len(body) >= 120 and ("。" in body or "；" in body):
+        score *= 1.08
+    elif len(body) < 40:
+        score *= 0.6
     reason = []
     if hits:
         reason.append("命中「" + "、".join(sorted(hits, key=len, reverse=True)[:3]) + "」")

@@ -31,6 +31,46 @@ _SENTENCE = re.compile(r"(?<=[。；！？])")
 _PUNCT = re.compile(r"[\s，。；：、（）()【】\[\]《》\"'“”‘’\-—_=·•.]")
 
 
+_HTML_TAG = re.compile(r"<\s*/?\s*(br|p|div|span|li|ul|ol|table|tr|td|th|strong|b|em|i|font|img)[^>]*>", re.I)
+# 低价值片段（封面/表单/资格清单/模板）：占篇幅但对正文没有信息价值
+_BOILERPLATE = (
+    re.compile(r"(招标人[:：]|投标人[:：]|招标代理机构[:：]|采购人[:：])"),
+    re.compile(r"(盖单位公章|电子印章|签字|法定代表人|日期[:：]?\s*年|年\s*月\s*日)"),
+    re.compile(r"(投标文件格式|响应文件格式|格式[一二三四五六七八九十]|范本)"),
+    re.compile(r"(投标人被.{0,20}(不接受投标|市场禁入)|未解除的)"),
+    re.compile(r"(符合性审查|资格审查合格|初步评审)"),
+)
+
+
+def strip_html(text: str) -> str:
+    """去掉 PDF/网页带进来的 <br> 等标签（预览与素材里都不该出现）。"""
+    cleaned = _HTML_TAG.sub("\n", str(text or ""))
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+# 单条命中即可判为低价值（否决条款 / 资格清单 / 格式模板 / 封面）
+_STRONG_BOILERPLATE = (
+    re.compile(r"(投标人被.{0,40}(不接受投标|市场禁入)|且未解除的|否决其投标)"),
+    re.compile(r"(投标文件格式|响应文件格式|格式[一二三四五六七八九十]|范本)"),
+    re.compile(r"(招标人[:：]|投标人[:：]|招标代理机构[:：]).{0,40}(地址|联系人|日期)"),
+    re.compile(r"(盖单位公章|电子印章|法定代表人[:：]?\s*\(?签字)"),
+    re.compile(r"^\s*[（(]\s*\d+\s*[)）]"),
+)
+
+
+def is_boilerplate(text: str) -> bool:
+    body = str(text or "")
+    if any(pattern.search(body) for pattern in _STRONG_BOILERPLATE):
+        # 但不能把"正文里引用了条款号"误判：正文型（有句号分段、长度>200）且不含格式/资格词时不算
+        if len(body) > 260 and not re.search(r"(格式|范本|公章|签字|否决|禁入|未解除)", body):
+            return False
+        return True
+    hits = sum(1 for pattern in _BOILERPLATE if pattern.search(body))
+    return hits >= 2 or (hits == 1 and len(body) < 160)
+
+
 _TAG_RULES = (
     ("clause", re.compile(r"(第[一二三四五六七八九十百0-9]+条|应(当)?(提供|提交|满足|符合)|须(提供|提交|具备|满足)|不得)")),
     ("data", re.compile(r"\d+(?:\.\d+)?\s*(?:%|个|项|人|万|亿|台|套|小时|天|分|元|页|次)")),
@@ -41,10 +81,12 @@ _TAG_RULES = (
 
 
 def tag_of(text: str) -> list[str]:
-    """片段类型标签（C2）：clause / data / qualification / policy / table。"""
+    """片段类型标签（C2）：clause / data / qualification / policy / table / boilerplate。"""
     body = str(text or "")
-    import json as _json
-    return [tag for tag, pattern in _TAG_RULES if pattern.search(body)]
+    tags = [tag for tag, pattern in _TAG_RULES if pattern.search(body)]
+    if is_boilerplate(body):
+        tags.append("boilerplate")
+    return tags
 
 
 def fingerprint(text: str) -> str:
@@ -139,7 +181,7 @@ def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
     """chunks: [{content, page}] → 归一后的 [{content, page, tags}]。"""
     cleaned: list[dict] = []
     for chunk in chunks or []:
-        text = str(chunk.get("content") or "").strip()
+        text = strip_html(str(chunk.get("content") or ""))
         if not text or is_noise(text):
             continue
         cleaned.append({"content": text, "page": int(chunk.get("page") or 0),

@@ -1021,3 +1021,8 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
   border: 1px solid #dbeafe; border-radius: 8px; font-size: 12px; color: #1e293b; }
 .cs-diagram-arrow { color: #94a3b8; font-size: 11px; line-height: 1; }
 .cs-diagram figcaption { margin-top: 6px; font-size: 11px; color: #64748b; }
+
+.cs-ol-mat-more { margin-top: 3px; }
+.cs-ol-mat-more summary { font-size: 10px; color: #2563eb; cursor: pointer; }
+.cs-ol-mat-more p { margin: 4px 0 0; font-size: 10.5px; color: #475569; line-height: 1.6; background: #fff;
+  border: 1px solid #eef2f7; border-radius: 6px; padding: 6px 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; }
