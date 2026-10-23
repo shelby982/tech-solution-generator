@@ -308,10 +308,15 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
     from services.section_practice import practice_of
     practice = await practice_of(int(block.get("project_id") or 0), str(block.get("block_id") or ""),
                                  str(section.get("title") or ""))
+    # 本章已选素材（cite/data/context 三种用法）
+    from services.material_context import material_prompt_for_block
+    material_prompt = await material_prompt_for_block(int(block.get("id") or 0),
+                                                      str(block.get("block_id") or ""))
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
         + (f"【本节写法（按计划执行）】{practice}\n" if practice else "")
+        + (f"{material_prompt}\n" if material_prompt else "")
         + (f"【本节硬性要求】{contract}\n" if contract else "")
         + f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
         f"目标字数：约 {payload.get('words') or 900} 字\n"

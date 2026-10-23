@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v422';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v422';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v424';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v424';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -466,8 +466,21 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       </label>`).join('') : `<p class="cs-muted">${empty}</p>`);
 
     return `<div class="cs-ml">
-      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4>
+      <div class="cs-ml-head"><h4>本章素材 <small>${(lib.bound || []).length}</small></h4>
         <button type="button" class="cs-gate-act" data-material-admin>素材库</button></div>
+      ${(() => {
+        const modeLabel = { cite: '引用出处', data: '数据依据', context: '仅上下文', paste: '粘贴原文' };
+        const bounds = lib.bound || [];
+        if (!bounds.length) return '<p class="cs-muted">本章还没有引用素材（用推荐或素材库添加）</p>';
+        return `<div class="cs-ml-list">${bounds.map((item) => `
+          <div class="cs-ml-item">
+            <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
+              <p>${esc(String(item.text || '').slice(0, 80))}…</p>
+              <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(modeLabel[item.mode] || '引用出处')}${item.section ? ` · ${esc(item.section)}` : ''}</small></div>
+            <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button>
+          </div>`).join('')}</div>`;
+      })()}
+      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4></div>
       ${(() => {
         const recommends = lib.recommend?.items || [];
         if (!recommends.length) return '';

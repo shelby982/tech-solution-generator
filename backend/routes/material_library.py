@@ -156,7 +156,7 @@ class BindBody(BaseModel):
     chunk_ids: list[int] = Field(default_factory=list)
     material_id: int = 0
     section: str = ""
-    mode: str = Field(default="cite", pattern="^(cite|context|paste)$")
+    mode: str = Field(default="cite", pattern="^(cite|data|context|paste)$")
 
 
 @router.post('/blocks/{block_id}/materials/bind')
