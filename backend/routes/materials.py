@@ -93,15 +93,19 @@ async def _parse_and_chunk_in_background(
                         await create_chunk(db, material_id=material_id, chunk_index=idx, content=content)
                     logger.info(f"素材 {material_id}（{material_role}）细粒度切片：{len(chunks)} 条")
                 else:
-                    for idx, sec in enumerate(parsed.sections):
+                    # C1 片段质量：按章节切 → 尺寸归一 / 噪声过滤 / 去重
+                    from services.chunk_quality import normalize as normalize_chunks
+                    raw_chunks = []
+                    for sec in parsed.sections:
                         text = f"{sec.title}\n{sec.raw_content or ''}".strip()
                         if text:
-                            await create_chunk(
-                                db, material_id=material_id, chunk_index=idx, content=text,
-                                # 页码带进切片 → 依据出处可以精确到页（Word 无页码则为 0）
-                                page=int(getattr(sec, "page", 0) or 0),
-                            )
-                    logger.info(f"素材 {material_id}（{material_role}）按章节切片：{len(parsed.sections)} 段")
+                            raw_chunks.append({"content": text,
+                                               "page": int(getattr(sec, "page", 0) or 0)})
+                    chunks = normalize_chunks(raw_chunks)
+                    for idx, chunk in enumerate(chunks):
+                        await create_chunk(db, material_id=material_id, chunk_index=idx,
+                                           content=chunk["content"], page=chunk["page"])
+                    logger.info(f"素材 {material_id}（{material_role}）切片：{len(raw_chunks)} → {len(chunks)} 段（已归一）")
                 await update_material_parse_status(db, material_id, "done")
         except Exception as e:
             logger.warning(f"素材 {material_id} 解析失败：{e}")

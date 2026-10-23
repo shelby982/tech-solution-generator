@@ -387,3 +387,32 @@ async def delete_source(project_id: int, kind: str, source_id: int):
             await db.execute("DELETE FROM citations WHERE id=? AND project_id=?", (source_id, project_id))
         await db.commit()
     return {"removed": True, "materials": "invalidated"}
+
+
+@router.post('/projects/{project_id}/materials/{material_id}/recut')
+async def recut_one(project_id: int, material_id: int):
+    """按新规则重新切片（保住已选素材，按内容指纹映射）。"""
+    from services.chunk_quality import recut_material
+
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT id FROM materials WHERE id=? AND project_id=? AND deleted_at IS NULL",
+            (material_id, project_id))).fetchone()
+        if not row:
+            raise HTTPException(404, "素材不存在")
+        return await recut_material(db, material_id)
+
+
+@router.post('/projects/{project_id}/materials/recut-all')
+async def recut_all(project_id: int):
+    """批量重新切片（一次性改好后，之后上传的素材自动走新规则）。"""
+    from services.chunk_quality import recut_material
+
+    results = []
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT id FROM materials WHERE project_id=? AND deleted_at IS NULL AND parse_status='done'",
+            (project_id,))).fetchall()
+        for row in rows:
+            results.append(await recut_material(db, row[0]))
+    return {"results": results}

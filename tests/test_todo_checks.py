@@ -260,3 +260,27 @@ def test_citation_enrich_adds_doc_numbers_and_standard():
     # 已有文号时不再重复补
     again, changes_again = enrich(after)
     assert changes_again == []
+
+
+def test_chunk_quality_normalizes_and_filters_noise():
+    """C1：噪声丢弃、短块合并、超长切分、去重。"""
+    from services.chunk_quality import is_noise, normalize, stats
+
+    assert is_noise("目录 ........ 12")
+    assert is_noise("第 3 页")
+    assert not is_noise("3.2 投标人资格要求：投标人须具备信息系统集成资质，并提供近三年业绩证明。")
+
+    raw = [
+        {"content": "第二章 投标人资格要求", "page": 2},           # 短标题 → 合并到下一段
+        {"content": "3.1 投标人须为依法注册的独立法人，具有独立承担民事责任的能力；" * 6, "page": 2},
+        {"content": "目录 ........ 12", "page": 3},                # 噪声
+        {"content": "3.2 投标人须具备信息系统集成资质，并提供近三年同类项目业绩证明。", "page": 4},
+        {"content": "3.2 投标人须具备信息系统集成资质，并提供近三年同类项目业绩证明。", "page": 4},  # 重复
+    ]
+    result = normalize(raw)
+    texts = [c["content"] for c in result]
+    assert not any("目录" in t for t in texts)
+    assert len(texts) == len(set(texts))
+    assert result[0]["content"].startswith("第二章")             # 标题合并进正文
+    st = stats(result)
+    assert st["lt60"] == 0
