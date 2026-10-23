@@ -31,6 +31,22 @@ _SENTENCE = re.compile(r"(?<=[。；！？])")
 _PUNCT = re.compile(r"[\s，。；：、（）()【】\[\]《》\"'“”‘’\-—_=·•.]")
 
 
+_TAG_RULES = (
+    ("clause", re.compile(r"(第[一二三四五六七八九十百0-9]+条|应(当)?(提供|提交|满足|符合)|须(提供|提交|具备|满足)|不得)")),
+    ("data", re.compile(r"\d+(?:\.\d+)?\s*(?:%|个|项|人|万|亿|台|套|小时|天|分|元|页|次)")),
+    ("qualification", re.compile(r"(业绩|资质|资格|证书|认证|营业执照|合同|验收|案例)")),
+    ("policy", re.compile(r"(《[^》]{2,40}》|政策|法规|标准|规范)")),
+    ("table", re.compile(r"\|.*\|")),
+)
+
+
+def tag_of(text: str) -> list[str]:
+    """片段类型标签（C2）：clause / data / qualification / policy / table。"""
+    body = str(text or "")
+    import json as _json
+    return [tag for tag, pattern in _TAG_RULES if pattern.search(body)]
+
+
 def fingerprint(text: str) -> str:
     return hashlib.sha1(_PUNCT.sub("", str(text or "")).encode("utf-8")).hexdigest()
 
@@ -143,7 +159,8 @@ def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        result.append({"content": text, "page": chunk["page"], "fingerprint": key})
+        result.append({"content": text, "page": chunk["page"], "fingerprint": key,
+                       "tags": tag_of(text)})
     return result
 
 
@@ -198,9 +215,12 @@ async def recut_material(db, material_id: int) -> dict:
     for index, chunk in enumerate(normalized):
         status = "selected" if selected_texts and covered(chunk["content"]) else "candidate"
         saved += 1 if status == "selected" else 0
+        import json as _json
         await db.execute(
-            "INSERT INTO material_chunks (material_id, chunk_index, content, page, status) VALUES (?,?,?,?,?)",
-            (material_id, index, chunk["content"], chunk["page"], status))
+            "INSERT INTO material_chunks (material_id, chunk_index, content, page, status, tags) "
+            "VALUES (?,?,?,?,?,?)",
+            (material_id, index, chunk["content"], chunk["page"], status,
+             _json.dumps(chunk.get("tags") or [], ensure_ascii=False)))
     await db.commit()
     return {"material_id": material_id, "before": len(rows), "after": len(normalized),
             "selected_kept": saved, "stats": stats(normalized)}

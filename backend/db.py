@@ -521,6 +521,14 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.commit()
     except Exception:
         pass
+    # C2：片段类型标签（JSON 数组文本）
+    chunk_cols2 = {r[1] for r in await (await conn.execute('PRAGMA table_info(material_chunks)')).fetchall()}
+    if chunk_cols2 and 'tags' not in chunk_cols2:
+        await conn.execute("ALTER TABLE material_chunks ADD COLUMN tags TEXT DEFAULT ''")
+    cite_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(citation_chunks)')).fetchall()}
+    if cite_cols and 'tags' not in cite_cols:
+        await conn.execute("ALTER TABLE citation_chunks ADD COLUMN tags TEXT DEFAULT ''")
+    await conn.commit()
     material_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_materials)')).fetchall()}
     if material_cols and 'section' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN section TEXT DEFAULT ''")

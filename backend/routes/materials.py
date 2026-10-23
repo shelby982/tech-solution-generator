@@ -102,9 +102,13 @@ async def _parse_and_chunk_in_background(
                             raw_chunks.append({"content": text,
                                                "page": int(getattr(sec, "page", 0) or 0)})
                     chunks = normalize_chunks(raw_chunks)
+                    import json as _json
                     for idx, chunk in enumerate(chunks):
                         await create_chunk(db, material_id=material_id, chunk_index=idx,
                                            content=chunk["content"], page=chunk["page"])
+                        await db.execute(
+                            "UPDATE material_chunks SET tags=? WHERE material_id=? AND chunk_index=?",
+                            (_json.dumps(chunk.get("tags") or [], ensure_ascii=False), material_id, idx))
                     logger.info(f"素材 {material_id}（{material_role}）切片：{len(raw_chunks)} → {len(chunks)} 段（已归一）")
                 await update_material_parse_status(db, material_id, "done")
         except Exception as e:

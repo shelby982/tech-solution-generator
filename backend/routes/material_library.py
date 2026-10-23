@@ -442,16 +442,23 @@ async def recommend_materials(block_id: int, section: str = "", limit: int = 10)
 
         # 候选池：未失效的片段（文件 + 网页），排除已选/已用
         rows = await (await db.execute(
-            "SELECT mc.id, mc.content, mc.page, m.role, 'file' AS kind, m.filename "
+            "SELECT mc.id, mc.content, mc.page, m.role, 'file' AS kind, m.filename, mc.tags "
             "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
             "WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status='candidate' "
             "UNION ALL "
-            "SELECT cc.id, cc.content, 0, 'web', 'web', c.domain "
+            "SELECT cc.id, cc.content, 0, 'web', 'web', c.domain, cc.tags "
             "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
             "WHERE c.project_id=? AND cc.status='candidate' LIMIT 800",
             (project_id, project_id))).fetchall()
+    import json as _json
+    def _tags(raw):
+        try:
+            return _json.loads(raw or "[]") or []
+        except Exception:
+            return []
     pool = [{"chunk_id": r[0], "text": r[1], "page": r[2], "role": r[3],
-             "source_kind": "web" if r[4] == "web" else "file", "source_title": r[5] or ""} for r in rows]
+             "source_kind": "web" if r[4] == "web" else "file", "source_title": r[5] or "",
+             "tags": _tags(r[6])} for r in rows]
     picked = recommend(profile, pool, limit=max(1, min(30, limit)))
     return {"section": profile["title"], "types_wanted": profile["types_wanted"],
             "keywords": sorted(profile["keywords"])[:20],
