@@ -269,7 +269,16 @@ _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 _review_path       = os.path.join(frontend_dir, "review.html")
 
 if os.path.isdir(frontend_dir):
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+    class NoCacheStaticFiles(StaticFiles):
+        """前端资源禁用缓存：改了 JS 后强制刷新一定能拿到新版本（避免"?v="未变时用旧缓存）。"""
+
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            return response
+
+    app.mount("/assets", NoCacheStaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
     logger.info(f"前端目录已挂载：{frontend_dir}")
 else:
     logger.warning(f"前端目录不存在，跳过静态文件挂载：{frontend_dir}")
