@@ -93,7 +93,7 @@ _TRUST = {"main_rfp": 1.0, "spec": 1.0, "scoring": 1.0, "web_official": 0.9,
           "web": 0.6, "source": 0.8}
 
 
-def score_chunk(profile: dict, chunk: dict) -> tuple[float, dict]:
+def score_chunk(profile: dict, chunk: dict, semantic: float | None = None) -> tuple[float, dict]:
     """返回 (分值, 解释)。解释用于前端展示"为什么推荐"。"""
     text = str(chunk.get("text") or "")
     terms = _terms(text)
@@ -126,10 +126,11 @@ def score_chunk(profile: dict, chunk: dict) -> tuple[float, dict]:
     trust = _TRUST.get(str(chunk.get("role") or ""), 0.5)
     if chunk.get("source_kind") == "web":
         trust = 0.6
-    sexp = 0.0  # 第一版无向量
-    score = 0.45 * keyword_score + 0.20 * type_score + 0.20 * coverage + 0.15 * trust
-    if not hits and not covered:
-        score *= 0.4                       # 既不命中关键词也不覆盖要点 → 强降权
+    sexp = max(0.0, min(1.0, semantic or 0.0))
+    score = (0.33 * keyword_score + 0.22 * sexp + 0.18 * type_score
+             + 0.15 * coverage + 0.12 * trust)
+    if not hits and not covered and sexp < 0.12:
+        score *= 0.4                       # 关键词/要点/语义都弱 → 强降权
     reason = []
     if hits:
         reason.append("命中「" + "、".join(sorted(hits, key=len, reverse=True)[:3]) + "」")
@@ -137,6 +138,8 @@ def score_chunk(profile: dict, chunk: dict) -> tuple[float, dict]:
         reason.append("类型匹配：" + "、".join(sorted(tags & types_wanted)))
     if covered:
         reason.append(f"覆盖要点 {covered}/{len(profile['points'])}")
+    if sexp >= 0.15:
+        reason.append(f"语义相近 {int(sexp * 100)}%")
     reason.append("来源：" + ("招标文件" if str(chunk.get("role")) in ("main_rfp", "spec") else
                               "联网来源" if chunk.get("source_kind") == "web" else "素材"))
     return round(score, 3), {"reason": " · ".join(reason), "hits": sorted(hits)[:6],
@@ -144,9 +147,14 @@ def score_chunk(profile: dict, chunk: dict) -> tuple[float, dict]:
 
 
 def recommend(profile: dict, chunks: list[dict], *, limit: int = 10, min_score: float = 0.18) -> list[dict]:
+    from services.semantic_index import score_documents
+
+    chunks = list(chunks or [])
+    sem = score_documents(profile.get("raw") or profile.get("title") or "",
+                          [str(chunk.get("text") or "") for chunk in chunks])
     scored = []
-    for chunk in chunks or []:
-        score, explain = score_chunk(profile, chunk)
+    for index, chunk in enumerate(chunks):
+        score, explain = score_chunk(profile, chunk, sem[index] if index < len(sem) else 0.0)
         if score < min_score:
             continue
         scored.append({**chunk, "score": score, **explain})

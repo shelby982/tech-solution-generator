@@ -555,3 +555,33 @@ async def swap_citation(block_id: int, body: SwapCitationBody):
         await add_revision(db, block_id, before, summary="替换引用来源", source="ai")
         await update_block_content(db, block_id, after)
     return {"ok": True, "content": after}
+
+
+@router.get('/projects/{project_id}/materials/{material_id}/images')
+async def material_images(project_id: int, material_id: int):
+    """某文件里抽出的图片素材（配图注与页码）。"""
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT i.id, i.page, i.caption, i.source, i.size_bytes FROM material_images i "
+            "JOIN materials m ON m.id=i.material_id "
+            "WHERE i.material_id=? AND m.project_id=? AND m.deleted_at IS NULL ORDER BY i.id",
+            (material_id, project_id))).fetchall()
+    return {"items": [{"id": r[0], "page": r[1], "caption": r[2] or "",
+                       "source": r[3] or "", "size": r[4] or 0} for r in rows]}
+
+
+@router.get('/studio/images/{image_id}/file')
+async def image_file(image_id: int):
+    """返回图片文件（给前端缩略图/插入正文用）。"""
+    from fastapi.responses import FileResponse
+
+    async with get_db() as db:
+        row = await (await db.execute("SELECT file_path FROM material_images WHERE id=?",
+                                      (image_id,))).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, "图片不存在")
+    from pathlib import Path as _Path
+    path = _Path(row[0])
+    if not path.exists():
+        raise HTTPException(404, "图片文件缺失")
+    return FileResponse(str(path))

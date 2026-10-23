@@ -413,6 +413,17 @@ CREATE TABLE IF NOT EXISTS project_snapshots (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS material_images (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL,
+    page        INTEGER DEFAULT 0,
+    file_path   TEXT NOT NULL,
+    caption     TEXT DEFAULT '',
+    source      TEXT DEFAULT 'docx',
+    size_bytes  INTEGER DEFAULT 0,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS material_chunks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     material_id INTEGER NOT NULL REFERENCES materials(id),

@@ -988,3 +988,11 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 
 .cs-excerpt-text { white-space: pre-wrap; max-height: 380px; overflow: auto; font-size: 11.5px; line-height: 1.7;
   color: #334155; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; padding: 10px; margin: 0; }
+
+/* 素材库：图片素材 */
+.cs-msrc-images { margin-bottom: 8px; }
+.cs-msrc-image-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.cs-msrc-image { margin: 0; border: 1px solid #eef2f7; border-radius: 8px; overflow: hidden; background: #fff; }
+.cs-msrc-image img { display: block; width: 100%; height: 80px; object-fit: contain; background: #f8fafc; }
+.cs-msrc-image figcaption { font-size: 9.5px; color: #64748b; padding: 3px 5px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

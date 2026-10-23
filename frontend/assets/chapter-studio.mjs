@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v425';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v425';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v426';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v426';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -267,6 +267,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const loadChunks = async (sourceId) => {
       const resp = await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${sourceId}/chunks?limit=150`, { cache: 'no-store' });
       state.chunks = resp.ok ? (await resp.json()).items || [] : [];
+      // 图片素材（仅文件出处）
+      state.images = [];
+      if (state.tab === 'file') {
+        const imageResp = await fetch(`/api/projects/${projectId}/materials/${sourceId}/images`, { cache: 'no-store' });
+        state.images = imageResp.ok ? (await imageResp.json()).items || [] : [];
+      }
     };
 
     const render = () => {
@@ -278,7 +284,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-gate-act" data-msrc-open="${src.id}">${state.openId === src.id ? '收起' : '展开'}</button>
             <button type="button" class="cs-todo-ignore" data-msrc-del="${src.id}">删除</button>
           </div>
-          ${state.openId === src.id ? `<div class="cs-msrc-chunks">
+          ${state.openId === src.id ? `${(state.images || []).length ? `<div class="cs-msrc-images">
+              <p class="cs-cite-sec">图片（${state.images.length}）</p>
+              <div class="cs-msrc-image-list">
+                ${state.images.map((img) => `<figure class="cs-msrc-image">
+                  <img src="/api/studio/images/${img.id}/file" alt="${esc(img.caption || '图片')}" loading="lazy" />
+                  <figcaption>${esc(img.caption || '图片')}${img.page ? ` · 第 ${img.page} 页` : ''}</figcaption>
+                </figure>`).join('')}
+              </div>
+            </div>` : ''}<div class="cs-msrc-chunks">
             ${state.chunks.length ? state.chunks.map((chunk) => `
               <label class="cs-ml-item is-pick">
                 <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />

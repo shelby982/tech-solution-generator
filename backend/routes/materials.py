@@ -110,6 +110,22 @@ async def _parse_and_chunk_in_background(
                             "UPDATE material_chunks SET tags=? WHERE material_id=? AND chunk_index=?",
                             (_json.dumps(chunk.get("tags") or [], ensure_ascii=False), material_id, idx))
                     logger.info(f"素材 {material_id}（{material_role}）切片：{len(raw_chunks)} → {len(chunks)} 段（已归一）")
+                # R3：抽图片素材（DOCX 直接取媒体；PDF 按图片区域渲染）
+                try:
+                    from services.image_material import extract as extract_images
+                    images = extract_images(abs_path, suffix=suffix)
+                    for image in images:
+                        await db.execute(
+                            "INSERT INTO material_images (material_id, page, file_path, caption, source, size_bytes) "
+                            "VALUES (?,?,?,?,?,?)",
+                            (material_id, int(image.get("page") or 0), image.get("path") or "",
+                             str(image.get("caption") or "")[:120], str(image.get("source") or ""),
+                             int(image.get("size") or 0)))
+                    await db.commit()
+                    if images:
+                        logger.info(f"素材 {material_id}：抽出图片 {len(images)} 张")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"素材 {material_id} 抽图失败：{exc}")
                 await update_material_parse_status(db, material_id, "done")
         except Exception as e:
             logger.warning(f"素材 {material_id} 解析失败：{e}")
