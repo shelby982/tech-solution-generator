@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v428';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v428';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v429';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v429';
 const $ = id => document.getElementById(id);
 
 // 「← 作业面板」带上当前项目/线程/标包 —— 回面板仍是同一条作业、同一个标包

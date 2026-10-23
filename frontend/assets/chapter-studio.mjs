@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v428';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v428';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v429';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v429';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -255,7 +255,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 素材库：两页签（我的文件 / 联网来源）+ 展开挑片段（勾选=素材）+ 应用到本章（选小节） */
   async function openMaterialAdminDialog() {
-    const state = { tab: 'file', openId: 0, chunks: [], sources: [], sections: (planBrief?.outline || []).map((s) => s.title) };
+    const state = { tab: 'file', openId: '', chunks: [], sources: [], sections: (planBrief?.outline || []).map((s) => s.title) };
     const dlg = globalThis.document.createElement('dialog');
     dlg.className = 'cs-plan-dialog cs-madmin';
     const closeAll = () => dlg.querySelectorAll('dialog').forEach((d) => d.close());
@@ -281,10 +281,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-msrc-head">
             <b>${esc(src.title || '出处')}</b>
             <small>${src.chunks} 段 · 已选 ${src.picked}</small>
-            <button type="button" class="cs-gate-act" data-msrc-open="${src.id}">${state.openId === src.id ? '收起' : '展开'}</button>
+            <button type="button" class="cs-gate-act" data-msrc-open="${src.id}">${String(state.openId) === String(src.id) ? '收起' : '展开'}</button>
             <button type="button" class="cs-todo-ignore" data-msrc-del="${src.id}">删除</button>
           </div>
-          ${state.openId === src.id ? `${(state.images || []).length ? `<div class="cs-msrc-images">
+          ${String(state.openId) === String(src.id) ? `${(state.images || []).length ? `<div class="cs-msrc-images">
               <p class="cs-cite-sec">图片（${state.images.length}）</p>
               <div class="cs-msrc-image-list">
                 ${state.images.map((img) => `<figure class="cs-msrc-image">
@@ -348,22 +348,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         return;
       }
       const tabBtn = event.target.closest('[data-mtab]');
-      if (tabBtn) { state.tab = tabBtn.dataset.mtab; state.openId = 0; state.chunks = []; await loadSources(); render(); return; }
+      if (tabBtn) { state.tab = tabBtn.dataset.mtab; state.openId = ''; state.chunks = []; await loadSources(); render(); return; }
       const openBtn = event.target.closest('[data-msrc-open]');
       if (openBtn) {
-        const id = Number(openBtn.dataset.msrcOpen);
-        if (state.openId === id) { state.openId = 0; state.chunks = []; render(); return; }
+        const id = String(openBtn.dataset.msrcOpen || '');
+        if (state.openId === id) { state.openId = ''; state.chunks = []; render(); return; }
         state.openId = id; await loadChunks(id); render();
         bindFileInput();
         return;
       }
       const delBtn = event.target.closest('[data-msrc-del]');
       if (delBtn) {
-        const id = Number(delBtn.dataset.msrcDel);
+        const id = String(delBtn.dataset.msrcDel || '');
         if (!globalThis.confirm('删除后，该出处里已选的素材一起失效（记录保留）。确定删除？')) return;
         const delResp = await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${id}`, { method: 'DELETE' });
         if (!delResp.ok) { status('删除失败，请重试'); return; }
-        state.openId = 0; state.chunks = [];
+        state.openId = ''; state.chunks = [];
         await loadSources(); render(); bindFileInput();
         status('已删除出处，其下素材标为失效');
         return;
@@ -3589,7 +3589,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         context.profile={...context.profile,...updated}; paintAside();
       } catch(error) { event.target.value=previous;status(error.message); }
     };
-    get('upload').onchange = async event => {
+    const uploadInput = get('upload');
+    if (uploadInput) uploadInput.onchange = async event => {
       const block=active;
       for (const file of event.target.files) {
         status(`正在上传 ${file.name}…`);
