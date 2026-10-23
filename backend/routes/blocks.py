@@ -225,7 +225,7 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
             if gate_changed:
                 body.content = cleaned
             # 表格规整：分隔行列数对齐表头（否则整张表在预览/导出里退化成一行文字）
-            from infra.docx.document_model import _normalize_tables as normalize_tables
+            from services.body_tables import normalize_table_rows as normalize_tables
             body.content = normalize_tables(body.content)
             # 表格上方统一补表名（`**表：名**`），保证预览/导出都有表名
             from services.body_tables import ensure_table_captions

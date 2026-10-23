@@ -243,6 +243,11 @@ async def run_job(job_id: str) -> None:
             elif (current.get("content") or "") != base:
                 reason = "正文在生成期间被修改，已保留建议稿，不覆盖"
             elif draft != base:
+                # 表格规整：分隔行列数对齐表头（否则预览/导出会退化成一行文字）
+                from services.body_tables import ensure_table_captions as add_table_captions
+                from services.body_tables import normalize_table_rows
+                draft = normalize_table_rows(draft)
+                draft, _captions_added = add_table_captions(draft)
                 # 正文净化：不留任何"待补充"字眼（用户要求：可以浅，但必须完整）
                 from services.placeholder_purge import purge as purge_placeholders
                 draft, purged_items = purge_placeholders(draft)

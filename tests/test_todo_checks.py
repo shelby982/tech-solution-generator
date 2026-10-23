@@ -300,3 +300,16 @@ def test_markdown_table_and_diagram_parsing():
     assert '<table>' in html and 'cs-diagram' in html
     assert '接入层' in html                      # 第一个节点不能被吃掉
     assert '| 源层' not in html                  # 不能退化成一行文字
+
+
+def test_generation_path_normalizes_tables():
+    """生成落库前：坏表格（分隔行列数不匹配）必须被修好，不能进正文。"""
+    from services.body_tables import normalize_table_rows
+
+    bad = ("前文说明。\n\n表：层间接口表\n"
+           "| 源层 | 目标层 | 接口方式 |\n|---|---|---|---|---|\n| A | B | 网关 |\n\n后文。")
+    fixed = normalize_table_rows(bad)
+    assert '|---|---|---|---|---|' not in fixed          # 多余列被去掉
+    assert fixed.count('---|') == 3                       # 与表头 3 列一致
+    from infra.docx.document_model import parse_markdown
+    assert sum(1 for block in parse_markdown(fixed) if block['type'] == 'table') == 1

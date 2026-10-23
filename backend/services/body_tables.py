@@ -54,3 +54,17 @@ def ensure_table_captions(content: str) -> tuple[str, int]:
         out.append(line)
         i += 1
     return "\n".join(out), added
+
+
+def normalize_table_rows(content: str) -> str:
+    """表格规整（生成落库前统一用）：分隔行列数与表头对齐 + 表格前后补空行。
+
+    只做"能确定修好"的修正，不改内容语义：
+      · `|---|` 列数 ≠ 表头列数 → 按表头列数重建
+      · 表格与前后段落之间补空行（否则 markdown 不识别为表格）
+    """
+    from infra.docx.document_model import _normalize_tables
+
+    original = str(content or "")
+    fixed = _normalize_tables(original)
+    return fixed

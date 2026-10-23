@@ -467,6 +467,8 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         from services.body_align import strip_invalid_diagrams
         from services.body_tables import ensure_table_captions
         text, _dropped = strip_invalid_diagrams(text)
+        from services.body_tables import normalize_table_rows as _normalize_tables
+        text = _normalize_tables(text)
         text, _captions = ensure_table_captions(text)
         # 正文净化：不留"待补充"字眼（可以浅，但必须完整）
         from services.placeholder_purge import purge as purge_placeholders
