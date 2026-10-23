@@ -45,7 +45,37 @@ def inline_runs(tokens):
     return runs
 
 
+def _cells_count(line: str) -> int:
+    body = line.strip().strip('|')
+    return len([part for part in body.split('|')])
+
+
+def _normalize_tables(value):
+    """表格规整：
+    ① 表格前后补空行（`表：xxx` 紧跟 `| 头 |` 时 markdown-it 不识别表格）
+    ② 分隔行 `|---|` 的列数与表头不一致时，按表头列数重建（否则整张表退化成段落）
+    """
+    lines = str(value or '').splitlines()
+    result = []
+    for index, line in enumerate(lines):
+        is_table = line.strip().startswith('|')
+        is_prev_table = bool(result) and result[-1].strip().startswith('|')
+        if is_table and result and not is_prev_table and result[-1].strip():
+            result.append('')
+        if is_prev_table and not is_table and line.strip():
+            result.append('')
+        # 修正分隔行列数
+        if is_table and set(line.strip().replace('|', '').replace('-', '').replace(':', '').strip()) == set():
+            header = next((item for item in reversed(result) if item.strip().startswith('|')), '')
+            header_cols = _cells_count(header) if header else 0
+            if header_cols and _cells_count(line) != header_cols:
+                line = '|' + '|'.join(['---'] * header_cols) + '|'
+        result.append(line)
+    return "\n".join(result)
+
+
 def parse_markdown(value):
+    value = _normalize_tables(value)
     parser = MarkdownIt('commonmark', {'html': False}).enable(['table', 'strikethrough'])
     parser.block.ruler.before('fence', 'response_diagram', _diagram,
                              {'alt': ['paragraph', 'reference', 'blockquote', 'list']})
@@ -188,16 +218,25 @@ def model_html(blocks):
         elif kind=='code':html.append(f'<pre><code>{escape(block["text"])}</code></pre>')
         elif kind=='diagram':
             # 统一走 services.diagrams 的解析：支持 type=layered/flow/timeline 与多行写法
+            # 图示：头部用 caption（含 type=），节点用正文行 → 不丢第一个节点
             from services.diagrams import parse_diagram
-            lines=[line for line in str(block['text']).splitlines() if line.strip()]
-            structure=parse_diagram(':::diagram '+(lines[0] if lines else ''), lines[1:] if len(lines)>1 else lines)
-            nodes=[str(n.get('label') or '').strip() for n in structure.get('nodes') or []]
+            caption = str(block.get('caption') or '').strip()
+            body_lines=[line.strip() for line in str(block.get('text') or '').splitlines() if line.strip()]
+            try:
+                structure = parse_diagram(':::diagram ' + caption, body_lines)
+            except Exception:
+                structure = {}
+            nodes=[str(n.get('label') or '').strip() for n in structure.get('nodes') or [] if str(n.get('label') or '').strip()]
+            if not nodes:
+                nodes = body_lines[:12]
             if not nodes:
                 html.append('<p class="cs-muted">（本节图示待补充）</p>');continue
             if len(nodes)>12: nodes=nodes[:12]
-            if len(nodes)==1:                      # 单节点也不报错：降级为列表
-                html.append('<ul>'+''.join(f'<li>{escape(n)}</li>' for n in nodes)+'</ul>');continue
-            html.append('<figure class="cs-diagram">'+''.join(('↓' if i else '')+f'<div>{escape(n)}</div>' for i,n in enumerate(nodes))+f'<figcaption>{escape(block["caption"])}</figcaption></figure>')
+            kind='layered'
+            m=__import__('re').search(r'type=([a-z]+)', caption)
+            if m: kind=m.group(1)
+            arrow = '→' if kind in ('flow','timeline') else '↓'
+            html.append('<figure class="cs-diagram">'+''.join(('' if i==0 else f'<span class="cs-diagram-arrow">{arrow}</span>')+f'<div>{escape(n)}</div>' for i,n in enumerate(nodes))+f'<figcaption>{escape(block["caption"])}</figcaption></figure>')
         elif kind=='separator':html.append('<hr>')
         else:
             tag=f'h{min(6,block.get("relative_level",1)+2)}' if kind=='heading' else 'p'

@@ -284,3 +284,19 @@ def test_chunk_quality_normalizes_and_filters_noise():
     assert result[0]["content"].startswith("第二章")             # 标题合并进正文
     st = stats(result)
     assert st["lt60"] == 0
+
+
+def test_markdown_table_and_diagram_parsing():
+    """预览/导出：分隔行列数不匹配的表格要能修好；:::diagram 块要解析成图示。"""
+    from infra.docx.document_model import _normalize_tables, model_html, parse_markdown
+
+    content = ("表：层间接口表\n\n"
+               "| 源层 | 目标层 | 接口方式 |\n|---|---|---|---|---|\n| A | B | 网关 |\n\n"
+               ":::diagram type=layered 分层示意图\n接入层\n应用层\n数据层\n:::\n")
+    blocks = parse_markdown(content)
+    assert sum(1 for b in blocks if b['type'] == 'table') == 1
+    assert sum(1 for b in blocks if b['type'] == 'diagram') == 1
+    html = model_html(blocks)
+    assert '<table>' in html and 'cs-diagram' in html
+    assert '接入层' in html                      # 第一个节点不能被吃掉
+    assert '| 源层' not in html                  # 不能退化成一行文字

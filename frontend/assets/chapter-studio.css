@@ -1013,3 +1013,11 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 /* 重写弹窗：本节素材 */
 .cs-rc-mat-row { display: flex; align-items: center; gap: 8px; }
 .cs-rc-mat-row b { font-size: 11.5px; color: #334155; }
+
+/* 图示预览：分层/流程 */
+.cs-diagram { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 10px 0;
+  padding: 12px; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; }
+.cs-diagram > div { min-width: 220px; text-align: center; padding: 7px 12px; background: #fff;
+  border: 1px solid #dbeafe; border-radius: 8px; font-size: 12px; color: #1e293b; }
+.cs-diagram-arrow { color: #94a3b8; font-size: 11px; line-height: 1; }
+.cs-diagram figcaption { margin-top: 6px; font-size: 11px; color: #64748b; }
