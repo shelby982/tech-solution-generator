@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v427';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v427';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v428';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v428';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -361,7 +361,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (delBtn) {
         const id = Number(delBtn.dataset.msrcDel);
         if (!globalThis.confirm('删除后，该出处里已选的素材一起失效（记录保留）。确定删除？')) return;
-        await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${id}`, { method: 'DELETE' });
+        const delResp = await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${id}`, { method: 'DELETE' });
+        if (!delResp.ok) { status('删除失败，请重试'); return; }
         state.openId = 0; state.chunks = [];
         await loadSources(); render(); bindFileInput();
         status('已删除出处，其下素材标为失效');

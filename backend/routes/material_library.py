@@ -320,7 +320,7 @@ async def material_sources(project_id: int, kind: str = "file"):
 
 
 @router.get('/projects/{project_id}/material-sources/{kind}/{source_id}/chunks')
-async def source_chunks(project_id: int, kind: str, source_id: int, q: str = "",
+async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
                         limit: int = 150, picked_only: bool = False):
     """某个出处下的片段（片段 = 素材候选；picked = 已选为素材）。"""
     kind = "web" if kind == "web" else "file"
@@ -375,17 +375,21 @@ async def pick_chunks(project_id: int, body: PickBody):
 
 
 @router.delete('/projects/{project_id}/material-sources/{kind}/{source_id}')
-async def delete_source(project_id: int, kind: str, source_id: int):
+async def delete_source(project_id: int, kind: str, source_id: str):
     """删除出处：文件软删 / 来源删除；**其下素材标失效（invalid），记录保留**。"""
     kind = "web" if kind == "web" else "file"
     async with get_db() as db:
         if kind == "file":
+            try:
+                file_id = int(source_id)
+            except (TypeError, ValueError):
+                raise HTTPException(422, "文件 ID 非法")
             await db.execute("UPDATE materials SET deleted_at=CURRENT_TIMESTAMP "
-                             "WHERE id=? AND project_id=?", (source_id, project_id))
-            await db.execute("UPDATE material_chunks SET status='invalid' WHERE material_id=?", (source_id,))
+                             "WHERE id=? AND project_id=?", (file_id, project_id))
+            await db.execute("UPDATE material_chunks SET status='invalid' WHERE material_id=?", (file_id,))
         else:
-            await db.execute("UPDATE citation_chunks SET status='invalid' WHERE citation_id=?", (source_id,))
-            await db.execute("DELETE FROM citations WHERE id=? AND project_id=?", (source_id, project_id))
+            await db.execute("UPDATE citation_chunks SET status='invalid' WHERE citation_id=?", (str(source_id),))
+            await db.execute("DELETE FROM citations WHERE id=? AND project_id=?", (str(source_id), project_id))
         await db.commit()
     return {"removed": True, "materials": "invalidated"}
 
