@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v420';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v420';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v421';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v421';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -251,64 +251,157 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     } catch (error) { materialLib = null; }
   }
 
-  /** 素材库（统一管理弹窗）：上传 + 我上传的 + 联网搜索的 + 外部依据 + 应用到本章 */
+  /** 素材库：两页签（我的文件 / 联网来源）+ 展开挑片段（勾选=素材）+ 应用到本章（选小节） */
   async function openMaterialAdminDialog() {
-    await loadMaterialLibrary();
-    const lib = materialLib || { confirmed: [], counts: {}, citations: {} };
-    const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
-    const uploadItems = (lib.confirmed || []).filter((item) => item.source_type !== 'web');
-    const webItems = (lib.confirmed || []).filter((item) => item.source_type === 'web');
-    const rowHtml = (items) => items.slice(0, 40).map((item) => `
-      <label class="cs-ml-item is-pick">
-        <input type="checkbox" data-ml-pick="${pickId(item)}" />
-        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
-          <p>${esc(String(item.text || '').slice(0, 70))}…</p>
-          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
-      </label>`).join('');
-
+    const state = { tab: 'file', openId: 0, chunks: [], sources: [], sections: (planBrief?.outline || []).map((s) => s.title) };
     const dlg = globalThis.document.createElement('dialog');
-    dlg.className = 'cs-plan-dialog';
-    dlg.innerHTML = `<header><h3>素材库</h3><button type="button" data-madmin-close>×</button></header>
-      <div class="cs-plan-body">
-        <div class="cs-madmin-upload">
-          <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" data-madmin-file />
-          <span class="cs-dim">上传后自动解析成片段，可直接应用到本章</span>
+    dlg.className = 'cs-plan-dialog cs-madmin';
+    const closeAll = () => dlg.querySelectorAll('dialog').forEach((d) => d.close());
+
+    const loadSources = async () => {
+      const resp = await fetch(`/api/projects/${projectId}/material-sources?kind=${state.tab}`, { cache: 'no-store' });
+      state.sources = resp.ok ? (await resp.json()).items || [] : [];
+    };
+    const loadChunks = async (sourceId) => {
+      const resp = await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${sourceId}/chunks?limit=150`, { cache: 'no-store' });
+      state.chunks = resp.ok ? (await resp.json()).items || [] : [];
+    };
+
+    const render = () => {
+      const srcHtml = state.sources.length ? state.sources.map((src) => `
+        <div class="cs-msrc">
+          <div class="cs-msrc-head">
+            <b>${esc(src.title || '出处')}</b>
+            <small>${src.chunks} 段 · 已选 ${src.picked}</small>
+            <button type="button" class="cs-gate-act" data-msrc-open="${src.id}">${state.openId === src.id ? '收起' : '展开'}</button>
+            <button type="button" class="cs-todo-ignore" data-msrc-del="${src.id}">删除</button>
+          </div>
+          ${state.openId === src.id ? `<div class="cs-msrc-chunks">
+            ${state.chunks.length ? state.chunks.map((chunk) => `
+              <label class="cs-ml-item is-pick">
+                <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />
+                <div class="cs-ml-body"><p>${esc(String(chunk.text || '').slice(0, 90))}…</p>
+                  <small>${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
+              </label>`).join('') : '<p class="cs-muted">没有片段</p>'}
+          </div>` : ''}
+        </div>`).join('') : '<p class="cs-muted">还没有内容，点右上角「添加素材」</p>';
+
+      dlg.innerHTML = `<header><h3>素材库</h3><button type="button" data-madmin-close>×</button></header>
+        <div class="cs-madmin-tabs">
+          <button type="button" data-mtab="file" class="${state.tab === 'file' ? 'is-on' : ''}">我的文件</button>
+          <button type="button" data-mtab="web" class="${state.tab === 'web' ? 'is-on' : ''}">联网来源</button>
+          <span class="cs-madmin-add">
+            <button type="button" class="cs-gate-act" data-madmin-add>添加素材 ▾</button>
+            <span class="cs-madmin-menu" hidden>
+              <button type="button" class="cs-gate-act" data-madmin-upload>上传文件…</button>
+              <button type="button" class="cs-gate-act" data-madmin-search>联网搜索…</button>
+            </span>
+          </span>
         </div>
-        <div class="cs-ml-search"><input type="text" data-ml-q placeholder="搜索素材…" /></div>
-        <div class="cs-madmin-cols">
-          <section class="cs-madmin-col">
-            <p class="cs-cite-sec">我上传的（${uploadItems.length}）</p>
-            <div class="cs-ml-list">${rowHtml(uploadItems) || '<p class="cs-muted">还没有上传素材</p>'}</div>
-          </section>
-          <section class="cs-madmin-col">
-            <p class="cs-cite-sec">联网搜索的（${webItems.length}）</p>
-            <div class="cs-ml-list">${rowHtml(webItems) || '<p class="cs-muted">还没有联网搜索的素材</p>'}</div>
-          </section>
+        <div class="cs-plan-body">
+          <input type="file" multiple hidden data-madmin-file accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" />
+          <div class="cs-msrc-list">${srcHtml}</div>
         </div>
-      </div>
-      <footer class="cs-ins-foot">
-        <button type="button" class="cs-cp-ghost" data-madmin-close2>关闭</button>
-        <button type="button" class="cs-cp-primary" data-ml-apply>应用到本章</button>
-      </footer>`;
-    dlg.addEventListener('click', (event) => {
-      if (event.target.closest('[data-madmin-close]') || event.target.closest('[data-madmin-close2]')) { dlg.close(); return; }
-    });
-    dlg.addEventListener('change', async (event) => {
-      const input = event.target.closest('[data-madmin-file]');
-      if (!input || !input.files?.length) return;
-      for (const file of input.files) {
-        status(`正在上传 ${file.name}…`);
-        try {
-          const form = new FormData();
-          form.append('file', file);
-          await json(`/api/blocks/${active.id}/studio/materials`, { method: 'POST', body: form });
-        } catch (error) { status(`${file.name}：${error.message}`); return; }
-      }
-      await loadMaterialLibrary(); dlg.close();
-      status('已上传，解析完成后可在素材库里选择应用到本章');
-      paintAside();
-    });
+        <footer class="cs-ins-foot">
+          <select class="cs-madmin-section" data-madmin-section>
+            <option value="">整章</option>
+            ${state.sections.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+          </select>
+          <button type="button" class="cs-cp-ghost" data-madmin-close2>关闭</button>
+          <button type="button" class="cs-cp-primary" data-madmin-apply>应用到本章</button>
+        </footer>`;
+    };
+
+    render();
+    await loadSources(); render();
     dlg.addEventListener('close', () => dlg.remove());
+
+    dlg.addEventListener('click', async (event) => {
+      const closeBtn = event.target.closest('[data-madmin-close]') || event.target.closest('[data-madmin-close2]');
+      if (closeBtn) { dlg.close(); return; }
+      if (event.target.closest('[data-madmin-add]')) {
+        const menu = dlg.querySelector('.cs-madmin-menu');
+        if (menu) menu.hidden = !menu.hidden;
+        return;
+      }
+      if (event.target.closest('[data-madmin-upload]')) { dlg.querySelector('[data-madmin-file]')?.click(); return; }
+      if (event.target.closest('[data-madmin-search]')) {
+        dlg.close();
+        const btn = globalThis.document.querySelector('[data-cite-open]');
+        if (btn) btn.click(); else status('请用「插入 → 官方来源」检索公开素材');
+        return;
+      }
+      const tabBtn = event.target.closest('[data-mtab]');
+      if (tabBtn) { state.tab = tabBtn.dataset.mtab; state.openId = 0; state.chunks = []; await loadSources(); render(); return; }
+      const openBtn = event.target.closest('[data-msrc-open]');
+      if (openBtn) {
+        const id = Number(openBtn.dataset.msrcOpen);
+        if (state.openId === id) { state.openId = 0; state.chunks = []; render(); return; }
+        state.openId = id; await loadChunks(id); render();
+        bindFileInput();
+        return;
+      }
+      const delBtn = event.target.closest('[data-msrc-del]');
+      if (delBtn) {
+        const id = Number(delBtn.dataset.msrcDel);
+        if (!globalThis.confirm('删除后，该出处里已选的素材一起失效（记录保留）。确定删除？')) return;
+        await fetch(`/api/projects/${projectId}/material-sources/${state.tab}/${id}`, { method: 'DELETE' });
+        state.openId = 0; state.chunks = [];
+        await loadSources(); render(); bindFileInput();
+        status('已删除出处，其下素材标为失效');
+        return;
+      }
+      if (event.target.closest('[data-madmin-apply]')) {
+        const pickedIds = [...dlg.querySelectorAll('[data-mpick]:checked')].map((el) => Number(el.dataset.mpick));
+        const section = String(dlg.querySelector('[data-madmin-section]')?.value || '');
+        if (!pickedIds.length) { status('先在出处里勾选片段（勾选即素材）'); return; }
+        const signed = state.tab === 'web' ? pickedIds.map((id) => -id) : pickedIds;
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/materials/bind`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chunk_ids: signed, section, mode: 'cite' }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+          dlg.close();
+          await loadMaterialLibrary(); paintAside();
+          status(`已应用 ${data.added || signed.length} 段素材${section ? `到「${section}」` : '到整章'}`);
+        } catch (error) { status(`应用失败：${error.message}`); }
+        return;
+      }
+    });
+
+    // 勾选 = 素材（立即写 selected）
+    dlg.addEventListener('change', async (event) => {
+      const box = event.target.closest('[data-mpick]');
+      if (!box) return;
+      try {
+        await fetch(`/api/projects/${projectId}/material-sources/pick`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chunk_ids: [Number(box.dataset.mpick)], picked: box.checked, source_kind: state.tab }),
+        });
+        status(box.checked ? '已选为素材' : '已取消');
+      } catch (error) { status(error.message); }
+    });
+
+    const bindFileInput = () => {
+      const input = dlg.querySelector('[data-madmin-file]');
+      if (!input) return;
+      input.onchange = async (event) => {
+        for (const file of event.target.files || []) {
+          status(`正在上传 ${file.name}…`);
+          try {
+            const form = new FormData();
+            form.append('file', file);
+            await json(`/api/blocks/${active.id}/studio/materials`, { method: 'POST', body: form });
+          } catch (error) { status(`${file.name}：${error.message}`); return; }
+        }
+        await loadSources(); render(); bindFileInput();
+        status('已上传，解析完成后可在「我的文件」里展开挑片段');
+      };
+    };
+
+    bindFileInput();
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
   }

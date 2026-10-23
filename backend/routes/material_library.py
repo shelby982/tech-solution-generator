@@ -20,9 +20,11 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
                   material_id: int = 0, limit: int = 50):
     """素材库 / 待确认：按片段列出（带所属文件与页码）。"""
     status = status if status in ("confirmed", "pending", "rejected") else "confirmed"
+    # 素材 = 已选中的片段（status='selected'）
+    status = "selected" if status in ("confirmed", "selected") else status
     sql = ("SELECT mc.id, mc.material_id, mc.chunk_index, mc.page, mc.content, mc.status,"
            "       m.filename, m.role FROM material_chunks mc JOIN materials m ON m.id=mc.material_id"
-           " WHERE m.project_id=? AND m.deleted_at IS NULL AND COALESCE(mc.status,'confirmed')=?")
+           " WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status=?")
     args: list = [project_id, status]
     if material_id:
         sql += " AND mc.material_id=?"
@@ -66,13 +68,14 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
             (project_id, status, status, max(1, min(200, limit))))).fetchall()
         counts = {}
         for state in ("confirmed", "pending"):
+            mapped = "selected" if state == "confirmed" else ("candidate" if state == "pending" else state)
             file_count = (await (await db.execute(
                 "SELECT COUNT(*) FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
-                "WHERE m.project_id=? AND m.deleted_at IS NULL AND COALESCE(mc.status,'confirmed')=?",
-                (project_id, state))).fetchone())[0]
+                "WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status=?",
+                (project_id, mapped))).fetchone())[0]
             cite_count = (await (await db.execute(
                 "SELECT COUNT(*) FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
-                "WHERE c.project_id=? AND cc.status=?", (project_id, state))).fetchone())[0]
+                "WHERE c.project_id=? AND cc.status=?", (project_id, mapped))).fetchone())[0]
             counts[state] = file_count + cite_count
         files = await (await db.execute(
             "SELECT m.id, m.filename, m.role, m.parse_status, "
@@ -170,17 +173,17 @@ async def bind(block_id: int, body: BindBody):
             if int(chunk_id) < 0:                          # 负数 = 搜索片段
                 row = await (await db.execute(
                     "SELECT cc.id, 0, cc.status FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
-                    "WHERE cc.id=? AND c.project_id=?", (-int(chunk_id), block["project_id"]))).fetchone()
+                    "WHERE cc.id=? AND c.project_id=? AND cc.status<>'invalid'", (-int(chunk_id), block["project_id"]))).fetchone()
                 kind = "cite"
             else:
                 row = await (await db.execute(
-                    "SELECT mc.id, mc.material_id, COALESCE(mc.status,'confirmed') FROM material_chunks mc "
+                    "SELECT mc.id, mc.material_id, mc.status FROM material_chunks mc "
                     "JOIN materials m ON m.id=mc.material_id "
-                    "WHERE mc.id=? AND m.project_id=? AND m.deleted_at IS NULL",
+                    "WHERE mc.id=? AND m.project_id=? AND m.deleted_at IS NULL AND mc.status<>'invalid'",
                     (chunk_id, block["project_id"]))).fetchone()
                 kind = "file"
-            if not row or (row[2] or "confirmed") == "rejected":
-                continue                                    # 丢弃的素材不可用（方案 C：解析即可用）
+            if not row or str(row[2] or "") not in ("selected", "confirmed"):
+                continue                                    # 只有"已选为素材"的片段可应用
             await db.execute(
                 "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode, chunk_kind) "
                 "VALUES (?,?,?,?,?) ON CONFLICT(block_id, chunk_id) DO UPDATE SET "
@@ -287,3 +290,100 @@ async def chapter_citations(block_id: int):
         by_kind[point["kind"]] = by_kind.get(point["kind"], 0) + 1
     return {"points": points, "missing": missing[:20],
             "summary": {"citations": len(points), "missing": len(missing), "by_kind": by_kind}}
+
+
+# ── 素材出处（我的文件 / 联网来源）与片段挑选（片段=素材）──────────────────
+@router.get('/projects/{project_id}/material-sources')
+async def material_sources(project_id: int, kind: str = "file"):
+    """素材的两类出处：file（我上传的文件）/ web（联网来源）。"""
+    kind = "web" if kind == "web" else "file"
+    async with get_db() as db:
+        if kind == "file":
+            rows = await (await db.execute(
+                "SELECT m.id, m.filename, m.role, m.parse_status, "
+                "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id AND c.status<>'invalid') AS chunks, "
+                "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id AND c.status='selected') AS picked "
+                "FROM materials m WHERE m.project_id=? AND m.deleted_at IS NULL ORDER BY m.id DESC",
+                (project_id,))).fetchall()
+            items = [{"id": r[0], "title": r[1], "sub": r[2] or "", "status": r[3],
+                      "chunks": r[4], "picked": r[5]} for r in rows]
+        else:
+            rows = await (await db.execute(
+                "SELECT c.id, c.title, c.domain, c.published_at, "
+                "(SELECT COUNT(*) FROM citation_chunks cc WHERE cc.citation_id=c.id AND cc.status<>'invalid') AS chunks, "
+                "(SELECT COUNT(*) FROM citation_chunks cc WHERE cc.citation_id=c.id AND cc.status='selected') AS picked "
+                "FROM citations c WHERE c.project_id=? ORDER BY c.created_at DESC",
+                (project_id,))).fetchall()
+            items = [{"id": r[0], "title": r[1] or (r[2] or "网页"), "sub": (r[2] or "") + (f" · {r[3]}" if r[3] else ""),
+                      "status": "done", "chunks": r[4], "picked": r[5]} for r in rows]
+    return {"kind": kind, "items": items}
+
+
+@router.get('/projects/{project_id}/material-sources/{kind}/{source_id}/chunks')
+async def source_chunks(project_id: int, kind: str, source_id: int, q: str = "",
+                        limit: int = 150, picked_only: bool = False):
+    """某个出处下的片段（片段 = 素材候选；picked = 已选为素材）。"""
+    kind = "web" if kind == "web" else "file"
+    async with get_db() as db:
+        if kind == "file":
+            sql = ("SELECT mc.id, mc.chunk_index, mc.page, mc.content, mc.status "
+                   "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
+                   "WHERE mc.material_id=? AND m.project_id=? AND m.deleted_at IS NULL "
+                   "AND mc.status<>'invalid'")
+            args: list = [source_id, project_id]
+        else:
+            sql = ("SELECT cc.id, cc.chunk_index, 0, cc.content, cc.status "
+                   "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+                   "WHERE cc.citation_id=? AND c.project_id=? AND cc.status<>'invalid'")
+            args = [source_id, project_id]
+        if q:
+            sql += " AND COALESCE(" + ("mc.content" if kind == "file" else "cc.content") + ",'') LIKE ?"
+            args.append(f"%{q}%")
+        if picked_only:
+            sql += " AND " + ("mc.status" if kind == "file" else "cc.status") + "='selected'"
+        sql += " ORDER BY " + ("mc.chunk_index" if kind == "file" else "cc.chunk_index") + " LIMIT ?"
+        args.append(max(1, min(300, limit)))
+        rows = await (await db.execute(sql, args)).fetchall()
+    return {"kind": kind, "source_id": source_id,
+            "items": [{"chunk_id": r[0], "index": r[1], "page": r[2], "text": r[3],
+                       "picked": str(r[4]) == "selected",
+                       "chunk_kind": "cite" if kind == "web" else "file"} for r in rows]}
+
+
+class PickBody(BaseModel):
+    chunk_ids: list[int] = Field(default_factory=list)
+    picked: bool = True
+    source_kind: str = "file"
+
+
+@router.post('/projects/{project_id}/material-sources/pick')
+async def pick_chunks(project_id: int, body: PickBody):
+    """勾选/取消：**片段即素材**（picked=True → status=selected）。"""
+    kind = "web" if body.source_kind == "web" else "file"
+    table = "citation_chunks" if kind == "web" else "material_chunks"
+    status = "selected" if body.picked else "candidate"
+    if not body.chunk_ids:
+        return {"changed": 0}
+    async with get_db() as db:
+        placeholders = ",".join("?" for _ in body.chunk_ids)
+        cur = await db.execute(f"UPDATE {table} SET status=? WHERE id IN ({placeholders}) AND status<>'invalid'",
+                               [status, *body.chunk_ids])
+        await db.commit()
+        changed = cur.rowcount or 0
+    return {"changed": changed, "status": status}
+
+
+@router.delete('/projects/{project_id}/material-sources/{kind}/{source_id}')
+async def delete_source(project_id: int, kind: str, source_id: int):
+    """删除出处：文件软删 / 来源删除；**其下素材标失效（invalid），记录保留**。"""
+    kind = "web" if kind == "web" else "file"
+    async with get_db() as db:
+        if kind == "file":
+            await db.execute("UPDATE materials SET deleted_at=CURRENT_TIMESTAMP "
+                             "WHERE id=? AND project_id=?", (source_id, project_id))
+            await db.execute("UPDATE material_chunks SET status='invalid' WHERE material_id=?", (source_id,))
+        else:
+            await db.execute("UPDATE citation_chunks SET status='invalid' WHERE citation_id=?", (source_id,))
+            await db.execute("DELETE FROM citations WHERE id=? AND project_id=?", (source_id, project_id))
+        await db.commit()
+    return {"removed": True, "materials": "invalidated"}

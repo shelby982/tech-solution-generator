@@ -514,6 +514,13 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             await conn.execute("ALTER TABLE material_chunks ADD COLUMN status TEXT DEFAULT 'confirmed'")
         if 'confirmed_at' not in chunk_cols:
             await conn.execute("ALTER TABLE material_chunks ADD COLUMN confirmed_at TEXT")
+    # 素材语义：片段状态 = candidate(候选) / selected(素材) / rejected(丢弃) / invalid(出处已删)
+    try:
+        await conn.execute("UPDATE material_chunks SET status='candidate' WHERE status IN ('confirmed','pending') OR status IS NULL")
+        await conn.execute("UPDATE citation_chunks SET status='candidate' WHERE status IN ('confirmed','pending') OR status IS NULL")
+        await conn.commit()
+    except Exception:
+        pass
     material_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_materials)')).fetchall()}
     if material_cols and 'section' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN section TEXT DEFAULT ''")

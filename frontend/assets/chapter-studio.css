@@ -969,3 +969,19 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-madmin-col { min-width: 0; }
 .cs-madmin-col .cs-ml-list { max-height: 340px; overflow: auto; }
 @media (max-width: 720px) { .cs-madmin-cols { grid-template-columns: 1fr; } }
+
+/* 素材库：两页签 + 出处列表 + 片段挑选 */
+.cs-madmin-tabs { display: flex; align-items: center; gap: 6px; padding: 6px 14px 0; border-bottom: 1px solid #eef2f7; }
+.cs-madmin-tabs > button { border: 0; background: transparent; padding: 7px 10px; font-size: 12px; color: #64748b;
+  border-bottom: 2px solid transparent; cursor: pointer; }
+.cs-madmin-tabs > button.is-on { color: #1d4ed8; border-bottom-color: #2563eb; font-weight: 600; }
+.cs-madmin-add { margin-left: auto; position: relative; }
+.cs-madmin-menu { position: absolute; right: 0; top: 28px; z-index: 5; display: flex; flex-direction: column; gap: 4px;
+  padding: 6px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 8px 24px rgba(15,23,42,.12); }
+.cs-msrc-list { display: flex; flex-direction: column; gap: 6px; }
+.cs-msrc { border: 1px solid #eef2f7; border-radius: 9px; background: #fff; padding: 7px 9px; }
+.cs-msrc-head { display: flex; align-items: center; gap: 8px; }
+.cs-msrc-head b { flex: 1; min-width: 0; font-size: 11.5px; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-msrc-head small { font-size: 10px; color: #64748b; }
+.cs-msrc-chunks { margin-top: 7px; max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 5px; }
+.cs-madmin-section { margin-right: auto; border: 1px solid #e2e8f0; border-radius: 7px; padding: 4px 8px; font-size: 11px; }

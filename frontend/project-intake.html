@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>项目准备 · 智能应标</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20261016-v420">
+  <link rel="stylesheet" href="/assets/styles.css?v=20261016-v421">
   <style>
     body{margin:0;background:#f7f8fa;color:#17202a;font-family:Inter,"PingFang SC",sans-serif}
     .shell{max-width:1120px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
@@ -32,4 +32,4 @@
 </main>
 <dialog id="package-editor"><form id="package-form"><h2>编辑投标对象</h2><p class="hint">仅在识别有误时修改；名称可留空。</p><input id="edit-id" type="hidden"><label>对象类型<select id="edit-kind"><option value="package">标包</option><option value="section">标段</option><option value="target">独立标的</option></select></label><label>所属标的编号<input id="edit-target"></label><label>标包 / 标段编号<input id="edit-code"></label><label>完整名称<input id="edit-name" maxlength="300"></label><div class="actions"><button type="button" id="cancel-edit">取消</button><button class="primary" type="submit">保存</button></div></form></dialog>
 <dialog id="merge-dialog"><form id="merge-form"><h2>合并重复候选</h2><p class="hint">将当前候选的证据合并到以下保留项。已有运行成果的候选不能合并，保留项需要重新核验。</p><input id="merge-source" type="hidden"><label>保留的投标对象<select id="merge-destination"></select></label><div class="actions"><button type="button" id="cancel-merge">取消</button><button type="submit" class="primary">确认合并</button></div></form></dialog>
-<script type="module" src="/assets/intake.js?v=20261016-v420"></script></body></html>
+<script type="module" src="/assets/intake.js?v=20261016-v421"></script></body></html>
