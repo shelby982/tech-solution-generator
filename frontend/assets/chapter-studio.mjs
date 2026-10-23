@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v421';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v421';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v422';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v422';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -240,14 +240,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function loadMaterialLibrary() {
     if (!active) return;
     try {
-      const [citeList, lib, pend, boundList] = await Promise.all([
+      const [recommendList, citeList, lib, pend, boundList] = await Promise.all([
+        fetch(`/api/blocks/${active.id}/materials/recommend?limit=8`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/blocks/${active.id}/citations`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=confirmed&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=pending&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/blocks/${active.id}/materials/bound`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
       ]);
       materialLib = { confirmed: lib?.items || [], counts: lib?.counts || {}, pending: pend?.items || [],
-                      bound: boundList?.items || [], citations: citeList || { points: [], missing: [], summary: {} } };
+                      bound: boundList?.items || [], citations: citeList || { points: [], missing: [], summary: {} },
+                      recommend: recommendList || { items: [] } };
     } catch (error) { materialLib = null; }
   }
 
@@ -466,6 +468,23 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<div class="cs-ml">
       <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4>
         <button type="button" class="cs-gate-act" data-material-admin>素材库</button></div>
+      ${(() => {
+        const recommends = lib.recommend?.items || [];
+        if (!recommends.length) return '';
+        return `<details class="cs-ml-fold" open>
+          <summary>本章推荐素材（${recommends.length}）— 按本节要点匹配</summary>
+          <div class="cs-ml-list">
+            ${recommends.map((item) => `<div class="cs-cite-row">
+              <span class="cs-cite-kind ${item.source_kind === 'web' ? 'is-web' : 'is-upload'}">${item.source_kind === 'web' ? '联网' : '文件'}</span>
+              <div class="cs-cite-body">
+                <p class="cs-cite-quote">${esc(String(item.text || '').slice(0, 56))}…</p>
+                <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(item.reason || '')}</small>
+              </div>
+              <button type="button" class="cs-todo-ignore" data-mrec="${item.chunk_id}|${item.source_kind}">采用</button>
+            </div>`).join('')}
+          </div>
+        </details>`;
+      })()}
       <p class="cs-ml-sum">招标文件 ${byKind.upload || 0} · 联网来源 ${byKind.web || 0} · 法规标准 ${byKind.doc || 0}</p>
       ${pointsHtml || '<p class="cs-muted">正文里还没有【来源：…】标注</p>'}
       ${missingHtml}
@@ -3738,6 +3757,23 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     if(event.target.closest('[data-material-admin]')){ await openMaterialAdminDialog(); return; }
+    const recBtn=event.target.closest('[data-mrec]');
+    if(recBtn && active){
+      const [rawId, kind] = String(recBtn.dataset.mrec||'').split('|');
+      const chunkId=Number(rawId);
+      try{
+        await fetch(`/api/projects/${projectId}/material-sources/pick`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({chunk_ids:[chunkId],picked:true,source_kind:kind==='web'?'web':'file'})});
+        const signed = kind==='web' ? [-chunkId] : [chunkId];
+        await fetch(`/api/blocks/${active.id}/materials/bind`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({chunk_ids:signed,section:'',mode:'cite'})});
+        await loadMaterialLibrary(); paintAside();
+        status('已采用为本章素材');
+      }catch(error){status(`采用失败：${error.message}`);}
+      return;
+    }
     const citeLocate=event.target.closest('[data-cite-locate]');
     if(citeLocate){
       const [section, quote] = String(citeLocate.dataset.citeLocate||'').split('|');

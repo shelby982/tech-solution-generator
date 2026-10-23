@@ -416,3 +416,43 @@ async def recut_all(project_id: int):
         for row in rows:
             results.append(await recut_material(db, row[0]))
     return {"results": results}
+
+
+@router.get('/blocks/{block_id}/materials/recommend')
+async def recommend_materials(block_id: int, section: str = "", limit: int = 10):
+    """本章/本节推荐素材：关键词 + 类型 + 要点覆盖 + 来源可信度（可解释）。"""
+    from services.material_match import recommend, section_profile
+
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        project_id = int(block["project_id"])
+        # 章节画像：优先用传入的节标题，否则用大纲第一节
+        outline = []
+        try:
+            from services.writing_plans import chapter_plan
+            plan = await chapter_plan(db, project_id, str(block["run_thread_id"] or ""), str(block["block_id"] or ""))
+            outline = plan.get("outline") or []
+        except Exception:
+            plan = {}
+        target = next((s for s in outline if str(s.get("title") or "") == section), None) if section else None
+        target = target or (outline[0] if outline else {"title": str(block["title"] or "")})
+        profile = section_profile(target, plan)
+
+        # 候选池：未失效的片段（文件 + 网页），排除已选/已用
+        rows = await (await db.execute(
+            "SELECT mc.id, mc.content, mc.page, m.role, 'file' AS kind, m.filename "
+            "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
+            "WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status='candidate' "
+            "UNION ALL "
+            "SELECT cc.id, cc.content, 0, 'web', 'web', c.domain "
+            "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+            "WHERE c.project_id=? AND cc.status='candidate' LIMIT 800",
+            (project_id, project_id))).fetchall()
+    pool = [{"chunk_id": r[0], "text": r[1], "page": r[2], "role": r[3],
+             "source_kind": "web" if r[4] == "web" else "file", "source_title": r[5] or ""} for r in rows]
+    picked = recommend(profile, pool, limit=max(1, min(30, limit)))
+    return {"section": profile["title"], "types_wanted": profile["types_wanted"],
+            "keywords": sorted(profile["keywords"])[:20],
+            "items": picked, "pool": len(pool)}
