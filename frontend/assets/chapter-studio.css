@@ -1005,3 +1005,11 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-ol-mat-text { display: block; font-size: 10.5px; color: #334155; line-height: 1.5; }
 .cs-ol-mat-body small { font-size: 9.5px; color: #94a3b8; }
 .cs-ol-mat-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 5px; }
+
+/* 重写弹窗：本节素材 */
+.cs-rc-mat-row { display: flex; align-items: center; gap: 8px; }
+.cs-rc-mat-row b { font-size: 11.5px; color: #334155; }
+
+/* 重写弹窗：本节素材 */
+.cs-rc-mat-row { display: flex; align-items: center; gap: 8px; }
+.cs-rc-mat-row b { font-size: 11.5px; color: #334155; }
