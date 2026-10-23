@@ -94,21 +94,26 @@ async def _parse_and_chunk_in_background(
                     logger.info(f"素材 {material_id}（{material_role}）细粒度切片：{len(chunks)} 条")
                 else:
                     # C1 片段质量：按章节切 → 尺寸归一 / 噪声过滤 / 去重
+                    from services.chunk_quality import heading_path as build_path
                     from services.chunk_quality import normalize as normalize_chunks
+                    titles = [str(getattr(sec, "title", "") or "") for sec in parsed.sections]
+                    paths = build_path(titles)
                     raw_chunks = []
-                    for sec in parsed.sections:
+                    for index, sec in enumerate(parsed.sections):
                         text = f"{sec.title}\n{sec.raw_content or ''}".strip()
                         if text:
                             raw_chunks.append({"content": text,
-                                               "page": int(getattr(sec, "page", 0) or 0)})
+                                               "page": int(getattr(sec, "page", 0) or 0),
+                                               "path": paths[index] if index < len(paths) else ""})
                     chunks = normalize_chunks(raw_chunks)
                     import json as _json
                     for idx, chunk in enumerate(chunks):
                         await create_chunk(db, material_id=material_id, chunk_index=idx,
                                            content=chunk["content"], page=chunk["page"])
                         await db.execute(
-                            "UPDATE material_chunks SET tags=? WHERE material_id=? AND chunk_index=?",
-                            (_json.dumps(chunk.get("tags") or [], ensure_ascii=False), material_id, idx))
+                            "UPDATE material_chunks SET tags=?, path=? WHERE material_id=? AND chunk_index=?",
+                            (_json.dumps(chunk.get("tags") or [], ensure_ascii=False),
+                             str(chunk.get("path") or "")[:200], material_id, idx))
                     logger.info(f"素材 {material_id}（{material_role}）切片：{len(raw_chunks)} → {len(chunks)} 段（已归一）")
                 # R3：抽图片素材（DOCX 直接取媒体；PDF 按图片区域渲染）
                 try:

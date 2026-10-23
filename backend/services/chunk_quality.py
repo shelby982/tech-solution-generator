@@ -101,6 +101,40 @@ def _split_long(text: str) -> list[str]:
     return result
 
 
+_NUMBERING = re.compile(r"^\s*(第[一二三四五六七八九十百]+[章节条]|[\d]+(?:\.[\d]+)*)\s*")
+
+
+def heading_path(titles: list[str]) -> list[str]:
+    """由一串节标题推断层级路径（C3）：按编号深度维护栈。
+
+    「第三章 投标人资格要求」→ path=["第三章 投标人资格要求"]
+    「3.2 资质要求」          → path=["第三章 …", "3.2 资质要求"]
+    """
+    stack: list[tuple[int, str]] = []
+    paths: list[str] = []
+    for title in titles or []:
+        name = str(title or "").strip()
+        if not name:
+            paths.append("")
+            continue
+        match = _NUMBERING.match(name)
+        if match:
+            token = match.group(1)
+            if token.startswith("第"):
+                # 第X章=1 / 第X节=2 / 第X条=3
+                depth = 3 if token.endswith("条") else 2 if token.endswith("节") else 1
+            else:
+                depth = token.count(".") + 1
+        else:
+            # 无编号：视为与上一个同级（保持栈深）
+            depth = stack[-1][0] if stack else 1
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        stack.append((depth, name))
+        paths.append(" > ".join(item[1] for item in stack))
+    return paths
+
+
 def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
     """chunks: [{content, page}] → 归一后的 [{content, page, tags}]。"""
     cleaned: list[dict] = []
@@ -108,7 +142,8 @@ def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
         text = str(chunk.get("content") or "").strip()
         if not text or is_noise(text):
             continue
-        cleaned.append({"content": text, "page": int(chunk.get("page") or 0)})
+        cleaned.append({"content": text, "page": int(chunk.get("page") or 0),
+                        "path": str(chunk.get("path") or "")})
 
     # 短片段与下一段合并（标题合并到正文）
     merged: list[dict] = []
@@ -133,7 +168,8 @@ def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
             text = piece.strip()
             if not text or is_noise(text):
                 continue
-            split_chunks.append({"content": text, "page": chunk["page"]})
+            split_chunks.append({"content": text, "page": chunk["page"],
+                                 "path": chunk.get("path") or ""})
 
     compacted: list[dict] = []
     buffer = None
@@ -160,7 +196,7 @@ def normalize(chunks: list[dict], *, target: int = MAX_LEN) -> list[dict]:
             continue
         seen.add(key)
         result.append({"content": text, "page": chunk["page"], "fingerprint": key,
-                       "tags": tag_of(text)})
+                       "tags": tag_of(text), "path": chunk.get("path") or ""})
     return result
 
 
@@ -191,7 +227,12 @@ async def recut_material(db, material_id: int) -> dict:
 
     # 记录旧"已选"片段的内容（用指纹匹配）
     selected_texts = [r[0] for r in rows if str(r[2]) == "selected"]
-    normalized = normalize([{"content": r[0], "page": r[1]} for r in rows])
+    # C3：用每段首行（章节标题）推断章节路径
+    titles = [str(r[0] or "").splitlines()[0].strip() if str(r[0] or "").strip() else "" for r in rows]
+    paths = heading_path(titles)
+    normalized = normalize([{"content": r[0], "page": r[1],
+                             "path": paths[index] if index < len(paths) else ""}
+                            for index, r in enumerate(rows)])
     if not normalized:
         return {"material_id": material_id, "skipped": True}
 
@@ -217,10 +258,11 @@ async def recut_material(db, material_id: int) -> dict:
         saved += 1 if status == "selected" else 0
         import json as _json
         await db.execute(
-            "INSERT INTO material_chunks (material_id, chunk_index, content, page, status, tags) "
-            "VALUES (?,?,?,?,?,?)",
+            "INSERT INTO material_chunks (material_id, chunk_index, content, page, status, tags, path) "
+            "VALUES (?,?,?,?,?,?,?)",
             (material_id, index, chunk["content"], chunk["page"], status,
-             _json.dumps(chunk.get("tags") or [], ensure_ascii=False)))
+             _json.dumps(chunk.get("tags") or [], ensure_ascii=False),
+             str(chunk.get("path") or "")[:200]))
     await db.commit()
     return {"material_id": material_id, "before": len(rows), "after": len(normalized),
             "selected_kept": saved, "stats": stats(normalized)}

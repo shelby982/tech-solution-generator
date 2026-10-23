@@ -326,13 +326,13 @@ async def source_chunks(project_id: int, kind: str, source_id: int, q: str = "",
     kind = "web" if kind == "web" else "file"
     async with get_db() as db:
         if kind == "file":
-            sql = ("SELECT mc.id, mc.chunk_index, mc.page, mc.content, mc.status "
+            sql = ("SELECT mc.id, mc.chunk_index, mc.page, mc.content, mc.status, mc.path "
                    "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
                    "WHERE mc.material_id=? AND m.project_id=? AND m.deleted_at IS NULL "
                    "AND mc.status<>'invalid'")
             args: list = [source_id, project_id]
         else:
-            sql = ("SELECT cc.id, cc.chunk_index, 0, cc.content, cc.status "
+            sql = ("SELECT cc.id, cc.chunk_index, 0, cc.content, cc.status, cc.path "
                    "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
                    "WHERE cc.citation_id=? AND c.project_id=? AND cc.status<>'invalid'")
             args = [source_id, project_id]
@@ -347,6 +347,7 @@ async def source_chunks(project_id: int, kind: str, source_id: int, q: str = "",
     return {"kind": kind, "source_id": source_id,
             "items": [{"chunk_id": r[0], "index": r[1], "page": r[2], "text": r[3],
                        "picked": str(r[4]) == "selected",
+                       "path": (r[5] if len(r) > 5 else "") or "",
                        "chunk_kind": "cite" if kind == "web" else "file"} for r in rows]}
 
 

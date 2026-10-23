@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v426';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v426';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v427';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v427';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -297,7 +297,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <label class="cs-ml-item is-pick">
                 <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />
                 <div class="cs-ml-body"><p>${esc(String(chunk.text || '').slice(0, 90))}…</p>
-                  <small>${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
+                  <small>${chunk.path ? `${esc(String(chunk.path).slice(0, 30))} · ` : ''}${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
               </label>`).join('') : '<p class="cs-muted">没有片段</p>'}
           </div>` : ''}
         </div>`).join('') : '<p class="cs-muted">还没有内容，点右上角「添加素材」</p>';

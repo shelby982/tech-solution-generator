@@ -540,6 +540,14 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if cite_cols and 'tags' not in cite_cols:
         await conn.execute("ALTER TABLE citation_chunks ADD COLUMN tags TEXT DEFAULT ''")
     await conn.commit()
+    # C3：片段所属章节路径（第三章 > 3.2 > 3.2.1）
+    chunk_cols3 = {r[1] for r in await (await conn.execute('PRAGMA table_info(material_chunks)')).fetchall()}
+    if chunk_cols3 and 'path' not in chunk_cols3:
+        await conn.execute("ALTER TABLE material_chunks ADD COLUMN path TEXT DEFAULT ''")
+    cite_cols3 = {r[1] for r in await (await conn.execute('PRAGMA table_info(citation_chunks)')).fetchall()}
+    if cite_cols3 and 'path' not in cite_cols3:
+        await conn.execute("ALTER TABLE citation_chunks ADD COLUMN path TEXT DEFAULT ''")
+    await conn.commit()
     material_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_materials)')).fetchall()}
     if material_cols and 'section' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN section TEXT DEFAULT ''")
