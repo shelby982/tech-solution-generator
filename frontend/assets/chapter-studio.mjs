@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v429';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v429';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v430';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v430';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -539,6 +539,59 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     </div>`;
   }
 
+  let planMaterials = null;
+
+  /** 拉"每节建议素材"（计划阶段确认用） */
+  async function loadPlanMaterials() {
+    if (!active) return;
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/plan/material-suggestions?per_section=3`,
+                              { cache: 'no-store', signal: AbortSignal.timeout(60000) });
+      planMaterials = resp.ok ? await resp.json() : null;
+    } catch (error) { planMaterials = null; }
+  }
+
+  /** 计划面板里每节的素材块（建议 + 已确认） */
+  function planMaterialHtml(index, sectionTitle) {
+    const item = (planMaterials?.sections || []).find((s) => String(s.section) === String(sectionTitle));
+    if (!item) return '';
+    const candidates = item.candidates || [];
+    if (!candidates.length) {
+      return `<div class="cs-ol-mat"><p class="cs-ol-mat-title"><b>素材</b><span class="cs-dim">素材库没有匹配到的片段（本节将写概括表述）</span></p></div>`;
+    }
+    return `<div class="cs-ol-mat">
+      <p class="cs-ol-mat-title"><b>素材</b><span class="cs-dim">建议 ${candidates.length} 条 · 已确认 ${item.confirmed_count}</span></p>
+      ${candidates.map((c, i) => `<label class="cs-ol-mat-row">
+        <input type="checkbox" data-ol-mat="${index}" data-mat-chunk="${c.chunk_id}" ${c.confirmed ? 'checked' : ''} />
+        <span class="cs-ol-mat-body">
+          <span class="cs-ol-mat-text">${esc(String(c.text || '').slice(0, 60))}…</span>
+          <small>${c.source_kind === 'web' ? '联网' : '文件'}${c.page ? ` · 第 ${c.page} 页` : ''} · ${esc(c.reason || '')}</small>
+        </span>
+      </label>`).join('')}
+      <div class="cs-ol-mat-acts">
+        <button type="button" class="cs-cp-primary" data-ol-mat-apply="${index}">采用所选</button>
+        <button type="button" class="cs-cp-ghost" data-ol-mat-clear="${index}">清空本节素材</button>
+      </div>
+    </div>`;
+  }
+
+  /** 采用某节的所选素材 */
+  async function applySectionMaterials(index) {
+    const outline = planBrief?.outline || [];
+    const section = outline[index];
+    if (!section) return;
+    const boxes = [...host.querySelectorAll(`[data-ol-mat="${index}"]`)];
+    const ids = boxes.filter((el) => el.checked).map((el) => Number(el.dataset.matChunk));
+    try {
+      await json(`/api/blocks/${active.id}/plan/material-suggestions/apply`, {
+        method: 'POST', body: { section: section.title, chunk_ids: ids, mode: 'auto' },
+      });
+      await loadPlanMaterials(); await loadMaterialLibrary();
+      status(ids.length ? `已确认「${section.title}」的 ${ids.length} 条素材` : `已清空「${section.title}」的素材`);
+      openChapterPlan();
+    } catch (error) { status(`确认失败：${error.message}`); }
+  }
+
   /** 这一节的"写法"（= 该节提示词）：优先用保存过的覆盖值，否则用系统默认 */
   function practiceOf(section) {
     const saved = (planBrief?.practiceOverrides || {})[String(section.title)];
@@ -770,6 +823,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const kindLabel = {text: '写作', table: '产出·表', figure: '产出·图', material: '素材'};
     const materialTone = (status) => status === '已满足' ? 'ok' : status === '已补不足' ? 'warn' : 'bad';
     const load = async () => {
+      await loadPlanMaterials();
       const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockId)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
       const payload = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
@@ -891,6 +945,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                       <button type="button" class="cs-cp-primary" data-ol-how-save="${i}">保存写法</button>
                     </div>
                   </div>
+                  ${planMaterialHtml(i, sec.title)}
                   <p><b>交付物</b>${deliv || '文字'}</p>
                 </div>
               </details>`;
@@ -3893,6 +3948,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const headBtn = globalThis.document.querySelector('[data-action="ai"]');
       if(headBtn){ headBtn.click(); }
       else { status('请用章头的「编写整章」按写法批量生成'); }
+      return;
+    }
+    const matApply=event.target.closest('[data-ol-mat-apply]');
+    if(matApply){ await applySectionMaterials(Number(matApply.dataset.olMatApply||0)); return; }
+    const matClear=event.target.closest('[data-ol-mat-clear]');
+    if(matClear){
+      const index=Number(matClear.dataset.olMatClear||0);
+      host.querySelectorAll(`[data-ol-mat="${index}"]`).forEach((el)=>{el.checked=false;});
+      await applySectionMaterials(index);
       return;
     }
     const howSave=event.target.closest('[data-ol-how-save]');

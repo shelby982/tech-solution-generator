@@ -411,7 +411,10 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     _material_prompt = ''
     try:
         from services.material_context import material_prompt_for_block as _material_for
-        _material_prompt = await _material_for(int(block['id']), str(block.get('block_id') or ''))
+        _material_prompt = await _material_for(int(block['id']), str(block.get('block_id') or ''), title)
+        if not _material_prompt:
+            from services.material_context import NO_MATERIAL_HINT as _no_material
+            _material_prompt = _no_material
     except Exception:
         _material_prompt = ''
     _practice = ''

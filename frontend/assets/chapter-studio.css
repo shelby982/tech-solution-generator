@@ -996,3 +996,12 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-msrc-image img { display: block; width: 100%; height: 80px; object-fit: contain; background: #f8fafc; }
 .cs-msrc-image figcaption { font-size: 9.5px; color: #64748b; padding: 3px 5px; line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 计划面板：每节素材（建议 + 确认） */
+.cs-ol-mat { margin: 6px 0 8px; padding: 7px 9px; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; }
+.cs-ol-mat-title { margin: 0 0 5px; display: flex; align-items: baseline; gap: 6px; }
+.cs-ol-mat-row { display: flex; gap: 7px; align-items: flex-start; padding: 3px 0; cursor: pointer; }
+.cs-ol-mat-body { min-width: 0; }
+.cs-ol-mat-text { display: block; font-size: 10.5px; color: #334155; line-height: 1.5; }
+.cs-ol-mat-body small { font-size: 9.5px; color: #94a3b8; }
+.cs-ol-mat-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 5px; }

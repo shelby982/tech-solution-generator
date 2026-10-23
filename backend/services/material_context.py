@@ -13,11 +13,21 @@ MODE_LIMITS = {"cite": 0, "data": 300, "context": 500}
 MODE_LABELS = {"cite": "引用出处", "data": "数据依据", "context": "仅上下文"}
 
 
-async def chapter_material_context(db, block_id: int, block_code: str = "") -> dict:
-    """返回 {cite: [labels], data: [texts], context: [texts], count}。"""
-    rows = await (await db.execute(
-        "SELECT b.chunk_id, COALESCE(b.mode,'cite'), COALESCE(b.chunk_kind,'file') "
-        "FROM chapter_material_chunks b WHERE b.block_id=?", (block_id,))).fetchall()
+async def chapter_material_context(db, block_id: int, block_code: str = "",
+                                   section: str = "") -> dict:
+    """返回 {cite: [labels], data: [texts], context: [texts], count}。
+
+    section 非空时：优先取"绑定到该节"的素材；该节没有绑定则回退整章素材（兼容历史数据）。
+    """
+    rows = []
+    if section:
+        rows = await (await db.execute(
+            "SELECT b.chunk_id, COALESCE(b.mode,'cite'), COALESCE(b.chunk_kind,'file') "
+            "FROM chapter_material_chunks b WHERE b.block_id=? AND b.section=?", (block_id, section))).fetchall()
+    if not rows:
+        rows = await (await db.execute(
+            "SELECT b.chunk_id, COALESCE(b.mode,'cite'), COALESCE(b.chunk_kind,'file') "
+            "FROM chapter_material_chunks b WHERE b.block_id=?", (block_id,))).fetchall()
     result: dict = {"cite": [], "data": [], "context": [], "count": 0}
     for chunk_id, mode, kind in rows:
         mode = mode if mode in MODE_LIMITS else "cite"
@@ -61,7 +71,11 @@ def render_for_prompt(context: dict) -> str:
     return "\n\n".join(parts)
 
 
-async def material_prompt_for_block(block_pk: int, block_code: str = "") -> str:
+async def material_prompt_for_block(block_pk: int, block_code: str = "", section: str = "") -> str:
     async with get_db() as db:
-        context = await chapter_material_context(db, block_pk, block_code)
+        context = await chapter_material_context(db, block_pk, block_code, section)
     return render_for_prompt(context)
+
+
+NO_MATERIAL_HINT = ("【本节无可用素材】不要编造具体项目名称、合同金额与精确数字；"
+                    "用概括但完整的表述把内容写完（如「我方具备同类项目实施经验」）。")
