@@ -1026,3 +1026,14 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-ol-mat-more summary { font-size: 10px; color: #2563eb; cursor: pointer; }
 .cs-ol-mat-more p { margin: 4px 0 0; font-size: 10.5px; color: #475569; line-height: 1.6; background: #fff;
   border: 1px solid #eef2f7; border-radius: 6px; padding: 6px 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; }
+
+/* 素材库：片段挑选器工具栏 */
+.cs-msrc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px; }
+.cs-msrc-tools input[type="search"] { flex: 1; min-width: 140px; border: 1px solid #e2e8f0; border-radius: 7px;
+  padding: 5px 8px; font-size: 11px; }
+.cs-msrc-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+.cs-msrc-filter { border: 1px solid #e2e8f0; background: #fff; color: #475569; border-radius: 999px;
+  font-size: 10px; padding: 2px 8px; cursor: pointer; }
+.cs-msrc-filter.is-on { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.cs-msrc-batch { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.cs-msrc-batch em { font-style: normal; font-size: 10px; color: #64748b; }

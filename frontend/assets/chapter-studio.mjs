@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v434';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v434';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v435';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v435';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -258,7 +258,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 素材库：两页签（我的文件 / 联网来源）+ 展开挑片段（勾选=素材）+ 应用到本章（选小节） */
   async function openMaterialAdminDialog() {
-    const state = { tab: 'file', openId: '', chunks: [], sources: [], sections: (planBrief?.outline || []).map((s) => s.title) };
+    const state = { tab: 'file', openId: '', chunks: [], visible: [], sources: [],
+                    q: '', filter: '', sections: (planBrief?.outline || []).map((s) => s.title) };
     const dlg = globalThis.document.createElement('dialog');
     dlg.className = 'cs-plan-dialog cs-madmin';
     const closeAll = () => dlg.querySelectorAll('dialog').forEach((d) => d.close());
@@ -287,7 +288,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-gate-act" data-msrc-open="${src.id}">${String(state.openId) === String(src.id) ? '收起' : '展开'}</button>
             <button type="button" class="cs-todo-ignore" data-msrc-del="${src.id}">删除</button>
           </div>
-          ${String(state.openId) === String(src.id) ? `${(state.images || []).length ? `<div class="cs-msrc-images">
+          ${String(state.openId) === String(src.id) ? `<div class="cs-msrc-tools">
+              <input type="search" data-msrc-q placeholder="在本出处里搜索…" value="${esc(state.q || '')}" />
+              <span class="cs-msrc-filters">
+                ${[['', '全部'], ['picked', '只看已选'], ['data', '含数字'], ['clause', '条款'], ['table', '表格'], ['clean', '排除表单']]
+                  .map(([key, label]) => `<button type="button" class="cs-msrc-filter ${String(state.filter || '') === key ? 'is-on' : ''}" data-msrc-filter="${key}">${label}</button>`).join('')}
+              </span>
+              <span class="cs-msrc-batch">
+                <button type="button" class="cs-gate-act" data-msrc-all="1">全选</button>
+                <button type="button" class="cs-gate-act" data-msrc-all="0">清空选择</button>
+                <em data-msrc-count>已选 ${state.chunks.filter((c) => c.picked).length}</em>
+              </span>
+            </div>${(state.images || []).length ? `<div class="cs-msrc-images">
               <p class="cs-cite-sec">图片（${state.images.length}）</p>
               <div class="cs-msrc-image-list">
                 ${state.images.map((img) => `<figure class="cs-msrc-image">
@@ -296,12 +308,28 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 </figure>`).join('')}
               </div>
             </div>` : ''}<div class="cs-msrc-chunks">
-            ${state.chunks.length ? state.chunks.map((chunk) => `
-              <label class="cs-ml-item is-pick">
-                <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />
-                <div class="cs-ml-body"><p>${esc(String(chunk.text || '').slice(0, 90))}…</p>
-                  <small>${chunk.path ? `${esc(String(chunk.path).slice(0, 30))} · ` : ''}${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
-              </label>`).join('') : '<p class="cs-muted">没有片段</p>'}
+            ${(() => {
+              const visible = (state.chunks || []).filter((chunk) => {
+                const q = String(state.q || '').trim();
+                if (q && !String(chunk.text || '').includes(q)) return false;
+                const filter = String(state.filter || '');
+                const tags = chunk.tags || [];
+                if (filter === 'picked') return chunk.picked;
+                if (filter === 'data') return tags.includes('data') || /\d/.test(String(chunk.text || ''));
+                if (filter === 'clause') return tags.includes('clause');
+                if (filter === 'table') return tags.includes('table');
+                if (filter === 'clean') return !tags.includes('boilerplate');
+                return true;
+              });
+              state.visible = visible;
+              if (!visible.length) return '<p class="cs-muted">当前筛选下没有片段</p>';
+              return visible.slice(0, 200).map((chunk) => `
+                <label class="cs-ml-item is-pick">
+                  <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />
+                  <div class="cs-ml-body"><p>${esc(String(chunk.text || '').slice(0, 90))}…</p>
+                    <small>${(chunk.tags || []).includes('boilerplate') ? '⚠表单 · ' : ''}${chunk.path ? `${esc(String(chunk.path).slice(0, 28))} · ` : ''}${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
+                </label>`).join('');
+            })()}
           </div>` : ''}
         </div>`).join('') : '<p class="cs-muted">还没有内容，点右上角「添加素材」</p>';
 
@@ -331,6 +359,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </footer>`;
     };
 
+    dlg._csState = state;
+    dlg._csRender = render;
     render();
     await loadSources(); render();
     dlg.addEventListener('close', () => dlg.remove());
@@ -356,8 +386,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (openBtn) {
         const id = String(openBtn.dataset.msrcOpen || '');
         if (state.openId === id) { state.openId = ''; state.chunks = []; render(); return; }
-        state.openId = id; await loadChunks(id); render();
+        state.openId = id; state.q = ''; state.filter = '';
+        await loadChunks(id); render();
         bindFileInput();
+        bindPickerTools();
         return;
       }
       const delBtn = event.target.closest('[data-msrc-del]');
@@ -424,6 +456,80 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     bindFileInput();
     globalThis.document.body.appendChild(dlg);
     dlg.showModal();
+  }
+
+  /** 片段挑选器交互（v3）：搜索 / 筛选 / 批量全选（在素材库弹窗内） */
+  function bindPickerTools() {
+    const dlg = globalThis.document.querySelector('dialog.cs-madmin') || globalThis.document.querySelector('dialog.cs-plan-dialog');
+    if (!dlg) return;
+    const state = dlg._csState;
+    if (!state) return;
+    const rerender = () => { dlg._csRender(); bindPickerTools(); };
+
+    dlg.querySelectorAll('[data-msrc-filter]').forEach((btn) => {
+      btn.onclick = () => { state.filter = btn.dataset.msrcFilter || ''; rerender(); };
+    });
+    const search = dlg.querySelector('[data-msrc-q]');
+    if (search) {
+      search.oninput = () => {
+        state.q = search.value;
+        // 只重绘列表，避免输入框失焦
+        const visible = (state.chunks || []).filter((chunk) => {
+          const q = String(state.q || '').trim();
+          if (q && !String(chunk.text || '').includes(q)) return false;
+          const filter = String(state.filter || '');
+          const tags = chunk.tags || [];
+          if (filter === 'picked') return chunk.picked;
+          if (filter === 'data') return tags.includes('data') || /\d/.test(String(chunk.text || ''));
+          if (filter === 'clause') return tags.includes('clause');
+          if (filter === 'table') return tags.includes('table');
+          if (filter === 'clean') return !tags.includes('boilerplate');
+          return true;
+        });
+        state.visible = visible;
+        const list = dlg.querySelector('.cs-msrc-chunks');
+        if (list) {
+          list.innerHTML = visible.length ? visible.slice(0, 200).map((chunk) => `
+            <label class="cs-ml-item is-pick">
+              <input type="checkbox" data-mpick="${chunk.chunk_id}" ${chunk.picked ? 'checked' : ''} />
+              <div class="cs-ml-body"><p>${esc(String(chunk.text || '').slice(0, 90))}…</p>
+                <small>${(chunk.tags || []).includes('boilerplate') ? '⚠表单 · ' : ''}${chunk.path ? `${esc(String(chunk.path).slice(0, 28))} · ` : ''}${chunk.page ? `第 ${chunk.page} 页` : '网页片段'}</small></div>
+            </label>`).join('') : '<p class="cs-muted">当前筛选下没有片段</p>';
+        }
+      };
+    }
+    dlg.querySelectorAll('[data-msrc-all]').forEach((btn) => {
+      btn.onclick = async () => {
+        const wanted = btn.dataset.msrcAll === '1';
+        const visible = state.visible || state.chunks || [];
+        const ids = visible.map((chunk) => chunk.chunk_id);
+        if (!ids.length) return;
+        try {
+          await fetch(`/api/projects/${projectId}/material-sources/pick`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chunk_ids: ids, picked: wanted, source_kind: state.tab }),
+          });
+          visible.forEach((chunk) => { chunk.picked = wanted; });
+          status(wanted ? `已选 ${ids.length} 条为素材` : `已取消 ${ids.length} 条`);
+          rerender();
+        } catch (error) { status(`批量操作失败：${error.message}`); }
+      };
+    });
+    dlg.querySelectorAll('[data-mpick]').forEach((box) => {
+      box.onchange = async () => {
+        try {
+          await fetch(`/api/projects/${projectId}/material-sources/pick`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chunk_ids: [Number(box.dataset.mpick)], picked: box.checked, source_kind: state.tab }),
+          });
+          const chunk = (state.chunks || []).find((item) => String(item.chunk_id) === String(box.dataset.mpick));
+          if (chunk) chunk.picked = box.checked;
+          const counter = dlg.querySelector('[data-msrc-count]');
+          if (counter) counter.textContent = `已选 ${state.chunks.filter((c) => c.picked).length}`;
+          status(box.checked ? '已选为素材' : '已取消');
+        } catch (error) { status(error.message); }
+      };
+    });
   }
 
   /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（弹窗） */

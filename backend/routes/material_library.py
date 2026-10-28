@@ -319,6 +319,22 @@ async def material_sources(project_id: int, kind: str = "file"):
     return {"kind": kind, "items": items}
 
 
+def _chunk_item(row, kind: str) -> dict:
+    import json as _json
+
+    def _tags(raw):
+        try:
+            return _json.loads(raw or "[]") or []
+        except Exception:
+            return []
+
+    return {"chunk_id": row[0], "index": row[1], "page": row[2], "text": row[3],
+            "picked": str(row[4]) == "selected",
+            "path": (row[5] if len(row) > 5 else "") or "",
+            "tags": _tags(row[6]) if len(row) > 6 else [],
+            "chunk_kind": "cite" if kind == "web" else "file"}
+
+
 @router.get('/projects/{project_id}/material-sources/{kind}/{source_id}/chunks')
 async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
                         limit: int = 150, picked_only: bool = False):
@@ -326,13 +342,13 @@ async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
     kind = "web" if kind == "web" else "file"
     async with get_db() as db:
         if kind == "file":
-            sql = ("SELECT mc.id, mc.chunk_index, mc.page, mc.content, mc.status, mc.path "
+            sql = ("SELECT mc.id, mc.chunk_index, mc.page, mc.content, mc.status, mc.path, mc.tags "
                    "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
                    "WHERE mc.material_id=? AND m.project_id=? AND m.deleted_at IS NULL "
                    "AND mc.status<>'invalid'")
             args: list = [source_id, project_id]
         else:
-            sql = ("SELECT cc.id, cc.chunk_index, 0, cc.content, cc.status, cc.path "
+            sql = ("SELECT cc.id, cc.chunk_index, 0, cc.content, cc.status, cc.path, cc.tags "
                    "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
                    "WHERE cc.citation_id=? AND c.project_id=? AND cc.status<>'invalid'")
             args = [source_id, project_id]
@@ -345,10 +361,7 @@ async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
         args.append(max(1, min(300, limit)))
         rows = await (await db.execute(sql, args)).fetchall()
     return {"kind": kind, "source_id": source_id,
-            "items": [{"chunk_id": r[0], "index": r[1], "page": r[2], "text": r[3],
-                       "picked": str(r[4]) == "selected",
-                       "path": (r[5] if len(r) > 5 else "") or "",
-                       "chunk_kind": "cite" if kind == "web" else "file"} for r in rows]}
+            "items": [_chunk_item(r, kind) for r in rows]}
 
 
 class PickBody(BaseModel):
