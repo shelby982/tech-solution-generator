@@ -337,7 +337,8 @@ def _chunk_item(row, kind: str) -> dict:
 
 @router.get('/projects/{project_id}/material-sources/{kind}/{source_id}/chunks')
 async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
-                        limit: int = 150, picked_only: bool = False):
+                        limit: int = 150, picked_only: bool = False,
+                        include_boilerplate: bool = False):
     """某个出处下的片段（片段 = 素材候选；picked = 已选为素材）。"""
     kind = "web" if kind == "web" else "file"
     async with get_db() as db:
@@ -357,6 +358,9 @@ async def source_chunks(project_id: int, kind: str, source_id: str, q: str = "",
             args.append(f"%{q}%")
         if picked_only:
             sql += " AND " + ("mc.status" if kind == "file" else "cc.status") + "='selected'"
+        if not include_boilerplate:
+            column = "mc.tags" if kind == "file" else "cc.tags"
+            sql += f" AND COALESCE({column},'') NOT LIKE '%boilerplate%'"
         sql += " ORDER BY " + ("mc.chunk_index" if kind == "file" else "cc.chunk_index") + " LIMIT ?"
         args.append(max(1, min(300, limit)))
         rows = await (await db.execute(sql, args)).fetchall()
@@ -603,3 +607,151 @@ async def image_file(image_id: int):
     if not path.exists():
         raise HTTPException(404, "图片文件缺失")
     return FileResponse(str(path))
+
+
+@router.post('/projects/{project_id}/materials/auto-pick')
+async def auto_pick(project_id: int, per_type: int = 8, min_length: int = 80, max_length: int = 900,
+                    keep_existing: bool = True, apply: bool = False):
+    """智能备料（高质量预筛）：把"正文型片段"批量勾选为素材。
+
+    规则（只要正文型，不要表格/表单/碎片）：
+      · 长度 80~900 字（可配）
+      · 含句子（。或；）—— 排除清单碎片
+      · 排除 boilerplate（格式/资格/封面）
+      · 按类型配额（policy/data/clause/qualification/table），每类最多 per_type 条
+    """
+    import json as _json
+
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT mc.id, mc.content, mc.tags, mc.status, m.role, mc.path FROM material_chunks mc "
+            "JOIN materials m ON m.id=mc.material_id "
+            "WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status<>'invalid'",
+            (project_id,))).fetchall()
+
+    from services.chunk_quality import substance_score
+
+    # 按"来源章节"过滤：招投标程序/合同/格式类章节对写正文无用，技术需求/评分/工作项类才有用
+    BAD_PATH = ("投标人须知", "评标办法", "合同条款", "合同格式", "格式", "附件", "招标公告",
+                "投标邀请", "保证金", "前附表", "投标文件编制", "开标", "废标", "无效投标")
+    GOOD_PATH = ("技术规范", "技术要求", "需求", "工作项", "评分", "服务内容", "交付",
+                 "指标", "功能", "架构", "安全", "实施", "运维", "培训", "业绩")
+
+    QUOTA = (("policy", per_type), ("data", per_type), ("clause", per_type),
+             ("qualification", max(3, per_type // 2)), ("table", max(3, per_type // 2)))
+    BANNED = ("boilerplate", "procedural", "empty_table")
+    candidates: dict[str, list[tuple[float, int]]] = {}
+    for chunk_id, content, tags_raw, status, role, path in rows:
+        if not keep_existing and str(status) == "selected":
+            continue
+        try:
+            tags = _json.loads(tags_raw or "[]") or []
+        except Exception:
+            tags = []
+        if any(tag in tags for tag in BANNED):
+            continue
+        text = str(content or "")
+        if not (min_length <= len(text) <= max_length):
+            continue
+        if "。" not in text and "；" not in text:
+            continue
+        primary = next((tag for tag, _ in QUOTA if tag in tags), "")
+        if not primary:
+            continue
+        source_path = str(path or "")
+        if any(word in source_path for word in BAD_PATH):
+            continue
+        score = substance_score(text)
+        if source_path and any(word in source_path for word in GOOD_PATH):
+            score += 0.15                      # 技术/需求类章节优先
+        if score < 0.15:
+            continue
+        candidates.setdefault(primary, []).append((score, int(chunk_id)))
+
+    counts: dict[str, int] = {}
+    picked: list[int] = []
+    for tag, limit in QUOTA:
+        ranked = sorted(candidates.get(tag, []), reverse=True)[:limit]
+        if not ranked:
+            continue
+        counts[tag] = len(ranked)
+        picked.extend(chunk_id for _, chunk_id in ranked)
+
+    if picked and apply:
+        async with get_db() as db:
+            placeholders = ",".join("?" for _ in picked)
+            await db.execute(
+                f"UPDATE material_chunks SET status='selected' WHERE id IN ({placeholders}) "
+                f"AND status<>'invalid'", picked)
+            await db.commit()
+
+    # 返回候选明细（供前端预览/逐条确认）
+    detail = []
+    if picked:
+        async with get_db() as db:
+            placeholders = ",".join("?" for _ in picked)
+            found = await (await db.execute(
+                f"SELECT id, content, tags, path, page FROM material_chunks WHERE id IN ({placeholders})",
+                picked)).fetchall()
+        for row in found:
+            detail.append({"chunk_id": row[0], "text": str(row[1] or "")[:200],
+                           "tags": _json.loads(row[2] or "[]") or [],
+                           "path": row[3] or "", "page": row[4] or 0})
+    return {"picked": len(picked), "by_type": counts, "total_pool": len(rows),
+            "applied": bool(apply), "items": detail}
+
+
+@router.get('/projects/{project_id}/materials/source-diagnosis')
+async def source_diagnosis(project_id: int):
+    """料源诊断：告诉你"现在手里的文件能不能备出好素材"。
+
+    回答三件事：
+      ① 可用（正文型）多少段、占比多少
+      ② 程序性/格式类占多少（这些写正文用不上）
+      ③ 建议补什么料（技术规范书 / 评分标准 / 我方业绩资质）
+    """
+    import json as _json
+
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT mc.content, mc.tags, mc.status FROM material_chunks mc "
+            "JOIN materials m ON m.id=mc.material_id "
+            "WHERE m.project_id=? AND m.deleted_at IS NULL AND mc.status<>'invalid'",
+            (project_id,))).fetchall()
+        files = await (await db.execute(
+            "SELECT filename, role, parse_status FROM materials WHERE project_id=? AND deleted_at IS NULL",
+            (project_id,))).fetchall()
+
+    total = len(rows)
+    usable = procedural = boilerplate = empty_table = selected = 0
+    for content, tags_raw, status in rows:
+        try:
+            tags = _json.loads(tags_raw or "[]") or []
+        except Exception:
+            tags = []
+        text = str(content or "")
+        if str(status) == "selected":
+            selected += 1
+        if "boilerplate" in tags:
+            boilerplate += 1
+        elif "procedural" in tags:
+            procedural += 1
+        elif "empty_table" in tags:
+            empty_table += 1
+        elif 80 <= len(text) <= 900 and ("。" in text or "；" in text):
+            usable += 1
+    ratio = round(usable / total * 100) if total else 0
+    suggestions = []
+    if not total:
+        suggestions.append("还没有上传文件：先上传招标文件/技术规范书/评分标准，再备料")
+    if ratio < 25:
+        suggestions.append(f"可用正文型片段只占 {ratio}%：现有文件以招投标程序/合同条款为主，"
+                           "建议补充「技术规范书」「评分标准/评分办法」「我方业绩与资质」")
+    if boilerplate and boilerplate / max(1, total) > 0.3:
+        suggestions.append("格式/范本类片段偏多（写到正文里没意义），备料时建议勾选「排除表单」")
+    if selected == 0:
+        suggestions.append("素材池还是空的：用「智能备料（建议）」一键筛出可用片段，再逐条确认")
+    return {"total": total, "usable": usable, "usable_ratio": ratio, "procedural": procedural,
+            "boilerplate": boilerplate, "empty_table": empty_table, "selected": selected,
+            "files": [{"filename": r[0], "role": r[1], "status": r[2]} for r in files],
+            "suggestions": suggestions}

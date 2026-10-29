@@ -80,13 +80,50 @@ _TAG_RULES = (
 )
 
 
+# 程序性条款（招标流程/时间/保证金等）：对写正文没有信息价值
+_PROCEDURAL = re.compile(
+    r"(招标文件获取|获取招标文件|投标截止|开标时间|开标地点|澄清|答疑|保证金|"
+    r"投标有效期|评标委员会|中标通知|投标文件的递交|递交投标文件|异议|投诉|"
+    r"招标公告发布|资格审查方式|招标分类|获取方式|报名)")
+# 表格空壳：表格行里大多为空单元格
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$", re.M)
+
+
+def _empty_table_ratio(text: str) -> float:
+    rows = _TABLE_ROW.findall(str(text or ""))
+    if not rows:
+        return 0.0
+    empty = 0
+    for row in rows:
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if all(not cell or set(cell) <= set("-: ") for cell in cells):
+            empty += 1
+    return empty / len(rows)
+
+
 def tag_of(text: str) -> list[str]:
     """片段类型标签（C2）：clause / data / qualification / policy / table / boilerplate。"""
     body = str(text or "")
     tags = [tag for tag, pattern in _TAG_RULES if pattern.search(body)]
     if is_boilerplate(body):
         tags.append("boilerplate")
+    if _PROCEDURAL.search(body):
+        tags.append("procedural")
+    if _empty_table_ratio(body) >= 0.5:
+        tags.append("empty_table")
     return tags
+
+
+def substance_score(text: str) -> float:
+    """实质内容分（0~1）：有要求类动词 + 有句子 + 有具体名词，越高越值得备料。"""
+    body = str(text or "")
+    if len(body) < 40:
+        return 0.0
+    verbs = len(re.findall(r"(要求|应(当)?|须|具备|实现|支持|覆盖|包括|保证|满足|提供|指标|功能|性能|安全|管理|设计)", body))
+    sentences = body.count("。") + body.count("；")
+    digits = len(re.findall(r"\d", body))
+    score = min(1.0, verbs / 8) * 0.5 + min(1.0, sentences / 3) * 0.3 + min(1.0, digits / 10) * 0.2
+    return round(score, 3)
 
 
 def fingerprint(text: str) -> str:
@@ -146,6 +183,12 @@ def _split_long(text: str) -> list[str]:
 _NUMBERING = re.compile(r"^\s*(第[一二三四五六七八九十百]+[章节条]|[\d]+(?:\.[\d]+)*)\s*")
 
 
+def _clean_title(title: str) -> str:
+    text = strip_html(str(title or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:80]
+
+
 def heading_path(titles: list[str]) -> list[str]:
     """由一串节标题推断层级路径（C3）：按编号深度维护栈。
 
@@ -155,7 +198,7 @@ def heading_path(titles: list[str]) -> list[str]:
     stack: list[tuple[int, str]] = []
     paths: list[str] = []
     for title in titles or []:
-        name = str(title or "").strip()
+        name = _clean_title(title)
         if not name:
             paths.append("")
             continue

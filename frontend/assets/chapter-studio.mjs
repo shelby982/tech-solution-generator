@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v435';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v435';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v436';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v436';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -347,6 +347,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
         <div class="cs-plan-body">
           <input type="file" multiple hidden data-madmin-file accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" />
+          <div class="cs-madmin-diag" data-madmin-diag>
+            <div class="cs-madmin-diag-head">
+              <b>料源</b><span data-diag-text>正在诊断…</span>
+              <button type="button" class="cs-gate-act" data-auto-pick>智能备料（建议）</button>
+            </div>
+            <p class="cs-diag-suggest" data-diag-suggest hidden></p>
+          </div>
+          <div class="cs-msrc-pick-preview" hidden data-pick-preview></div>
           <div class="cs-msrc-list">${srcHtml}</div>
         </div>
         <footer class="cs-ins-foot">
@@ -359,6 +367,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </footer>`;
     };
 
+    const paintDiagnosis = async () => {
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/materials/source-diagnosis`, { cache: 'no-store' });
+        const data = resp.ok ? await resp.json() : null;
+        const textEl = dlg.querySelector('[data-diag-text]');
+        const suggestEl = dlg.querySelector('[data-diag-suggest]');
+        if (!data) { if (textEl) textEl.textContent = '诊断失败'; return; }
+        if (textEl) {
+          textEl.textContent = data.total
+            ? `共 ${data.total} 段 · 可用正文型 ${data.usable} 段（${data.usable_ratio}%）· 已选素材 ${data.selected} 条`
+            : '还没有上传文件';
+        }
+        if (suggestEl && (data.suggestions || []).length) {
+          suggestEl.hidden = false;
+          suggestEl.textContent = data.suggestions[0];
+        }
+      } catch (error) { /* ignore */ }
+    };
+    void paintDiagnosis();
     dlg._csState = state;
     dlg._csRender = render;
     render();
@@ -374,6 +401,45 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         return;
       }
       if (event.target.closest('[data-madmin-upload]')) { dlg.querySelector('[data-madmin-file]')?.click(); return; }
+      if (event.target.closest('[data-auto-pick]')) {
+        const box = dlg.querySelector('[data-pick-preview]');
+        if (box) { box.hidden = false; box.innerHTML = '<p class="cs-muted">正在按类型与章节质量筛选…</p>'; }
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/materials/auto-pick?per_type=6`, { method: 'POST' });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+          const items = data.items || [];
+          if (box) {
+            box.innerHTML = `<div class="cs-pick-head"><b>智能备料建议 ${items.length} 条</b>
+              <span class="cs-dim">${Object.entries(data.by_type || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}</span>
+              ${items.length ? '<button type="button" class="cs-cp-primary" data-auto-pick-apply>全部加入素材</button>' : ''}</div>
+              ${items.length ? items.map((item) => `<div class="cs-pick-row">
+                <span class="cs-pick-tag">${(item.tags || []).includes('data') ? '数据' : (item.tags || []).includes('policy') ? '政策' : (item.tags || []).includes('clause') ? '条款' : '资质'}</span>
+                <span class="cs-pick-text">${esc(String(item.text || '').slice(0, 110))}…</span>
+              </div>`).join('') : '<p class="cs-muted">没有筛出可用片段：建议补充技术规范书/评分标准（见上方诊断建议）</p>'}
+              ${items.length ? `<div class="cs-pick-actions"><button type="button" class="cs-cp-ghost" data-auto-pick-hide>收起</button></div>` : ''}`;
+            dlg._csPickIds = items.map((item) => item.chunk_id);
+          }
+        } catch (error) { status(`智能备料失败：${error.message}`); }
+        return;
+      }
+      if (event.target.closest('[data-auto-pick-hide]')) {
+        const box = dlg.querySelector('[data-pick-preview]');
+        if (box) { box.hidden = true; box.innerHTML = ''; }
+        return;
+      }
+      if (event.target.closest('[data-auto-pick-apply]')) {
+        const ids = dlg._csPickIds || [];
+        if (!ids.length) return;
+        try {
+          const resp = await fetch(`/api/projects/${projectId}/materials/auto-pick?per_type=6&apply=true`, { method: 'POST' });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          await loadSources(); render(); bindPickerTools(); paintDiagnosis();
+          status(`已加入 ${data.picked || ids.length} 条素材`);
+        } catch (error) { status(`加入失败：${error.message}`); }
+        return;
+      }
       if (event.target.closest('[data-madmin-search]')) {
         dlg.close();
         const btn = globalThis.document.querySelector('[data-cite-open]');
