@@ -23,10 +23,14 @@ WORKDIR /app
 # 同款运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
+        fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 设计版图表（Diagram Design）用 Chromium 渲染 HTML→PNG
+RUN playwright install --with-deps chromium
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/

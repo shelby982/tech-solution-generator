@@ -223,13 +223,14 @@ async def export_docx(
         template = template_row[0] if template_row else None
         # 旧导出入口也读取本应答模板及内部图片，避免不同入口丢图。
         import re
-        from routes.chapter_studio import image_bytes
+        from routes.chapter_studio import studio_image_bytes
         images = {}
+        image_pattern = re.compile(r'!\[[^\]]*\]\((/api/studio/(?:materials/\d+|diagrams/[0-9a-fA-F]{16,})/image)\)')
         for b in all_blocks:
-            for mid in re.findall(r'!\[[^\]]*\]\(/api/studio/materials/(\d+)/image\)', b.get('content') or ''):
-                key = f'/api/studio/materials/{mid}/image'
+            for match in image_pattern.finditer(b.get('content') or ''):
+                key = match.group(1)
                 if key not in images:
-                    images[key] = (await image_bytes(db, int(mid), project_id))[0]
+                    images[key] = (await studio_image_bytes(db, key, project_id))[0]
 
     sections_data = [
         {

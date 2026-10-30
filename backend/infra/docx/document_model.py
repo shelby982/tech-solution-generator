@@ -4,6 +4,9 @@ import re
 
 MODEL_VERSION = 1
 
+# 正文里允许引用的两类内部图片：上传素材 / 设计版图表资产。
+STUDIO_IMAGE_RE = re.compile(r"/api/studio/(?:materials/\d+|diagrams/[0-9a-fA-F]{16,})/image")
+
 
 def _diagram(state, start, end, silent):
     position = state.bMarks[start] + state.tShift[start]
@@ -136,7 +139,7 @@ def render_blocks(doc, blocks, *, chapter_level, images):
         for part in runs:
             if part['type'] == 'image':
                 url = part['url']
-                if not re.fullmatch(r'/api/studio/materials/\d+/image', url):
+                if not STUDIO_IMAGE_RE.fullmatch(url):
                     raise ValueError('图片必须上传到本项目后引用，不能引用外部 URL')
                 if url not in (images or {}): raise ValueError(f"图片未纳入快照：{part['caption']}")
                 _add_studio_image(doc, images[url], part['caption'])
@@ -191,7 +194,7 @@ def image_urls(blocks):
         for group in groups:
             for part in group:
                 if part['type'] == 'image':
-                    if not re.fullmatch(r'/api/studio/materials/\d+/image', part['url']):
+                    if not STUDIO_IMAGE_RE.fullmatch(part['url']):
                         raise ValueError('请先上传图片，再使用本项目内部图片地址')
                     yield part['url']
 
@@ -202,7 +205,7 @@ def model_html(blocks):
         out=[]
         for part in runs:
             if part['type']=='image':
-                if not re.fullmatch(r'/api/studio/materials/\d+/image',part['url']): raise ValueError('不支持外部图片引用')
+                if not STUDIO_IMAGE_RE.fullmatch(part['url']): raise ValueError('不支持外部图片引用')
                 out.append(f'<figure><img src="{escape(part["url"],quote=True)}" alt="{escape(part["caption"],quote=True)}"><figcaption>{escape(part["caption"])}</figcaption></figure>')
             else:
                 text=escape(part['text']).replace('\n','<br>')

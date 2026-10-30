@@ -35,6 +35,7 @@ from routes.chapter_studio import router as studio_router
 from routes.chapter_writing import router as writing_router
 from routes.writing_specs import router as specs_router
 from routes.citations import router as citations_router
+from routes.diagram_assets import router as diagram_assets_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -200,6 +201,8 @@ async def lifespan(app: FastAPI):
     await recover_stale_jobs()
     from services.chapter_writing import recover_jobs
     await recover_jobs()
+    from services.diagram_design import recover_jobs as recover_diagram_jobs
+    await recover_diagram_jobs()
     logger.info("WorkflowRunner 已注入")
 
     yield
@@ -254,6 +257,7 @@ app.include_router(writing_settings_router, prefix="/api")
 app.include_router(chapter_sse_router, prefix="/api")
 app.include_router(todo_v3_router, prefix="/api")
 app.include_router(material_library_router, prefix="/api")
+app.include_router(diagram_assets_router, prefix="/api")
 app.include_router(plan_materials_router, prefix="/api")
 
 

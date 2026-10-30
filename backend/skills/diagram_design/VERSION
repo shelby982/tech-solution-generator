@@ -1,0 +1,4 @@
+upstream: https://github.com/cathrynlavery/diagram-design
+commit: 0cf73c3fcc56667ad91a9a04c439ac6ccfabc9d1
+skill_version: 2.6.136
+vendored_at: 2026-10-30

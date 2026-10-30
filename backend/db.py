@@ -85,6 +85,44 @@ CREATE TABLE IF NOT EXISTS writing_model_settings (
     UNIQUE(scope, scope_id)
 );
 
+-- 设计版图表（Diagram Design 技能）：HTML 源 + PNG 导出 + 内容/校验留痕。
+CREATE TABLE IF NOT EXISTS diagram_assets (
+    id          TEXT PRIMARY KEY,
+    project_id  INTEGER NOT NULL,
+    block_id    INTEGER,
+    section     TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    skill_type  TEXT NOT NULL DEFAULT 'architecture',
+    size_preset TEXT NOT NULL DEFAULT 'doc-wide',
+    html        TEXT NOT NULL DEFAULT '',
+    svg         TEXT NOT NULL DEFAULT '',
+    png_path    TEXT NOT NULL DEFAULT '',
+    png_width   INTEGER,
+    png_height  INTEGER,
+    brief_json  TEXT NOT NULL DEFAULT '{}',
+    checks_json TEXT NOT NULL DEFAULT '{}',
+    model       TEXT NOT NULL DEFAULT '',
+    prompt_hash TEXT NOT NULL DEFAULT '',
+    version     INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL DEFAULT 'done',
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    deleted_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_diagram_assets_project ON diagram_assets(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS diagram_jobs (
+    id          TEXT PRIMARY KEY,
+    project_id  INTEGER NOT NULL,
+    block_id    INTEGER,
+    asset_id    TEXT,
+    status      TEXT NOT NULL DEFAULT 'queued',
+    stage       TEXT NOT NULL DEFAULT '排队中',
+    error       TEXT NOT NULL DEFAULT '',
+    brief_json  TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_diagram_jobs_project ON diagram_jobs(project_id, created_at);
+
 CREATE TABLE IF NOT EXISTS chapter_gaps (
     id          TEXT PRIMARY KEY,
     project_id  INTEGER NOT NULL,
@@ -772,6 +810,12 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE llm_usage ADD COLUMN project_id INTEGER")
     if "thread_id" not in existing_cols:
         await conn.execute("ALTER TABLE llm_usage ADD COLUMN thread_id TEXT")
+
+    # 设计版图表 job：老库若已建过表，补 brief_json（新库由 _DDL 直接带）。
+    _diagram_job_cols = {row[1] for row in await (await conn.execute(
+        "PRAGMA table_info(diagram_jobs)")).fetchall()}
+    if _diagram_job_cols and "brief_json" not in _diagram_job_cols:
+        await conn.execute("ALTER TABLE diagram_jobs ADD COLUMN brief_json TEXT NOT NULL DEFAULT '{}'")
 
     _snapshot_cols = {row[1] for row in await (await conn.execute(
         "PRAGMA table_info(project_snapshots)")).fetchall()}

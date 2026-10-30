@@ -657,6 +657,21 @@ async def image_bytes(db, material_id, project_id=None):
     return path.read_bytes(), row['type']
 
 
+async def studio_image_bytes(db, url: str, project_id=None):
+    """正文内部图片统一读取：素材图 / 设计版图表资产。"""
+    if str(url).startswith('/api/studio/diagrams/'):
+        asset_id = str(url).split('/')[-2]
+        from services import diagram_assets
+        asset = await diagram_assets.get_asset(asset_id)
+        if not asset or (project_id is not None and int(asset["project_id"]) != int(project_id)):
+            raise HTTPException(404, '图表不存在或不属于当前项目')
+        try:
+            return diagram_assets.read_png(asset), 'png'
+        except FileNotFoundError as exc:
+            raise HTTPException(404, '图表图片文件已丢失') from exc
+    return await image_bytes(db, int(str(url).split('/')[-2]), project_id)
+
+
 @router.get('/studio/materials/{material_id}/image')
 async def get_image(material_id: int):
     async with get_db() as db:
@@ -681,7 +696,7 @@ async def preview_content(block_id: int, body: ContentPreviewBody):
         async with get_db() as db:
             block=await require_block(db,block_id)
             for url in image_urls(model):
-                await image_bytes(db,int(url.split('/')[-2]),block['project_id'])
+                await studio_image_bytes(db,url,block['project_id'])
         return {'html':model_html(model), 'notice':'内容预览不模拟 Word 分页，请在导出后查看排版 PDF'}
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
@@ -860,7 +875,7 @@ async def create_export(project_id: int, body: ExportBody):
                 section['document_blocks'] = parse_markdown(content)
                 for url in image_urls(section['document_blocks']):
                     if url not in images:
-                        data, _ = await image_bytes(db, int(url.split('/')[-2]), project_id)
+                        data, _ = await studio_image_bytes(db, url, project_id)
                         images[url] = base64.b64encode(data).decode()
                         if sum(len(v) for v in images.values()) > 70_000_000:
                             raise HTTPException(413, '图片总量过大，请分组导出')

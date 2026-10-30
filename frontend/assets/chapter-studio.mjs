@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v436';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v436';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v438';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v438';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1732,6 +1732,152 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     };
   }
 
+  /** 设计版图表：Diagram Design 技能（架构/分层/流程/时间线/矩阵…）。
+   * 只产出一张图片资产：HTML/SVG 源在服务端，正文插入 PNG。
+   */
+  async function openDesignDiagramDialog(presetType = 'architecture') {
+    if (!active) return;
+    const selected = String(editor.value || '').slice(editor.selectionStart || 0, editor.selectionEnd || 0).trim();
+    const outline = planBrief?.outline || [];
+    const gist = selected.length >= 10
+      ? selected.slice(0, 6000)
+      : [active.title || '', ...outline.flatMap((sec) => [sec.title, ...(sec.points || [])])].filter(Boolean).join('\n').slice(0, 6000);
+    const dialog = globalThis.document.createElement('dialog');
+    dialog.className = 'cs-plan-dialog cs-design-dialog';
+    dialog.innerHTML = `<header><h3>AI 生成图表（设计版）</h3><button type="button" data-dd-close>×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">由 Diagram Design 规范生成，只使用下面的内容；生成后先预览，再插入正文。</p>
+        <label class="cs-field"><span>图名</span><input data-dd-title maxlength="80" value="${esc(active.title || '架构图')}" /></label>
+        <div class="cs-dd-row">
+          <label class="cs-field"><span>图型</span><select data-dd-type><option value="architecture">架构图（推荐）</option></select></label>
+          <label class="cs-field"><span>尺寸</span><select data-dd-size>
+            <option value="doc-wide">文档宽（推荐）</option><option value="doc-inline">文档内</option>
+            <option value="print-a4-landscape">A4 横向打印</option><option value="slide-16x9">16:9 整页</option>
+          </select></label>
+        </div>
+        <label class="cs-field"><span>内容来源（本节要点 / 选中文字）</span><textarea data-dd-text rows="6">${esc(gist)}</textarea></label>
+        <p class="cs-muted" data-dd-hint>正在读取图型…</p>
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-cancel>取消</button>
+          <button type="button" class="cs-cp-primary" data-dd-run>生成预览</button></div>
+        <div data-dd-result></div>
+      </div>`;
+    const typeEl = dialog.querySelector('[data-dd-type]');
+    const sizeEl = dialog.querySelector('[data-dd-size]');
+    const textEl = dialog.querySelector('[data-dd-text]');
+    const titleEl = dialog.querySelector('[data-dd-title]');
+    const hintEl = dialog.querySelector('[data-dd-hint]');
+    const resultEl = dialog.querySelector('[data-dd-result]');
+    const runBtn = dialog.querySelector('[data-dd-run]');
+    const fallbackTypes = [
+      ['architecture', '架构图'], ['layers', '分层图'], ['process', '流程图'], ['flowchart', '决策流程'],
+      ['timeline', '时间线'], ['tree', '目标分解'], ['pyramid', '金字塔'], ['quadrant', '矩阵图'],
+      ['loop', '闭环图'], ['org-chart', '组织图'], ['data-flow', '数据流'], ['architecture-delta', '现状对比'],
+    ];
+    const fillTypes = (items, recommended) => {
+      const current = String(typeEl.value || presetType || 'architecture');
+      typeEl.innerHTML = (items && items.length ? items : fallbackTypes).map((item) => {
+        const key = Array.isArray(item) ? item[0] : item.key;
+        const label = Array.isArray(item) ? item[1] : item.label;
+        return `<option value="${esc(key)}"${key === current ? ' selected' : ''}>${esc(label)}</option>`;
+      }).join('');
+      if (recommended && [...typeEl.options].some((option) => option.value === recommended) && !presetType) {
+        typeEl.value = recommended;
+      }
+      const pool = items && items.length ? items : fallbackTypes;
+      const found = pool.find((x) => (Array.isArray(x) ? x[0] : x.key) === recommended);
+      const foundLabel = Array.isArray(found) ? found[1] : (found && found.label);
+      hintEl.textContent = recommended ? `推荐图型：${foundLabel || recommended}` : '可选图型';
+    };
+    fillTypes(fallbackTypes, presetType || 'architecture');
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-design/types`, { signal: AbortSignal.timeout(15000) });
+      if (resp.ok) {
+        const data = await resp.json();
+        fillTypes(data.types || fallbackTypes, data.recommended || presetType);
+        if (data.sizes) {
+          const current = sizeEl.value;
+          sizeEl.innerHTML = data.sizes.map((item) => `<option value="${esc(item.key)}"${item.key === current ? ' selected' : ''}>${esc(item.label)}</option>`).join('');
+        }
+      }
+    } catch (error) { /* 类型接口失败不影响手动选 */ }
+
+    const setBusy = (busy, label = '生成预览') => {
+      runBtn.disabled = busy;
+      runBtn.textContent = busy ? '生成中…' : label;
+    };
+    const showError = (message) => {
+      resultEl.innerHTML = `<p class="cs-warning">生成失败：${esc(String(message || '未知错误'))}</p>
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-retry>重试</button></div>`;
+      resultEl.querySelector('[data-dd-retry]')?.addEventListener('click', () => start());
+    };
+    const poll = async (jobId) => {
+      for (let i = 0; i < 120; i += 1) {
+        if (!dialog.isConnected) return;
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1500));
+        let data;
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-assets/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+          data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        } catch (error) { showError(error.message); return; }
+        if (data.status === 'failed') { showError(data.error || '图表生成失败'); return; }
+        if (data.status === 'done') { showDone(data); return; }
+        resultEl.innerHTML = `<p class="cs-muted">${esc(data.stage || '生成中')}… <span class="cs-dim">（设计版通常需要 30–90 秒）</span></p>`;
+      }
+      showError('生成超时，请重试');
+    };
+    const showDone = (data) => {
+      const checks = data.checks || {};
+      const warnings = Array.isArray(checks.unknown_numbers) && checks.unknown_numbers.length
+        ? `<p class="cs-warning">图里有 ${checks.unknown_numbers.length} 个数字不在本节依据中，请核对：${checks.unknown_numbers.map(esc).join('、')}</p>`
+        : '';
+      resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
+        <p class="cs-muted">图型 ${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
+        ${warnings}
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-again>重新生成</button>
+          ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
+          <button type="button" class="cs-cp-primary" data-dd-insert>插入正文</button></div>`;
+      resultEl.querySelector('[data-dd-again]')?.addEventListener('click', () => start());
+      resultEl.querySelector('[data-dd-insert]')?.addEventListener('click', () => {
+        const title = String(titleEl.value || data.title || '图表').trim() || '图表';
+        insertAtCursor(`:::figure ${title}\n![${title.replaceAll(']', '')}](${data.image_url})\n:::`);
+        dialog.close();
+        status('已插入设计版图表；点击正文图片可重新设计/查看源');
+      });
+    };
+    async function start() {
+      const text = String(textEl.value || '').trim();
+      if (!text) { resultEl.innerHTML = '<p class="cs-warning">先写一句这张图要表达什么。</p>'; return; }
+      setBusy(true);
+      resultEl.innerHTML = '<p class="cs-muted">正在组装设计规范并生成（30–90 秒）…</p>';
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-assets`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            title: String(titleEl.value || active.title || '图表').trim(),
+            text,
+            skill_type: typeEl.value,
+            size_preset: sizeEl.value,
+            section: '',
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        await poll(data.job_id);
+      } catch (error) { showError(error.message); }
+      finally { if (dialog.isConnected) setBusy(false); }
+    }
+    dialog.addEventListener('click', (event) => {
+      if (event.target.closest('[data-dd-close]') || event.target.closest('[data-dd-cancel]')) dialog.close();
+      if (event.target.closest('[data-dd-run]')) start();
+    });
+    dialog.addEventListener('close', () => dialog.remove());
+    globalThis.document.body.appendChild(dialog);
+    dialog.showModal();
+    if (presetType) typeEl.value = presetType;
+  }
+
   /** 目录级编写计划（C1：降级为"汇总 + 批量"）——只看工作量与状态；编辑与确认都在章计划里。 */
   async function openWritingPlan(unitBlockId) {
     if (!unitBlockId) return;
@@ -2284,7 +2430,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <div class="cs-plan-body">
         <nav class="cs-ins-tabs">
           <button type="button" data-fr-filter="all" aria-pressed="true">全部</button>
-          <button type="button" data-fr-filter="ai" aria-pressed="false">AI 生成</button>
+          <button type="button" data-fr-filter="ai" aria-pressed="false">结构图</button>
+          <button type="button" data-fr-filter="design" aria-pressed="false">设计图</button>
           <button type="button" data-fr-filter="material" aria-pressed="false">素材</button>
           <button type="button" data-fr-filter="pending" aria-pressed="false">待补</button>
         </nav>
@@ -2299,14 +2446,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       grid.innerHTML = items.length ? items.map((f) => `<div class="cs-fig-card">
           <div class="cs-fig-thumb" data-zoom-card="${esc(f.id || '')}" title="点击放大">${f.kind === 'ai'
             ? renderDiagramFigure(`:::diagram type=${f.type} ${f.title}`, (f.raw || '').split('\n').slice(1, -1))
-            : f.kind === 'material' && f.url
+            : (f.kind === 'material' || f.kind === 'design') && f.url
               ? `<img src="${esc(f.url)}" alt="${esc(f.title)}" loading="lazy" />`
               : '<div class="cs-fig-missing">待补</div>'}</div>
           <p class="cs-fig-name">${esc(f.title)}</p>
-          <p class="cs-fig-sub">${esc(f.section || '')}${f.kind === 'ai' ? ` · ${{layered:'层次图',flow:'流程图',timeline:'时间线'}[f.type] || '图'} · ${f.nodes || 0} 节点` : f.kind === 'material' ? ' · 素材图' : ' · 待补'}</p>
+          <p class="cs-fig-sub">${esc(f.section || '')}${f.kind === 'ai' ? ` · ${{layered:'层次图',flow:'流程图',timeline:'时间线'}[f.type] || '图'} · ${f.nodes || 0} 节点` : f.kind === 'material' ? ' · 素材图' : f.kind === 'design' ? ' · 设计图' : ' · 待补'}</p>
           <div class="cs-fig-card-acts">${f.kind === 'ai'
             ? `<button type="button" class="cs-todo-act" data-fr-adjust="${f.id}">调整</button>`
-            : f.kind === 'material'
+            : (f.kind === 'material' || f.kind === 'design')
               ? `<button type="button" class="cs-todo-act" data-fr-view="${f.id}">查看</button>`
               : `<button type="button" class="cs-todo-act" data-fr-create="${esc(f.section)}">生成</button>`}
             <button type="button" class="cs-todo-act" data-fr-locate="${esc(f.section || '')}">定位</button>
@@ -3594,9 +3741,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         let j = i + 1;
         while (j < lines.length && lines[j].trim() !== ':::') { body.push(lines[j]); j += 1; }
         const img = body.join(' ').match(/!\[([^\]]*)\]\(([^)]+)\)/);
-        figures.push({ id: `img-${figures.length + 1}`, kind: 'material', section,
+        const imgUrl = img ? img[2] : '';
+        figures.push({ id: `img-${figures.length + 1}`,
+                       kind: /\/api\/studio\/diagrams\//.test(imgUrl) ? 'design' : 'material', section,
                        title: (line.slice(9).trim() || (img && img[1]) || '图片'),
-                       url: img ? img[2] : '', start: i, end: j });
+                       url: imgUrl, start: i, end: j });
         i = j;
       }
     }
@@ -3626,7 +3775,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ? `<details class="cs-sec-figs"><summary>🖼 ${secFigs.length + secPending.length}</summary>
              ${secFigs.map((f) => `<div class="cs-fig-row">
                  <span class="cs-fig-main" title="${esc(f.title)}">${esc(f.title)}</span>
-                 <span class="cs-fig-meta">${f.kind === 'ai' ? `${({layered:'层次图',flow:'流程图',timeline:'时间线'})[f.type] || '图'} · ${f.nodes} 节点` : '素材图'}</span>
+                 <span class="cs-fig-meta">${f.kind === 'ai' ? `${({layered:'层次图',flow:'流程图',timeline:'时间线'})[f.type] || '图'} · ${f.nodes} 节点` : f.kind === 'design' ? '设计图' : '素材图'}</span>
                  <span class="cs-fig-acts">${f.kind === 'ai'
                    ? `<button type="button" class="cs-todo-act" data-fig-adjust="${f.id}">调整</button>`
                    : `<button type="button" class="cs-todo-act" data-fig-view="${f.id}">查看</button>`}
@@ -3706,12 +3855,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const isImage = state.tab === 'image';
       pickedEl.textContent = '';
       bodyEl.innerHTML = isImage ? `
-        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成信息图</b>
-            <small>把选中的文字 / 本章要点抽成图：层次 / 流程 / 时间线，自动判断结构</small></div>
+        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成图表（设计版）</b>
+            <small>按 Diagram Design 规范生成：架构 / 分层 / 流程 / 时间线 / 矩阵等；默认架构图，可换图型</small></div>
+          <button type="button" class="cs-ins-chip" data-ins-design="architecture">生成</button></div>
+        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>快速结构图</b>
+            <small>把文字抽成可编辑的层次 / 流程 / 时间线（纯文本，可手改）</small></div>
           <button type="button" class="cs-ins-chip" data-ins-generate="info">生成</button></div>
-        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成架构图</b>
-            <small>按"接入 → 服务 → 数据"分层生成（等同层次图）</small></div>
-          <button type="button" class="cs-ins-chip" data-ins-generate="arch">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>从素材插入图片</b>
             <small>证书 / 截图 / 现场照（真实图片）</small></div>
           <button type="button" class="cs-ins-chip" data-ins-from-material="image">选择素材</button></div>`
@@ -3761,6 +3910,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tab = el.closest('[data-ins-tab]');
       if (tab) { state.tab = tab.dataset.insTab; for (const b of dlg.querySelectorAll('[data-ins-tab]')) b.setAttribute('aria-pressed', String(b.dataset.insTab === state.tab)); showMenu(); return; }
       if (el.closest('[data-ins-goto]')) { dlg.close(); showPanel('materials'); return; }
+      const design = el.closest('[data-ins-design]');
+      if (design) {
+        dlg.close();
+        openDesignDiagramDialog(design.dataset.insDesign || 'architecture');
+        return;
+      }
       const gen = el.closest('[data-ins-generate]');
       if (gen) { state.view = 'generate'; renderGenerate(gen.dataset.insGenerate); return; }
       const fromMat = el.closest('[data-ins-from-material]');

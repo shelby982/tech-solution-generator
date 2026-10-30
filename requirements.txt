@@ -35,3 +35,7 @@ httpx>=0.23.0,<0.28.0
 # ── LangGraph 编排（Phase 4）──────────────────
 langgraph>=0.2.0,<0.5.0
 langgraph-checkpoint-sqlite>=2.0.0,<3.0.0
+
+# ── 设计版图表渲染（Diagram Design）───────────
+# 需要 Chromium：playwright install chromium；Dockerfile 已装。
+playwright==1.64.1

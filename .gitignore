@@ -15,3 +15,6 @@ backend/data/
 .planning/
 .DS_Store
 backend/data/cache/
+
+# local Playwright browser cache
+.playwright-browsers/

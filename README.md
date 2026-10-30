@@ -32,6 +32,18 @@ bash start.sh                  # 默认模式
 LLM_MODE=mock pytest tests/    # 跑测试
 ```
 
+### 设计版图表（Diagram Design）
+
+「插入内容 → 图片 → AI 生成图表（设计版）」需要 Chromium 渲染 HTML→PNG：
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+未安装时设计版会明确失败，不影响快速结构图与素材图。详见
+`docs/design/生图-DiagramDesign技能接入-方案.md`。
+
 ## 关键路径
 
 - 入口：`backend/main.py`
