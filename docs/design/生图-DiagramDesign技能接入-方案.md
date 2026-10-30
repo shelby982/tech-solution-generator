@@ -1,5 +1,7 @@
 # 生图接入 Diagram Design 技能 —— 产品与技术方案
 
+> **P0 已实施**：见 [实施记录](生图-DiagramDesign技能接入-实施记录.md)（单入口、校验、Playwright PNG、Word 导出；批量设计版仍为 P1）。
+
 > 目标：把 [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)（MIT，45 种图型，输出单文件 HTML + SVG）包装进产品「插入内容 → 图片」的生图链路，生成能直接进标书正文、能导出 Word 的高质量图示。
 >
 > 已核对的仓库版本：HEAD `0cf73c3`，skill 版本 `2.6.136`；技能许可证 MIT。
