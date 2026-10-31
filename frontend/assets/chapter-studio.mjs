@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v439';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v439';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v440';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v440';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1831,15 +1831,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const warnings = Array.isArray(checks.unknown_numbers) && checks.unknown_numbers.length
         ? `<p class="cs-warning">图里有 ${checks.unknown_numbers.length} 个数字不在本节依据中，请核对：${checks.unknown_numbers.map(esc).join('、')}</p>`
         : '';
+      const missingElements = Array.isArray(checks.elements_missing) ? checks.elements_missing : [];
+      const elementsWarning = missingElements.length
+        ? `<p class="cs-warning">图中未出现本节交付要素：${missingElements.map(esc).join('、')}，请核对。</p>`
+        : '';
       const geo = checks.geometry || {};
-      const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length
-        ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处越界、${(geo.overlaps || []).length} 处标签重叠，请放大预览核对。</p>`
+      const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length || (geo.shapes_overflow || []).length
+        ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处文字越界、${(geo.shapes_overflow || []).length} 处图形越界、${(geo.overlaps || []).length} 处标签重叠，请放大预览核对。</p>`
         : '';
       resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
         <p class="cs-muted">图型 ${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
-        ${warnings}${geoWarnings}
+        ${warnings}${elementsWarning}${geoWarnings}
         <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-again>重新生成</button>
           ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
+          ${data.asset_id ? `<a class="cs-cp-ghost" href="/api/studio/diagrams/${esc(data.asset_id)}/svg" download>下载 SVG</a>` : ''}
           <button type="button" class="cs-cp-primary" data-dd-insert>插入正文</button></div>`;
       resultEl.querySelector('[data-dd-again]')?.addEventListener('click', () => start());
       resultEl.querySelector('[data-dd-insert]')?.addEventListener('click', () => {

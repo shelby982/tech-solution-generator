@@ -97,6 +97,8 @@ async def test_create_job_runs_and_serves_png(env, monkeypatch):
     assert image.status_code == 200 and image.headers["content-type"] == "image/png"
     preview = await env.client.get(f"/api/studio/diagrams/{asset_id}/preview")
     assert preview.status_code == 200 and "default-src 'none'" in preview.headers["content-security-policy"]
+    svg = await env.client.get(f"/api/studio/diagrams/{asset_id}/svg")
+    assert svg.status_code == 200 and "<svg" in svg.text
 
 
 async def test_failed_render_marks_job_failed(env, monkeypatch):

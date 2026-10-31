@@ -87,7 +87,7 @@ def _audit_geometry(page) -> dict:
         return page.evaluate(
             """() => {
                 const svg = document.querySelector('svg');
-                if (!svg) return {texts: 0, overflow: [], overlaps: []};
+                if (!svg) return {texts: 0, overflow: [], overlaps: [], shapes_overflow: []};
                 const vb = svg.viewBox && svg.viewBox.baseVal;
                 const boxes = [...svg.querySelectorAll('text')]
                     .filter((el) => (el.textContent || '').trim())
@@ -99,6 +99,11 @@ def _audit_geometry(page) -> dict:
                     }).filter(Boolean);
                 const overflow = vb ? boxes.filter((b) => b.x < -2 || b.y < -2 ||
                     b.x + b.w > vb.width + 2 || b.y + b.h > vb.height + 2).slice(0, 8) : [];
+                const shapes = [...svg.querySelectorAll('rect,circle,ellipse,line,polyline,polygon,path')]
+                    .map((el) => { try { const b = el.getBBox(); return {tag: el.tagName, x: b.x, y: b.y, w: b.width, h: b.height}; } catch (e) { return null; } })
+                    .filter(Boolean);
+                const shapesOverflow = vb ? shapes.filter((b) => b.x < -4 || b.y < -4 ||
+                    b.x + b.w > vb.width + 4 || b.y + b.h > vb.height + 4).slice(0, 8) : [];
                 const overlaps = [];
                 const area = (b) => Math.max(0, b.w) * Math.max(0, b.h);
                 for (let i = 0; i < boxes.length && overlaps.length < 8; i += 1) {
@@ -112,11 +117,11 @@ def _audit_geometry(page) -> dict:
                         }
                     }
                 }
-                return {texts: boxes.length, overflow, overlaps};
+                return {texts: boxes.length, overflow, overlaps, shapes_overflow: shapesOverflow};
             }"""
         )
     except Exception:  # noqa: BLE001
-        return {"texts": 0, "overflow": [], "overlaps": [], "error": "geometry audit failed"}
+        return {"texts": 0, "overflow": [], "overlaps": [], "shapes_overflow": [], "error": "geometry audit failed"}
 
 
 async def render_png(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int, dict]:

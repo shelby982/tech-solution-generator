@@ -225,6 +225,9 @@ def validate_html(html: str, brief: dict) -> tuple[str, dict]:
         "html_bytes": len(text.encode("utf-8")),
         "security": not errors,
     }
+    joined = "\n".join(labels)
+    elements = [str(x).strip() for x in (brief.get("elements") or []) if str(x).strip()]
+    checks["elements_missing"] = [x for x in elements if x not in joined][:8]
     if not errors:
         ok, output = _run_self_check(text)
         checks["self_check"] = ok
@@ -336,10 +339,17 @@ async def create_asset(block: dict, brief: dict, *, force: bool = False) -> dict
     width, height, geometry = await render_png(html_file, png_file, scale=SIZE_SCALE[brief["size_preset"]])
     checks["png_size"] = [width, height]
     checks["geometry"] = geometry
+    svg = ""
+    try:
+        from services.diagram_svg import export_svg
+        svg = await export_svg(html_file, diagram_assets.svg_path(int(block["project_id"]), asset_id))
+        checks["svg_bytes"] = len(svg.encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        checks["svg_error"] = str(exc)[:200]
     await diagram_assets.save_asset(
         int(block["project_id"]), int(block["id"]), section=str(brief.get("section") or ""),
         title=str(brief.get("title") or "图表"), skill_type=brief["skill_type"],
-        size_preset=brief["size_preset"], html=html, png=png_file.read_bytes(), svg="", brief=brief,
+        size_preset=brief["size_preset"], html=html, png=png_file.read_bytes(), svg=svg, brief=brief,
         checks=checks, model=str(config.model), width=width, height=height,
         asset_id=asset_id, prompt_hash=digest,
     )

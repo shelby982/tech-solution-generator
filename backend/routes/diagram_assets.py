@@ -144,6 +144,19 @@ async def regenerate(asset_id: str, body: DiagramDesignBody | None = None):
     return {"job_id": job_id, "status": "queued"}
 
 
+@router.get('/studio/diagrams/{asset_id}/svg')
+async def diagram_svg(asset_id: str):
+    asset = await diagram_assets.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "图表不存在")
+    svg = str(asset.get("svg") or "")
+    if not svg:
+        raise HTTPException(404, "该图表没有 SVG 源")
+    return Response(svg, media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
+                             "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'"})
+
+
 @router.get('/studio/diagrams/{asset_id}/image')
 async def diagram_image(asset_id: str):
     asset = await diagram_assets.get_asset(asset_id)
