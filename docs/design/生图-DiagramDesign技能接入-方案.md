@@ -1,6 +1,6 @@
 # 生图接入 Diagram Design 技能 —— 产品与技术方案
 
-> **P0/P1 与 P2 大部分已实施**（Prompt 精简除外）：见 [实施记录](生图-DiagramDesign技能接入-实施记录.md)（单入口、校验、Playwright PNG/Word 导出、prompt 缓存、质量档批量、SVG、几何/要素校验）。
+> **P0/P1/P2 已实施**：见 [实施记录](生图-DiagramDesign技能接入-实施记录.md)（单入口、校验、Playwright PNG/Word 导出、prompt 缓存与精简、质量档批量、SVG、几何/要素校验）。
 
 > 目标：把 [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)（MIT，45 种图型，输出单文件 HTML + SVG）包装进产品「插入内容 → 图片」的生图链路，生成能直接进标书正文、能导出 Word 的高质量图示。
 >
