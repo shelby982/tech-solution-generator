@@ -1,4 +1,4 @@
-# 生图接入 Diagram Design —— 实施记录（P0）
+# 生图接入 Diagram Design —— 实施记录（P0 + P1）
 
 > 对应方案：[生图-DiagramDesign技能接入-方案](生图-DiagramDesign技能接入-方案.md)
 > 上游：cathrynlavery/diagram-design，commit `0cf73c3`，skill `2.6.136`，MIT。
@@ -64,7 +64,7 @@ bash start.sh
 
 ## 验证
 
-- 后端：`1028 passed, 1 deselected`
+- 后端：`1031 passed, 1 deselected`
 - 前端：`156 pass`
 - 新增测试：`tests/test_diagram_design.py`（类型/清洗/校验/路由/失败路径/Word 图片白名单）
 - 实测：Playwright 渲染 1280×720 @2 → 2560×1440 PNG；job 状态/资产读写/图片端点正常。
@@ -91,3 +91,27 @@ bash start.sh
 | `backend/routes/chapter_studio.py` / `routes/export.py` | 导出取图 |
 | `frontend/assets/chapter-studio.mjs` | 入口/弹窗/插入 |
 | `frontend/assets/chapter-studio.css` | 预览样式 |
+
+
+## P1 续做（已完成）
+
+- **Prompt 缓存 / 资产复用**：
+  - 技能静态提示词按 `(图型, 尺寸)` `lru_cache`，不再每次重读 ~100KB 文件；
+  - `prompt_hash` 写入 `diagram_assets`；同项目、同 brief、同模型命中缓存直接复用资产，避免重复烧模型；
+  - 「重新生成」显式带 `force`，绕过缓存。
+- **几何审计**：
+  - 渲染时用 Playwright 读取所有 `<text>` 的 `getBBox()`，检查文字越界和标签重叠（阈值 30%）；
+  - 结果写 `checks.geometry`，前端预览显示「越界/标签重叠」提示，不阻断插入。
+- **批量图表 opt-in**：
+  - 新表 `diagram_settings(project_id, quality)`；`GET/PUT /api/projects/{id}/diagram-settings`；
+  - 质量档：`fast`（默认快图）/ `design_architecture`（架构/分层图用设计版）/ `design_all`（所有图）；
+  - 「编写设置」弹窗新增「图表质量」；章节 SSE 的图任务按设置自动走设计版，失败自动回退快速结构图；
+  - 设计图以 `:::figure` 插入，`merge_charts`/Word 导出沿用图片链路。
+- 新增测试：同 prompt 复用、质量设置 roundtrip、章节图任务走设计版分支。
+
+## 仍未做
+
+- 自动批量只接到章节 SSE 的 figure 任务；旧 job 编排（legacy）不接。
+- 几何审计只报告越界/文本重叠，不检测连线遮挡/交叉；未接上游 `verify-geometry.py`。
+- SVG 导出字段预留但未实现；Prompt 可进一步精简（当前仍是完整技能参考）。
+- 资产清理（项目删除/版本保留）未做。
