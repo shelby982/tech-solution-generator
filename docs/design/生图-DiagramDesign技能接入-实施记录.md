@@ -127,3 +127,10 @@ bash start.sh
 
 - 后端 `1031 passed, 1 deselected`；前端 `156 pass`。
 - `tests/test_diagram_design.py` 增加 SVG 端点断言；工具单测覆盖几何/要素提示的数据结构。
+
+## P2 续做（compact prompt）
+
+- 新增 `references/prompt-core.product.md`：从 SKILL.md / 品牌 style / 输出规格 / 布局 / 图元规则中抽取必需章节，保留中文排版规则与连接线规则；约 49KB（原完整参考约 98KB）。
+- 默认使用精简版；`DIAGRAM_FULL_PROMPT=1` 可切回完整版做质量对照。
+- 实测同一架构 brief：`deepseek-flash` 约 20s 完成，PNG 2560×1440，`self_check` 通过，`elements_missing=[]`，几何审计无越界/重叠；未知数字（443/L4/L7）进入 `unknown_numbers` 提示。
+- 仍建议对真实章节做 A/B：精简版 vs 完整版的质量/耗时/token。

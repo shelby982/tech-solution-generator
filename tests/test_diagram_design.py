@@ -202,3 +202,14 @@ async def test_same_prompt_reuses_cached_asset(env, monkeypatch):
     a = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{first['job_id']}")).json()
     b = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{second['job_id']}")).json()
     assert a["asset_id"] == b["asset_id"]
+
+
+def test_compact_prompt_keeps_chinese_rules_and_is_smaller():
+    system, user = diagram_design.build_prompt({
+        "title": "总体技术架构图", "skill_type": "architecture", "size_preset": "doc-wide",
+        "text": "接入层、服务层、数据层", "elements": ["接入层", "服务层", "数据层"],
+    })
+    assert "Simplified Chinese" in system
+    assert "Mandatory connector rules" in system
+    assert len(system) < 70000, len(system)
+    assert "总体技术架构图" in user

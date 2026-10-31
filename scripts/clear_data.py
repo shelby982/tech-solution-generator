@@ -17,6 +17,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "backend", "data", "ge_solution.db")
 UPLOADS_DIR = os.path.join(ROOT, "backend", "data", "uploads")
+DIAGRAMS_DIR = os.path.join(ROOT, "backend", "data", "diagrams")
 
 TABLES = [
     # 子表在前、父表在后；即使未来打开 SQLite foreign_keys 也能安全执行。
@@ -34,6 +35,9 @@ TABLES = [
     "packages",
     "project_packages",
     "llm_usage",
+    "diagram_jobs",
+    "diagram_assets",
+    "diagram_settings",
     # LangGraph checkpointer 表（不同版本不一定全部存在）。
     "checkpoint_writes",
     "checkpoint_blobs",
@@ -79,6 +83,17 @@ def clear_db(conn: sqlite3.Connection) -> None:
     print("  ✓ 数据库已清空，自增 ID 已重置")
 
 
+def clear_diagrams() -> None:
+    if not os.path.isdir(DIAGRAMS_DIR):
+        print("  ✓ diagrams/ 目录不存在，跳过")
+        return
+    for name in os.listdir(DIAGRAMS_DIR):
+        path = os.path.join(DIAGRAMS_DIR, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+    print("  ✓ diagrams/ 设计版图表已清除")
+
+
 def clear_uploads() -> None:
     if not os.path.isdir(UPLOADS_DIR):
         print("  ✓ uploads/ 目录不存在，跳过")
@@ -122,6 +137,7 @@ def main():
         print("  - 跳过数据库（--keep-db）")
 
     clear_uploads()
+    clear_diagrams()
     conn.close()
     print("\n清除完成。")
 

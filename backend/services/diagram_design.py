@@ -102,14 +102,17 @@ def _read(rel: str) -> str:
 
 @lru_cache(maxsize=8)
 def _skill_static() -> str:
-    """技能静态规则。只保留一次读取；调用方按图型追加 type reference。"""
-    return (
-        "【技能规范】\n" + _read("SKILL.md") +
-        "\n\n【品牌样式（必须遵守）】\n" + _read("references/style-guide.product.md") +
-        "\n\n【输出规格】\n" + _read("references/output-spec.md") +
-        "\n\n【布局预算】\n" + _read("references/layout-budget.md") +
-        "\n\n【图元与连接线规则】\n" + _read("references/primitives-core.md")
-    )
+    """技能静态规则。默认用产品精简版（约 49KB），完整版用 DIAGRAM_FULL_PROMPT=1 调试。"""
+    import os
+    if os.environ.get("DIAGRAM_FULL_PROMPT") == "1":
+        return (
+            "【技能规范】\n" + _read("SKILL.md") +
+            "\n\n【品牌样式（必须遵守）】\n" + _read("references/style-guide.product.md") +
+            "\n\n【输出规格】\n" + _read("references/output-spec.md") +
+            "\n\n【布局预算】\n" + _read("references/layout-budget.md") +
+            "\n\n【图元与连接线规则】\n" + _read("references/primitives-core.md")
+        )
+    return "【技能规范（产品精简版）】\n" + _read("references/prompt-core.product.md")
 
 
 @lru_cache(maxsize=24)
@@ -418,6 +421,7 @@ async def run_job(job_id: str) -> None:
         brief["skill_type"] = normalize_type(brief.get("skill_type"))
         brief["size_preset"] = normalize_size(brief.get("size_preset"))
         await diagram_assets.set_job(job_id, status="running", stage="准备设计规范")
+        await diagram_assets.set_job(job_id, stage="正在设计图表")
         result = await create_asset(block, brief, force=bool(brief.get("force")))
         await diagram_assets.set_job(job_id, status="done", stage="已完成",
                                      asset_id=result["asset_id"], error="")
