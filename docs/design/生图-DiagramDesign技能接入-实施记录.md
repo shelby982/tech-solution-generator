@@ -115,3 +115,15 @@ bash start.sh
 - 几何审计只报告越界/文本重叠，不检测连线遮挡/交叉；未接上游 `verify-geometry.py`。
 - SVG 导出字段预留但未实现；Prompt 可进一步精简（当前仍是完整技能参考）。
 - 资产清理（项目删除/版本保留）未做。
+
+## P2 续做（本轮）
+
+- **SVG 矢量导出**：vendor 的 `export_svg.py --system-fonts` 在生成后产出独立 SVG；资产表写 `svg` 字段；新增 `GET /api/studio/diagrams/{id}/svg`，预览弹窗加「下载 SVG」。
+- **更强几何审计**：除文字越界/标签重叠外，增加 `rect/circle/path/line/polygon` 的图形越界；前端预览同时显示文字越界、图形越界、标签重叠数量。
+- **交付要素覆盖**：生成校验比较本节 `elements` 与图中 `<text>`，缺失要素写 `checks.elements_missing`，预览提示「图中未出现本节交付要素」。
+- 前端资源版本统一升到 `20261016-v440`。
+
+### 验证
+
+- 后端 `1031 passed, 1 deselected`；前端 `156 pass`。
+- `tests/test_diagram_design.py` 增加 SVG 端点断言；工具单测覆盖几何/要素提示的数据结构。
