@@ -20,6 +20,39 @@ from services.diagram_design import (
 router = APIRouter(tags=["diagram-design"])
 
 
+QUALITY_OPTIONS = [
+    {"key": "fast", "label": "快速结构图（默认）"},
+    {"key": "design_architecture", "label": "架构/分层图用设计版"},
+    {"key": "design_all", "label": "全部图用设计版（较慢）"},
+]
+
+
+class DiagramQualityBody(BaseModel):
+    quality: str = Field(default="fast", max_length=40)
+
+
+@router.get('/projects/{project_id}/diagram-settings')
+async def diagram_settings(project_id: int):
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT quality FROM diagram_settings WHERE project_id=?", (project_id,)
+        )).fetchone()
+    return {"quality": (row[0] if row else "fast"), "options": QUALITY_OPTIONS}
+
+
+@router.put('/projects/{project_id}/diagram-settings')
+async def save_diagram_settings(project_id: int, body: DiagramQualityBody):
+    quality = body.quality if body.quality in {item["key"] for item in QUALITY_OPTIONS} else "fast"
+    async with get_db() as db:
+        await db.execute(
+            "INSERT INTO diagram_settings(project_id, quality, updated_at) VALUES(?,?,CURRENT_TIMESTAMP) "
+            "ON CONFLICT(project_id) DO UPDATE SET quality=excluded.quality, updated_at=CURRENT_TIMESTAMP",
+            (project_id, quality),
+        )
+        await db.commit()
+    return {"quality": quality}
+
+
 class DiagramDesignBody(BaseModel):
     title: str = Field(default="", max_length=120)
     text: str = Field(default="", max_length=8000)
@@ -105,6 +138,7 @@ async def regenerate(asset_id: str, body: DiagramDesignBody | None = None):
         brief.update({k: v for k, v in body.model_dump().items() if v not in (None, "", [])})
     brief["skill_type"] = normalize_type(brief.get("skill_type"))
     brief["size_preset"] = normalize_size(brief.get("size_preset"))
+    brief["force"] = True  # 重新生成必须绕过同 prompt 缓存
     job_id = await diagram_assets.create_job(int(asset["project_id"]), int(asset["block_id"] or 0), brief)
     queue_job(job_id)
     return {"job_id": job_id, "status": "queued"}

@@ -63,7 +63,7 @@ async def env(monkeypatch, tmp_path):
 
 
 async def test_create_job_runs_and_serves_png(env, monkeypatch):
-    async def fake_generate(config, brief, *, project_id, block_id):
+    async def fake_generate(config, brief, *, project_id, block_id, prompt=None):
         html = ('<!doctype html><html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" '
                 'role="img"><title>总体技术方案</title><desc>架构示意</desc>'
                 '<rect width="10" height="10" fill="#fff"/><text>接入层</text><text>服务层</text>'
@@ -73,7 +73,7 @@ async def test_create_job_runs_and_serves_png(env, monkeypatch):
     async def fake_render(html_path, png_path, scale=2):
         png_path.parent.mkdir(parents=True, exist_ok=True)
         png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
-        return 1280, 720
+        return 1280, 720, {"texts": 2, "overflow": [], "overlaps": []}
 
     async def fake_config(db, block):
         return SimpleNamespace(model="test-model", provider="openai"), {"used": "test-model", "source": "test"}
@@ -90,7 +90,7 @@ async def test_create_job_runs_and_serves_png(env, monkeypatch):
     await diagram_design.run_job(job_id)
 
     status = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{job_id}")).json()
-    assert status["status"] == "done"
+    assert status["status"] == "done", status
     asset_id = status["asset_id"]
     assert status["image_url"] == f"/api/studio/diagrams/{asset_id}/image"
     image = await env.client.get(f"/api/studio/diagrams/{asset_id}/image")
@@ -100,7 +100,7 @@ async def test_create_job_runs_and_serves_png(env, monkeypatch):
 
 
 async def test_failed_render_marks_job_failed(env, monkeypatch):
-    async def fake_generate(config, brief, *, project_id, block_id):
+    async def fake_generate(config, brief, *, project_id, block_id, prompt=None):
         return '<html><body><svg viewBox="0 0 10 10" role="img"><title>x</title><desc>y</desc></svg></body></html>', {}
 
     async def fake_config(db, block):
@@ -129,3 +129,74 @@ def test_word_export_accepts_diagram_image_url_and_rejects_external():
     bad = parse_markdown("![图](https://evil.example/x.png)")
     with pytest.raises(ValueError):
         list(image_urls(bad))
+
+
+async def test_diagram_quality_setting_roundtrip(env):
+    got = (await env.client.get(f"/api/projects/{env.pid}/diagram-settings")).json()
+    assert got["quality"] == "fast" and got["options"]
+    saved = await env.client.put(f"/api/projects/{env.pid}/diagram-settings",
+                                 json={"quality": "design_all"})
+    assert saved.status_code == 200 and saved.json()["quality"] == "design_all"
+    got = (await env.client.get(f"/api/projects/{env.pid}/diagram-settings")).json()
+    assert got["quality"] == "design_all"
+    # 非法值回退 fast
+    await env.client.put(f"/api/projects/{env.pid}/diagram-settings", json={"quality": "nope"})
+    assert (await env.client.get(f"/api/projects/{env.pid}/diagram-settings")).json()["quality"] == "fast"
+
+
+async def test_chart_uses_design_when_project_quality_enabled(monkeypatch):
+    from services import chapter_sse, diagram_design
+
+    async def fake_emit(*args, **kwargs):
+        return None
+
+    async def fake_quality(project_id):
+        return "design_architecture"
+
+    async def fake_design(block, section, deliverable):
+        return {"ok": True, "asset_id": "a" * 32, "title": "架构图",
+                "model": "m", "checks": {"self_check": True},
+                "markdown": ":::figure 架构图\n![架构图](/api/studio/diagrams/" + "a" * 32 + "/image)\n:::"}
+
+    monkeypatch.setattr(chapter_sse, "emit", fake_emit)
+    monkeypatch.setattr(diagram_design, "project_quality", fake_quality)
+    monkeypatch.setattr(diagram_design, "design_section_figure", fake_design)
+    result = await chapter_sse._generate_chart(
+        "job", 0, {"title": "总体架构", "points": ["接入层"]},
+        {"kind": "figure", "title": "总体架构图", "type": "layered"}, "t" * 10, "m",
+        {"project_id": 1, "id": 1},
+    )
+    assert result["ok"] and result["kind"] == "design"
+    assert result["markdown"].startswith(":::figure")
+
+
+async def test_same_prompt_reuses_cached_asset(env, monkeypatch):
+    calls = {"generate": 0}
+
+    async def fake_generate(config, brief, *, project_id, block_id, prompt=None):
+        calls["generate"] += 1
+        html = ('<!doctype html><html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" '
+                'role="img"><title>图</title><desc>说明</desc><rect width="10" height="10"/>'
+                '<text>接入层</text><text>服务层</text></svg></body></html>')
+        return html, {"self_check": True}
+
+    async def fake_render(html_path, png_path, scale=2):
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        return 1280, 720, {"texts": 2, "overflow": [], "overlaps": []}
+
+    async def fake_config(db, block):
+        return SimpleNamespace(model="test-model", provider="openai"), {}
+
+    monkeypatch.setattr(diagram_design, "generate_valid_html", fake_generate)
+    monkeypatch.setattr(diagram_design, "resolve_config", fake_config)
+    monkeypatch.setattr("services.diagram_render.render_png", fake_render)
+    payload = {"title": "缓存图", "text": "接入层、服务层", "skill_type": "architecture"}
+    first = (await env.client.post(f"/api/blocks/{env.block['id']}/studio/diagram-assets", json=payload)).json()
+    await diagram_design.run_job(first["job_id"])
+    second = (await env.client.post(f"/api/blocks/{env.block['id']}/studio/diagram-assets", json=payload)).json()
+    await diagram_design.run_job(second["job_id"])
+    assert calls["generate"] == 1
+    a = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{first['job_id']}")).json()
+    b = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{second['job_id']}")).json()
+    assert a["asset_id"] == b["asset_id"]

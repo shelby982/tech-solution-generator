@@ -71,7 +71,7 @@ async def get_job(job_id: str) -> dict | None:
 async def save_asset(project_id: int, block_id: int | None, *, section: str, title: str,
                      skill_type: str, size_preset: str, html: str, png: bytes, svg: str,
                      brief: dict, checks: dict, model: str, width: int, height: int,
-                     asset_id: str | None = None) -> str:
+                     asset_id: str | None = None, prompt_hash: str = "") -> str:
     asset_id = asset_id or new_asset_id()
     html_path(project_id, asset_id).write_text(html, encoding="utf-8")
     png_path(project_id, asset_id).write_bytes(png)
@@ -80,15 +80,28 @@ async def save_asset(project_id: int, block_id: int | None, *, section: str, tit
     async with get_db() as db:
         await db.execute(
             "INSERT INTO diagram_assets(id, project_id, block_id, section, title, skill_type, size_preset,"
-            " html, svg, png_path, png_width, png_height, brief_json, checks_json, model, version, status)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " html, svg, png_path, png_width, png_height, brief_json, checks_json, model,"
+            " prompt_hash, version, status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (asset_id, int(project_id), block_id, section, title, skill_type, size_preset,
              html, svg, str(png_path(project_id, asset_id)), width, height,
              json.dumps(brief, ensure_ascii=False), json.dumps(checks, ensure_ascii=False),
-             model, 1, "done"),
+             model, prompt_hash, 1, "done"),
         )
         await db.commit()
     return asset_id
+
+
+async def find_by_prompt_hash(project_id: int, prompt_hash: str) -> dict | None:
+    """同项目、同 prompt、同模型的历史资产直接复用（避免重复烧模型）。"""
+    if not prompt_hash:
+        return None
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT * FROM diagram_assets WHERE project_id=? AND prompt_hash=? AND status='done'"
+            " AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            (int(project_id), prompt_hash),
+        )).fetchone()
+    return dict(row) if row else None
 
 
 async def get_asset(asset_id: str) -> dict | None:

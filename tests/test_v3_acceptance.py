@@ -55,7 +55,7 @@ def test_03_04_chart_runs_parallel_and_ignores_section_text(monkeypatch):
         for chunk in ("本" * 30, "文" * 30):
             yield chunk
 
-    async def fake_chart(job_id, index, section, deliverable, thread_id, model):
+    async def fake_chart(job_id, index, section, deliverable, thread_id, model, block=None):
         captured["deliverable"] = deliverable
         captured["has_text"] = "text" in json.dumps(deliverable, ensure_ascii=False)
         await asyncio.sleep(0)

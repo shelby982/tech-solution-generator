@@ -43,6 +43,9 @@ def chart_items(role: str, markdown: str, deliverable: dict, section_text: str,
     """返回该图表的问题项（空 = 通过）。"""
     items: list[dict] = []
     title = str((deliverable or {}).get("title") or "")
+    # 设计版图表是图片资产，几何/内容校验在生成时做；这里不按文本图解析。
+    if str(markdown or "").lstrip().startswith(":::figure"):
+        return items
     if not refs:
         items.append({"group": "proof", "severity": "block",
                       "title": f"{'图' if role == 'diagram' else '表'}「{title}」缺依据",

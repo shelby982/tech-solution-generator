@@ -179,7 +179,7 @@ async def run_job(job_id: str) -> None:
             for deliverable in chart_deliverables:
                 role = "diagram" if deliverable.get("kind") == "figure" else "table"
                 chart_tasks.append(asyncio.create_task(
-                    _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""))))
+                    _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""), block)))
             text = ""
             started_at = time.monotonic()
             from infra.llm.usage import call_context
@@ -205,6 +205,8 @@ async def run_job(job_id: str) -> None:
                     from services.chart_checks import chart_items
                     refs = [str((b or {}).get("ref")) for b in (section.get("basis") or []) if (b or {}).get("ref")]
                     for chart, deliverable in zip([c for c in charts if c.get("ok")], chart_deliverables):
+                        if chart.get("kind") == "design":
+                            continue
                         section_checks += chart_items(chart["role"], chart.get("markdown") or "",
                                                       deliverable, text, refs)
                 except Exception:
@@ -376,7 +378,7 @@ _PLACEHOLDER_RE = re.compile(r"\[\[(FIGURE|TABLE):([^\]]+)\]\]")
 
 
 async def _generate_chart(job_id: str, index: int, section: dict, deliverable: dict,
-                          thread_id: str, model: str) -> dict:
+                          thread_id: str, model: str, block: dict | None = None) -> dict:
     role = "diagram" if deliverable.get("kind") == "figure" else "table"
     title = str(deliverable.get("title") or "").strip()
     basis = "；".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or []))
@@ -385,6 +387,34 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
                                 "section_index": index, "detail": title})
     await emit(job_id, "chart", {"role": role, "index": index, "title": title, "state": "working",
                                  "model": model})
+    # 设计版图表（项目设置 opt-in）：失败自动回退到下面的快速结构图，不阻断章节。
+    if role == "diagram" and block:
+        try:
+            from services.diagram_design import design_section_figure, design_type_for, project_quality
+            quality = await project_quality(int(block["project_id"]))
+            design_type = design_type_for(deliverable)
+            enabled = quality == "design_all" or (
+                quality == "design_architecture" and design_type in ("architecture", "layers"))
+            if enabled:
+                await emit(job_id, "chart", {"role": role, "index": index, "title": title,
+                                             "state": "designing", "model": model})
+                designed = await design_section_figure(block, section, deliverable)
+                markdown = designed["markdown"]
+                await emit(job_id, "chart", {"role": role, "index": index, "title": title,
+                                             "state": "done", "markdown": markdown,
+                                             "checks": designed.get("checks") or {},
+                                             "model": designed.get("model") or model,
+                                             "kind": "design"})
+                await emit(job_id, "role", {"role": role, "state": "done",
+                                            "model": designed.get("model") or model,
+                                            "section_index": index})
+                return {"ok": True, "role": role, "index": index, "title": title,
+                        "markdown": markdown, "model": designed.get("model") or model,
+                        "checks": designed.get("checks") or {}, "kind": "design"}
+        except Exception as exc:  # noqa: BLE001
+            await emit(job_id, "chart", {"role": role, "index": index, "title": title,
+                                         "state": "fallback", "model": model,
+                                         "error": str(exc)[:160]})
     try:
         from agents.chapter_team import call_role
         if role == "diagram":
@@ -439,7 +469,7 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
             retry_deliverable = dict(deliverable)
             if role == "diagram":
                 retry_deliverable["type"] = "flow" if deliverable.get("type") != "flow" else "layered"
-            retry = await _generate_chart(job_id, index, section, retry_deliverable, thread_id, model)
+            retry = await _generate_chart(job_id, index, section, retry_deliverable, thread_id, model, block)
             if retry.get("ok"):
                 retry["retried"] = True
                 return retry
@@ -504,7 +534,7 @@ async def write_sections(job_id: str, block: dict, block_pk: int, sections: list
         for deliverable in chart_deliverables:
             role = "diagram" if deliverable.get("kind") == "figure" else "table"
             chart_tasks.append(asyncio.create_task(
-                _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""))))
+                _generate_chart(job_id, index, section, deliverable, thread_id, models.get(role, ""), block)))
         text = ""
         started_at = time.monotonic()
         async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):

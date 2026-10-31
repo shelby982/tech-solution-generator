@@ -29,7 +29,7 @@ def viewbox_size(html: str) -> tuple[int, int]:
     return int(round(width)), int(round(height))
 
 
-def render_png_sync(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int]:
+def render_png_sync(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int, dict]:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:  # noqa: BLE001
@@ -68,17 +68,56 @@ def render_png_sync(html_path: Path, out_path: Path, scale: int = 2) -> tuple[in
                 }"""
             )
             page.wait_for_timeout(150)
+            geometry = _audit_geometry(page)
             svg.screenshot(path=str(out_path), omit_background=False)
         finally:
             browser.close()
     try:
         from PIL import Image
         with Image.open(out_path) as image:
-            return image.width, image.height
+            return image.width, image.height, geometry
     except Exception:  # noqa: BLE001
         width, height = viewbox_size(html_path.read_text(encoding="utf-8", errors="ignore"))
-        return width * max(1, min(3, int(scale))), height * max(1, min(3, int(scale)))
+        return width * max(1, min(3, int(scale))), height * max(1, min(3, int(scale))), geometry
 
 
-async def render_png(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int]:
+def _audit_geometry(page) -> dict:
+    """轻量几何审计：文本越界 + 文本标签互相遮挡（只报告，不阻断）。"""
+    try:
+        return page.evaluate(
+            """() => {
+                const svg = document.querySelector('svg');
+                if (!svg) return {texts: 0, overflow: [], overlaps: []};
+                const vb = svg.viewBox && svg.viewBox.baseVal;
+                const boxes = [...svg.querySelectorAll('text')]
+                    .filter((el) => (el.textContent || '').trim())
+                    .map((el) => {
+                        let b;
+                        try { b = el.getBBox(); } catch (e) { return null; }
+                        return {text: (el.textContent || '').trim().slice(0, 40),
+                                x: b.x, y: b.y, w: b.width, h: b.height};
+                    }).filter(Boolean);
+                const overflow = vb ? boxes.filter((b) => b.x < -2 || b.y < -2 ||
+                    b.x + b.w > vb.width + 2 || b.y + b.h > vb.height + 2).slice(0, 8) : [];
+                const overlaps = [];
+                const area = (b) => Math.max(0, b.w) * Math.max(0, b.h);
+                for (let i = 0; i < boxes.length && overlaps.length < 8; i += 1) {
+                    for (let j = i + 1; j < boxes.length && overlaps.length < 8; j += 1) {
+                        const a = boxes[i], b = boxes[j];
+                        const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+                        const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+                        const inter = ox * oy;
+                        if (inter > 0 && inter > Math.min(area(a), area(b)) * 0.3) {
+                            overlaps.push({a: a.text, b: b.text});
+                        }
+                    }
+                }
+                return {texts: boxes.length, overflow, overlaps};
+            }"""
+        )
+    except Exception:  # noqa: BLE001
+        return {"texts": 0, "overflow": [], "overlaps": [], "error": "geometry audit failed"}
+
+
+async def render_png(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int, dict]:
     return await asyncio.to_thread(render_png_sync, html_path, out_path, scale)

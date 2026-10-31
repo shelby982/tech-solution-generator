@@ -123,6 +123,13 @@ CREATE TABLE IF NOT EXISTS diagram_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_diagram_jobs_project ON diagram_jobs(project_id, created_at);
 
+-- 设计版图表质量档：fast（默认快速结构图）/ design_architecture / design_all
+CREATE TABLE IF NOT EXISTS diagram_settings (
+    project_id  INTEGER PRIMARY KEY,
+    quality     TEXT NOT NULL DEFAULT 'fast',
+    updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS chapter_gaps (
     id          TEXT PRIMARY KEY,
     project_id  INTEGER NOT NULL,

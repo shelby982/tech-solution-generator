@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v438';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v438';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v439';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v439';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1831,9 +1831,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const warnings = Array.isArray(checks.unknown_numbers) && checks.unknown_numbers.length
         ? `<p class="cs-warning">图里有 ${checks.unknown_numbers.length} 个数字不在本节依据中，请核对：${checks.unknown_numbers.map(esc).join('、')}</p>`
         : '';
+      const geo = checks.geometry || {};
+      const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length
+        ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处越界、${(geo.overlaps || []).length} 处标签重叠，请放大预览核对。</p>`
+        : '';
       resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
         <p class="cs-muted">图型 ${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
-        ${warnings}
+        ${warnings}${geoWarnings}
         <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-again>重新生成</button>
           ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
           <button type="button" class="cs-cp-primary" data-dd-insert>插入正文</button></div>`;
@@ -2360,10 +2364,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 编写设置（项目默认 + 5 个角色，可设为项目默认/重置本章） */
   async function openWritingSettingsDialog() {
-    const [models, settingsResp] = await Promise.all([loadModelOptions(), loadWritingModels()]);
+    const [models, settingsResp, qualityResp] = await Promise.all([
+      loadModelOptions(), loadWritingModels(),
+      fetch(`/api/projects/${projectId}/diagram-settings`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).catch(() => null),
+    ]);
     const info = settingsResp || {};
     const blockSettings = info.settings || {};
     const effective = info.effective || {};
+    const qualityInfo = qualityResp || { quality: 'fast', options: [] };
+    const qualityOptions = qualityInfo.options?.length ? qualityInfo.options : [
+      { key: 'fast', label: '快速结构图（默认）' },
+      { key: 'design_architecture', label: '架构/分层图用设计版' },
+      { key: 'design_all', label: '全部图用设计版（较慢）' },
+    ];
     const dlg = globalThis.document.createElement('dialog');
     dlg.className = 'cs-plan-dialog';
     const roles = [['chief', '主编', '规划/校验'], ['text', '文字', '每节正文'], ['rewrite', '文字精修', '带原文改写'],
@@ -2380,7 +2393,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               ${blockSettings[role] ? `<em class="cs-ws-badge">本章覆盖</em>` : ''}
             </label>`).join('')}
         </div>
-        <p class="cs-dim">改完点「设为项目默认」；只影响本章请点头像旁的「换模型」。</p>
+        <label class="cs-ws-row">
+          <span class="cs-ws-name"><b>图表质量</b><small>章节批量编写时使用</small></span>
+          <select data-ws-quality>
+            ${qualityOptions.map((item) => `<option value="${esc(item.key)}" ${qualityInfo.quality === item.key ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}
+          </select>
+        </label>
+        <p class="cs-dim">改完点「设为项目默认」；只影响本章请点头像旁的「换模型」。设计版单图约 15–60 秒。</p>
       </div>
       <footer class="cs-ins-foot">
         <button type="button" class="cs-cp-ghost" data-ws-reset>重置本章覆盖</button>
@@ -2408,6 +2427,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        const quality = dlg.querySelector('[data-ws-quality]')?.value || 'fast';
+        await fetch(`/api/projects/${projectId}/diagram-settings`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quality }), signal: AbortSignal.timeout(20000),
+        });
         await loadWritingModels();
         dlg.close(); paintAside();
         status('已设为项目默认（全项目生效）');

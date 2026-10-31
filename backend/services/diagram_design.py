@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import subprocess
 import sys
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 from db import get_db
@@ -93,10 +95,12 @@ def recommend_type(title: str, text: str = "") -> str:
     return "architecture"
 
 
+@lru_cache(maxsize=64)
 def _read(rel: str) -> str:
     return (SKILL_DIR / rel).read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=8)
 def _skill_static() -> str:
     """技能静态规则。只保留一次读取；调用方按图型追加 type reference。"""
     return (
@@ -108,12 +112,12 @@ def _skill_static() -> str:
     )
 
 
-def build_prompt(brief: dict, repair: dict | None = None) -> tuple[str, str]:
-    skill_type = normalize_type(brief.get("skill_type"))
-    size_preset = normalize_size(brief.get("size_preset"))
+@lru_cache(maxsize=24)
+def _system_for(skill_type: str, size_preset: str) -> str:
+    """静态系统提示词按(图型,尺寸)缓存；同一图型重复生成不再重读/重拼技能文件。"""
     width, height = SIZE_PRESETS[size_preset]
-    type_ref = _read(f"references/type-{skill_type}.md") if (SKILL_DIR / f"references/type-{skill_type}.md").is_file() else ""
-    system = (
+    type_ref = _type_ref(skill_type)
+    return (
         "你是标书图示设计师。必须严格按 Diagram Design 技能规范，输出**一个自包含的 HTML 文件**。\n"
         "只输出 HTML 本身，不要解释，不要 Markdown 代码围栏。\n"
         "硬约束：\n"
@@ -126,6 +130,19 @@ def build_prompt(brief: dict, repair: dict | None = None) -> tuple[str, str]:
         _skill_static() +
         ("\n\n【选中图型参考】\n" + type_ref if type_ref else "")
     )
+
+
+@lru_cache(maxsize=24)
+def _type_ref(skill_type: str) -> str:
+    path = SKILL_DIR / f"references/type-{skill_type}.md"
+    return _read(f"references/type-{skill_type}.md") if path.is_file() else ""
+
+
+def build_prompt(brief: dict, repair: dict | None = None) -> tuple[str, str]:
+    skill_type = normalize_type(brief.get("skill_type"))
+    size_preset = normalize_size(brief.get("size_preset"))
+    width, height = SIZE_PRESETS[size_preset]
+    system = _system_for(skill_type, size_preset)
     payload = {
         "title": brief.get("title") or "图表",
         "section": brief.get("section") or "",
@@ -150,6 +167,10 @@ def build_prompt(brief: dict, repair: dict | None = None) -> tuple[str, str]:
             + str(repair.get("html") or "")[:30000]
         )
     return system, user
+
+
+def prompt_hash(system: str, user: str, model: str = "") -> str:
+    return hashlib.sha256(f"{model}\n{system}\n{user}".encode("utf-8")).hexdigest()
 
 
 def clean_html(raw: str) -> str:
@@ -272,8 +293,9 @@ async def generate_once(config, system: str, user: str, *, project_id: int, bloc
         )
 
 
-async def generate_valid_html(config, brief: dict, *, project_id: int, block_id: int) -> tuple[str, dict]:
-    system, user = build_prompt(brief)
+async def generate_valid_html(config, brief: dict, *, project_id: int, block_id: int,
+                             prompt: tuple[str, str] | None = None) -> tuple[str, dict]:
+    system, user = prompt or build_prompt(brief)
     raw = await generate_once(config, system, user, project_id=project_id, block_id=block_id,
                               section=str(brief.get("section") or ""), model=str(config.model))
     try:
@@ -286,6 +308,90 @@ async def generate_valid_html(config, brief: dict, *, project_id: int, block_id:
         html, checks = validate_html(raw2, brief)
         checks["repaired"] = True
         return html, checks
+
+
+async def create_asset(block: dict, brief: dict, *, force: bool = False) -> dict:
+    """生成/复用一张设计版图表；run_job 与章节自动图表共用。"""
+    async with get_db() as db:
+        config, info = await resolve_config(db, block)
+    prompt = build_prompt(brief)
+    digest = prompt_hash(prompt[0], prompt[1], str(config.model))
+    if not force:
+        cached = await diagram_assets.find_by_prompt_hash(int(block["project_id"]), digest)
+        if cached:
+            return {"asset_id": cached["id"], "title": cached.get("title") or brief.get("title") or "",
+                    "model": cached.get("model") or str(config.model),
+                    "checks": json.loads(cached.get("checks_json") or "{}"),
+                    "cached": True, "model_source": info}
+    html, checks = await generate_valid_html(config, brief, project_id=int(block["project_id"]),
+                                             block_id=int(block["id"]), prompt=prompt)
+    checks["model_source"] = info
+    checks["prompt_hash"] = digest
+    asset_id = diagram_assets.new_asset_id()
+    html_file = diagram_assets.html_path(int(block["project_id"]), asset_id)
+    png_file = diagram_assets.png_path(int(block["project_id"]), asset_id)
+    html_file.parent.mkdir(parents=True, exist_ok=True)
+    html_file.write_text(html, encoding="utf-8")
+    from services.diagram_render import render_png
+    width, height, geometry = await render_png(html_file, png_file, scale=SIZE_SCALE[brief["size_preset"]])
+    checks["png_size"] = [width, height]
+    checks["geometry"] = geometry
+    await diagram_assets.save_asset(
+        int(block["project_id"]), int(block["id"]), section=str(brief.get("section") or ""),
+        title=str(brief.get("title") or "图表"), skill_type=brief["skill_type"],
+        size_preset=brief["size_preset"], html=html, png=png_file.read_bytes(), svg="", brief=brief,
+        checks=checks, model=str(config.model), width=width, height=height,
+        asset_id=asset_id, prompt_hash=digest,
+    )
+    return {"asset_id": asset_id, "title": brief.get("title") or "", "model": str(config.model),
+            "checks": checks, "cached": False, "model_source": info}
+
+
+def asset_markdown(asset_id: str, title: str) -> str:
+    safe_title = str(title or "图表").strip()[:80] or "图表"
+    return f":::figure {safe_title}\n![{safe_title.replace(']', '')}](/api/studio/diagrams/{asset_id}/image)\n:::"
+
+
+async def project_quality(project_id: int) -> str:
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT quality FROM diagram_settings WHERE project_id=?", (int(project_id),)
+        )).fetchone()
+    return str(row[0]) if row and row[0] in ("fast", "design_architecture", "design_all") else "fast"
+
+
+def design_type_for(deliverable: dict) -> str:
+    explicit = str(deliverable.get("design_type") or "").strip()
+    if explicit in SKILL_TYPES:
+        return explicit
+    title = str(deliverable.get("title") or "")
+    if any(word in title for word in ("架构", "集成", "平台")):
+        return "architecture"
+    return {"layered": "layers", "flow": "process", "timeline": "timeline"}.get(
+        str(deliverable.get("type") or "layered"), "architecture")
+
+
+async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
+    basis = [str((b or {}).get("ref") or "") for b in (section.get("basis") or []) if (b or {}).get("ref")]
+    points = [str(x) for x in (section.get("points") or [])]
+    elements = [str(x) for x in (deliverable.get("elements") or []) if str(x).strip()] or points
+    return {
+        "title": str(deliverable.get("title") or "图表")[:120],
+        "section": str(section.get("title") or "")[:120],
+        "skill_type": design_type_for(deliverable),
+        "size_preset": "doc-wide",
+        "text": "\n".join([str(section.get("title") or ""), *points, *basis])[:6000],
+        "elements": elements[:12],
+        "evidence": basis[:8],
+        "caption": str(deliverable.get("title") or "")[:160],
+    }
+
+
+async def design_section_figure(block: dict, section: dict, deliverable: dict) -> dict:
+    """章节自动编写：生成一张设计版图并返回可插入正文的 markdown。"""
+    brief = await section_brief(block, section, deliverable)
+    result = await create_asset(block, brief)
+    return {**result, "markdown": asset_markdown(result["asset_id"], result["title"]), "ok": True}
 
 
 async def run_job(job_id: str) -> None:
@@ -302,32 +408,9 @@ async def run_job(job_id: str) -> None:
         brief["skill_type"] = normalize_type(brief.get("skill_type"))
         brief["size_preset"] = normalize_size(brief.get("size_preset"))
         await diagram_assets.set_job(job_id, status="running", stage="准备设计规范")
-        async with get_db() as db:
-            config, info = await resolve_config(db, block)
-        await diagram_assets.set_job(job_id, stage=f"正在设计图表（{config.model}）")
-        html, checks = await generate_valid_html(config, brief, project_id=int(block["project_id"]),
-                                                 block_id=int(block["id"]))
-        checks["model_source"] = info
-
-        asset_id = diagram_assets.new_asset_id()
-        html_file = diagram_assets.html_path(int(block["project_id"]), asset_id)
-        png_file = diagram_assets.png_path(int(block["project_id"]), asset_id)
-        html_file.parent.mkdir(parents=True, exist_ok=True)
-        html_file.write_text(html, encoding="utf-8")
-        await diagram_assets.set_job(job_id, stage="正在渲染图片")
-        from services.diagram_render import render_png
-        width, height = await render_png(html_file, png_file, scale=SIZE_SCALE[brief["size_preset"]])
-        png = png_file.read_bytes()
-        svg = ""
-        checks["png_size"] = [width, height]
-        await diagram_assets.save_asset(
-            int(block["project_id"]), int(block["id"]), section=str(brief.get("section") or ""),
-            title=str(brief.get("title") or "图表"), skill_type=brief["skill_type"],
-            size_preset=brief["size_preset"], html=html, png=png, svg=svg, brief=brief,
-            checks=checks, model=str(config.model), width=width, height=height,
-            asset_id=asset_id,
-        )
-        await diagram_assets.set_job(job_id, status="done", stage="已完成", asset_id=asset_id, error="")
+        result = await create_asset(block, brief, force=bool(brief.get("force")))
+        await diagram_assets.set_job(job_id, status="done", stage="已完成",
+                                     asset_id=result["asset_id"], error="")
     except Exception as exc:  # noqa: BLE001
         await diagram_assets.set_job(job_id, status="failed", stage="失败", error=str(exc)[:800])
 
