@@ -213,3 +213,42 @@ def test_compact_prompt_keeps_chinese_rules_and_is_smaller():
     assert "Mandatory connector rules" in system
     assert len(system) < 70000, len(system)
     assert "总体技术架构图" in user
+
+
+def test_strict_numbers_reject_invented_numbers():
+    brief = {"title": "图", "skill_type": "architecture", "size_preset": "doc-wide",
+             "text": "接入层", "elements": ["接入层"], "strict_numbers": True,
+             "strict_elements": True}
+    html = ('<html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img">'
+            '<title>图</title><desc>说明</desc><text>接入层</text><text>端口 999</text>'
+            '</svg></body></html>')
+    with pytest.raises(diagram_design.DiagramValidationError):
+        diagram_design.validate_html(html, brief)
+
+
+async def test_deleted_asset_is_no_longer_served(env, monkeypatch):
+    async def fake_generate(config, brief, *, project_id, block_id, prompt=None):
+        html = ('<!doctype html><html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" '
+                'role="img"><title>图</title><desc>说明</desc><text>接入层</text><text>服务层</text>'
+                '</svg></body></html>')
+        return html, {"self_check": True}
+
+    async def fake_render(html_path, png_path, scale=2):
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 16)
+        return 100, 100, {"texts": 2, "overflow": [], "overlaps": [], "shapes_overflow": []}
+
+    async def fake_config(db, block):
+        return SimpleNamespace(model="test", provider="openai"), {}
+
+    monkeypatch.setattr(diagram_design, "generate_valid_html", fake_generate)
+    monkeypatch.setattr(diagram_design, "resolve_config", fake_config)
+    monkeypatch.setattr("services.diagram_render.render_png", fake_render)
+    created = await env.client.post(f"/api/blocks/{env.block['id']}/studio/diagram-assets",
+                                    json={"title": "图", "text": "接入层、服务层"})
+    job_id = created.json()["job_id"]
+    await diagram_design.run_job(job_id)
+    status = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{job_id}")).json()
+    asset_id = status["asset_id"]
+    assert (await env.client.delete(f"/api/studio/diagrams/{asset_id}")).status_code == 200
+    assert (await env.client.get(f"/api/studio/diagrams/{asset_id}/image")).status_code == 404

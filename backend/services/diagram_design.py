@@ -244,6 +244,10 @@ def validate_html(html: str, brief: dict) -> tuple[str, dict]:
         if number and number not in allowed:
             unknown.append(number)
     checks["unknown_numbers"] = sorted(set(unknown))[:8]
+    if brief.get("strict_elements") and checks.get("elements_missing"):
+        errors.append("缺少计划要素：" + "、".join(checks["elements_missing"]))
+    if brief.get("strict_numbers") and checks.get("unknown_numbers"):
+        errors.append("出现 brief 之外的数字：" + "、".join(checks["unknown_numbers"]))
     if errors:
         raise DiagramValidationError("；".join(errors))
     return text, checks
@@ -325,10 +329,15 @@ async def create_asset(block: dict, brief: dict, *, force: bool = False) -> dict
     if not force:
         cached = await diagram_assets.find_by_prompt_hash(int(block["project_id"]), digest)
         if cached:
-            return {"asset_id": cached["id"], "title": cached.get("title") or brief.get("title") or "",
-                    "model": cached.get("model") or str(config.model),
-                    "checks": json.loads(cached.get("checks_json") or "{}"),
-                    "cached": True, "model_source": info}
+            cached_checks = json.loads(cached.get("checks_json") or "{}")
+            strict_invalid = (
+                (brief.get("strict_elements") and cached_checks.get("elements_missing"))
+                or (brief.get("strict_numbers") and cached_checks.get("unknown_numbers"))
+            )
+            if not strict_invalid:
+                return {"asset_id": cached["id"], "title": cached.get("title") or brief.get("title") or "",
+                        "model": cached.get("model") or str(config.model),
+                        "checks": cached_checks, "cached": True, "model_source": info}
     html, checks = await generate_valid_html(config, brief, project_id=int(block["project_id"]),
                                              block_id=int(block["id"]), prompt=prompt)
     checks["model_source"] = info
@@ -397,6 +406,8 @@ async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
         "elements": elements[:12],
         "evidence": basis[:8],
         "caption": str(deliverable.get("title") or "")[:160],
+        "strict_numbers": True,
+        "strict_elements": True,
     }
 
 

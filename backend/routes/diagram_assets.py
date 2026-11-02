@@ -157,6 +157,14 @@ async def diagram_svg(asset_id: str):
                              "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'"})
 
 
+@router.delete('/studio/diagrams/{asset_id}')
+async def remove_diagram(asset_id: str):
+    deleted = await diagram_assets.delete_asset(asset_id)
+    if not deleted:
+        raise HTTPException(404, "图表不存在")
+    return {"deleted": True}
+
+
 @router.get('/studio/diagrams/{asset_id}/image')
 async def diagram_image(asset_id: str):
     asset = await diagram_assets.get_asset(asset_id)

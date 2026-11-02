@@ -134,3 +134,10 @@ bash start.sh
 - 默认使用精简版；`DIAGRAM_FULL_PROMPT=1` 可切回完整版做质量对照。
 - 实测同一架构 brief：`deepseek-flash` 约 20s 完成，PNG 2560×1440，`self_check` 通过，`elements_missing=[]`，几何审计无越界/重叠；未知数字（443/L4/L7）进入 `unknown_numbers` 提示。
 - 仍建议对真实章节做 A/B：精简版 vs 完整版的质量/耗时/token。
+
+## P2 续做（质量门与资产删除）
+
+- **自动设计版质量门**：`section_brief` 带 `strict_numbers/strict_elements`；自动图表若出现 brief 外数字或缺少计划要素，直接判生成失败并回退快速结构图（手工入口仍只提示、不阻断）。
+- **缓存安全**：严格模式下命中缓存时，会检查缓存资产的 `unknown_numbers/elements_missing`；不合格的缓存不复用。
+- **资产删除**：`DELETE /api/studio/diagrams/{id}` 软删；图片/SVG/预览接口对已删除资产返回 404。
+- 新增测试：严格数字拦截、缓存安全路径、删除后不可访问。

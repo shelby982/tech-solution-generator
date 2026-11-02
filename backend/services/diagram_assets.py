@@ -124,3 +124,13 @@ def read_html(asset: dict) -> str:
     if text:
         return text
     return html_path(int(asset["project_id"]), str(asset["id"])).read_text(encoding="utf-8")
+
+
+async def delete_asset(asset_id: str) -> bool:
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE diagram_assets SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL",
+            (asset_id,),
+        )
+        await db.commit()
+    return bool(cur.rowcount)
