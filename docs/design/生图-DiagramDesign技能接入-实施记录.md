@@ -141,3 +141,9 @@ bash start.sh
 - **缓存安全**：严格模式下命中缓存时，会检查缓存资产的 `unknown_numbers/elements_missing`；不合格的缓存不复用。
 - **资产删除**：`DELETE /api/studio/diagrams/{id}` 软删；图片/SVG/预览接口对已删除资产返回 404。
 - 新增测试：严格数字拦截、缓存安全路径、删除后不可访问。
+
+## P2 续做（连线穿字审计）
+
+- 几何审计增加 `line` 线段与文字矩形相交检测（Liang-Barsky），结果 `checks.geometry.line_text_hits`。
+- 前端预览把「连线穿字」纳入几何警告；仍只提示、不阻断。
+- 局限：只检测 `<line>`，不解析 `<path>` 曲线/折线；复杂连线仍建议人工放大核对。

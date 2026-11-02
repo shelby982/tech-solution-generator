@@ -87,7 +87,7 @@ def _audit_geometry(page) -> dict:
         return page.evaluate(
             """() => {
                 const svg = document.querySelector('svg');
-                if (!svg) return {texts: 0, overflow: [], overlaps: [], shapes_overflow: []};
+                if (!svg) return {texts: 0, overflow: [], overlaps: [], shapes_overflow: [], line_text_hits: []};
                 const vb = svg.viewBox && svg.viewBox.baseVal;
                 const boxes = [...svg.querySelectorAll('text')]
                     .filter((el) => (el.textContent || '').trim())
@@ -104,6 +104,29 @@ def _audit_geometry(page) -> dict:
                     .filter(Boolean);
                 const shapesOverflow = vb ? shapes.filter((b) => b.x < -4 || b.y < -4 ||
                     b.x + b.w > vb.width + 4 || b.y + b.h > vb.height + 4).slice(0, 8) : [];
+                const lineTextHits = [];
+                const lines = [...svg.querySelectorAll('line')].map((el) => ({
+                    x1: +el.getAttribute('x1') || 0, y1: +el.getAttribute('y1') || 0,
+                    x2: +el.getAttribute('x2') || 0, y2: +el.getAttribute('y2') || 0,
+                })).filter((l) => (l.x1 !== l.x2 || l.y1 !== l.y2));
+                const segRect = (l, b) => {
+                    // Liang-Barsky：线段与文字矩形是否相交
+                    let t0 = 0, t1 = 1;
+                    const dx = l.x2 - l.x1, dy = l.y2 - l.y1;
+                    const p = [-dx, dx, -dy, dy];
+                    const q = [l.x1 - b.x, b.x + b.w - l.x1, l.y1 - b.y, b.y + b.h - l.y1];
+                    for (let i = 0; i < 4; i += 1) {
+                        if (p[i] === 0) { if (q[i] < 0) return false; continue; }
+                        const r = q[i] / p[i];
+                        if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+                        else { if (r < t0) return false; if (r < t1) t1 = r; }
+                    }
+                    return t0 <= t1;
+                };
+                for (const b of boxes) {
+                    if (lineTextHits.length >= 8) break;
+                    if (lines.some((l) => segRect(l, b))) lineTextHits.push(b.text);
+                }
                 const overlaps = [];
                 const area = (b) => Math.max(0, b.w) * Math.max(0, b.h);
                 for (let i = 0; i < boxes.length && overlaps.length < 8; i += 1) {
@@ -117,11 +140,13 @@ def _audit_geometry(page) -> dict:
                         }
                     }
                 }
-                return {texts: boxes.length, overflow, overlaps, shapes_overflow: shapesOverflow};
+                return {texts: boxes.length, overflow, overlaps, shapes_overflow: shapesOverflow,
+                        line_text_hits: lineTextHits};
             }"""
         )
     except Exception:  # noqa: BLE001
-        return {"texts": 0, "overflow": [], "overlaps": [], "shapes_overflow": [], "error": "geometry audit failed"}
+        return {"texts": 0, "overflow": [], "overlaps": [], "shapes_overflow": [],
+                "line_text_hits": [], "error": "geometry audit failed"}
 
 
 async def render_png(html_path: Path, out_path: Path, scale: int = 2) -> tuple[int, int, dict]:
