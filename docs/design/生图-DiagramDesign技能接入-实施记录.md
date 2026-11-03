@@ -160,7 +160,7 @@ bash start.sh
 - 后端 `DiagramDesignBody` 增加 `purpose/claim/score_refs/mapping/source_refs`；score/compare 缺评分点返回 422。
 - 提示词增加「评标正式版」约束：顶部图标题/评分点/结论三行、层带语义、证据区不占层带、可打印字号、安全边距。
 - 校验增加 `score_visible/claim_visible`；自动严格模式缺失会回退；手工只警告。
-- 自动 `section_brief` 读取本节正文（Markdown 标题下正文），不再只读 points/basis。
+- 自动 `section_brief` 读取本节正文（Markdown 标题下正文），并从已有 `:::diagram` 节点抽取 elements，不再只读 points/basis。
 - 推荐图型现在会覆盖默认架构图（之前被 `presetType` 钉死）。
 - 前端资源版本 `20261016-v446`。
 - 评分点选择器：从本章 plan `basis(type=score_point)` 聚合；无评分点时提示直接粘贴条款号。
@@ -171,4 +171,4 @@ bash start.sh
 
 - 后端 `1037 passed, 1 deselected`；前端 `156 pass`。
 - 真实 `deepseek-flash` 生成样例：顶部标题/评分点/结论、三层带、证据对照区、图例齐全；`self_check` 通过，`score_visible/claim_visible=true`，几何无越界。
-- 仍待：图号自动生成、评分点选择器（当前文本+自动带出）、图骨架编辑、真实章节 A/B。
+- 仍待：严格章节号、真实章节 A/B（已完成 1 个真实章节试跑）、多图批量评估。
