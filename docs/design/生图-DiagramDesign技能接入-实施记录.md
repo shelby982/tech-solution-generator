@@ -147,3 +147,25 @@ bash start.sh
 - 几何审计增加 `line` 线段与文字矩形相交检测（Liang-Barsky），结果 `checks.geometry.line_text_hits`。
 - 前端预览把「连线穿字」纳入几何警告；仍只提示、不阻断。
 - 局限：只检测 `<line>`，不解析 `<path>` 曲线/折线；复杂连线仍建议人工放大核对。
+
+## P3 续做（评标专家输入与正式版）
+
+- 输入弹窗从“图名/图型/尺寸/内容”改为 **评标用途卡**：
+  - 用途：证明评分点 / 解释方案现状 / 对比选择；
+  - 条件必填：对应评分点/条款（score/compare）；
+  - 必填：结论、关键要素、依据来源；
+  - 评分证据图填「要求 → 响应 → 证据」；
+  - 对应章节自动带出本节 points/basis；
+  - 图型/尺寸收进高级设置。
+- 后端 `DiagramDesignBody` 增加 `purpose/claim/score_refs/mapping/source_refs`；score/compare 缺评分点返回 422。
+- 提示词增加「评标正式版」约束：顶部图标题/评分点/结论三行、层带语义、证据区不占层带、可打印字号、安全边距。
+- 校验增加 `score_visible/claim_visible`；自动严格模式缺失会回退；手工只警告。
+- 自动 `section_brief` 读取本节正文（Markdown 标题下正文），不再只读 points/basis。
+- 推荐图型现在会覆盖默认架构图（之前被 `presetType` 钉死）。
+- 前端资源版本 `20261016-v443`。
+
+### 验证
+
+- 后端 `1037 passed, 1 deselected`；前端 `156 pass`。
+- 真实 `deepseek-flash` 生成样例：顶部标题/评分点/结论、三层带、证据对照区、图例齐全；`self_check` 通过，`score_visible/claim_visible=true`，几何无越界。
+- 仍待：图号自动生成、评分点选择器（当前文本+自动带出）、图骨架编辑、真实章节 A/B。
