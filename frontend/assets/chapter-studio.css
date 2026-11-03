@@ -1060,7 +1060,17 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-design-dialog .cs-field input, .cs-design-dialog .cs-field textarea, .cs-design-dialog .cs-field select { width: 100%; box-sizing: border-box; border: 1px solid #dbe3ef; border-radius: 6px; padding: 7px 8px; font: inherit; font-size: 12px; color: #172033; background: #fff; }
 .cs-design-dialog .cs-field textarea { resize: vertical; line-height: 1.7; }
 .cs-design-dialog .cs-dd-row .cs-field { margin: 0; }
-.cs-design-dialog .cs-dd-skeleton { margin: 8px 0 2px; padding: 7px 9px; border-radius: 6px; background: #f7f8fa; font-size: 12px; color: #4b5563; }
+.cs-design-dialog .cs-dd-skeleton { margin: 8px 0 2px; padding: 8px 9px; border-radius: 6px; background: #f7f8fa; font-size: 12px; color: #4b5563; }
+.cs-design-dialog .cs-dd-node-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cs-design-dialog .cs-dd-node { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 7px; border: 1px solid #bfdbfe; border-radius: 999px; background: #fff; color: #1e3a8a; }
+.cs-design-dialog .cs-dd-node b { font-weight: 500; }
+.cs-design-dialog .cs-dd-node button { border: 0; background: transparent; padding: 1px 3px; font-size: 11px; color: #64748b; cursor: pointer; }
+.cs-design-dialog .cs-dd-node button:hover { color: #1d4ed8; }
+.cs-design-dialog .cs-dd-node-warn { color: #b45309; }
+.cs-design-dialog .cs-dd-node-tools { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.cs-design-dialog .cs-dd-node-tools input { flex: 1; min-width: 0; border: 1px solid #dbe3ef; border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.cs-design-dialog .cs-dd-node-tools button { border: 1px solid #dbe3ef; background: #fff; border-radius: 5px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.cs-design-dialog .cs-dd-node-hint { font-size: 11px; color: #64748b; white-space: nowrap; }
 .cs-design-dialog .cs-dd-advanced { margin: 8px 0 4px; border-top: 1px dashed var(--line, #e5e7eb); padding-top: 8px; }
 .cs-design-dialog .cs-dd-advanced summary { cursor: pointer; font-size: 13px; color: var(--text-2, #4b5563); }
 .cs-design-dialog .cs-dd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

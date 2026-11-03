@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v446';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v446';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v447';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v447';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1796,7 +1796,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <input data-dd-refs maxlength="600" value="${esc(initialRefs.join('；'))}" placeholder="招标文件条款、素材/页码…" />
           </label>
         </div>
-        <p class="cs-dd-skeleton" data-dd-skeleton></p>
+        <div class="cs-dd-skeleton" data-dd-skeleton></div>
         <label class="cs-field"><span>补充说明 / 选中文字（可选）</span>
           <textarea data-dd-text rows="3" maxlength="6000" placeholder="可以粘贴本节正文或补充约束；不填也可以生成">${esc(selected.slice(0, 6000))}</textarea>
         </label>
@@ -1854,12 +1854,41 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const renderSkeleton = () => {
       const els = splitList(elementsEl.value);
       const rows = String(mappingEl.value || '').split(/\n+/).map((line) => line.split(/[|｜\t]/).map((x) => x.trim())).filter((parts) => parts.length >= 2);
-      const head = els.length >= 2 ? `图骨架：${els.join(' → ')}` : '图骨架：要素不足，至少填 2 个';
-      const tail = purposeEl.value !== 'explain' && rows.length
-        ? `；${rows.length} 组「要求→响应→证据」会进入图中`
-        : '';
-      skeletonEl.textContent = head + tail;
+      const chips = els.map((name, index) => `<span class="cs-dd-node"><button type="button" data-node-op="up" data-node-i="${index}" title="上移">↑</button><b>${esc(name)}</b><button type="button" data-node-op="down" data-node-i="${index}" title="下移">↓</button><button type="button" data-node-op="del" data-node-i="${index}" title="删除">×</button></span>`).join('');
+      const warning = els.length < 2 ? '<span class="cs-dd-node-warn">至少 2 个</span>' : '';
+      const tail = purposeEl.value !== 'explain' && rows.length ? ` · ${rows.length} 组要求/响应/证据` : '';
+      skeletonEl.innerHTML = `<div class="cs-dd-node-list">${chips || '<span class="cs-dd-node-warn">还没有节点</span>'}${warning}</div>
+        <div class="cs-dd-node-tools"><input data-dd-node-new maxlength="80" placeholder="添加一个节点，回车" /><button type="button" data-dd-node-add>添加</button><span class="cs-dd-node-hint">图骨架（顺序可调）${tail}</span></div>`;
     };
+    skeletonEl.addEventListener('click', (event) => {
+      const add = event.target.closest('[data-dd-node-add]');
+      if (add) {
+        const input = skeletonEl.querySelector('[data-dd-node-new]');
+        const value = String(input?.value || '').trim();
+        if (value) {
+          const list = splitList(elementsEl.value);
+          list.push(value);
+          elementsEl.value = list.join('、');
+          renderSkeleton();
+        }
+        return;
+      }
+      const op = event.target.closest('[data-node-op]');
+      if (!op) return;
+      const list = splitList(elementsEl.value);
+      const index = Number(op.dataset.nodeI || -1);
+      if (index < 0 || index >= list.length) return;
+      if (op.dataset.nodeOp === 'del') list.splice(index, 1);
+      if (op.dataset.nodeOp === 'up' && index > 0) [list[index - 1], list[index]] = [list[index], list[index - 1]];
+      if (op.dataset.nodeOp === 'down' && index < list.length - 1) [list[index + 1], list[index]] = [list[index], list[index + 1]];
+      elementsEl.value = list.join('、');
+      renderSkeleton();
+    });
+    skeletonEl.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || !event.target.closest('[data-dd-node-new]')) return;
+      event.preventDefault();
+      skeletonEl.querySelector('[data-dd-node-add]')?.click();
+    });
     const syncSkills = () => { syncPurpose(); renderSkeleton(); };
     scorePickEl.innerHTML = `<option value="">${allScoreRefs.length ? '— 从本章评分点选择 —' : '本章未识别评分点，可直接粘贴条款号'}</option>` + allScoreRefs.map((ref) => `<option value="${esc(ref)}">${esc(ref)}</option>`).join('');
     scorePickEl.addEventListener('change', () => {
