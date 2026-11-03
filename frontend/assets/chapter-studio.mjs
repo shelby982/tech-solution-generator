@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v442';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v442';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v443';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v443';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1829,6 +1829,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const hintEl = dialog.querySelector('[data-dd-hint]');
     const resultEl = dialog.querySelector('[data-dd-result]');
     const runBtn = dialog.querySelector('[data-dd-run]');
+    let typeTouched = false;
     let lastAutoTitle = titleEl.value;
     let lastAutoElements = elementsEl.value;
     let lastAutoScore = scoreEl.value;
@@ -1854,7 +1855,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const found = pool.find((x) => (Array.isArray(x) ? x[0] : x.key) === recommended);
       const foundLabel = Array.isArray(found) ? found[1] : (found && found.label);
       hintEl.textContent = `推荐图型：${foundLabel || recommended || '架构图'}`;
+      if (recommended && !typeTouched && [...typeEl.options].some((option) => option.value === recommended)) {
+        typeEl.value = recommended;
+      }
     };
+    typeEl.addEventListener('change', () => { typeTouched = true; });
     const applySection = (name) => {
       const sec = sectionFor(name);
       const score = scoreRefsFor(sec);
