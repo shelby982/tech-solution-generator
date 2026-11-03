@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from db import get_db
 from services import diagram_assets
 from services.diagram_design import (
-    SKILL_TYPES, normalize_size, normalize_type, queue_job, recommend_type,
+    SKILL_TYPES, normalize_purpose, normalize_size, normalize_type, queue_job, recommend_type,
 )
 
 router = APIRouter(tags=["diagram-design"])
@@ -53,6 +53,12 @@ async def save_diagram_settings(project_id: int, body: DiagramQualityBody):
     return {"quality": quality}
 
 
+class DiagramMappingRow(BaseModel):
+    requirement: str = Field(default="", max_length=200)
+    response: str = Field(default="", max_length=200)
+    evidence: str = Field(default="", max_length=200)
+
+
 class DiagramDesignBody(BaseModel):
     title: str = Field(default="", max_length=120)
     text: str = Field(default="", max_length=8000)
@@ -62,6 +68,11 @@ class DiagramDesignBody(BaseModel):
     elements: list[str] = Field(default_factory=list, max_length=12)
     evidence: list[str] = Field(default_factory=list, max_length=8)
     caption: str = Field(default="", max_length=160)
+    purpose: str = Field(default="", max_length=40)
+    claim: str = Field(default="", max_length=300)
+    score_refs: list[str] = Field(default_factory=list, max_length=8)
+    mapping: list[DiagramMappingRow] = Field(default_factory=list, max_length=8)
+    source_refs: list[str] = Field(default_factory=list, max_length=8)
 
 
 @router.get('/blocks/{block_id}/studio/diagram-design/types')
@@ -89,6 +100,9 @@ async def create_diagram(block_id: int, body: DiagramDesignBody):
     title = (body.title or block.get("title") or "图表").strip()[:120]
     if not text:
         text = (str(block.get("content") or "")[:4000] or title)
+    purpose = normalize_purpose(body.purpose, body.score_refs)
+    if purpose in ("score_evidence", "compare") and not body.score_refs:
+        raise HTTPException(422, "请先选择对应评分点/条款")
     skill_type = normalize_type(body.skill_type or recommend_type(title, text))
     size_preset = normalize_size(body.size_preset)
     brief = {
@@ -100,6 +114,11 @@ async def create_diagram(block_id: int, body: DiagramDesignBody):
         "elements": [str(x)[:80] for x in body.elements][:12],
         "evidence": [str(x)[:500] for x in body.evidence][:8],
         "caption": (body.caption or title)[:160],
+        "purpose": purpose,
+        "claim": (body.claim or "").strip()[:300],
+        "score_refs": [str(x)[:160] for x in body.score_refs][:8],
+        "mapping": [row.model_dump() for row in body.mapping][:8],
+        "source_refs": [str(x)[:300] for x in body.source_refs][:8],
     }
     job_id = await diagram_assets.create_job(int(block["project_id"]), int(block_id), brief)
     queue_job(job_id)

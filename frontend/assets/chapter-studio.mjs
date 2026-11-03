@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v441';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v441';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v442';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v442';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1738,41 +1738,111 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function openDesignDiagramDialog(presetType = 'architecture') {
     if (!active) return;
     const selected = String(editor.value || '').slice(editor.selectionStart || 0, editor.selectionEnd || 0).trim();
-    const outline = planBrief?.outline || [];
-    const gist = selected.length >= 10
-      ? selected.slice(0, 6000)
-      : [active.title || '', ...outline.flatMap((sec) => [sec.title, ...(sec.points || [])])].filter(Boolean).join('\n').slice(0, 6000);
+    const outline = (planBrief?.outline || []).filter((s) => s && s.title);
+    const sectionNames = outline.map((s) => String(s.title));
+    const defaultSection = sectionNames[0] || active.title || '本节';
+    const splitList = (value) => String(value || '')
+      .split(/[、,，;；\n]/).map((x) => x.trim()).filter(Boolean);
+    const sectionFor = (name) => outline.find((s) => String(s.title) === name) || null;
+    const scoreRefsFor = (sec) => (sec?.basis || [])
+      .filter((b) => b && String(b.type || '') === 'score_point' && b.ref)
+      .map((b) => String(b.ref));
+    const sourceRefsFor = (sec) => (sec?.basis || [])
+      .filter((b) => b && b.ref && String(b.type || '') !== 'score_point')
+      .map((b) => String(b.ref));
+    const elementsFor = (sec) => {
+      const fromPoints = (sec?.points || []).map((x) => String(x).trim()).filter(Boolean);
+      if (fromPoints.length) return fromPoints;
+      const figure = (sec?.deliverables || []).find((d) => d && d.kind === 'figure');
+      return (figure?.elements || []).map((x) => String(x).trim()).filter(Boolean);
+    };
+    const firstSection = sectionFor(defaultSection);
+    const initialScoreRefs = scoreRefsFor(firstSection);
+    const initialRefs = sourceRefsFor(firstSection);
+    const initialElements = elementsFor(firstSection);
     const dialog = globalThis.document.createElement('dialog');
     dialog.className = 'cs-plan-dialog cs-design-dialog';
     dialog.innerHTML = `<header><h3>AI 生成图表（设计版）</h3><button type="button" data-dd-close>×</button></header>
       <div class="cs-plan-body">
-        <p class="cs-muted">由 Diagram Design 规范生成，只使用下面的内容；生成后先预览，再插入正文。</p>
-        <label class="cs-field"><span>图名</span><input data-dd-title maxlength="80" value="${esc(active.title || '架构图')}" /></label>
+        <p class="cs-muted">读者固定为评标专家。先告诉系统这张图要证明/解释什么，再生成；图型/尺寸在高级设置里。</p>
         <div class="cs-dd-row">
-          <label class="cs-field"><span>图型</span><select data-dd-type><option value="architecture">架构图（推荐）</option></select></label>
-          <label class="cs-field"><span>尺寸</span><select data-dd-size>
-            <option value="doc-wide">文档宽（推荐）</option><option value="doc-inline">文档内</option>
-            <option value="print-a4-landscape">A4 横向打印</option><option value="slide-16x9">16:9 整页</option>
-          </select></label>
+          <label class="cs-field"><span>这张图用来做什么</span>
+            <select data-dd-purpose>
+              <option value="score_evidence">证明评分点</option>
+              <option value="explain">解释方案/现状</option>
+              <option value="compare">对比/选择</option>
+            </select>
+          </label>
+          <label class="cs-field"><span>对应章节</span>
+            <select data-dd-section>${(sectionNames.length ? sectionNames : [defaultSection]).map((name) => `<option value="${esc(name)}"${name === defaultSection ? ' selected' : ''}>${esc(name)}</option>`).join('')}</select>
+          </label>
         </div>
-        <label class="cs-field"><span>内容来源（本节要点 / 选中文字）</span><textarea data-dd-text rows="6">${esc(gist)}</textarea></label>
-        <p class="cs-muted" data-dd-hint>正在读取图型…</p>
+        <label class="cs-field" data-dd-score-wrap><span>对应评分点 / 条款</span>
+          <input data-dd-score maxlength="360" value="${esc(initialScoreRefs.slice(0, 2).join('；'))}" placeholder="从本章评分点选，或粘贴条款号；多个用分号分隔" />
+        </label>
+        <label class="cs-field"><span>让评标专家得出什么结论（必填）</span>
+          <textarea data-dd-claim rows="2" maxlength="300" placeholder="例：平台满足三级等保，并通过双中心双活实现业务连续性"></textarea>
+        </label>
+        <label class="cs-field" data-dd-mapping-wrap><span>招标要求 → 方案响应 → 证据</span>
+          <textarea data-dd-mapping rows="4" maxlength="2400" placeholder="每行一组：招标要求 | 我们的响应 | 证据/依据&#10;例：双活要求 | 双中心双活部署 | 招标文件 5.2.3；素材第 12 页"></textarea>
+        </label>
+        <div class="cs-dd-row">
+          <label class="cs-field"><span>关键要素（至少 2 个，建议 3–7 个）</span>
+            <input data-dd-elements maxlength="600" value="${esc(initialElements.join('、'))}" placeholder="接入网关、客户档案服务、标签服务…" />
+          </label>
+          <label class="cs-field"><span>依据来源（可选）</span>
+            <input data-dd-refs maxlength="600" value="${esc(initialRefs.join('；'))}" placeholder="招标文件条款、素材/页码…" />
+          </label>
+        </div>
+        <label class="cs-field"><span>补充说明 / 选中文字（可选）</span>
+          <textarea data-dd-text rows="3" maxlength="6000" placeholder="可以粘贴本节正文或补充约束；不填也可以生成">${esc(selected.slice(0, 6000))}</textarea>
+        </label>
+        <details class="cs-dd-advanced">
+          <summary>高级设置（图型 / 尺寸 / 图名）</summary>
+          <div class="cs-dd-row">
+            <label class="cs-field"><span>图名</span><input data-dd-title maxlength="80" value="${esc(active.title || defaultSection)}" /></label>
+            <label class="cs-field"><span>图型</span><select data-dd-type><option value="architecture">架构图（推荐）</option></select></label>
+            <label class="cs-field"><span>尺寸</span><select data-dd-size>
+              <option value="doc-wide">文档宽（推荐）</option><option value="doc-inline">文档内</option>
+              <option value="print-a4-landscape">A4 横向打印</option><option value="slide-16x9">16:9 整页</option>
+            </select></label>
+          </div>
+          <p class="cs-muted" data-dd-hint>正在读取图型…</p>
+        </details>
         <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-cancel>取消</button>
           <button type="button" class="cs-cp-primary" data-dd-run>生成预览</button></div>
         <div data-dd-result></div>
       </div>`;
-    const typeEl = dialog.querySelector('[data-dd-type]');
-    const sizeEl = dialog.querySelector('[data-dd-size]');
+    const purposeEl = dialog.querySelector('[data-dd-purpose]');
+    const sectionEl = dialog.querySelector('[data-dd-section]');
+    const scoreEl = dialog.querySelector('[data-dd-score]');
+    const scoreWrap = dialog.querySelector('[data-dd-score-wrap]');
+    const claimEl = dialog.querySelector('[data-dd-claim]');
+    const mappingEl = dialog.querySelector('[data-dd-mapping]');
+    const mappingWrap = dialog.querySelector('[data-dd-mapping-wrap]');
+    const elementsEl = dialog.querySelector('[data-dd-elements]');
+    const refsEl = dialog.querySelector('[data-dd-refs]');
     const textEl = dialog.querySelector('[data-dd-text]');
     const titleEl = dialog.querySelector('[data-dd-title]');
+    const typeEl = dialog.querySelector('[data-dd-type]');
+    const sizeEl = dialog.querySelector('[data-dd-size]');
     const hintEl = dialog.querySelector('[data-dd-hint]');
     const resultEl = dialog.querySelector('[data-dd-result]');
     const runBtn = dialog.querySelector('[data-dd-run]');
+    let lastAutoTitle = titleEl.value;
+    let lastAutoElements = elementsEl.value;
+    let lastAutoScore = scoreEl.value;
+    let lastAutoRefs = refsEl.value;
     const fallbackTypes = [
       ['architecture', '架构图'], ['layers', '分层图'], ['process', '流程图'], ['flowchart', '决策流程'],
       ['timeline', '时间线'], ['tree', '目标分解'], ['pyramid', '金字塔'], ['quadrant', '矩阵图'],
       ['loop', '闭环图'], ['org-chart', '组织图'], ['data-flow', '数据流'], ['architecture-delta', '现状对比'],
     ];
+    const syncPurpose = () => {
+      const scoring = purposeEl.value !== 'explain';
+      scoreWrap.hidden = !scoring;
+      mappingWrap.hidden = !scoring;
+    };
     const fillTypes = (items, recommended) => {
       const current = String(typeEl.value || presetType || 'architecture');
       typeEl.innerHTML = (items && items.length ? items : fallbackTypes).map((item) => {
@@ -1780,26 +1850,40 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const label = Array.isArray(item) ? item[1] : item.label;
         return `<option value="${esc(key)}"${key === current ? ' selected' : ''}>${esc(label)}</option>`;
       }).join('');
-      if (recommended && [...typeEl.options].some((option) => option.value === recommended) && !presetType) {
-        typeEl.value = recommended;
-      }
       const pool = items && items.length ? items : fallbackTypes;
       const found = pool.find((x) => (Array.isArray(x) ? x[0] : x.key) === recommended);
       const foundLabel = Array.isArray(found) ? found[1] : (found && found.label);
-      hintEl.textContent = recommended ? `推荐图型：${foundLabel || recommended}` : '可选图型';
+      hintEl.textContent = `推荐图型：${foundLabel || recommended || '架构图'}`;
+    };
+    const applySection = (name) => {
+      const sec = sectionFor(name);
+      const score = scoreRefsFor(sec);
+      const refs = sourceRefsFor(sec);
+      const elements = elementsFor(sec);
+      const autoTitle = name || active.title || '图表';
+      if (!titleEl.value || titleEl.value === lastAutoTitle) { titleEl.value = autoTitle; lastAutoTitle = autoTitle; }
+      if (!scoreEl.value || scoreEl.value === lastAutoScore) { scoreEl.value = score.slice(0, 2).join('；'); lastAutoScore = scoreEl.value; }
+      if (!refsEl.value || refsEl.value === lastAutoRefs) { refsEl.value = refs.join('；'); lastAutoRefs = refsEl.value; }
+      if (!elementsEl.value || elementsEl.value === lastAutoElements) { elementsEl.value = elements.join('、'); lastAutoElements = elementsEl.value; }
+      if (purposeEl.value === 'explain' && score.length) purposeEl.value = 'score_evidence';
+      if (purposeEl.value === 'score_evidence' && !score.length) purposeEl.value = 'explain';
+      syncPurpose();
     };
     fillTypes(fallbackTypes, presetType || 'architecture');
+    syncPurpose();
     try {
       const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-design/types`, { signal: AbortSignal.timeout(15000) });
       if (resp.ok) {
         const data = await resp.json();
-        fillTypes(data.types || fallbackTypes, data.recommended || presetType);
+        fillTypes(data.types || fallbackTypes, data.recommended || presetType || 'architecture');
         if (data.sizes) {
           const current = sizeEl.value;
           sizeEl.innerHTML = data.sizes.map((item) => `<option value="${esc(item.key)}"${item.key === current ? ' selected' : ''}>${esc(item.label)}</option>`).join('');
         }
       }
     } catch (error) { /* 类型接口失败不影响手动选 */ }
+    if (initialScoreRefs.length) purposeEl.value = 'score_evidence';
+    syncPurpose();
 
     const setBusy = (busy, label = '生成预览') => {
       runBtn.disabled = busy;
@@ -1822,26 +1906,29 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         } catch (error) { showError(error.message); return; }
         if (data.status === 'failed') { showError(data.error || '图表生成失败'); return; }
         if (data.status === 'done') { showDone(data); return; }
-        resultEl.innerHTML = `<p class="cs-muted">${esc(data.stage || '生成中')}… <span class="cs-dim">（设计版通常需要 30–90 秒）</span></p>`;
+        resultEl.innerHTML = `<p class="cs-muted">${esc(data.stage || '生成中')}… <span class="cs-dim">（评标正式版通常需要 30–90 秒）</span></p>`;
       }
       showError('生成超时，请重试');
     };
     const showDone = (data) => {
       const checks = data.checks || {};
       const warnings = Array.isArray(checks.unknown_numbers) && checks.unknown_numbers.length
-        ? `<p class="cs-warning">图里有 ${checks.unknown_numbers.length} 个数字不在本节依据中，请核对：${checks.unknown_numbers.map(esc).join('、')}</p>`
+        ? `<p class="cs-warning">图里有 ${checks.unknown_numbers.length} 个数字不在依据中，请核对：${checks.unknown_numbers.map(esc).join('、')}</p>`
+        : '';
+      const evidenceWarnings = (checks.score_visible === false || checks.claim_visible === false)
+        ? `<p class="cs-warning">图中缺少${checks.score_visible === false ? '对应评分点' : ''}${checks.score_visible === false && checks.claim_visible === false ? '和' : ''}${checks.claim_visible === false ? '结论条' : ''}，评标专家可能对不上评分项。</p>`
         : '';
       const missingElements = Array.isArray(checks.elements_missing) ? checks.elements_missing : [];
       const elementsWarning = missingElements.length
-        ? `<p class="cs-warning">图中未出现本节交付要素：${missingElements.map(esc).join('、')}，请核对。</p>`
+        ? `<p class="cs-warning">图中未出现关键要素：${missingElements.map(esc).join('、')}</p>`
         : '';
       const geo = checks.geometry || {};
       const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length || (geo.shapes_overflow || []).length || (geo.line_text_hits || []).length
         ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处文字越界、${(geo.shapes_overflow || []).length} 处图形越界、${(geo.overlaps || []).length} 处标签重叠、${(geo.line_text_hits || []).length} 处连线穿字，请放大预览核对。</p>`
         : '';
       resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
-        <p class="cs-muted">图型 ${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
-        ${warnings}${elementsWarning}${geoWarnings}
+        <p class="cs-muted">${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
+        ${warnings}${evidenceWarnings}${elementsWarning}${geoWarnings}
         <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-again>重新生成</button>
           ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
           ${data.asset_id ? `<a class="cs-cp-ghost" href="/api/studio/diagrams/${esc(data.asset_id)}/svg" download>下载 SVG</a>` : ''}
@@ -1855,28 +1942,54 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       });
     };
     async function start() {
-      const text = String(textEl.value || '').trim();
-      if (!text) { resultEl.innerHTML = '<p class="cs-warning">先写一句这张图要表达什么。</p>'; return; }
+      const claim = String(claimEl.value || '').trim();
+      if (claim.length < 10) { resultEl.innerHTML = '<p class="cs-warning">先写一句这张图要让评标专家得出的结论（至少 10 字）。</p>'; return; }
+      const purpose = purposeEl.value;
+      const scoreRefs = splitList(scoreEl.value);
+      if ((purpose === 'score_evidence' || purpose === 'compare') && !scoreRefs.length) {
+        resultEl.innerHTML = '<p class="cs-warning">「证明评分点/对比」需要先填对应评分点或条款；如果只是解释现状，请把用途改为「解释方案/现状」。</p>';
+        return;
+      }
+      const elements = splitList(elementsEl.value);
+      if (elements.length < 2) { resultEl.innerHTML = '<p class="cs-warning">至少填 2 个关键要素，否则图会变成空框。</p>'; return; }
+      const section = String(sectionEl.value || '').trim();
+      const mapping = String(mappingEl.value || '').split(/\n+/).map((line) => {
+        const parts = line.split(/[|｜\t]/).map((x) => x.trim());
+        return parts.length >= 2 ? { requirement: parts[0], response: parts[1], evidence: parts[2] || '' } : null;
+      }).filter(Boolean).slice(0, 8);
+      const sourceRefs = splitList(refsEl.value);
+      const sourceText = String(textEl.value || '').trim();
+      const text = [claim, section, ...elements, ...mapping.flatMap((m) => [m.requirement, m.response, m.evidence]), ...sourceRefs, sourceText]
+        .filter(Boolean).join('\n').slice(0, 6000);
       setBusy(true);
-      resultEl.innerHTML = '<p class="cs-muted">正在组装设计规范并生成（30–90 秒）…</p>';
+      resultEl.innerHTML = '<p class="cs-muted">正在组装评标图规范并生成（30–90 秒）…</p>';
       try {
         const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-assets`, {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            title: String(titleEl.value || active.title || '图表').trim(),
+            title: String(titleEl.value || section || '图表').trim(),
             text,
             skill_type: typeEl.value,
             size_preset: sizeEl.value,
-            section: '',
+            section,
+            purpose,
+            claim,
+            score_refs: scoreRefs,
+            elements,
+            evidence: sourceRefs,
+            source_refs: sourceRefs,
+            mapping,
           }),
           signal: AbortSignal.timeout(30000),
         });
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
         await poll(data.job_id);
       } catch (error) { showError(error.message); }
       finally { if (dialog.isConnected) setBusy(false); }
     }
+    purposeEl.addEventListener('change', syncPurpose);
+    sectionEl.addEventListener('change', () => applySection(sectionEl.value));
     dialog.addEventListener('click', (event) => {
       if (event.target.closest('[data-dd-close]') || event.target.closest('[data-dd-cancel]')) dialog.close();
       if (event.target.closest('[data-dd-run]')) start();
@@ -1885,6 +1998,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     globalThis.document.body.appendChild(dialog);
     dialog.showModal();
     if (presetType) typeEl.value = presetType;
+    applySection(defaultSection);
   }
 
   /** 目录级编写计划（C1：降级为"汇总 + 批量"）——只看工作量与状态；编辑与确认都在章计划里。 */

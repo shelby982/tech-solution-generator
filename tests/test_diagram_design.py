@@ -252,3 +252,59 @@ async def test_deleted_asset_is_no_longer_served(env, monkeypatch):
     asset_id = status["asset_id"]
     assert (await env.client.delete(f"/api/studio/diagrams/{asset_id}")).status_code == 200
     assert (await env.client.get(f"/api/studio/diagrams/{asset_id}/image")).status_code == 404
+
+
+async def test_create_job_with_evaluator_brief(env, monkeypatch):
+    async def fake_generate(config, brief, *, project_id, block_id, prompt=None):
+        html = ('<!doctype html><html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" '
+                'role="img"><title>图</title><desc>说明</desc><text>接入层</text><text>服务层</text>'
+                '<text>数据层</text></svg></body></html>')
+        return html, {"self_check": True}
+
+    async def fake_render(html_path, png_path, scale=2):
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 16)
+        return 1280, 720, {"texts": 3, "overflow": [], "overlaps": [], "shapes_overflow": []}
+
+    async def fake_config(db, block):
+        return SimpleNamespace(model="test", provider="openai"), {}
+
+    monkeypatch.setattr(diagram_design, "generate_valid_html", fake_generate)
+    monkeypatch.setattr(diagram_design, "resolve_config", fake_config)
+    monkeypatch.setattr("services.diagram_render.render_png", fake_render)
+    created = await env.client.post(f"/api/blocks/{env.block['id']}/studio/diagram-assets", json={
+        "title": "总体技术架构", "text": "接入层、服务层、数据层",
+        "purpose": "score_evidence", "claim": "平台满足三级等保并实现双活容灾",
+        "score_refs": ["技术架构先进性（10分）"],
+        "elements": ["接入层", "服务层", "数据层"],
+        "mapping": [{"requirement": "双活要求", "response": "双中心双活", "evidence": "招标文件 5.2.3"}],
+        "source_refs": ["招标文件 5.2.3"],
+    })
+    assert created.status_code == 202
+    job = await diagram_assets.get_job(created.json()["job_id"])
+    brief = json.loads(job["brief_json"])
+    assert brief["purpose"] == "score_evidence"
+    assert brief["claim"].startswith("平台满足")
+    assert brief["score_refs"] == ["技术架构先进性（10分）"]
+    assert brief["mapping"][0]["response"] == "双中心双活"
+
+
+async def test_score_purpose_without_score_ref_is_rejected(env):
+    resp = await env.client.post(f"/api/blocks/{env.block['id']}/studio/diagram-assets", json={
+        "title": "图", "text": "内容", "purpose": "score_evidence",
+    })
+    assert resp.status_code == 422
+
+
+def test_evaluator_prompt_contains_score_and_claim():
+    system, user = diagram_design.build_prompt({
+        "title": "总体技术架构", "skill_type": "architecture", "size_preset": "doc-wide",
+        "text": "接入层、服务层", "elements": ["接入层", "服务层"],
+        "purpose": "score_evidence", "claim": "满足双活要求",
+        "score_refs": ["技术架构先进性"], "mapping": [
+            {"requirement": "双活要求", "response": "双中心双活", "evidence": "招标文件 5.2"},
+        ],
+    })
+    assert "评标正式版" in system and "对应评分点" in system
+    assert "技术架构先进性" in user and "满足双活要求" in user
+    assert "双中心双活" in user

@@ -1054,6 +1054,9 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 
 /* 设计版图表弹窗（Diagram Design） */
 .cs-design-dialog { width: min(900px, 94vw); }
+.cs-design-dialog [hidden] { display: none !important; }
+.cs-design-dialog .cs-dd-advanced { margin: 8px 0 4px; border-top: 1px dashed var(--line, #e5e7eb); padding-top: 8px; }
+.cs-design-dialog .cs-dd-advanced summary { cursor: pointer; font-size: 13px; color: var(--text-2, #4b5563); }
 .cs-design-dialog .cs-dd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cs-design-preview { margin: 12px 0; border: 1px solid var(--line, #e5e7eb); border-radius: 8px; background: #fff; padding: 8px; text-align: center; }
 .cs-design-preview img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
