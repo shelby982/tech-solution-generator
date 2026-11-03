@@ -467,8 +467,39 @@ def _section_body(block: dict, section_title: str, limit: int = 3000) -> str:
         if re.match(r"^\s{0,3}#{1,4}\s+", line):
             break
         body.append(line)
-    text = re.sub(r"\s+", " ", "\n".join(body)).strip()
+    text = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in body).strip()
     return text[:limit]
+
+
+def _body_claim(body: str) -> str:
+    """从正文里选一句适合放图顶部的结论；优先含“结论”的句子。"""
+    text = re.sub(r"(?ms)^:::diagram[^\n]*\n.*?^:::\s*$", " ", str(body or ""))
+    sentences = [re.sub(r"\s+", " ", x).strip() for x in re.split(r"(?<=[。！？])", text) if x.strip()]
+    if not sentences:
+        return ""
+    for marker in ("结论", "目标是", "差距", "总体"):
+        for sentence in sentences:
+            if marker in sentence and len(sentence) <= 180:
+                return sentence[:300]
+    return sentences[0][:300]
+
+
+def _diagram_nodes_from_body(body: str) -> list[str]:
+    match = re.search(r"(?ms)^:::diagram[^\n]*\n(.*?)^:::", str(body or ""))
+    if not match:
+        return []
+    nodes: list[str] = []
+    for line in match.group(1).splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("---") or raw.startswith("--"):
+            continue
+        text = raw.lstrip("-").strip()
+        if not text or text.startswith("type="):
+            continue
+        text = re.sub(r"^[0-9]+[.、]\s*", "", text)
+        if text and text not in nodes:
+            nodes.append(text[:80])
+    return nodes[:12]
 
 
 async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
@@ -477,8 +508,12 @@ async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
     score_refs = [str(b.get("ref")) for b in basis_rows
                   if str(b.get("type") or "") == "score_point" and b.get("ref")][:4]
     points = [str(x) for x in (section.get("points") or [])]
-    body = _section_body(block, str(section.get("title") or ""))
-    elements = [str(x) for x in (deliverable.get("elements") or []) if str(x).strip()] or points
+    raw_body = _section_body(block, str(section.get("title") or ""))
+    diagram_nodes = _diagram_nodes_from_body(raw_body)
+    body = re.sub(r"(?ms)^:::diagram[^\n]*\n.*?^:::\s*$", "", raw_body).strip()
+    explicit_elements = [str(x) for x in (deliverable.get("elements") or []) if str(x).strip()]
+    elements = explicit_elements or diagram_nodes or points
+    claim = _body_claim(body) or (points[0] if points else str(section.get("title") or ""))
     return {
         "title": str(deliverable.get("title") or "图表")[:120],
         "section": str(section.get("title") or "")[:120],
@@ -489,7 +524,7 @@ async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
         "evidence": basis[:8],
         "caption": str(deliverable.get("title") or "")[:160],
         "purpose": "score_evidence" if score_refs else "explain",
-        "claim": (points[0] if points else (body[:180] or str(section.get("title") or "")))[:300],
+        "claim": claim[:300],
         "score_refs": score_refs,
         "mapping": [],
         "source_refs": basis[:8],

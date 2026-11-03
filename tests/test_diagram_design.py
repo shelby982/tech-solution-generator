@@ -308,3 +308,15 @@ def test_evaluator_prompt_contains_score_and_claim():
     assert "评标正式版" in system and "对应评分点" in system
     assert "技术架构先进性" in user and "满足双活要求" in user
     assert "双中心双活" in user
+
+
+async def test_auto_brief_reads_section_body_and_existing_figure():
+    block = {"content": "## 现状与目标对比图\n\n:::diagram type=layered 对比图\n- 合规\n- 数据\n- 权限\n:::\n\n图形结论为：现状与目标存在差距，数据治理优先。"}
+    section = {"title": "现状与目标对比图", "points": ["选取维度"],
+               "basis": [{"type": "score_point", "ref": "对比图评分点"}],
+               "deliverables": [{"kind": "figure", "title": "现状与目标对比图", "type": "layered"}]}
+    brief = await diagram_design.section_brief(block, section, section["deliverables"][0])
+    assert brief["purpose"] == "score_evidence"
+    assert brief["elements"] == ["合规", "数据", "权限"]
+    assert "图形结论" in brief["claim"]
+    assert "图形结论" in brief["text"]
