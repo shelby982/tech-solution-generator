@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v445';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v445';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v446';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v446';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1861,7 +1861,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       skeletonEl.textContent = head + tail;
     };
     const syncSkills = () => { syncPurpose(); renderSkeleton(); };
-    scorePickEl.innerHTML = '<option value="">— 从本章评分点选择 —</option>' + allScoreRefs.map((ref) => `<option value="${esc(ref)}">${esc(ref)}</option>`).join('');
+    scorePickEl.innerHTML = `<option value="">${allScoreRefs.length ? '— 从本章评分点选择 —' : '本章未识别评分点，可直接粘贴条款号'}</option>` + allScoreRefs.map((ref) => `<option value="${esc(ref)}">${esc(ref)}</option>`).join('');
     scorePickEl.addEventListener('change', () => {
       const value = scorePickEl.value;
       if (value && !splitList(scoreEl.value).includes(value)) {
