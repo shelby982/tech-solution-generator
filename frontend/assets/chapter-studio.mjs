@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v447';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v447';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v448';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v448';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1984,8 +1984,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ? `<p class="cs-warning">图中未出现关键要素：${missingElements.map(esc).join('、')}</p>`
         : '';
       const geo = checks.geometry || {};
-      const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length || (geo.shapes_overflow || []).length || (geo.line_text_hits || []).length
-        ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处文字越界、${(geo.shapes_overflow || []).length} 处图形越界、${(geo.overlaps || []).length} 处标签重叠、${(geo.line_text_hits || []).length} 处连线穿字，请放大预览核对。</p>`
+      const geoWarnings = (geo.overflow || []).length || (geo.overlaps || []).length || (geo.shapes_overflow || []).length
+        ? `<p class="cs-warning">几何检查发现 ${(geo.overflow || []).length} 处文字越界、${(geo.shapes_overflow || []).length} 处图形越界、${(geo.overlaps || []).length} 处标签重叠，请放大预览核对。</p>`
         : '';
       resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
         <p class="cs-muted">${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
