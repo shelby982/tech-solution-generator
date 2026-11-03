@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v443';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v443';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v444';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v444';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1747,6 +1747,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const scoreRefsFor = (sec) => (sec?.basis || [])
       .filter((b) => b && String(b.type || '') === 'score_point' && b.ref)
       .map((b) => String(b.ref));
+    const allScoreRefs = [...new Set(outline.flatMap((sec) => scoreRefsFor(sec)))].slice(0, 12);
     const sourceRefsFor = (sec) => (sec?.basis || [])
       .filter((b) => b && b.ref && String(b.type || '') !== 'score_point')
       .map((b) => String(b.ref));
@@ -1778,7 +1779,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           </label>
         </div>
         <label class="cs-field" data-dd-score-wrap><span>对应评分点 / 条款</span>
-          <input data-dd-score maxlength="360" value="${esc(initialScoreRefs.slice(0, 2).join('；'))}" placeholder="从本章评分点选，或粘贴条款号；多个用分号分隔" />
+          <select data-dd-score-pick><option value="">— 从本章评分点选择 —</option></select>
+          <input data-dd-score maxlength="360" value="${esc(initialScoreRefs.slice(0, 2).join('；'))}" placeholder="也可以直接粘贴条款号；多个用分号分隔" />
         </label>
         <label class="cs-field"><span>让评标专家得出什么结论（必填）</span>
           <textarea data-dd-claim rows="2" maxlength="300" placeholder="例：平台满足三级等保，并通过双中心双活实现业务连续性"></textarea>
@@ -1794,12 +1796,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <input data-dd-refs maxlength="600" value="${esc(initialRefs.join('；'))}" placeholder="招标文件条款、素材/页码…" />
           </label>
         </div>
+        <p class="cs-dd-skeleton" data-dd-skeleton></p>
         <label class="cs-field"><span>补充说明 / 选中文字（可选）</span>
           <textarea data-dd-text rows="3" maxlength="6000" placeholder="可以粘贴本节正文或补充约束；不填也可以生成">${esc(selected.slice(0, 6000))}</textarea>
         </label>
         <details class="cs-dd-advanced">
           <summary>高级设置（图型 / 尺寸 / 图名）</summary>
           <div class="cs-dd-row">
+            <label class="cs-field"><span>图号</span><input data-dd-figure maxlength="40" value="${esc(active.block_id ? `图 ${String(active.block_id).replace(/^s/, '')}` : '图')}" /></label>
             <label class="cs-field"><span>图名</span><input data-dd-title maxlength="80" value="${esc(active.title || defaultSection)}" /></label>
             <label class="cs-field"><span>图型</span><select data-dd-type><option value="architecture">架构图（推荐）</option></select></label>
             <label class="cs-field"><span>尺寸</span><select data-dd-size>
@@ -1816,7 +1820,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const purposeEl = dialog.querySelector('[data-dd-purpose]');
     const sectionEl = dialog.querySelector('[data-dd-section]');
     const scoreEl = dialog.querySelector('[data-dd-score]');
+    const scorePickEl = dialog.querySelector('[data-dd-score-pick]');
     const scoreWrap = dialog.querySelector('[data-dd-score-wrap]');
+    const skeletonEl = dialog.querySelector('[data-dd-skeleton]');
+    const figureEl = dialog.querySelector('[data-dd-figure]');
     const claimEl = dialog.querySelector('[data-dd-claim]');
     const mappingEl = dialog.querySelector('[data-dd-mapping]');
     const mappingWrap = dialog.querySelector('[data-dd-mapping-wrap]');
@@ -1844,6 +1851,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       scoreWrap.hidden = !scoring;
       mappingWrap.hidden = !scoring;
     };
+    const renderSkeleton = () => {
+      const els = splitList(elementsEl.value);
+      const rows = String(mappingEl.value || '').split(/\n+/).map((line) => line.split(/[|｜\t]/).map((x) => x.trim())).filter((parts) => parts.length >= 2);
+      const head = els.length >= 2 ? `图骨架：${els.join(' → ')}` : '图骨架：要素不足，至少填 2 个';
+      const tail = purposeEl.value !== 'explain' && rows.length
+        ? `；${rows.length} 组「要求→响应→证据」会进入图中`
+        : '';
+      skeletonEl.textContent = head + tail;
+    };
+    const syncSkills = () => { syncPurpose(); renderSkeleton(); };
+    scorePickEl.innerHTML = '<option value="">— 从本章评分点选择 —</option>' + allScoreRefs.map((ref) => `<option value="${esc(ref)}">${esc(ref)}</option>`).join('');
+    scorePickEl.addEventListener('change', () => {
+      const value = scorePickEl.value;
+      if (value && !splitList(scoreEl.value).includes(value)) {
+        scoreEl.value = [...splitList(scoreEl.value), value].join('；');
+      }
+      scorePickEl.value = '';
+    });
+    elementsEl.addEventListener('input', renderSkeleton);
+    mappingEl.addEventListener('input', renderSkeleton);
     const fillTypes = (items, recommended) => {
       const current = String(typeEl.value || presetType || 'architecture');
       typeEl.innerHTML = (items && items.length ? items : fallbackTypes).map((item) => {
@@ -1872,10 +1899,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (!elementsEl.value || elementsEl.value === lastAutoElements) { elementsEl.value = elements.join('、'); lastAutoElements = elementsEl.value; }
       if (purposeEl.value === 'explain' && score.length) purposeEl.value = 'score_evidence';
       if (purposeEl.value === 'score_evidence' && !score.length) purposeEl.value = 'explain';
-      syncPurpose();
+      syncSkills();
     };
     fillTypes(fallbackTypes, presetType || 'architecture');
-    syncPurpose();
+    syncSkills();
     try {
       const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-design/types`, { signal: AbortSignal.timeout(15000) });
       if (resp.ok) {
@@ -1888,7 +1915,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       }
     } catch (error) { /* 类型接口失败不影响手动选 */ }
     if (initialScoreRefs.length) purposeEl.value = 'score_evidence';
-    syncPurpose();
+    syncSkills();
 
     const setBusy = (busy, label = '生成预览') => {
       runBtn.disabled = busy;
@@ -1940,7 +1967,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <button type="button" class="cs-cp-primary" data-dd-insert>插入正文</button></div>`;
       resultEl.querySelector('[data-dd-again]')?.addEventListener('click', () => start());
       resultEl.querySelector('[data-dd-insert]')?.addEventListener('click', () => {
-        const title = String(titleEl.value || data.title || '图表').trim() || '图表';
+        const rawTitle = String(titleEl.value || data.title || '图表').trim() || '图表';
+        const figureNo = String(figureEl.value || '').trim();
+        const title = /^图\s/.test(rawTitle) ? rawTitle : [figureNo, rawTitle].filter(Boolean).join(' ');
         insertAtCursor(`:::figure ${title}\n![${title.replaceAll(']', '')}](${data.image_url})\n:::`);
         dialog.close();
         status('已插入设计版图表；点击正文图片可重新设计/查看源');
@@ -1969,10 +1998,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       setBusy(true);
       resultEl.innerHTML = '<p class="cs-muted">正在组装评标图规范并生成（30–90 秒）…</p>';
       try {
+        const rawTitle = String(titleEl.value || section || '图表').trim();
+        const figureNo = String(figureEl.value || '').trim();
+        const finalTitle = /^图\s/.test(rawTitle) ? rawTitle : [figureNo, rawTitle].filter(Boolean).join(' ');
         const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-assets`, {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            title: String(titleEl.value || section || '图表').trim(),
+            title: finalTitle,
             text,
             skill_type: typeEl.value,
             size_preset: sizeEl.value,
@@ -1993,7 +2025,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       } catch (error) { showError(error.message); }
       finally { if (dialog.isConnected) setBusy(false); }
     }
-    purposeEl.addEventListener('change', syncPurpose);
+    purposeEl.addEventListener('change', syncSkills);
     sectionEl.addEventListener('change', () => applySection(sectionEl.value));
     dialog.addEventListener('click', (event) => {
       if (event.target.closest('[data-dd-close]') || event.target.closest('[data-dd-cancel]')) dialog.close();
