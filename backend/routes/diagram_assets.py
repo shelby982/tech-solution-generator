@@ -74,6 +74,7 @@ class DiagramDesignBody(BaseModel):
     mapping: list[DiagramMappingRow] = Field(default_factory=list, max_length=8)
     source_refs: list[str] = Field(default_factory=list, max_length=8)
     relations: str = Field(default="", max_length=40)
+    connections: list[str] = Field(default_factory=list, max_length=12)
 
 
 @router.get('/blocks/{block_id}/studio/diagram-design/types')
@@ -121,6 +122,7 @@ async def create_diagram(block_id: int, body: DiagramDesignBody):
         "mapping": [row.model_dump() for row in body.mapping][:8],
         "source_refs": [str(x)[:300] for x in body.source_refs][:8],
         "relations": (body.relations or "").strip()[:40],
+        "connections": [str(x)[:200] for x in body.connections][:12],
     }
     job_id = await diagram_assets.create_job(int(block["project_id"]), int(block_id), brief)
     queue_job(job_id)

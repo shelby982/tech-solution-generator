@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v451';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v451';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v452';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v452';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1814,6 +1814,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <label class="cs-field" data-dd-mapping-wrap><span>招标要求 → 方案响应 → 证据</span>
           <textarea data-dd-mapping rows="4" maxlength="2400" placeholder="每行一组：招标要求 | 我们的响应 | 证据/依据&#10;例：双活要求 | 双中心双活部署 | 招标文件 5.2.3；素材第 12 页"></textarea>
         </label>
+        <label class="cs-field"><span>模块连接（可选，每行：源模块 → 目标模块：关系）</span>
+          <textarea data-dd-connections rows="3" maxlength="1600" placeholder="统一接入网关 → 客户档案服务：调用&#10;客户档案服务 → 客户档案库：读写&#10;基础设施层 → 服务层：运行支撑"></textarea>
+        </label>
         <div class="cs-dd-row">
           <label class="cs-field"><span>关键要素（至少 2 个，建议 3–7 个）</span>
             <input data-dd-elements maxlength="600" value="${esc(initialElements.join('、'))}" placeholder="接入网关、客户档案服务、标签服务…" />
@@ -1855,6 +1858,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const figureEl = dialog.querySelector('[data-dd-figure]');
     const claimEl = dialog.querySelector('[data-dd-claim]');
     const mappingEl = dialog.querySelector('[data-dd-mapping]');
+    const connectionsEl = dialog.querySelector('[data-dd-connections]');
     const mappingWrap = dialog.querySelector('[data-dd-mapping-wrap]');
     const elementsEl = dialog.querySelector('[data-dd-elements]');
     const refsEl = dialog.querySelector('[data-dd-refs]');
@@ -1885,7 +1889,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const rows = String(mappingEl.value || '').split(/\n+/).map((line) => line.split(/[|｜\t]/).map((x) => x.trim())).filter((parts) => parts.length >= 2);
       const chips = els.map((name, index) => `<span class="cs-dd-node"><button type="button" data-node-op="up" data-node-i="${index}" title="上移">↑</button><b>${esc(name)}</b><button type="button" data-node-op="down" data-node-i="${index}" title="下移">↓</button><button type="button" data-node-op="del" data-node-i="${index}" title="删除">×</button></span>`).join('');
       const warning = els.length < 2 ? '<span class="cs-dd-node-warn">至少 2 个</span>' : '';
-      const tail = `${purposeEl.value !== 'explain' && rows.length ? ` · ${rows.length} 组要求/响应/证据` : ''} · 关系：${relationsEl.value}`;
+      const links = String(connectionsEl.value || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).length;
+      const tail = `${purposeEl.value !== 'explain' && rows.length ? ` · ${rows.length} 组要求/响应/证据` : ''} · 关系：${relationsEl.value}${links ? ` · ${links} 条模块连接` : ''}`;
       skeletonEl.innerHTML = `<div class="cs-dd-node-list">${chips || '<span class="cs-dd-node-warn">还没有节点</span>'}${warning}</div>
         <div class="cs-dd-node-tools"><input data-dd-node-new maxlength="80" placeholder="添加一个节点，回车" /><button type="button" data-dd-node-add>添加</button><span class="cs-dd-node-hint">图骨架（顺序可调）${tail}</span></div>`;
     };
@@ -2087,6 +2092,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             source_refs: sourceRefs,
             mapping,
             relations: relationsEl.value,
+            connections: String(connectionsEl.value || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
           }),
           signal: AbortSignal.timeout(30000),
         });
