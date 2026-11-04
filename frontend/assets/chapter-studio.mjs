@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v448';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v448';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v449';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v449';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1803,7 +1803,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <details class="cs-dd-advanced">
           <summary>高级设置（图型 / 尺寸 / 图名）</summary>
           <div class="cs-dd-row">
-            <label class="cs-field"><span>图号</span><input data-dd-figure maxlength="40" value="${esc(active.block_id ? `图 ${String(active.block_id).replace(/^s/, '')}` : '图')}" /></label>
+            <label class="cs-field"><span>图号</span><input data-dd-figure maxlength="40" value="${esc(active.block_id ? `图 ${String(active.block_id).replace(/^s/, '')}-${(String(editor.value || '').match(/:::figure\b/g) || []).length + 1}` : '图')}" /></label>
             <label class="cs-field"><span>图名</span><input data-dd-title maxlength="80" value="${esc(active.title || defaultSection)}" /></label>
             <label class="cs-field"><span>图型</span><select data-dd-type><option value="architecture">架构图（推荐）</option></select></label>
             <label class="cs-field"><span>尺寸</span><select data-dd-size>

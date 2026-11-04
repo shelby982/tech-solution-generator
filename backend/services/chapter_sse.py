@@ -398,7 +398,9 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
             if enabled:
                 await emit(job_id, "chart", {"role": role, "index": index, "title": title,
                                              "state": "designing", "model": model})
-                designed = await design_section_figure(block, section, deliverable)
+                block_no = str((block or {}).get("block_id") or "").replace("s", "", 1)
+                figure_no = f"图 {block_no}-{index + 1}" if block_no else f"图 {index + 1}"
+                designed = await design_section_figure(block, section, deliverable, figure_no=figure_no)
                 markdown = designed["markdown"]
                 await emit(job_id, "chart", {"role": role, "index": index, "title": title,
                                              "state": "done", "markdown": markdown,

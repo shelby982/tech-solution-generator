@@ -502,7 +502,17 @@ def _diagram_nodes_from_body(body: str) -> list[str]:
     return nodes[:12]
 
 
-async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
+def block_number(block: dict) -> str:
+    raw = str((block or {}).get("block_id") or "")
+    return raw.replace("s", "", 1) if raw.startswith("s") else raw
+
+
+def figure_number(block: dict, index: int = 1) -> str:
+    prefix = block_number(block)
+    return f"图 {prefix}-{max(1, int(index))}" if prefix else f"图 {max(1, int(index))}"
+
+
+async def section_brief(block: dict, section: dict, deliverable: dict, figure_no: str = "") -> dict:
     basis_rows = [(b or {}) for b in (section.get("basis") or [])]
     basis = [str(b.get("ref") or "") for b in basis_rows if b.get("ref")]
     score_refs = [str(b.get("ref")) for b in basis_rows
@@ -514,8 +524,10 @@ async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
     explicit_elements = [str(x) for x in (deliverable.get("elements") or []) if str(x).strip()]
     elements = explicit_elements or diagram_nodes or points
     claim = _body_claim(body) or (points[0] if points else str(section.get("title") or ""))
+    raw_title = str(deliverable.get("title") or "图表")[:120]
+    title = raw_title if not figure_no or str(raw_title).startswith("图") else f"{figure_no} {raw_title}"
     return {
-        "title": str(deliverable.get("title") or "图表")[:120],
+        "title": title[:160],
         "section": str(section.get("title") or "")[:120],
         "skill_type": design_type_for(deliverable),
         "size_preset": "doc-wide",
@@ -534,9 +546,10 @@ async def section_brief(block: dict, section: dict, deliverable: dict) -> dict:
     }
 
 
-async def design_section_figure(block: dict, section: dict, deliverable: dict) -> dict:
+async def design_section_figure(block: dict, section: dict, deliverable: dict,
+                                figure_no: str = "") -> dict:
     """章节自动编写：生成一张设计版图并返回可插入正文的 markdown。"""
-    brief = await section_brief(block, section, deliverable)
+    brief = await section_brief(block, section, deliverable, figure_no=figure_no)
     result = await create_asset(block, brief)
     return {**result, "markdown": asset_markdown(result["asset_id"], result["title"]), "ok": True}
 

@@ -155,7 +155,7 @@ async def test_chart_uses_design_when_project_quality_enabled(monkeypatch):
     async def fake_quality(project_id):
         return "design_architecture"
 
-    async def fake_design(block, section, deliverable):
+    async def fake_design(block, section, deliverable, figure_no=""):
         return {"ok": True, "asset_id": "a" * 32, "title": "架构图",
                 "model": "m", "checks": {"self_check": True},
                 "markdown": ":::figure 架构图\n![架构图](/api/studio/diagrams/" + "a" * 32 + "/image)\n:::"}
@@ -320,3 +320,13 @@ async def test_auto_brief_reads_section_body_and_existing_figure():
     assert brief["elements"] == ["合规", "数据", "权限"]
     assert "图形结论" in brief["claim"]
     assert "图形结论" in brief["text"]
+
+
+async def test_auto_brief_prefixes_figure_number():
+    block = {"block_id": "s1.2.1.1", "content": "## 图节\n\n正文"}
+    section = {"title": "图节", "points": ["a", "b"], "basis": [], "deliverables": []}
+    brief = await diagram_design.section_brief(
+        block, section, {"kind": "figure", "title": "总体架构图", "type": "layered"},
+        figure_no="图 1.2.1.1-1")
+    assert brief["title"] == "图 1.2.1.1-1 总体架构图"
+    assert diagram_design.figure_number(block, 2) == "图 1.2.1.1-2"
