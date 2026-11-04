@@ -194,6 +194,7 @@ def build_prompt(brief: dict, repair: dict | None = None) -> tuple[str, str]:
             for m in (brief.get("mapping") or [])[:8] if isinstance(m, dict)
         ],
         "source_refs": [str(x)[:300] for x in (brief.get("source_refs") or [])][:8],
+        "relations": str(brief.get("relations") or "")[:40],
     }
     required = []
     if payload["score_refs"]:
@@ -517,6 +518,15 @@ def figure_number(block: dict, index: int = 1) -> str:
     return f"图 {prefix}-{max(1, int(index))}" if prefix else f"图 {max(1, int(index))}"
 
 
+def relation_for_type(skill_type: str) -> str:
+    return {
+        "layers": "分层", "architecture": "分层/边界", "architecture-delta": "对比",
+        "data-flow": "流向", "process": "流向", "flowchart": "判断/流向",
+        "timeline": "时序", "quadrant": "对比", "tree": "包含/分解",
+        "pyramid": "层级", "loop": "循环", "org-chart": "职责/汇报",
+    }.get(str(skill_type or ""), "分层/结构")
+
+
 async def section_brief(block: dict, section: dict, deliverable: dict, figure_no: str = "") -> dict:
     basis_rows = [(b or {}) for b in (section.get("basis") or [])]
     basis = [str(b.get("ref") or "") for b in basis_rows if b.get("ref")]
@@ -549,6 +559,7 @@ async def section_brief(block: dict, section: dict, deliverable: dict, figure_no
         "source_refs": basis[:8],
         "strict_numbers": True,
         "strict_elements": True,
+        "relations": relation_for_type(design_type_for(deliverable)),
         "strict_evidence": True,
     }
 

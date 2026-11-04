@@ -278,7 +278,7 @@ async def test_create_job_with_evaluator_brief(env, monkeypatch):
         "score_refs": ["技术架构先进性（10分）"],
         "elements": ["接入层", "服务层", "数据层"],
         "mapping": [{"requirement": "双活要求", "response": "双中心双活", "evidence": "招标文件 5.2.3"}],
-        "source_refs": ["招标文件 5.2.3"],
+        "source_refs": ["招标文件 5.2.3"], "relations": "分层",
     })
     assert created.status_code == 202
     job = await diagram_assets.get_job(created.json()["job_id"])
@@ -287,6 +287,7 @@ async def test_create_job_with_evaluator_brief(env, monkeypatch):
     assert brief["claim"].startswith("平台满足")
     assert brief["score_refs"] == ["技术架构先进性（10分）"]
     assert brief["mapping"][0]["response"] == "双中心双活"
+    assert brief["relations"] == "分层"
 
 
 async def test_score_purpose_without_score_ref_is_rejected(env):

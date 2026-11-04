@@ -73,6 +73,7 @@ class DiagramDesignBody(BaseModel):
     score_refs: list[str] = Field(default_factory=list, max_length=8)
     mapping: list[DiagramMappingRow] = Field(default_factory=list, max_length=8)
     source_refs: list[str] = Field(default_factory=list, max_length=8)
+    relations: str = Field(default="", max_length=40)
 
 
 @router.get('/blocks/{block_id}/studio/diagram-design/types')
@@ -119,6 +120,7 @@ async def create_diagram(block_id: int, body: DiagramDesignBody):
         "score_refs": [str(x)[:160] for x in body.score_refs][:8],
         "mapping": [row.model_dump() for row in body.mapping][:8],
         "source_refs": [str(x)[:300] for x in body.source_refs][:8],
+        "relations": (body.relations or "").strip()[:40],
     }
     job_id = await diagram_assets.create_job(int(block["project_id"]), int(block_id), brief)
     queue_job(job_id)

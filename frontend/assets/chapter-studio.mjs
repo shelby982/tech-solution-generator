@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v449';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v449';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v450';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v450';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1757,6 +1757,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const figure = (sec?.deliverables || []).find((d) => d && d.kind === 'figure');
       return (figure?.elements || []).map((x) => String(x).trim()).filter(Boolean);
     };
+    const escapeReg = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sectionBodyFor = (name) => {
+      const lines = String(editor.value || '').split(/\n/);
+      const re = new RegExp('^\\s{0,3}#{1,4}\\s*' + escapeReg(name) + '\\s*$');
+      const start = lines.findIndex((line) => re.test(line));
+      if (start < 0) return '';
+      const body = [];
+      for (const line of lines.slice(start + 1)) {
+        if (/^\s{0,3}#{1,4}\s+/.test(line)) break;
+        body.push(line);
+      }
+      return body.join('\n').trim().slice(0, 6000);
+    };
+    let lastAutoText = selected;
     const firstSection = sectionFor(defaultSection);
     const initialScoreRefs = scoreRefsFor(firstSection);
     const initialRefs = sourceRefsFor(firstSection);
@@ -1778,6 +1792,18 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <select data-dd-section>${(sectionNames.length ? sectionNames : [defaultSection]).map((name) => `<option value="${esc(name)}"${name === defaultSection ? ' selected' : ''}>${esc(name)}</option>`).join('')}</select>
           </label>
         </div>
+        <label class="cs-field"><span>要素关系</span>
+          <select data-dd-relations>
+            <option value="分层/边界">分层 / 边界</option>
+            <option value="流向">流向 / 调用</option>
+            <option value="对比">对比</option>
+            <option value="包含/分解">包含 / 分解</option>
+            <option value="时序">时序</option>
+            <option value="循环">循环</option>
+            <option value="职责/汇报">职责 / 汇报</option>
+            <option value="判断/分支">判断 / 分支</option>
+          </select>
+        </label>
         <label class="cs-field" data-dd-score-wrap><span>对应评分点 / 条款</span>
           <select data-dd-score-pick><option value="">— 从本章评分点选择 —</option></select>
           <input data-dd-score maxlength="360" value="${esc(initialScoreRefs.slice(0, 2).join('；'))}" placeholder="也可以直接粘贴条款号；多个用分号分隔" />
@@ -1799,6 +1825,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-dd-skeleton" data-dd-skeleton></div>
         <label class="cs-field"><span>补充说明 / 选中文字（可选）</span>
           <textarea data-dd-text rows="3" maxlength="6000" placeholder="可以粘贴本节正文或补充约束；不填也可以生成">${esc(selected.slice(0, 6000))}</textarea>
+          <small class="cs-dd-source" data-dd-source-hint>${selected ? '使用当前选中文字' : '会尝试自动带出本节正文'}</small>
         </label>
         <details class="cs-dd-advanced">
           <summary>高级设置（图型 / 尺寸 / 图名）</summary>
@@ -1819,6 +1846,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       </div>`;
     const purposeEl = dialog.querySelector('[data-dd-purpose]');
     const sectionEl = dialog.querySelector('[data-dd-section]');
+    const relationsEl = dialog.querySelector('[data-dd-relations]');
+    const sourceHintEl = dialog.querySelector('[data-dd-source-hint]');
     const scoreEl = dialog.querySelector('[data-dd-score]');
     const scorePickEl = dialog.querySelector('[data-dd-score-pick]');
     const scoreWrap = dialog.querySelector('[data-dd-score-wrap]');
@@ -1856,7 +1885,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const rows = String(mappingEl.value || '').split(/\n+/).map((line) => line.split(/[|｜\t]/).map((x) => x.trim())).filter((parts) => parts.length >= 2);
       const chips = els.map((name, index) => `<span class="cs-dd-node"><button type="button" data-node-op="up" data-node-i="${index}" title="上移">↑</button><b>${esc(name)}</b><button type="button" data-node-op="down" data-node-i="${index}" title="下移">↓</button><button type="button" data-node-op="del" data-node-i="${index}" title="删除">×</button></span>`).join('');
       const warning = els.length < 2 ? '<span class="cs-dd-node-warn">至少 2 个</span>' : '';
-      const tail = purposeEl.value !== 'explain' && rows.length ? ` · ${rows.length} 组要求/响应/证据` : '';
+      const tail = `${purposeEl.value !== 'explain' && rows.length ? ` · ${rows.length} 组要求/响应/证据` : ''} · 关系：${relationsEl.value}`;
       skeletonEl.innerHTML = `<div class="cs-dd-node-list">${chips || '<span class="cs-dd-node-warn">还没有节点</span>'}${warning}</div>
         <div class="cs-dd-node-tools"><input data-dd-node-new maxlength="80" placeholder="添加一个节点，回车" /><button type="button" data-dd-node-add>添加</button><span class="cs-dd-node-hint">图骨架（顺序可调）${tail}</span></div>`;
     };
@@ -1928,6 +1957,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if (!elementsEl.value || elementsEl.value === lastAutoElements) { elementsEl.value = elements.join('、'); lastAutoElements = elementsEl.value; }
       if (purposeEl.value === 'explain' && score.length) purposeEl.value = 'score_evidence';
       if (purposeEl.value === 'score_evidence' && !score.length) purposeEl.value = 'explain';
+      const body = selected ? '' : sectionBodyFor(name);
+      if (!selected) {
+        if (!textEl.value.trim() || textEl.value === lastAutoText) {
+          textEl.value = body;
+          lastAutoText = body;
+        }
+        sourceHintEl.textContent = body ? `已带出本节正文 ${body.length} 字，可修改` : '未识别本节正文，可粘贴或补充';
+      }
+      if (relationsEl.value === '') relationsEl.value = '分层/边界';
       syncSkills();
     };
     fillTypes(fallbackTypes, presetType || 'architecture');
@@ -2045,6 +2083,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             evidence: sourceRefs,
             source_refs: sourceRefs,
             mapping,
+            relations: relationsEl.value,
           }),
           signal: AbortSignal.timeout(30000),
         });
