@@ -80,14 +80,22 @@ def _combine(tech, comp) -> dict:
     needs_material = [item for item in issues if item.get("needs_material")]
     fixable = [item for item in issues if not item.get("needs_material")]
     errors = [getattr(tech, "error", ""), getattr(comp, "error", "")]
+    score = round((tech_score + comp_score) / 2)
+    satisfied = str(getattr(tech, "satisfied", "") or getattr(comp, "satisfied", "") or "")
+    if not satisfied:
+        # 评审没给满足度时按分数兜底（否则评分点聚合会把低分章节误判为"满足"）
+        satisfied = "satisfied" if score >= 85 else ("partial" if score >= 70 else "unsatisfied")
+    missing_points = list(getattr(tech, "missing_points", []) or []) + list(getattr(comp, "missing_points", []) or [])
+    if not missing_points and issues:
+        missing_points = [str(item.get("point") or "")[:80] for item in issues[:6] if item.get("point")]
     return {
         "tech_score": tech_score,
         "comp_score": comp_score,
-        "score": round((tech_score + comp_score) / 2),
-        "satisfied": str(getattr(tech, "satisfied", "") or getattr(comp, "satisfied", "") or ""),
+        "score": score,
+        "satisfied": satisfied,
         "criterion_text": str(getattr(tech, "criterion_text", "") or ""),
         "covered_points": list(getattr(tech, "covered_points", []) or []),
-        "missing_points": list(getattr(tech, "missing_points", []) or []),
+        "missing_points": missing_points,
         "issues": issues,
         "needs_material": needs_material,
         "fixable": fixable,
@@ -124,6 +132,9 @@ async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
 
     combined = _combine(tech, comp)
     combined["block_id"] = output.block_id
+
+    # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
+    await _write_back_reviews(block, tech, comp, combined)
 
     async with get_db() as db:
         await db.execute(
@@ -173,3 +184,58 @@ async def load_review(block_pk: int) -> dict | None:
         "fixable": [item for item in issues if not item.get("needs_material")],
         "updated_at": data.get("updated_at") or "",
     }
+
+
+_WORSE = {"unsatisfied": 0, "partial": 1, "satisfied": 2, "": 3}
+
+
+def _worst_satisfied(*values: str) -> str:
+    """取最差的满足度（不满足 > 部分满足 > 满足 > 空）。"""
+    cleaned = [str(v or "") for v in values if str(v or "")]
+    if not cleaned:
+        return ""
+    return min(cleaned, key=lambda item: _WORSE.get(item, 9))
+
+
+async def _write_back_reviews(block: dict, tech, comp, combined: dict) -> None:
+    """把章节双评审写进 reviews 表（每 agent 一行，覆盖上一轮），供评分点聚合使用。
+
+    reviews 是评分点聚合（summarize_scoring_risk）的唯一数据源；章节评审不写这里，
+    "评审与交付"页面就永远显示"未评审"。
+    """
+    thread_id = str(block.get("run_thread_id") or "")
+    block_code = str(block.get("block_id") or "")
+    if not block_code:
+        return
+    merged_missing = list(combined.get("missing_points") or [])
+    worst = _worst_satisfied(getattr(tech, "satisfied", ""), getattr(comp, "satisfied", ""))
+    rows = []
+    for agent_name, finding in (("wang_anshi", tech), ("bao_zheng", comp)):
+        if finding is None:
+            continue
+        issues = _issue_dicts(finding)
+        rows.append({
+            "agent": agent_name,
+            "score": int(getattr(finding, "score", 0) or 0),
+            "issues": json.dumps(issues, ensure_ascii=False),
+            "strengths": json.dumps(list(getattr(finding, "strengths", []) or []), ensure_ascii=False),
+            "error": str(getattr(finding, "error", "") or ""),
+            "criterion_text": str(getattr(finding, "criterion_text", "") or combined.get("criterion_text") or ""),
+            "satisfied": worst or str(getattr(finding, "satisfied", "") or combined.get("satisfied") or ""),
+            "covered_points": json.dumps(list(getattr(finding, "covered_points", []) or []), ensure_ascii=False),
+            "missing_points": json.dumps(merged_missing, ensure_ascii=False),
+        })
+    if not rows:
+        return
+    async with get_db() as db:
+        await db.execute("DELETE FROM reviews WHERE block_id=? AND agent IN ('wang_anshi','bao_zheng') "
+                         "AND (? = '' OR thread_id = ?)", (block_code, thread_id, thread_id))
+        for row in rows:
+            await db.execute(
+                "INSERT INTO reviews (thread_id, block_id, agent, score, issues, strengths, error, "
+                "criterion_text, satisfied, covered_points, missing_points) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (thread_id, block_code, row["agent"], row["score"], row["issues"], row["strengths"],
+                 row["error"], row["criterion_text"], row["satisfied"], row["covered_points"],
+                 row["missing_points"]))
+        await db.commit()

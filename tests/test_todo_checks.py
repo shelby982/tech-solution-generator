@@ -390,3 +390,28 @@ def test_review_patch_locate_and_clean():
     assert clean_output("```\n修正后的片段：这是一段完整表述。\n```") == "这是一段完整表述。"
     # 没有对应原文时不应硬定位
     assert locate(content, "完全无关的一句话，正文里肯定没有这句话") is None
+
+
+def test_review_writeback_maps_satisfied_fallback():
+    """打通：章节评审要能写回 reviews（评分点聚合的数据源），并带满足度兜底。"""
+    import json
+    from services.chapter_review import _combine, _worst_satisfied
+
+    class _F:
+        def __init__(self, score, satisfied=""):
+            self.score = score
+            self.satisfied = satisfied
+            self.issues = []
+            self.strengths = []
+            self.error = ""
+            self.criterion_text = ""
+            self.covered_points = []
+            self.missing_points = []
+
+    # 评审没给 satisfied → 按分数兜底
+    assert _combine(_F(60), _F(60))["satisfied"] == "unsatisfied"
+    assert _combine(_F(75), _F(75))["satisfied"] == "partial"
+    assert _combine(_F(90), _F(90))["satisfied"] == "satisfied"
+    # 两侧都给时取最差
+    assert _worst_satisfied("satisfied", "unsatisfied") == "unsatisfied"
+    assert _worst_satisfied("partial", "satisfied") == "partial"

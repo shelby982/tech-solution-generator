@@ -182,6 +182,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <button type="button" class="cs-insert-btn" data-open-insert title="从官方来源 / 素材 / 结构模板插入内容">插入…</button>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
               <button data-action="recompose">重新编写本模块…</button>
+              <button data-action="review-batch">批量评审（最多 3 章）</button>
               <button data-action="plan-materials-all">全项目：生成素材建议并采用</button>
               <div class="cs-more-sep"></div>
               <button data-action="project-todo">全书待办</button>
@@ -5354,6 +5355,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='link'){await json(`/api/blocks/${active.id}/studio/materials`,send('PUT',{material_id:Number(button.dataset.id),section:pendingMaterialSection||''}));pendingMaterialSection='';context=await json(`/api/blocks/${active.id}/studio`);paintAside();}
       if(action==='project-todo') { openProjectTodoDialog(); return; }
       if(action==='recompose') { await openRecomposeDialog(); return; }
+      if(action==='review-batch') {
+        const nodes=[...host.querySelectorAll('.cs-node[data-chapter]')]
+          .filter((el)=>String(el.dataset.st||'')!=='empty')
+          .map((el)=>Number(el.dataset.chapter)).filter(Boolean);
+        const targets=nodes.length?nodes.slice(0,3):[active.id];
+        if(!globalThis.confirm(`将评审 ${targets.length} 章（每章约 30~60 秒），继续？`)) return;
+        let done=0;
+        for(const blockId of targets){
+          status(`正在评审第 ${done+1}/${targets.length} 章…`);
+          try{
+            const resp=await fetch(`/api/blocks/${blockId}/studio/review`,{method:'POST',signal:AbortSignal.timeout(300000)});
+            if(resp.ok) done++;
+          }catch(error){ /* 跳过失败的章 */ }
+        }
+        await loadChapterReview(); await loadBasis(active.block_id); paintAside();
+        status(`批量评审完成：${done}/${targets.length} 章`);
+        return;
+      }
       if(action==='plan-materials-all') {
         if(!globalThis.confirm('为全项目空章节逐节匹配素材并自动采用（不改已写正文），继续？')) return;
         status('正在为全项目生成素材建议…');
