@@ -755,3 +755,65 @@ async def source_diagnosis(project_id: int):
             "boilerplate": boilerplate, "empty_table": empty_table, "selected": selected,
             "files": [{"filename": r[0], "role": r[1], "status": r[2]} for r in files],
             "suggestions": suggestions}
+
+
+@router.get('/blocks/{block_id}/materials/needs')
+async def chapter_material_needs(block_id: int):
+    """评审意见里"需补材料"的条目 → 本章需要补什么材料（issue → 素材联动）。"""
+    import json as _json
+
+    from services.chapter_review import load_review
+
+    review = await load_review(block_id)
+    if not review:
+        return {"count": 0, "items": [], "reviewed": False}
+    items = []
+    for issue in (review.get("needs_material") or []):
+        query = str(issue.get("material_query") or "").strip()
+        point = str(issue.get("point") or "").strip()
+        items.append({
+            "query": query or point[:60],           # 检索关键词
+            "reason": point[:120],                  # 为什么需要
+            "severity": issue.get("severity") or "medium",
+        })
+    # 按 query 去重
+    seen, unique = set(), []
+    for item in items:
+        key = item["query"]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return {"count": len(unique), "items": unique[:8], "reviewed": True}
+
+
+@router.get('/projects/{project_id}/materials/needs')
+async def project_material_needs(project_id: int):
+    """项目级：全章节评审汇总"需要补的材料"（去重、按次数排序）。"""
+    import json as _json
+
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT block_id, needs_material FROM chapter_reviews WHERE project_id=?", (project_id,))).fetchall()
+        blocks = await (await db.execute(
+            "SELECT id, title, block_id FROM blocks WHERE project_id=? AND COALESCE(block_id,'')<>''",
+            (project_id,))).fetchall()
+    titles = {int(r[0]): (r[1] or r[2]) for r in blocks}
+    counter: dict[str, dict] = {}
+    for block_pk, raw in rows:
+        try:
+            needs = _json.loads(raw or "[]") or []
+        except Exception:
+            needs = []
+        for issue in needs:
+            query = str(issue.get("material_query") or issue.get("point") or "").strip()[:60]
+            if not query:
+                continue
+            entry = counter.setdefault(query, {"query": query, "reason": str(issue.get("point") or "")[:120],
+                                               "severity": issue.get("severity") or "medium",
+                                               "chapters": [], "count": 0})
+            entry["count"] += 1
+            if len(entry["chapters"]) < 5:
+                entry["chapters"].append(titles.get(int(block_pk), str(block_pk)))
+    ordered = sorted(counter.values(), key=lambda item: item["count"], reverse=True)
+    return {"count": len(ordered), "items": ordered[:12]}

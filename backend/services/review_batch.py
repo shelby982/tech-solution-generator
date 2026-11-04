@@ -129,3 +129,55 @@ async def recover_stale_jobs() -> None:
             await db.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"批量评审恢复失败：{exc}")
+
+
+async def estimate(db, project_id: int, thread_id: str = "", only_unreviewed: bool = True,
+                   limit: int = 0) -> dict:
+    """成本预估：待评章节数 / 调用次数 / 预计 token / 预计耗时。
+
+    token 用**真实历史**（llm_usage 里 review_tech / review_compliance 的均值），
+    没有历史时用保守默认值（每章约 1.2 万 token）。
+    """
+    targets = await _targets(db, project_id, thread_id, only_unreviewed, limit)
+    pending = len(targets)
+
+    per_chapter = 0
+    try:
+        rows = await (await db.execute(
+            "SELECT call_site, AVG(total_tokens) FROM llm_usage "
+            "WHERE call_site IN ('review_tech','review_compliance') AND total_tokens > 0 "
+            "GROUP BY call_site")).fetchall()
+        per_chapter = int(sum(float(r[1] or 0) for r in rows))
+    except Exception:
+        per_chapter = 0
+    if per_chapter <= 0:
+        per_chapter = 12000          # 兜底：双评审约 1.2 万 token/章
+
+    try:
+        concurrency = max(1, int(os.getenv("REVIEW_BATCH_CONCURRENCY", "2")))
+    except Exception:
+        concurrency = 2
+    seconds_per_chapter = 50         # 实测单章约 50 秒
+    minutes = round(pending * seconds_per_chapter / concurrency / 60, 1)
+
+    reviewed = 0
+    try:
+        rows = await (await db.execute(
+            "SELECT COUNT(*) FROM blocks WHERE project_id=? AND COALESCE(content,'')<>'' "
+            "AND (?='' OR run_thread_id=?)", (project_id, thread_id or "", thread_id or ""))).fetchone()
+        total_with_content = int(rows[0] or 0)
+        reviewed = total_with_content - pending if only_unreviewed else 0
+    except Exception:
+        total_with_content = pending
+
+    return {
+        "chapters_pending": pending,
+        "chapters_with_content": total_with_content,
+        "chapters_reviewed": max(0, reviewed) if only_unreviewed else 0,
+        "calls_est": pending * 2,
+        "tokens_per_chapter": per_chapter,
+        "tokens_est": pending * per_chapter,
+        "minutes_est": minutes,
+        "concurrency": concurrency,
+        "only_unreviewed": only_unreviewed,
+    }

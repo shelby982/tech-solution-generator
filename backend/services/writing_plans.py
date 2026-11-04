@@ -422,6 +422,15 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
         await _bind_clauses_to_chapters(db, project_id, thread_id, leaves)
     except Exception:
         pass
+    spec_clauses = {}
+    try:
+        rows = await (await db.execute(
+            "SELECT requirement_id, topic, title, text, mandatory_level FROM spec_requirements "
+            "WHERE run_thread_id=? ORDER BY order_idx", (thread_id,),
+        )).fetchall()
+        spec_clauses = {str(row["requirement_id"]): dict(row) for row in rows}
+    except Exception:
+        spec_clauses = {}
 
     for leaf in leaves:
         layout = layout_for(leaf)
@@ -434,7 +443,7 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             gaps.append(f"{leaf.get('title')}：{need[:60]}")
         plan = Plan(objective=f"{leaf.get('title')}：按《{LAYOUTS[layout]['label']}》结构编制",
                     tasks=tasks, gaps=chapter_gaps).model_dump()
-        chapters.append({
+        chapter_row = {
             "id": leaf.get("id"),
             "block_id": leaf["block_id"], "title": leaf.get("title"), "level": leaf.get("level"),
             "layout": layout, "layout_label": LAYOUTS[layout]["label"],
@@ -444,7 +453,26 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
             "has_children": any(str(x.get("block_id") or "").startswith(str(leaf.get("block_id")) + ".")
                                 for x in leaves),
             "confirmed": True,   # 系统统筹生成即生效；用户可改，改完仍生效
-        })
+        }
+        # 把招标技术规范条款写进本章要求：计划阶段就看到“对内要写什么”
+        try:
+            spec_ids = [str(x) for x in json.loads(leaf.get("spec_requirement_ids") or "[]")]
+        except ValueError:
+            spec_ids = []
+        chapter_row["spec_requirement_ids"] = spec_ids
+        for requirement_id in spec_ids[:5]:
+            clause = spec_clauses.get(requirement_id)
+            if not clause:
+                continue
+            text = str(clause.get("text") or "").strip()
+            if not text:
+                continue
+            chapter_row["requirements"].append({
+                "id": f"spec-{requirement_id}", "text": f"技术规范条款：{text[:260]}",
+                "type": "text", "source": "spec", "source_label": "技术规范书",
+                "spec_requirement_id": requirement_id,
+            })
+        chapters.append(chapter_row)
         # 父章（自己写正文、又有子节）追加"总述"要求 —— 避免与子节内容重复
         if chapters[-1]["has_children"] and str(leaf.get("content") or "").strip():
             children_count = sum(1 for x in leaves

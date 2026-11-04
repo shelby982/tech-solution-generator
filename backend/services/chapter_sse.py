@@ -221,6 +221,13 @@ async def run_job(job_id: str) -> None:
                 continue
             from services.section_context import coverage_for_section
             coverage = await coverage_for_section(block, thread_id, text)
+            if coverage.get("missing_detail"):
+                await emit(job_id, "todo", {"index": index, "items": [{
+                    "group": "proof", "severity": "suggest",
+                    "title": f"规范条款未回应：{item.get('title') or item.get('requirement_id')}",
+                    "evidence": f"第 {index + 1} 节「{title}」",
+                    "source": "技术规范覆盖", "action": "locate",
+                } for item in coverage["missing_detail"][:5]]})
             draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
             words = len(re.sub(r"\s+", "", text))
             section_records.append({"index": index, "title": title, "role": "text",
@@ -555,6 +562,13 @@ async def write_sections(job_id: str, block: dict, block_pk: int, sections: list
             text, _missing = merge_charts(text, charts)
         from services.section_context import coverage_for_section
         coverage = await coverage_for_section(block, thread_id, text)
+        if coverage.get("missing_detail"):
+            await emit(job_id, "todo", {"index": index, "items": [{
+                "group": "proof", "severity": "suggest",
+                "title": f"规范条款未回应：{item.get('title') or item.get('requirement_id')}",
+                "evidence": f"第 {index + 1} 节「{title}」",
+                "source": "技术规范覆盖", "action": "locate",
+            } for item in coverage["missing_detail"][:5]]})
         draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
         records.append({"index": index, "title": title, "role": "text",
                         "model": models.get("text", ""), "words": len(re.sub(r"\s+", "", text)),

@@ -133,6 +133,16 @@ async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
     combined = _combine(tech, comp)
     combined["block_id"] = output.block_id
 
+    # ── 写历史（每轮一条，用于对比"改完有没有变好"）──
+    async with get_db() as db:
+        await db.execute(
+            "INSERT INTO review_history (block_id, project_id, score, tech_score, comp_score, satisfied, "
+            "issues_count, needs_material_count) VALUES (?,?,?,?,?,?,?,?)",
+            (block_pk, int(block.get("project_id") or 0), combined["score"], combined["tech_score"],
+             combined["comp_score"], combined["satisfied"], len(combined.get("issues") or []),
+             len(combined.get("needs_material") or [])))
+        await db.commit()
+
     # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
     await _write_back_reviews(block, tech, comp, combined)
 
@@ -239,3 +249,16 @@ async def _write_back_reviews(block: dict, tech, comp, combined: dict) -> None:
                  row["error"], row["criterion_text"], row["satisfied"], row["covered_points"],
                  row["missing_points"]))
         await db.commit()
+
+
+async def load_history(block_pk: int, limit: int = 10) -> list[dict]:
+    """本章评审历史（新的在前），带与上一轮的分差。"""
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT score, tech_score, comp_score, satisfied, issues_count, needs_material_count, created_at "
+            "FROM review_history WHERE block_id=? ORDER BY id DESC LIMIT ?", (block_pk, max(2, limit)))).fetchall()
+    items = [dict(row) for row in rows]
+    for index, item in enumerate(items):
+        prev = items[index + 1] if index + 1 < len(items) else None
+        item["delta"] = (int(item["score"]) - int(prev["score"])) if prev else None
+    return items

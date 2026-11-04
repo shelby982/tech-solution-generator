@@ -92,8 +92,24 @@ async function runBatchReview() {
   const label = document.getElementById('batch-review-status');
   if (!workspace.projectId || !btn) return;
   btn.disabled = true;
-  if (label) label.textContent = '正在创建任务…';
+  if (label) label.textContent = '正在估算成本…';
   try {
+    // 先估成本（用真实历史 token 均值），让用户看清代价再跑
+    const est = await fetch(`/api/projects/${workspace.projectId}/reviews/estimate`
+      + `?thread_id=${encodeURIComponent(workspace.threadId || '')}&only_unreviewed=true`).then((r) => r.json()).catch(() => ({}));
+    if (!est || !est.chapters_pending) {
+      if (label) label.textContent = '没有待评审章节（都有评审了）';
+      btn.disabled = false;
+      return;
+    }
+    const tokenText = est.tokens_est >= 10000 ? `${Math.round(est.tokens_est / 10000)} 万 token` : `${est.tokens_est} token`;
+    const ok = globalThis.confirm(
+      `将评审 ${est.chapters_pending} 章（已评 ${est.chapters_reviewed || 0} / 共 ${est.chapters_with_content || 0} 章）\n`
+      + `调用次数：${est.calls_est} 次（每章技术+合规双评审）\n`
+      + `预计消耗：约 ${tokenText}（按历史均值 ${est.tokens_per_chapter} / 章）\n`
+      + `预计耗时：约 ${est.minutes_est} 分钟（并发 ${est.concurrency}）\n\n继续？`);
+    if (!ok) { if (label) label.textContent = ''; btn.disabled = false; return; }
+    if (label) label.textContent = '正在创建任务…';
     const body = { thread_id: workspace.threadId || '', only_unreviewed: true, limit: 0 };
     const resp = await fetch(`/api/projects/${workspace.projectId}/reviews/batch`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

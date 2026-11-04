@@ -601,6 +601,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（弹窗） */
   let chapterReview = null;
+  let reviewHistory = [];
+  let reviewDelta = null;
 
   /** 拉本章评审（最近一次） */
   async function loadChapterReview() {
@@ -610,6 +612,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const data = resp.ok ? await resp.json() : null;
       chapterReview = data?.reviewed ? data.review : null;
     } catch (error) { chapterReview = null; }
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/studio/review/history?limit=10`, { cache: 'no-store' });
+      const data = resp.ok ? await resp.json() : null;
+      reviewHistory = data?.items || [];
+      reviewDelta = reviewHistory.length ? reviewHistory[0].delta : null;
+    } catch (error) { reviewHistory = []; reviewDelta = null; }
+  }
+
+  let materialNeeds = { count: 0, items: [] };
+
+  /** 拉"评审要求补充的材料"（issue → 素材联动） */
+  async function loadMaterialNeeds() {
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/materials/needs`, { cache: 'no-store' });
+      materialNeeds = resp.ok ? await resp.json() : { count: 0, items: [] };
+    } catch (error) { materialNeeds = { count: 0, items: [] }; }
   }
 
   /** 编写页签：评审卡片（分数 + 评审按钮 + 意见列表） */
@@ -627,10 +645,27 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<div class="cs-review">
       <div class="cs-review-head">
         <b>评审 ${review.score}</b>
-        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}</span>
+        ${reviewDelta === null ? '' : `<span class="cs-review-delta ${reviewDelta >= 0 ? 'is-up' : 'is-down'}">${reviewDelta >= 0 ? '↑' : '↓'} ${Math.abs(reviewDelta)}</span>`}
+        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}</span>
         <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
       </div>
-      ${(review.needs_material || []).length ? `<p class="cs-review-need">其中 ${(review.needs_material || []).length} 条需要补材料（重写修不好）→ 见「素材」页签</p>` : ''}
+      ${(review.needs_material || []).length ? `<div class="cs-review-needs">
+        <p class="cs-review-need">需要补 ${(materialNeeds.items || []).length || (review.needs_material || []).length} 类材料（重写修不好）：</p>
+        ${(materialNeeds.items || []).slice(0, 4).map((item) => `<div class="cs-need-row">
+          <span class="cs-need-q">${esc(String(item.query || '').slice(0, 40))}</span>
+          <button type="button" class="cs-gate-act" data-need-upload>上传</button>
+          <button type="button" class="cs-gate-act" data-need-search="${esc(String(item.query || ''))}">联网找</button>
+        </div>`).join('')}
+      </div>` : ''}
+      ${reviewHistory.length > 1 ? `<details class="cs-review-fold">
+        <summary>评审历史（${reviewHistory.length} 轮，最近 ${esc(String(reviewHistory[0].created_at || '').slice(5, 16))}）</summary>
+        ${reviewHistory.map((item) => `<div class="cs-review-hist">
+          <span>${esc(String(item.created_at || '').slice(5, 16))}</span>
+          <b>${item.score}</b>
+          <em>${item.delta === null ? '首轮' : (item.delta >= 0 ? `↑${item.delta}` : `↓${Math.abs(item.delta)}`)}</em>
+          <small>技术 ${item.tech_score} · 合规 ${item.comp_score} · 问题 ${item.issues_count}</small>
+        </div>`).join('')}
+      </details>` : ''}
       ${issues.length ? `<details class="cs-review-fold" ${issues.length <= 3 ? 'open' : ''}>
         <summary>问题清单（${issues.length}）</summary>
         ${issues.map((issue, index) => `<div class="cs-review-issue">
@@ -4758,6 +4793,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       void loadWritingModels().then(() => paintAside());
       void autoCleanChapter();
       void loadChapterReview().then(() => paintAside());
+      void loadMaterialNeeds().then(() => paintAside());
       void loadMaterialLibrary().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
@@ -4944,6 +4980,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         dlg.addEventListener('close',()=>dlg.remove());
         globalThis.document.body.appendChild(dlg); dlg.showModal();
       }catch(error){status(`看原文失败：${error.message}`);}
+      return;
+    }
+    if(event.target.closest('[data-need-upload]')){
+      await openMaterialAdminDialog();
+      return;
+    }
+    const needSearch=event.target.closest('[data-need-search]');
+    if(needSearch){
+      const query=String(needSearch.dataset.needSearch||'');
+      try{ await navigator.clipboard.writeText(query); status(`已复制检索词「${query}」，在"插入 → 官方来源"里粘贴搜索`); }
+      catch(error){ status(`检索词：${query}`); }
+      const citeBtn=globalThis.document.querySelector('[data-cite-open]');
+      if(citeBtn) citeBtn.click();
       return;
     }
     if(event.target.closest('[data-review-run]')){

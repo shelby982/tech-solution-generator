@@ -61,3 +61,20 @@ def test_coverage_flags_missing_spec_terms():
     bad = coverage_for_text("本章按招标文件要求建设。", context)
     assert good["covered"] == 1 and good["missing"] == []
     assert bad["covered"] == 0 and bad["missing"] == ["sr-1"]
+
+
+def test_section_specific_spec_selection_and_missing_detail():
+    from services.section_context import _select_spec_for_section
+    spec = [
+        {"requirement_id": "sr-ddd", "title": "DDD 微服务边界",
+         "text": "基于领域驱动设计划分微服务边界，形成核心稳定外围敏态。"},
+        {"requirement_id": "sr-k8s", "title": "Kubernetes 服务治理",
+         "text": "基于 Kubernetes 的服务网关、注册中心、配置中心与熔断限流。"},
+        {"requirement_id": "sr-security", "title": "安全等保",
+         "text": "落实网络安全等级保护要求与安全边界防护。"},
+    ]
+    picked = _select_spec_for_section(spec, {"title": "Kubernetes 服务治理", "points": ["服务网关与注册中心"]})
+    assert picked and picked[0]["requirement_id"] == "sr-k8s"
+
+    coverage = coverage_for_text("本章落实安全等保要求。", {"spec_clauses": spec[:1]})
+    assert coverage["missing_detail"][0]["requirement_id"] == "sr-ddd"

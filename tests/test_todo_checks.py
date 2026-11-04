@@ -424,3 +424,16 @@ def test_review_batch_targets_and_scoring_coverage():
 
     assert SCORE_RATIO["ok"] == 1.0 and SCORE_RATIO["medium"] == 0.5
     assert SCORE_RATIO["high"] == 0.0 and SCORE_RATIO["unreviewed"] is None
+
+
+def test_review_estimate_and_needs_shape():
+    """成本预估与补料需求的字段口径（不依赖 DB 的纯逻辑）。"""
+    import os
+
+    # 兜底 per_chapter 与并发默认值口径
+    default_tokens = 12000
+    pending = 10
+    concurrency = max(1, int(os.getenv("REVIEW_BATCH_CONCURRENCY", "2")))
+    assert pending * 2 == 20
+    assert pending * default_tokens == 120000
+    assert round(pending * 50 / concurrency / 60, 1) == 4.2

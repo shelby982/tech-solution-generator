@@ -265,6 +265,19 @@ CREATE TABLE IF NOT EXISTS review_jobs (
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS review_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    block_id       INTEGER NOT NULL,
+    project_id     INTEGER NOT NULL DEFAULT 0,
+    score          INTEGER DEFAULT 0,
+    tech_score     INTEGER DEFAULT 0,
+    comp_score     INTEGER DEFAULT 0,
+    satisfied      TEXT DEFAULT '',
+    issues_count   INTEGER DEFAULT 0,
+    needs_material_count INTEGER DEFAULT 0,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS chapter_reviews (
     block_id      INTEGER PRIMARY KEY,
     project_id    INTEGER NOT NULL,

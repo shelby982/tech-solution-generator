@@ -145,9 +145,35 @@ async def _search_materials(db, block: dict, section: dict, spec: list[dict], re
     return out
 
 
+def _select_spec_for_section(spec: list[dict], section: dict) -> list[dict]:
+    """章节规范条款较多时，优先取与本节标题/要点/依据相关的条款。"""
+    if len(spec) <= 2:
+        return spec
+    from services.material_search import extract_terms
+    section_text = " ".join([
+        str(section.get("title") or ""),
+        " ".join(str(x) for x in (section.get("points") or [])),
+        " ".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or [])),
+    ])
+    section_terms = set(extract_terms(section_text, limit=24))
+    if not section_terms:
+        return spec[:3]
+    scored = []
+    for clause in spec:
+        blob = str(clause.get("title") or "") + " " + str(clause.get("text") or "")
+        clause_terms = set(extract_terms(blob, limit=16))
+        hits = len(section_terms & clause_terms)
+        scored.append((hits, clause))
+    scored.sort(key=lambda item: (-item[0], spec.index(item[1])))
+    # 有相关条款就取 top2；没有明显相关时保留前 3 条，避免完全丢规范
+    picked = [clause for hits, clause in scored if hits > 0][:2]
+    return picked or spec[:3]
+
+
 async def build_section_context(block: dict, section: dict, thread_id: str = "") -> dict:
     async with get_db() as db:
         spec = await _load_spec_clauses(db, block, thread_id)
+        spec = _select_spec_for_section(spec, section)
         reqs = await _load_plan_requirements(db, block, thread_id)
         package = await _load_package(db, thread_id or str(block.get("run_thread_id") or ""))
         manual = await _load_manual_materials(db, block, str(section.get("title") or ""))
@@ -205,6 +231,7 @@ def coverage_for_text(text: str, context: dict) -> dict:
     from services.material_search import extract_terms
     clauses = context.get("spec_clauses") or []
     missing = []
+    missing_detail = []
     covered = 0
     for clause in clauses:
         terms = extract_terms(str(clause.get("title") or ""), str(clause.get("text") or ""), limit=10)
@@ -214,5 +241,8 @@ def coverage_for_text(text: str, context: dict) -> dict:
         if hits >= max(2, min(3, len(terms) // 3)):
             covered += 1
         else:
-            missing.append(clause.get("requirement_id") or clause.get("title") or "")
-    return {"total": len(clauses), "covered": covered, "missing": missing[:8]}
+            key = clause.get("requirement_id") or clause.get("title") or ""
+            missing.append(key)
+            missing_detail.append({"requirement_id": key, "title": str(clause.get("title") or "")[:80]})
+    return {"total": len(clauses), "covered": covered, "missing": missing[:8],
+            "missing_detail": missing_detail[:8]}

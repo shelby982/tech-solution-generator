@@ -1061,3 +1061,11 @@ async def review_patch_apply(block_id: int, body: ReviewPatchApplyBody):
         return await apply_patch(block_id, body.before, body.after, issue_index=int(body.issue_index))
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+
+
+@router.get('/blocks/{block_id}/studio/review/history')
+async def chapter_review_history(block_id: int, limit: int = 10):
+    """本节评审历史（分数变化曲线 + 与上轮分差）。"""
+    from services.chapter_review import load_history
+
+    return {"items": await load_history(block_id, limit)}

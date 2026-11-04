@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from db import get_db
-from services.review_batch import create_job, get_job, latest_job, start
+from services.review_batch import create_job, estimate, get_job, latest_job, start
 
 router = APIRouter(tags=["review-batch"])
 
@@ -40,3 +40,11 @@ async def batch_progress(project_id: int, job_id: str):
     if not job or int(job["project_id"]) != project_id:
         raise HTTPException(404, "任务不存在")
     return job
+
+
+@router.get('/projects/{project_id}/reviews/estimate')
+async def batch_estimate(project_id: int, thread_id: str = "", only_unreviewed: bool = True,
+                         limit: int = 0):
+    """全量评审前的成本预估（章节数 / 调用次数 / token / 耗时）。"""
+    async with get_db() as db:
+        return await estimate(db, project_id, thread_id, only_unreviewed, limit)
