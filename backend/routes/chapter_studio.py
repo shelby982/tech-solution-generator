@@ -1011,3 +1011,24 @@ async def project_todo(project_id: int, thread_id: str = ''):
             "unconfirmed": unconfirmed,
         },
     }
+
+
+@router.post('/blocks/{block_id}/studio/review')
+async def review_chapter(block_id: int):
+    """对本章跑"技术 + 合规"双评审（编写 ↔ 评审结合）。"""
+    from services.chapter_review import review_block
+
+    try:
+        result = await review_block(block_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return result
+
+
+@router.get('/blocks/{block_id}/studio/review')
+async def get_chapter_review(block_id: int):
+    """读取最近一次章节评审（没有则 reviewed=false）。"""
+    from services.chapter_review import load_review
+
+    data = await load_review(block_id)
+    return {"reviewed": bool(data), "review": data}

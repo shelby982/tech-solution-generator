@@ -250,6 +250,21 @@ CREATE TABLE IF NOT EXISTS chapter_material_chunks (
     PRIMARY KEY (block_id, chunk_id)
 );
 
+CREATE TABLE IF NOT EXISTS chapter_reviews (
+    block_id      INTEGER PRIMARY KEY,
+    project_id    INTEGER NOT NULL,
+    tech_score    INTEGER DEFAULT 0,
+    comp_score    INTEGER DEFAULT 0,
+    score         INTEGER DEFAULT 0,
+    satisfied     TEXT DEFAULT '',
+    criterion_text TEXT DEFAULT '',
+    covered_points TEXT DEFAULT '[]',
+    missing_points TEXT DEFAULT '[]',
+    issues         TEXT DEFAULT '[]',
+    needs_material TEXT DEFAULT '[]',
+    updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS chapter_materials (
     block_id INTEGER NOT NULL REFERENCES blocks(id),
     material_id INTEGER NOT NULL REFERENCES materials(id),

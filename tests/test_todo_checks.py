@@ -334,3 +334,41 @@ def test_chunk_boilerplate_and_html_stripping():
     ]
     ranked = recommend(profile, pool, limit=2, min_score=0.01)
     assert ranked and ranked[0]["chunk_id"] == 2
+
+
+def test_chapter_review_combine_and_readiness_merge():
+    """评审与编写结合：双评审合并 + 就绪度合成（规则 60% + 评审 40%）。"""
+    from services.chapter_review import _combine
+    from services.writing_plans import _with_review
+
+    class _F:
+        def __init__(self, score, issues, satisfied="", covered=None, missing=None):
+            self.score = score
+            self.issues = issues
+            self.satisfied = satisfied
+            self.covered_points = covered or []
+            self.missing_points = missing or []
+            self.criterion_text = ""
+            self.error = ""
+
+    class _I:
+        def __init__(self, point, severity="high", needs_material=False, suggestion=""):
+            self._d = {"point": point, "severity": severity, "needs_material": needs_material,
+                       "suggestion": suggestion, "material_query": ""}
+
+        def to_dict(self):
+            return dict(self._d)
+
+    tech = _F(60, [_I("缺少量化指标", "critical"), _I("缺业绩材料", "high", True)])
+    comp = _F(80, [_I("合规口径不清", "medium")])
+    combined = _combine(tech, comp)
+    assert combined["score"] == 70
+    assert len(combined["issues"]) == 3
+    assert combined["issues"][0]["severity"] == "critical"       # 按严重度排序
+    assert len(combined["needs_material"]) == 1
+    assert len(combined["fixable"]) == 2
+
+    payload = {"summary": {"readiness": 100}}
+    merged = _with_review(payload, {"score": 54, "tech": 50, "comp": 58})
+    assert merged["summary"]["readiness"] == 82                  # 100*0.6 + 54*0.4
+    assert merged["summary"]["readiness_rule"] == 100

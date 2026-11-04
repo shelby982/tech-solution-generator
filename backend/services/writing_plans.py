@@ -1238,10 +1238,12 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "todo_items": build_todo_items(deliverables, material_gaps or [], generation_gaps or [],
                                        word_plan, content, is_parent_chapter, is_catalog, completion),
         "todo_groups": TODO_GROUPS,
-        "delivery_tasks": _delivery_tasks_payload(body=content, block_key=str(block_id),
-                                                 deliverables=deliverables, material_gaps=material_gaps,
-                                                 generation_gaps=generation_gaps, word_plan=word_plan,
-                                                 completion=completion, is_catalog=is_catalog),
+        "delivery_tasks": _with_review(
+            _delivery_tasks_payload(body=content, block_key=str(block_id),
+                                    deliverables=deliverables, material_gaps=material_gaps,
+                                    generation_gaps=generation_gaps, word_plan=word_plan,
+                                    completion=completion, is_catalog=is_catalog),
+            await _chapter_review_line(db, block)),
         "children": children,
         "catalog": is_catalog,
         "has_children": has_children,
@@ -1565,3 +1567,38 @@ async def _practice_overrides(db, project_id: int, block_id: str) -> dict[str, s
         return {row[0]: row[1] for row in rows if row[1]}
     except Exception:
         return {}
+
+
+async def _chapter_review_line(db, block: dict) -> dict:
+    """取本章最近一次评审（没有则空）。"""
+    try:
+        from services.chapter_review import load_review
+        row = await (await db.execute("SELECT id FROM blocks WHERE block_id=? AND project_id=? LIMIT 1",
+                                      (str(block.get("block_id") or ""), int(block.get("project_id") or 0)))).fetchone()
+        if not row:
+            return {}
+        review = await load_review(int(row[0]))
+        if not review:
+            return {}
+        return {"score": review["score"], "tech": review["tech_score"], "comp": review["comp_score"],
+                "issue_count": len(review.get("fixable") or []),
+                "needs_material_count": len(review.get("needs_material") or []),
+                "updated_at": review.get("updated_at") or ""}
+    except Exception:
+        return {}
+
+
+def _with_review(payload: dict, review: dict) -> dict:
+    """把评审分并入就绪度：规则分 60% + 评审分 40%（没有评审则保持规则分）。"""
+    if not review:
+        return payload
+    summary = dict(payload.get("summary") or {})
+    rule = int(summary.get("readiness") or 0)
+    combined = round(rule * 0.6 + int(review.get("score") or 0) * 0.4)
+    summary["readiness_rule"] = rule
+    summary["review"] = review
+    summary["readiness"] = combined
+    summary["readiness_text"] = ("可以交付" if combined >= 90 else "接近可交付" if combined >= 70
+                                 else "还需处理" if combined >= 40 else "不可交付")
+    payload["summary"] = summary
+    return payload

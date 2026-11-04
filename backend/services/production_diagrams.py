@@ -200,13 +200,28 @@ def render_data_flow(spec: dict, meta: dict) -> str:
             parts.append(_rect(x + 16, iy, stage_w - 32, 48, PAPER, "#dbe3ef", 5))
             parts.append(_text(x + 28, iy + 20, _clip(item, 14), 11, INK, 600))
             parts.append(_text(x + 28, iy + 36, "环节 " + str(i + 1), 8.5, MUTED))
-            positions[item] = (x + stage_w - 16, iy + 24)
+            positions[item] = {"x1": x + 16, "x2": x + stage_w - 16, "y": iy + 24, "stage": si}
     edges = [e for e in (spec.get("edges") or []) if isinstance(e, dict)]
-    for edge in edges:
+    for edge_index, edge in enumerate(edges):
         a = positions.get(str(edge.get("from")))
         b = positions.get(str(edge.get("to")))
-        if a and b:
-            parts.append(_edge(a[0], a[1], b[0], b[1], str(edge.get("label") or ""), "call", bool(edge.get("dashed"))))
+        if not a or not b:
+            continue
+        if b["stage"] > a["stage"]:
+            sx, tx = a["x2"], b["x1"]
+        elif b["stage"] < a["stage"]:
+            sx, tx = a["x1"], b["x2"]
+        else:
+            sx, tx = a["x2"], b["x2"]
+        mid = (sx + tx) / 2
+        path = f"M {sx:.1f} {a['y']:.1f} H {mid:.1f} V {b['y']:.1f} H {tx:.1f}"
+        parts.append(f'<path d="{path}" fill="none" stroke="{ACCENT}" stroke-width="1.5" marker-end="url(#p-arrow)"/>')
+        label = _clip(edge.get("label") or "", 14)
+        if label:
+            ly = (a["y"] + b["y"]) / 2 + (edge_index % 3 - 1) * 12
+            width = min(140, max(38, len(label) * 10 + 12))
+            parts.append(f'<rect x="{mid - width / 2:.1f}" y="{ly - 9:.1f}" width="{width}" height="17" rx="3" fill="{PAPER}"/>')
+            parts.append(_text(mid, ly + 3, label, 9, "#475569", anchor="middle"))
     return _doc("".join(parts), height, meta)
 
 
@@ -322,8 +337,8 @@ def render_fishbone(spec: dict, meta: dict) -> str:
     center_y = top + 210
     parts = []
     parts.append(_line(MARGIN + 40, center_y, W - MARGIN - 230, center_y, INK, 2))
-    parts.append(_rect(W - MARGIN - 220, center_y - 26, 210, 52, "#eff6ff", ACCENT, 6))
-    parts.append(_text(W - MARGIN - 115, center_y + 4, effect, 12, ACCENT, 700, "middle"))
+    parts.append(_rect(W - MARGIN - 240, center_y - 26, 240, 52, "#eff6ff", ACCENT, 6))
+    parts.append(_text(W - MARGIN - 120, center_y + 4, _clip(effect, 14), 11, ACCENT, 700, "middle"))
     for i, cat in enumerate(categories):
         above = i % 2 == 0
         x = MARGIN + 150 + (i // 2) * 250

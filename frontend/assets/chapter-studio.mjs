@@ -599,6 +599,52 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 素材页签（方案 C + M3）：① 本章引用（主） ② 素材库（弹窗） */
+  let chapterReview = null;
+
+  /** 拉本章评审（最近一次） */
+  async function loadChapterReview() {
+    if (!active) return;
+    try {
+      const resp = await fetch(`/api/blocks/${active.id}/studio/review`, { cache: 'no-store' });
+      const data = resp.ok ? await resp.json() : null;
+      chapterReview = data?.reviewed ? data.review : null;
+    } catch (error) { chapterReview = null; }
+  }
+
+  /** 编写页签：评审卡片（分数 + 评审按钮 + 意见列表） */
+  function reviewBlockHtml() {
+    const review = chapterReview;
+    const sevLabel = { critical: '严重', high: '高', medium: '中', low: '低' };
+    if (!review) {
+      return `<div class="cs-review">
+        <div class="cs-review-head"><b>评审</b><span class="cs-dim">还没有评审过</span>
+          <button type="button" class="cs-gate-act" data-review-run>评审本章</button></div>
+        <p class="cs-muted">按评分口径检查本章是否真正满足要求，并给出问题清单（不改正文）。</p>
+      </div>`;
+    }
+    const issues = review.issues || [];
+    return `<div class="cs-review">
+      <div class="cs-review-head">
+        <b>评审 ${review.score}</b>
+        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}</span>
+        <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
+      </div>
+      ${(review.needs_material || []).length ? `<p class="cs-review-need">其中 ${(review.needs_material || []).length} 条需要补材料（重写修不好）→ 见「素材」页签</p>` : ''}
+      ${issues.length ? `<details class="cs-review-fold" ${issues.length <= 3 ? 'open' : ''}>
+        <summary>问题清单（${issues.length}）</summary>
+        ${issues.map((issue, index) => `<div class="cs-review-issue">
+          <span class="cs-review-sev is-${esc(String(issue.severity || 'medium').toLowerCase())}">${sevLabel[String(issue.severity || '').toLowerCase()] || '中'}</span>
+          <div class="cs-review-body">
+            <p>${esc(String(issue.point || '').slice(0, 120))}</p>
+            ${issue.suggestion ? `<small>建议：${esc(String(issue.suggestion).slice(0, 90))}</small>` : ''}
+            ${issue.needs_material ? '<small class="cs-review-mat">需补料</small>' : ''}
+          </div>
+          ${issue.needs_material ? '' : `<button type="button" class="cs-todo-ignore" data-review-rewrite="${index}">按此重写</button>`}
+        </div>`).join('')}
+      </details>` : '<p class="cs-todo-ok">✓ 评审没有发现问题</p>'}
+    </div>`;
+  }
+
   function materialLibraryHtml() {
     const lib = materialLib || { confirmed: [], pending: [], bound: [], citations: { points: [], missing: [], summary: {} } };
     const citations = lib.citations || { points: [], missing: [], summary: {} };
@@ -3869,7 +3915,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 「重新编写本模块…」：选范围 + 填提示词 + 强度 → 直接重写并保存（优化的唯一入口） */
-  async function openRecomposeDialog() {
+  async function openRecomposeDialog(options = {}) {
     const outline = planBrief?.outline || [];
     if (!outline.length) { status('还没有大纲：请先生成「本章计划」'); return; }
     const dlg = globalThis.document.createElement('dialog');
@@ -3881,7 +3927,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             ${outline.map((sec, index) => `<option value="${index}">第 ${index + 1} 节 · ${esc(sec.title)}</option>`).join('')}
           </select></label>
         <label class="cs-field"><span>提示词（怎么改）</span>
-          <textarea data-rc-prompt rows="4" placeholder="例如：写得更具体，把每个目标加上指标与验收口径；语言更简洁；补充安全设计细节…"></textarea></label>
+          <textarea data-rc-prompt rows="4" placeholder="例如：写得更具体，把每个目标加上指标与验收口径；语言更简洁；补充安全设计细节…">${esc(options.prefillPrompt || '')}</textarea></label>
         <div class="cs-field cs-rc-mat">
           <span>本节素材</span>
           <span class="cs-rc-mat-row">
@@ -4091,10 +4137,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ? `<div class="cs-readiness ${score >= 90 ? 'is-ok' : score >= 70 ? 'is-warn' : 'is-bad'}">
            <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
       : '';
+    const reviewHtml = reviewBlockHtml();
     if (!need.length) {
-      return `${scoreHtml}<h4>待办</h4><p class="cs-todo-ok">本章没有需要你处理的事</p>`;
+      return `${scoreHtml}${reviewHtml}<h4>待办</h4><p class="cs-todo-ok">本章没有需要你处理的事</p>`;
     }
-    return `${scoreHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
+    return `${scoreHtml}${reviewHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
         ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}
@@ -4642,6 +4689,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       hydrateIgnored();
       void loadWritingModels().then(() => paintAside());
       void autoCleanChapter();
+      void loadChapterReview().then(() => paintAside());
       void loadMaterialLibrary().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
       const recovery=get('recovery');recovery.hidden=true;
@@ -4828,6 +4876,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         dlg.addEventListener('close',()=>dlg.remove());
         globalThis.document.body.appendChild(dlg); dlg.showModal();
       }catch(error){status(`看原文失败：${error.message}`);}
+      return;
+    }
+    if(event.target.closest('[data-review-run]')){
+      const btn=event.target.closest('[data-review-run]');
+      btn.disabled=true; status('正在评审本章（技术 + 合规，约 30~60 秒）…');
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/studio/review`,{method:'POST',signal:AbortSignal.timeout(240000)});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        await loadChapterReview(); await loadBasis(active.block_id); paintAside();
+        status(`评审完成：${data.score} 分（技术 ${data.tech_score} / 合规 ${data.comp_score}），问题 ${(data.issues||[]).length} 条`);
+      }catch(error){status(`评审失败：${error.message}`);}
+      finally{btn.disabled=false;}
+      return;
+    }
+    const rwBtn=event.target.closest('[data-review-rewrite]');
+    if(rwBtn && chapterReview){
+      const issue=(chapterReview.issues||[])[Number(rwBtn.dataset.reviewRewrite||0)];
+      if(!issue){status('这条意见已失效，请重新评审');return;}
+      await openRecomposeDialog({ prefillPrompt: `${issue.point||''}${issue.suggestion?`（建议：${issue.suggestion}）`:''}` });
       return;
     }
     const recBtn=event.target.closest('[data-mrec]');

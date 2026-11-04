@@ -1259,6 +1259,7 @@ async def check_convergence_node(
     iteration = int(state.get("iteration") or 0)
 
     unconverged: list[str] = []
+    needs_material_blocks: list[str] = []
     review_failed = False
 
     scope = (state.get("proposal") or {}).get("revision_scope")
@@ -1277,10 +1278,13 @@ async def check_convergence_node(
 
         tech_score = int(t.get("score") or 0)
         comp_score = int(c.get("score") or 0)
-        has_critical = any(
-            str(i.get("severity") or "").lower() == "critical"
-            for i in list(t.get("issues") or []) + list(c.get("issues") or [])
-        )
+        all_issues = list(t.get("issues") or []) + list(c.get("issues") or [])
+        has_critical = any(str(i.get("severity") or "").lower() == "critical" for i in all_issues)
+        # needs_material 的问题"重写"修不好（要补料）→ 不进回炉，单列交补料/人工
+        material_only = bool(all_issues) and all(bool(i.get("needs_material")) for i in all_issues)
+        if material_only and (tech_score < REVIEW_SCORE_THRESHOLD or comp_score < REVIEW_SCORE_THRESHOLD):
+            needs_material_blocks.append(block_id)
+            continue
 
         if (
             tech_score < REVIEW_SCORE_THRESHOLD
@@ -1302,6 +1306,7 @@ async def check_convergence_node(
     convergence = {
         "status": status,
         "unconverged_blocks": unconverged,
+        "needs_material_blocks": needs_material_blocks,
         "reason": reason,
         "iteration": iteration,
         "review_failed": review_failed,
