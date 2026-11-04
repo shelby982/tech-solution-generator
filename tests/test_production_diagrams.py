@@ -87,3 +87,25 @@ async def test_production_job_creates_asset(env, monkeypatch):
     assert data["status"] == "done" and data["asset_id"]
     assert data["checks"]["pipeline"] == "production"
     assert data["checks"]["template"] == "layered"
+
+
+def test_template_element_checklist_is_complete():
+    assert set(production_diagrams.TEMPLATE_ELEMENTS) == set(production_diagrams.TEMPLATES)
+
+
+def test_layered_has_inter_layer_arrows_and_legend():
+    html = production_diagrams.render_layered(SPECS["layered"], {
+        "title": "分层图", "claim": "结论", "score_refs": ["评分点"], "section": "章节", "evidence": ["依据"],
+    })
+    assert "marker-end" in html and "调用" in html
+    assert "图例" in html
+
+
+def test_gantt_has_real_time_axis():
+    html = production_diagrams.render_gantt({
+        "timeline": {"start": "2026-01", "end": "2026-06", "unit": "月"},
+        "tasks": [{"name": "设计", "start": "2026-01", "end": "2026-03"},
+                  {"name": "上线", "start": "2026-06", "end": "2026-06", "milestone": True}],
+    }, {"title": "甘特图", "claim": "结论", "score_refs": [], "section": "", "evidence": []})
+    assert "2026-01" in html and "2026-06" in html
+    assert "时间：" in html
