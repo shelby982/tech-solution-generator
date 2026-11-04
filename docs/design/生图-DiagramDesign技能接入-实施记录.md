@@ -171,4 +171,7 @@ bash start.sh
 
 - 后端 `1037 passed, 1 deselected`；前端 `156 pass`。
 - 真实 `deepseek-flash` 生成样例：顶部标题/评分点/结论、三层带、证据对照区、图例齐全；`self_check` 通过，`score_visible/claim_visible=true`，几何无越界。
-- 仍待：严格章节号、真实章节 A/B（已完成 1 个真实章节试跑）、多图批量评估。
+- 图号：自动 `图 <block_id>-<序号>`；手动入口按本节已有 `:::figure` 数递增；自动章节图表按 section index 传入。
+- 自动 elements 会过滤“层间接口标注/关系说明”等非组件节点。
+- 真实章节试跑 3 个：现状与目标对比、总体架构分层、总体架构逻辑分层；三张均 score/claim 可见、无缺要素、几何通过。
+- 仍待：严格文档章节编号、更多章节 A/B、视觉图标密度。
