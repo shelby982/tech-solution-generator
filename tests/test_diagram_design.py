@@ -332,3 +332,18 @@ async def test_auto_brief_prefixes_figure_number():
         figure_no="图 1.2.1.1-1")
     assert brief["title"] == "图 1.2.1.1-1 总体架构图"
     assert diagram_design.figure_number(block, 2) == "图 1.2.1.1-2"
+
+
+def test_connector_count_and_warning():
+    base = ('<html><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" '
+            'aria-labelledby="t d"><title id="t">图</title><desc id="d">说明</desc>'
+            '<text>接入层</text><text>服务层</text>')
+    one = base + '<path d="M10 10 L20 20" marker-end="url(#arrow-call)"/></svg></body></html>'
+    html, checks = diagram_design.validate_html(one, {"title": "图", "skill_type": "architecture",
+                                                       "size_preset": "doc-wide", "text": "接入层 服务层"})
+    assert checks["connector_count"] == 1 and checks["connectors_missing"] is True
+    two = base + '<path d="M10 10 L20 20" marker-end="url(#arrow-call)"/>' \
+                 '<path d="M30 30 L40 40" marker-end="url(#arrow-support)"/></svg></body></html>'
+    _html, checks = diagram_design.validate_html(two, {"title": "图", "skill_type": "architecture",
+                                                        "size_preset": "doc-wide", "text": "接入层 服务层"})
+    assert checks["connector_count"] == 2 and checks["connectors_missing"] is False

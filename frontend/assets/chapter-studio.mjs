@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v450';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v450';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v451';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v451';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2017,6 +2017,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const evidenceWarnings = (checks.score_visible === false || checks.claim_visible === false)
         ? `<p class="cs-warning">图中缺少${checks.score_visible === false ? '对应评分点' : ''}${checks.score_visible === false && checks.claim_visible === false ? '和' : ''}${checks.claim_visible === false ? '结论条' : ''}，评标专家可能对不上评分项。</p>`
         : '';
+      const connectorsWarning = checks.connectors_missing
+        ? '<p class="cs-warning">层间箭头不足 2 条：评标专家可能看不出模块之间怎么调用/支撑，请核对。</p>'
+        : '';
       const missingElements = Array.isArray(checks.elements_missing) ? checks.elements_missing : [];
       const elementsWarning = missingElements.length
         ? `<p class="cs-warning">图中未出现关键要素：${missingElements.map(esc).join('、')}</p>`
@@ -2027,7 +2030,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         : '';
       resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value || '图表')}" /></div>
         <p class="cs-muted">${esc(data.type || typeEl.value)} · ${esc(data.width || '')}×${esc(data.height || '')} · ${esc(data.stage || '已完成')}</p>
-        ${warnings}${evidenceWarnings}${elementsWarning}${geoWarnings}
+        ${warnings}${evidenceWarnings}${connectorsWarning}${elementsWarning}${geoWarnings}
         <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dd-again>重新生成</button>
           ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
           ${data.asset_id ? `<a class="cs-cp-ghost" href="/api/studio/diagrams/${esc(data.asset_id)}/svg" download>下载 SVG</a>` : ''}

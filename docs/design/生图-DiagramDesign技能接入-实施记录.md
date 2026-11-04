@@ -174,5 +174,6 @@ bash start.sh
 - 图号：自动 `图 <block_id>-<序号>`；手动入口按本节已有 `:::figure` 数递增；自动章节图表按 section index 传入。
 - 自动 elements 会过滤“层间接口标注/关系说明”等非组件节点。
 - 真实章节试跑 3 个：现状与目标对比、总体架构分层、总体架构逻辑分层；三张均 score/claim 可见、无缺要素、几何通过。
-- 评标正式版视觉基线加入层带编号 + 统一内联图标库（database/server/gateway/user/cloud/shield）；真实架构图试跑显示信息密度提升。
+- 评标正式版视觉基线加入层带编号 + 统一内联图标库（database/server/gateway/user/cloud/shield）+ 层间连接线规范（调用/支撑/只读/双向）；真实架构图试跑显示信息密度提升。
+- 连接线校验：`connector_count / connector_styles / connectors_missing`；自动严格模式少于 2 条跨层箭头会回退。
 - 仍待：严格文档章节编号、更多章节 A/B、图标资源标准化。

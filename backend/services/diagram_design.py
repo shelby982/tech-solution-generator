@@ -156,9 +156,11 @@ def _system_for(skill_type: str, size_preset: str) -> str:
         "- 不输出 <script>、<iframe>、动画、外链图片；\n"
         "- 节点/箭头遵守技能预算，超出就拆图；只使用 brief/evidence 中的事实、数字、名称；\n"
         "- 必须有 role=\"img\"、<title>、<desc>；禁止 Mermaid、禁止占位图。\n"
-        "- 输出保持紧凑：不要注释、不要脚本、不要重复样式；整个 HTML 控制在 18KB 以内，但必须完整闭合。\n\n" +
+        "- 输出保持紧凑：不要注释、不要脚本、不要重复样式；整个 HTML 控制在 18KB 以内，但必须完整闭合。\n"
+        "- 连接线是评标信息：层带之间至少 1 条关系，整图至少 2 条跨层箭头；每条箭头必须有关系标签；至少 2 种线型（调用实线/支撑虚线/只读点线）。\n\n" +
         _skill_static() +
         "\n\n【产品图标库（可选，内联 SVG）】\n" + _read("references/icons.product.md") +
+        "\n\n【连接线规范（必须遵守）】\n" + _read("references/connectors.product.md") +
         "\n\n" + EVAL_OVERLAY +
         ("\n\n【选中图型参考】\n" + type_ref if type_ref else "")
     )
@@ -284,6 +286,10 @@ def validate_html(html: str, brief: dict) -> tuple[str, dict]:
     claim = str(brief.get("claim") or "").strip()
     checks["score_visible"] = (not score_refs) or all(ref in joined for ref in score_refs)
     checks["claim_visible"] = (not claim) or claim[:8] in joined
+    marker_refs = re.findall(r"marker-(?:end|start)=[\"']url\(#([^)\"']+)\)[\"']", text)
+    checks["connector_count"] = len(marker_refs)
+    checks["connector_styles"] = sorted(set(marker_refs))[:8]
+    checks["connectors_missing"] = len(marker_refs) < 2
     if not errors:
         ok, output = _run_self_check(text)
         checks["self_check"] = ok
@@ -306,6 +312,8 @@ def validate_html(html: str, brief: dict) -> tuple[str, dict]:
             errors.append("图中没有显示对应评分点")
         if checks.get("claim_visible") is False:
             errors.append("图中没有显示结论")
+        if brief.get("strict_connectors") and checks.get("connectors_missing"):
+            errors.append("跨层箭头不足 2 条或缺少连接线")
     if errors:
         raise DiagramValidationError("；".join(errors))
     return text, checks
@@ -562,6 +570,7 @@ async def section_brief(block: dict, section: dict, deliverable: dict, figure_no
         "strict_elements": True,
         "relations": relation_for_type(design_type_for(deliverable)),
         "strict_evidence": True,
+        "strict_connectors": True,
     }
 
 
