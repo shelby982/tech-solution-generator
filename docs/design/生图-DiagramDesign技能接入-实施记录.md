@@ -162,7 +162,7 @@ bash start.sh
 - 校验增加 `score_visible/claim_visible`；自动严格模式缺失会回退；手工只警告。
 - 自动 `section_brief` 读取本节正文（Markdown 标题下正文），并从已有 `:::diagram` 节点抽取 elements，不再只读 points/basis。
 - 推荐图型现在会覆盖默认架构图（之前被 `presetType` 钉死）。
-- 前端资源版本 `20261016-v446`。
+- 前端资源版本 `20261016-v450`。
 - 评分点选择器：从本章 plan `basis(type=score_point)` 聚合；无评分点时提示直接粘贴条款号。
 - 图骨架预览：实时显示“要素 → 要素”和映射条数，要素不足 2 个时提示。
 - 图号：按 `block_id` 生成（如 `图 1.1.3`），可编辑；插入正文时自动拼到图名前。
