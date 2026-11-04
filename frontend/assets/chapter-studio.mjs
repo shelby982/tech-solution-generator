@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v452';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v452';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v453';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v453';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2115,6 +2115,133 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     applySection(defaultSection);
   }
 
+
+  /** 生产级部署拓扑：正文 → 结构化 spec → 确定性 SVG/PNG。 */
+  async function openDeploymentDiagramDialog() {
+    if (!active) return;
+    const outline = (planBrief?.outline || []).filter((s) => s && s.title);
+    const sectionNames = outline.map((s) => String(s.title));
+    const defaultSection = sectionNames[0] || active.title || '部署架构';
+    const sectionFor = (name) => outline.find((s) => String(s.title) === name) || null;
+    const scoreRefsFor = (sec) => (sec?.basis || [])
+      .filter((b) => b && String(b.type || '') === 'score_point' && b.ref)
+      .map((b) => String(b.ref));
+    const sectionBodyFor = (name) => {
+      const escapeReg = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const lines = String(editor.value || '').split(/\n/);
+      const re = new RegExp('^\\s{0,3}#{1,4}\\s*' + escapeReg(name) + '\\s*$');
+      const start = lines.findIndex((line) => re.test(line));
+      if (start < 0) return '';
+      const body = [];
+      for (const line of lines.slice(start + 1)) {
+        if (/^\s{0,3}#{1,4}\s+/.test(line)) break;
+        body.push(line);
+      }
+      return body.join('\n').trim().slice(0, 8000);
+    };
+    const figureNo = active.block_id
+      ? `图 ${String(active.block_id).replace(/^s/, '')}-${(String(editor.value || '').match(/:::figure\b/g) || []).length + 1}`
+      : '图';
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog cs-design-dialog';
+    dlg.innerHTML = `<header><h3>生产级部署拓扑图</h3><button type="button" data-dp-close>×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">先生成可核对的部署事实（区域 / 节点 / 连接），再渲染成图；不会让模型即兴画线。</p>
+        <div class="cs-dd-row">
+          <label class="cs-field"><span>图号 / 图名</span><input data-dp-title maxlength="120" value="${esc(figureNo + ' 部署拓扑图')}" /></label>
+          <label class="cs-field"><span>对应章节</span><select data-dp-section>${(sectionNames.length ? sectionNames : [defaultSection]).map((name) => `<option value="${esc(name)}"${name === defaultSection ? ' selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
+        </div>
+        <label class="cs-field"><span>对应评分点 / 条款（可选）</span><input data-dp-score maxlength="360" value="${esc((scoreRefsFor(sectionFor(defaultSection)) || []).slice(0, 2).join('；'))}" placeholder="多个用分号分隔" /></label>
+        <label class="cs-field"><span>部署结论（可选）</span><input data-dp-claim maxlength="300" placeholder="例：双中心双活部署，业务 RTO ≤ 30 分钟" /></label>
+        <label class="cs-field"><span>正文来源（自动带出，可修改）</span><textarea data-dp-text rows="7" maxlength="12000">${esc(sectionBodyFor(defaultSection))}</textarea></label>
+        <p class="cs-muted" data-dp-hint>会从正文抽取区域、节点、连接；抽取不足会报错，不会硬画。</p>
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dp-cancel>取消</button>
+          <button type="button" class="cs-cp-primary" data-dp-run>生成部署拓扑</button></div>
+        <div data-dp-result></div>
+      </div>`;
+    const titleEl = dlg.querySelector('[data-dp-title]');
+    const sectionEl = dlg.querySelector('[data-dp-section]');
+    const scoreEl = dlg.querySelector('[data-dp-score]');
+    const claimEl = dlg.querySelector('[data-dp-claim]');
+    const textEl = dlg.querySelector('[data-dp-text]');
+    const resultEl = dlg.querySelector('[data-dp-result]');
+    const runBtn = dlg.querySelector('[data-dp-run]');
+    const showError = (message) => {
+      resultEl.innerHTML = `<p class="cs-warning">生成失败：${esc(String(message || '未知错误'))}</p>
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dp-retry>重试</button></div>`;
+      resultEl.querySelector('[data-dp-retry]')?.addEventListener('click', () => start());
+    };
+    const showDone = (data) => {
+      const checks = data.checks || {};
+      const meta = `区域 ${checks.zones || '—'} · 节点 ${checks.nodes || '—'} · 连接 ${checks.edges || '—'}`;
+      resultEl.innerHTML = `<div class="cs-design-preview"><img src="${esc(data.image_url)}?t=${Date.now()}" alt="${esc(data.title || titleEl.value)}" /></div>
+        <p class="cs-muted">${esc(meta)} · ${esc(data.width || '')}×${esc(data.height || '')}</p>
+        <div class="cs-plan-actions"><button type="button" class="cs-cp-ghost" data-dp-again>重新抽取</button>
+          ${data.preview_url ? `<a class="cs-cp-ghost" href="${esc(data.preview_url)}" target="_blank" rel="noreferrer">查看源</a>` : ''}
+          ${data.asset_id ? `<a class="cs-cp-ghost" href="/api/studio/diagrams/${esc(data.asset_id)}/svg" download>下载 SVG</a>` : ''}
+          <button type="button" class="cs-cp-primary" data-dp-insert>插入正文</button></div>`;
+      resultEl.querySelector('[data-dp-again]')?.addEventListener('click', () => start());
+      resultEl.querySelector('[data-dp-insert]')?.addEventListener('click', () => {
+        const title = String(data.title || titleEl.value || '部署拓扑图').trim();
+        insertAtCursor(`:::figure ${title}\n![${title.replaceAll(']', '')}](${data.image_url})\n:::`);
+        dlg.close();
+        status('已插入生产级部署拓扑图');
+      });
+    };
+    const poll = async (jobId) => {
+      for (let i = 0; i < 120; i += 1) {
+        if (!dlg.isConnected) return;
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1500));
+        let data;
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/studio/diagram-assets/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+          data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        } catch (error) { showError(error.message); return; }
+        if (data.status === 'failed') { showError(data.error || '部署拓扑生成失败'); return; }
+        if (data.status === 'done') { showDone(data); return; }
+        resultEl.innerHTML = `<p class="cs-muted">${esc(data.stage || '生成中')}… <span class="cs-dim">（抽取 + 渲染通常 20–60 秒）</span></p>`;
+      }
+      showError('生成超时，请重试');
+    };
+    async function start() {
+      const text = String(textEl.value || '').trim();
+      if (text.length < 30) { resultEl.innerHTML = '<p class="cs-warning">正文太短，无法抽取部署拓扑；请补充区域/节点/连接描述。</p>'; return; }
+      runBtn.disabled = true; runBtn.textContent = '生成中…';
+      resultEl.innerHTML = '<p class="cs-muted">正在抽取部署事实并渲染（20–60 秒）…</p>';
+      try {
+        const resp = await fetch(`/api/blocks/${active.id}/studio/deployment-diagrams`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            title: String(titleEl.value || '部署拓扑图').trim(),
+            section: String(sectionEl.value || '').trim(),
+            claim: String(claimEl.value || '').trim(),
+            score_refs: String(scoreEl.value || '').split(/[、,，;；\n]/).map((x) => x.trim()).filter(Boolean),
+            source_refs: [],
+            text,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
+        await poll(data.job_id);
+      } catch (error) { showError(error.message); }
+      finally { if (dlg.isConnected) { runBtn.disabled = false; runBtn.textContent = '生成部署拓扑'; } }
+    }
+    sectionEl.addEventListener('change', () => {
+      textEl.value = sectionBodyFor(sectionEl.value);
+      const refs = scoreRefsFor(sectionFor(sectionEl.value));
+      if (refs.length) scoreEl.value = refs.slice(0, 2).join('；');
+    });
+    dlg.addEventListener('click', (event) => {
+      if (event.target.closest('[data-dp-close]') || event.target.closest('[data-dp-cancel]')) dlg.close();
+      if (event.target.closest('[data-dp-run]')) start();
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
   /** 目录级编写计划（C1：降级为"汇总 + 批量"）——只看工作量与状态；编辑与确认都在章计划里。 */
   async function openWritingPlan(unitBlockId) {
     if (!unitBlockId) return;
@@ -4112,6 +4239,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const isImage = state.tab === 'image';
       pickedEl.textContent = '';
       bodyEl.innerHTML = isImage ? `
+        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>生产级部署拓扑图</b>
+            <small>从本节正文抽取真实区域 / 节点 / 连接，模板化渲染；适合正式投标部署架构</small></div>
+          <button type="button" class="cs-ins-chip" data-ins-deploy="1">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成图表（设计版）</b>
             <small>按 Diagram Design 规范生成：架构 / 分层 / 流程 / 时间线 / 矩阵等；默认架构图，可换图型</small></div>
           <button type="button" class="cs-ins-chip" data-ins-design="architecture">生成</button></div>
@@ -4167,6 +4297,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tab = el.closest('[data-ins-tab]');
       if (tab) { state.tab = tab.dataset.insTab; for (const b of dlg.querySelectorAll('[data-ins-tab]')) b.setAttribute('aria-pressed', String(b.dataset.insTab === state.tab)); showMenu(); return; }
       if (el.closest('[data-ins-goto]')) { dlg.close(); showPanel('materials'); return; }
+      if (el.closest('[data-ins-deploy]')) {
+        dlg.close();
+        openDeploymentDiagramDialog();
+        return;
+      }
       const design = el.closest('[data-ins-design]');
       if (design) {
         dlg.close();

@@ -599,6 +599,13 @@ async def run_job(job_id: str) -> None:
         brief["skill_type"] = normalize_type(brief.get("skill_type"))
         brief["size_preset"] = normalize_size(brief.get("size_preset"))
         await diagram_assets.set_job(job_id, status="running", stage="准备设计规范")
+        if brief.get("pipeline") == "deployment":
+            from services.deployment_diagram import generate_asset as generate_deployment
+            await diagram_assets.set_job(job_id, stage="正在抽取部署拓扑")
+            result = await generate_deployment(block, brief)
+            await diagram_assets.set_job(job_id, status="done", stage="已完成",
+                                         asset_id=result["asset_id"], error="")
+            return
         await diagram_assets.set_job(job_id, stage="正在设计图表")
         result = await create_asset(block, brief, force=bool(brief.get("force")))
         await diagram_assets.set_job(job_id, status="done", stage="已完成",

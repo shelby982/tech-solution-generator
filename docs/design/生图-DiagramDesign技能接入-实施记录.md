@@ -178,3 +178,15 @@ bash start.sh
 - 连接线校验：`connector_count / connector_styles / connectors_missing`；自动严格模式少于 2 条跨层箭头会回退。
 - 新增「模块连接」输入（`源模块 → 目标模块：关系`）；提示词要求箭头落在具体组件卡片边缘，禁止悬空层带箭头。
 - 仍待：严格文档章节编号、更多章节 A/B、图标资源标准化。
+
+## P4 生产级部署拓扑（第一个生产模板）
+
+- 新增 `services/deployment_diagram.py`：
+  - `normalize_spec`：zones/nodes/edges 校验、ID 规整、短标签；
+  - `extract_spec`：LLM 只从正文抽取 JSON（不画 SVG）；
+  - `render_html`：确定性布局、区域、图标、箭头、图例、图号/评分点/结论/依据；
+  - `generate_asset`：复用 `diagram_assets` + Playwright PNG + SVG。
+- 新接口：`POST /api/blocks/{id}/studio/deployment-diagrams`（job 复用现有状态接口）。
+- 前端新增「生产级部署拓扑图」入口：自动带出本节正文，生成/预览/插入。
+- 与概念图（diagram_design）分离；概念图继续用 Diagram Design，生产图用模板。
+- 测试：`tests/test_deployment_diagram.py`（spec/渲染/路由/PNG）。
