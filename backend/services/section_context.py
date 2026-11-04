@@ -112,62 +112,8 @@ async def _load_manual_materials(db, block: dict, section: str) -> str:
 
 
 async def _search_materials(db, block: dict, section: dict, spec: list[dict], reqs: list[dict]) -> list[dict]:
-    from services.block_store import list_chunks_with_filename
-    from services.material_search import extract_terms, score_chunk
-    terms = extract_terms(
-        str(section.get("title") or ""),
-        " ".join(str(x) for x in (section.get("points") or [])),
-        " ".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or [])),
-        " ".join(item.get("text") or "" for item in spec),
-        " ".join(item.get("text") or "" for item in reqs),
-    )
-    if not terms:
-        return []
-    chunks = await list_chunks_with_filename(db, int(block.get("project_id") or 0))
-    ranked = []
-    for chunk in chunks:
-        score = score_chunk(str(chunk.get("content") or ""), terms)
-        if score > 0.08:
-            ranked.append((score, chunk))
-    ranked.sort(key=lambda item: -item[0])
-    per_file: dict[int, int] = {}
-    out = []
-    for score, chunk in ranked:
-        mid = int(chunk.get("material_id") or 0)
-        if per_file.get(mid, 0) >= 2:
-            continue
-        per_file[mid] = per_file.get(mid, 0) + 1
-        out.append({"material_id": mid, "filename": chunk.get("filename") or "",
-                    "page": chunk.get("page"), "content": str(chunk.get("content") or "")[:420],
-                    "score": round(score, 4)})
-        if len(out) >= _MATERIAL_MAX:
-            break
-    return out
-
-
-def _select_spec_for_section(spec: list[dict], section: dict) -> list[dict]:
-    """章节规范条款较多时，优先取与本节标题/要点/依据相关的条款。"""
-    if len(spec) <= 2:
-        return spec
-    from services.material_search import extract_terms
-    section_text = " ".join([
-        str(section.get("title") or ""),
-        " ".join(str(x) for x in (section.get("points") or [])),
-        " ".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or [])),
-    ])
-    section_terms = set(extract_terms(section_text, limit=24))
-    if not section_terms:
-        return spec[:3]
-    scored = []
-    for clause in spec:
-        blob = str(clause.get("title") or "") + " " + str(clause.get("text") or "")
-        clause_terms = set(extract_terms(blob, limit=16))
-        hits = len(section_terms & clause_terms)
-        scored.append((hits, clause))
-    scored.sort(key=lambda item: (-item[0], spec.index(item[1])))
-    # 有相关条款就取 top2；没有明显相关时保留前 3 条，避免完全丢规范
-    picked = [clause for hits, clause in scored if hits > 0][:2]
-    return picked or spec[:3]
+    from services.material_rerank import search_materials
+    return await search_materials(db, int(block.get("project_id") or 0), section, spec, reqs, limit=_MATERIAL_MAX)
 
 
 async def build_section_context(block: dict, section: dict, thread_id: str = "") -> dict:

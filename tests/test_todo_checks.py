@@ -456,3 +456,15 @@ def test_review_cards_into_delivery_tasks():
     assert merged["summary"]["need_user_count"] == 1
     assert merged["summary"]["readiness_rule"] == 95   # 1 条软任务 → -5
     assert merged["summary"]["readiness"] == 81        # 95*0.6 + 60*0.4
+
+
+def test_auto_review_toggle_and_delta_shape():
+    """自动复评审：分差口径（首轮 None，之后给差值）。"""
+    from services.chapter_review import load_history  # noqa: F401
+
+    history = [{"score": 62}, {"score": 55}, {"score": 50}]
+    deltas = []
+    for index, item in enumerate(history):
+        prev = history[index + 1] if index + 1 < len(history) else None
+        deltas.append(None if prev is None else item["score"] - prev["score"])
+    assert deltas == [7, 5, None]

@@ -648,6 +648,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         ${reviewDelta === null ? '' : `<span class="cs-review-delta ${reviewDelta >= 0 ? 'is-up' : 'is-down'}">${reviewDelta >= 0 ? '↑' : '↓'} ${Math.abs(reviewDelta)}</span>`}
         <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}</span>
         <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
+        <label class="cs-auto-review" title="应用补丁/重写完成后自动重评一次">
+          <input type="checkbox" data-auto-review ${globalThis.localStorage.getItem('cs_auto_review') === 'off' ? '' : 'checked'} />
+          自动复评
+        </label>
       </div>
       ${(review.needs_material || []).length ? `<div class="cs-review-needs">
         <p class="cs-review-need">需要补 ${(materialNeeds.items || []).length || (review.needs_material || []).length} 类材料（重写修不好）：</p>
@@ -3927,6 +3931,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.showModal();
   }
 
+  /** 改完自动复评审：应用补丁 / 重写完成后重跑一次，直接看分数变化（可关） */
+  async function autoReviewAfterEdit(label) {
+    if (!active) return;
+    try {
+      const settings = globalThis.localStorage.getItem('cs_auto_review');
+      if (settings === 'off') { status(`${label}；已关闭自动复评审`); return; }
+      status(`${label}；正在复评审（约 30~60 秒）…`);
+      const resp = await fetch(`/api/blocks/${active.id}/studio/review`, { method: 'POST', signal: AbortSignal.timeout(300000) });
+      if (!resp.ok) { status(`${label}；复评审失败，可手动点「重新评审」`); return; }
+      const data = await resp.json().catch(() => ({}));
+      await loadChapterReview(); await loadBasis(active.block_id); paintAside();
+      const delta = reviewDelta;
+      const trend = delta === null || delta === undefined ? '' : (delta >= 0 ? `（↑${delta}）` : `（↓${Math.abs(delta)}）`);
+      status(`${label}；复评审 ${data.score ?? '-'} 分${trend}`);
+    } catch (error) {
+      status(`${label}；复评审中断：${error.message}`);
+    }
+  }
+
   /** 评审 issue 定点重写：只改问题对应的那一段（before/after 对照，确认后落库） */
   async function openReviewPatchDialog(issue, issueIndex) {
     const dlg = globalThis.document.createElement('dialog');
@@ -4005,7 +4028,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           context = await json(`/api/blocks/${active.id}/studio`);
           dlg.close();
           await loadBasis(active.block_id); paintAside();
-          status('已应用到正文（写了版本，可回退）；再点「重新评审」看分数变化');
+          void autoReviewAfterEdit('已应用到正文（写了版本，可回退）');
         } catch (error) { status(`应用失败：${error.message}`); }
       }
     });
@@ -4126,7 +4149,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         await streamWriteSection(active.id, section, null, extra, 'rewrite');
         await save();
         await loadBasis(active.block_id); paintAside();
-        status(`已重写「${section.title}」并保存`);
+        void autoReviewAfterEdit(`已重写「${section.title}」并保存`);
       } catch (error) { status(`重写失败：${error.message}`); }
     });
     dlg.addEventListener('close', () => dlg.remove());
@@ -5006,6 +5029,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         dlg.addEventListener('close',()=>dlg.remove());
         globalThis.document.body.appendChild(dlg); dlg.showModal();
       }catch(error){status(`看原文失败：${error.message}`);}
+      return;
+    }
+    const autoReviewBox=event.target.closest('[data-auto-review]');
+    if(autoReviewBox){
+      try{ globalThis.localStorage.setItem('cs_auto_review', autoReviewBox.checked?'on':'off'); }catch(error){ /* ignore */ }
+      status(autoReviewBox.checked?'已开启：改完自动复评审':'已关闭自动复评审');
       return;
     }
     if(event.target.closest('[data-need-upload]')){

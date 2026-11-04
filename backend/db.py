@@ -434,8 +434,20 @@ CREATE TABLE IF NOT EXISTS blocks (
     -- 逐节提炼的结果状态（'' 正常 / 'no_source' 无原文 / 'failed' 需要重试）+ 原因
     error       TEXT DEFAULT '',
     error_kind  TEXT DEFAULT '',
+    context_version INTEGER DEFAULT 0,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS section_coverage_reviews (
+    block_id      INTEGER NOT NULL,
+    section_title TEXT NOT NULL,
+    text_hash     TEXT NOT NULL,
+    context_version INTEGER DEFAULT 0,
+    deterministic_json TEXT DEFAULT '{}',
+    llm_json      TEXT DEFAULT '{}',
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (block_id, section_title, text_hash)
 );
 
 CREATE TABLE IF NOT EXISTS review_points (
@@ -766,6 +778,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget INTEGER")
     if "page_budget_pinned" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget_pinned INTEGER NOT NULL DEFAULT 0")
+    _block_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(blocks)")).fetchall()}
+    if "context_version" not in _block_cols:
+        await conn.execute("ALTER TABLE blocks ADD COLUMN context_version INTEGER DEFAULT 0")
 
     # spec_requirements.package_no（2026-10-13）：技术要求按标包/标的归属
     # （用户口径：不存在"全项目共享"）。旧库需补列，否则落库写入直接报错。

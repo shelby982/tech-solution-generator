@@ -1119,3 +1119,7 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-review-needs { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #fed7aa; }
 .cs-need-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .cs-need-q { flex: 1; font-size: 10.5px; color: #b45309; }
+
+/* 评审：自动复评开关 */
+.cs-auto-review { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: #64748b; cursor: pointer; }
+.cs-auto-review input { margin: 0; }
