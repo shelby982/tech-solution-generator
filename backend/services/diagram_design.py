@@ -606,6 +606,13 @@ async def run_job(job_id: str) -> None:
             await diagram_assets.set_job(job_id, status="done", stage="已完成",
                                          asset_id=result["asset_id"], error="")
             return
+        if brief.get("pipeline") == "production":
+            from services.production_diagrams import generate_asset as generate_production
+            await diagram_assets.set_job(job_id, stage="正在抽取生产图事实")
+            result = await generate_production(block, brief)
+            await diagram_assets.set_job(job_id, status="done", stage="已完成",
+                                         asset_id=result["asset_id"], error="")
+            return
         await diagram_assets.set_job(job_id, stage="正在设计图表")
         result = await create_asset(block, brief, force=bool(brief.get("force")))
         await diagram_assets.set_job(job_id, status="done", stage="已完成",

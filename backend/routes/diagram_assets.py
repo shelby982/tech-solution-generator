@@ -77,6 +77,40 @@ class DiagramDesignBody(BaseModel):
     connections: list[str] = Field(default_factory=list, max_length=12)
 
 
+class ProductionDiagramBody(BaseModel):
+    template: str = Field(default="layered", max_length=40)
+    title: str = Field(default="", max_length=160)
+    text: str = Field(default="", max_length=12000)
+    section: str = Field(default="", max_length=120)
+    claim: str = Field(default="", max_length=300)
+    score_refs: list[str] = Field(default_factory=list, max_length=8)
+    source_refs: list[str] = Field(default_factory=list, max_length=8)
+    spec: dict | None = None
+
+
+@router.post('/blocks/{block_id}/studio/production-diagrams', status_code=202)
+async def create_production_diagram(block_id: int, body: ProductionDiagramBody):
+    from services.production_diagrams import TEMPLATES
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    template = body.template if body.template in TEMPLATES else "layered"
+    brief = {
+        "pipeline": "production", "template": template,
+        "title": (body.title or block["title"] or TEMPLATES[template]).strip()[:160],
+        "section": (body.section or "").strip()[:120],
+        "claim": (body.claim or "").strip()[:300],
+        "score_refs": [str(x)[:160] for x in body.score_refs][:8],
+        "source_refs": [str(x)[:300] for x in body.source_refs][:8],
+        "text": (body.text or "").strip()[:12000],
+        "spec": body.spec,
+    }
+    job_id = await diagram_assets.create_job(int(block["project_id"]), int(block_id), brief)
+    queue_job(job_id)
+    return {"job_id": job_id, "status": "queued", "template": template}
+
+
 class DeploymentDiagramBody(BaseModel):
     title: str = Field(default="", max_length=160)
     text: str = Field(default="", max_length=12000)

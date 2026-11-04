@@ -190,3 +190,11 @@ bash start.sh
 - 前端新增「生产级部署拓扑图」入口：自动带出本节正文，生成/预览/插入。
 - 与概念图（diagram_design）分离；概念图继续用 Diagram Design，生产图用模板。
 - 测试：`tests/test_deployment_diagram.py`（spec/渲染/路由/PNG）。
+
+## P5 生产级图模板（9 类）
+
+- 新增 `services/production_diagrams.py`：分层/数据流/时序/甘特/矩阵/鱼骨/金字塔/雷达/组织 9 个产品模板；每类结构化 spec + 确定性 SVG 渲染。
+- 新接口：`POST /api/blocks/{id}/studio/production-diagrams`；复用 job/asset/PNG/Word。
+- 前端新增「生产级图模板」入口：选模板、自动带本节正文、生成/预览/插入。
+- 生产模板与概念图（Diagram Design）分离；概念图继续用于示意图/概念图。
+- 测试：`tests/test_production_diagrams.py`（9 类渲染 + 路由/job）。
