@@ -497,7 +497,11 @@ def _diagram_nodes_from_body(body: str) -> list[str]:
         if not text or text.startswith("type="):
             continue
         text = re.sub(r"^[0-9]+[.、]\s*", "", text)
-        if text and text not in nodes:
+        if not text or re.search(r"(标注|说明|图例|备注)$", text):
+            continue
+        if text.startswith("层间") and any(word in text for word in ("标注", "关系", "说明")):
+            continue
+        if text not in nodes:
             nodes.append(text[:80])
     return nodes[:12]
 
@@ -521,7 +525,9 @@ async def section_brief(block: dict, section: dict, deliverable: dict, figure_no
     raw_body = _section_body(block, str(section.get("title") or ""))
     diagram_nodes = _diagram_nodes_from_body(raw_body)
     body = re.sub(r"(?ms)^:::diagram[^\n]*\n.*?^:::\s*$", "", raw_body).strip()
-    explicit_elements = [str(x) for x in (deliverable.get("elements") or []) if str(x).strip()]
+    explicit_elements = [str(x).strip() for x in (deliverable.get("elements") or []) if str(x).strip()]
+    explicit_elements = [x for x in explicit_elements if not re.search(r"(标注|说明|图例|备注)$", x)
+                         and not (x.startswith("层间") and any(word in x for word in ("标注", "关系", "说明")))]
     elements = explicit_elements or diagram_nodes or points
     claim = _body_claim(body) or (points[0] if points else str(section.get("title") or ""))
     raw_title = str(deliverable.get("title") or "图表")[:120]
