@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v457';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v457';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v458';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v458';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -3688,6 +3688,24 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function runDeliveryAction(task) {
     if (!task) return;
     const type = (task.action || {}).type || '';
+    if (type === 'review_rewrite') {
+      const index = Number(((task.action || {}).payload || {}).issue_index || 0);
+      const issue = (chapterReview?.issues || [])[index];
+      if (!issue) { status('这条评审意见已失效，请重新评审'); return; }
+      await openReviewPatchDialog(issue, index);
+      return;
+    }
+    if (type === 'review_need') {
+      await openMaterialAdminDialog();
+      return;
+    }
+    if (type === 'review_search') {
+      const query = String(((task.action || {}).payload || {}).query || '');
+      try { await navigator.clipboard.writeText(query); status(`已复制检索词「${query}」`); } catch (error) { status(`检索词：${query}`); }
+      const citeBtn = globalThis.document.querySelector('[data-cite-open]');
+      if (citeBtn) citeBtn.click();
+      return;
+    }
     if (type === 'upload_material') {
       pendingMaterialSection = String((task.target || {}).section || '');
       showPanel('materials');
@@ -4941,6 +4959,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const index=Number(taskApply.dataset.optIndex||0);
       const option=(task.options||[])[index];
       if(!task || !option){status('这条没有可选项');return;}
+      if(String(option.type||'')==='review_search'){
+        const query=String((option.payload||{}).query||'');
+        try{ await navigator.clipboard.writeText(query); status(`已复制检索词「${query}」`); }
+        catch(error){ status(`检索词：${query}`); }
+        const citeBtn=globalThis.document.querySelector('[data-cite-open]');
+        if(citeBtn) citeBtn.click();
+        return;
+      }
       await applyDecideOption(task, option.label);
       return;
     }

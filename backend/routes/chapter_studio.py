@@ -373,6 +373,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     from services.writing_plans import plan_of_block
     from services.section_outline import (SECTION_REWRITE_SYSTEM, SECTION_SYSTEM,
                                           build_section_payload, replace_section)
+    from services.section_context import build_section_context, render_context
     from services.block_store import add_revision, update_block_content
     from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
     from infra.llm.clients import stream_openai, stream_claude
@@ -392,7 +393,14 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     planned = next((x for x in (chapter.get('outline') or []) if str(x.get('title')) == title.strip()), {})
     section.update({'basis': planned.get('basis') or [], 'how': planned.get('how') or {},
                     'deliverables': planned.get('deliverables') or []})
-    payload = build_section_payload(chapter, section, str(block.get('content') or '')[:2000])
+    try:
+        _context = await build_section_context(block, section, thread_id)
+        _context_text = render_context(_context)
+    except Exception:  # noqa: BLE001
+        _context = {"section_text": ""}
+        _context_text = ""
+    payload = build_section_payload(chapter, section,
+                                    str(_context.get("section_text") or block.get('content') or '')[:2500])
     extra_request = str(prompt or '').strip()
     # 用自然语言给模型（直接丢 JSON 会被模型"续写 JSON"）
     is_rewrite = str(role or '').strip() == 'rewrite'
@@ -408,15 +416,6 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
             original_text = ''
     from services.section_contract import contract_for as _contract_for
     _contract = _contract_for(title)
-    _material_prompt = ''
-    try:
-        from services.material_context import material_prompt_for_block as _material_for
-        _material_prompt = await _material_for(int(block['id']), str(block.get('block_id') or ''), title)
-        if not _material_prompt:
-            from services.material_context import NO_MATERIAL_HINT as _no_material
-            _material_prompt = _no_material
-    except Exception:
-        _material_prompt = ''
     _practice = ''
     if not extra_request:
         try:
@@ -427,18 +426,19 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
-        f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
+        + (f"{_context_text}\n\n" if _context_text else "")
+        + f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本章要求：{'；'.join(payload.get('requirements') or []) or '（无特别要求）'}\n"
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节写法：{json.dumps(payload.get('how') or {}, ensure_ascii=False)}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
         + (f"【本节写法（按计划执行）】{_practice}\n" if _practice else "")
-        + (f"{_material_prompt}\n" if _material_prompt else "")
         + (f"【本节硬性要求】{_contract}\n" if _contract else "")
+        + "硬性要求：如果上下文中有【本章技术规范条款】，正文必须逐条回应；\n"
+          "每条要有「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n"
         + (f"【本次额外要求】{extra_request}\n" if extra_request else '')
         + (f"【本节原文】\n{original_text[:4000]}\n" if is_rewrite and original_text else '')
-        + f"可用素材（不得编造具体数字）：\n{payload.get('evidence') or '（无）'}\n"
         + ("这是**改写**：在【本节原文】基础上调整，保留引用与数字。" if is_rewrite and original_text
            else "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。")
     )

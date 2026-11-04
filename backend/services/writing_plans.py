@@ -1608,9 +1608,24 @@ async def _chapter_review_line(db, block: dict) -> dict:
         review = await load_review(int(row[0]))
         if not review:
             return {}
+        fixable = review.get("fixable") or []
+        needs = review.get("needs_material") or []
+        all_issues = review.get("issues") or []
+        # issue_index 指向 review.issues 的下标（前端定点重写要用）
+        indexed = []
+        for index, issue in enumerate(all_issues[:8]):
+            if issue.get("needs_material"):
+                continue
+            indexed.append({"index": index, "severity": issue.get("severity") or "medium",
+                            "point": str(issue.get("point") or "")[:120],
+                            "suggestion": str(issue.get("suggestion") or "")[:120]})
         return {"score": review["score"], "tech": review["tech_score"], "comp": review["comp_score"],
-                "issue_count": len(review.get("fixable") or []),
-                "needs_material_count": len(review.get("needs_material") or []),
+                "issue_count": len(fixable),
+                "needs_material_count": len(needs),
+                "fixable_items": indexed[:3],
+                "needs_material_items": [
+                    {"query": str(item.get("material_query") or item.get("point") or "")[:60],
+                     "severity": item.get("severity") or "medium"} for item in needs[:4]],
                 "updated_at": review.get("updated_at") or ""}
     except Exception:
         return {}
@@ -1620,9 +1635,54 @@ def _with_review(payload: dict, review: dict) -> dict:
     """把评审分并入就绪度：规则分 60% + 评审分 40%（没有评审则保持规则分）。"""
     if not review:
         return payload
+    # ── 评审结论进待办 ──
+    need_user = list(payload.get("need_user") or [])
+    system = list(payload.get("system") or [])
+    for item in (review.get("needs_material_items") or []):
+        query = str(item.get("query") or "").strip()
+        if not query:
+            continue
+        need_user.append({
+            "id": f"review-need-{abs(hash(query)) % 10 ** 8}", "scope": "chapter",
+            "category": "upload", "owner": "user", "title": f"补材料：{query[:16]}",
+            "target": {"block_id": "", "section": "", "quote": ""},
+            "why": "评审指出：缺这份材料，重写也补不了（需你提供或确认公开来源）",
+            "impact": "quality", "impact_text": "影响评审得分",
+            "action": {"type": "review_need", "label": "上传", "payload": {"query": query}},
+            "options": [{"type": "review_search", "label": "联网找", "payload": {"query": query}}],
+            "evidence": [{"label": "材料", "text": query}],
+            "dedupe_key": f"review-need:{query}", "occurrences": [],
+            "materials_required": [], "material_usage": "", "material_format": "",
+            "fallback": None, "status": "open", "source": "review",
+        })
+    for item in (review.get("fixable_items") or []):
+        point = str(item.get("point") or "").strip()
+        if not point:
+            continue
+        system.append({
+            "id": f"review-fix-{item.get('index')}-{abs(hash(point)) % 10 ** 8}", "scope": "chapter",
+            "category": "system", "owner": "system", "title": f"评审：{point[:16]}",
+            "target": {"block_id": "", "section": "", "quote": ""},
+            "why": "评审发现的问题，系统可定点改写",
+            "impact": "quality", "impact_text": "提升评审得分",
+            "action": {"type": "review_rewrite", "label": "按此重写",
+                       "payload": {"issue_index": int(item.get("index") or 0)}},
+            "options": [], "evidence": [{"label": "建议", "text": str(item.get("suggestion") or "")}],
+            "dedupe_key": f"review-fix:{point[:40]}", "occurrences": [],
+            "materials_required": [], "material_usage": "", "material_format": "",
+            "fallback": None, "status": "open", "source": "review",
+        })
+    payload["need_user"] = need_user
+    payload["system"] = system
+
     summary = dict(payload.get("summary") or {})
-    rule = int(summary.get("readiness") or 0)
+    need_count = len(need_user)
+    hard = sum(1 for task in need_user if task.get("impact") in ("export_block", "completion_block"))
+    soft = need_count - hard
+    rule = max(0, 100 - hard * 8 - soft * 5)
     combined = round(rule * 0.6 + int(review.get("score") or 0) * 0.4)
+    summary["need_user_count"] = need_count
+    summary["system_count"] = len(system)
     summary["readiness_rule"] = rule
     summary["review"] = review
     summary["readiness"] = combined
