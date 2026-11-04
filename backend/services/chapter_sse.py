@@ -74,7 +74,8 @@ async def _set_job(job_id: str, **fields) -> None:
         await db.commit()
 
 
-async def create_job(project_id: int, thread_id: str, block_pk: int, settings_override: dict | None = None) -> str:
+async def create_job(project_id: int, thread_id: str, block_pk: int, settings_override: dict | None = None,
+                     force_rewrite: bool = False) -> str:
     """建作业（同 block 只允许一个 queued/running；已存在则复用）。"""
     async with get_db() as db:
         block = await get_block(db, block_pk)
@@ -94,6 +95,7 @@ async def create_job(project_id: int, thread_id: str, block_pk: int, settings_ov
             "mode": "chapter_sse",
             "base_content": block.get("content") or "",
             "settings_override": settings_override or {},
+            "force_rewrite": bool(force_rewrite),
             "created_at": time.time(),
         }
         await db.execute(
@@ -154,7 +156,9 @@ async def run_job(job_id: str) -> None:
         draft = base
         all_checks: list[dict] = []
         section_records: list[dict] = []
-        pending = [s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
+        force_rewrite = bool(snapshot.get("force_rewrite"))
+        pending = list(outline) if force_rewrite else [
+            s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
         total = max(1, len(pending))
         for index, section in enumerate(pending):
             row_now = await _job_row(job_id)
@@ -219,8 +223,8 @@ async def run_job(job_id: str) -> None:
                                              "recoverable": True})
                 await emit(job_id, "section", {"index": index, "title": title, "state": "failed", "words": 0})
                 continue
-            from services.section_context import coverage_for_section
-            coverage = await coverage_for_section(block, thread_id, text)
+            from services.coverage_review import review_coverage
+            coverage = await review_coverage(block, title, text, thread_id=thread_id)
             if coverage.get("missing_detail"):
                 await emit(job_id, "todo", {"index": index, "items": [{
                     "group": "proof", "severity": "suggest",
@@ -273,6 +277,12 @@ async def run_job(job_id: str) -> None:
                 await add_revision(db, block_pk, base,
                                    summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai")
                 await update_block_content(db, block_pk, draft)
+                from services.section_context import SECTION_CONTEXT_VERSION
+                # 只有全章重写/新章才把整章标为当前版本；只补未写节时旧节仍是旧上下文
+                if force_rewrite or not base.strip():
+                    await db.execute("UPDATE blocks SET context_version=? WHERE id=?",
+                                     (SECTION_CONTEXT_VERSION, block_pk))
+                    await db.commit()
                 saved = True
                 reason = "已写入正文"
         await _set_job(job_id, status="done", stage="已完成", content=draft, saved=1 if saved else 0,
@@ -560,8 +570,8 @@ async def write_sections(job_id: str, block: dict, block_pk: int, sections: list
         charts = [await task for task in chart_tasks] if chart_tasks else []
         if charts:
             text, _missing = merge_charts(text, charts)
-        from services.section_context import coverage_for_section
-        coverage = await coverage_for_section(block, thread_id, text)
+        from services.coverage_review import review_coverage
+        coverage = await review_coverage(block, title, text, thread_id=thread_id)
         if coverage.get("missing_detail"):
             await emit(job_id, "todo", {"index": index, "items": [{
                 "group": "proof", "severity": "suggest",

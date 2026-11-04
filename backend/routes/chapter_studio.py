@@ -366,6 +366,29 @@ class AlignBody(BaseModel):
     thread_id: str = Field(min_length=8)
 
 
+class CoverageReviewBody(BaseModel):
+    thread_id: str = Field(default="", max_length=120)
+    section: str = Field(default="", max_length=120)
+    text: str = Field(default="", max_length=20000)
+    deep: bool = False
+
+
+@router.post('/blocks/{block_id}/studio/coverage-review')
+async def coverage_review(block_id: int, body: CoverageReviewBody):
+    """规范条款覆盖核对；deep=true 时额外调用评标视角 LLM。"""
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+    from services.coverage_review import review_coverage
+    from services.section_context import section_body
+    text = (body.text or "").strip()
+    if not text:
+        text = section_body(block.get("content") or "", body.section)
+    if not text:
+        raise HTTPException(422, "没有可核对的正文")
+    result = await review_coverage(block, body.section, text, thread_id=body.thread_id, deep=body.deep)
+    return result
+
+
 @router.get('/blocks/{block_id}/studio/section/stream')
 async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = ''):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""

@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v458';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v458';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v459';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v459';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -1093,6 +1093,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const resp = await fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockId)}/plan?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(30000)});
       const payload = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(payload.detail || `HTTP ${resp.status}`);
+      try {
+        const planId = payload.plan_id || '';
+        const [coverageResp, rebuildResp] = await Promise.all([
+          planId ? fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(planId)}/coverage?threadId=${encodeURIComponent(threadId)}`).catch(() => null) : null,
+          fetch(`/api/projects/${projectId}/studio/context-rebuild?threadId=${encodeURIComponent(threadId)}`).catch(() => null),
+        ]);
+        const coverage = coverageResp?.ok ? await coverageResp.json() : null;
+        const rebuild = rebuildResp?.ok ? await rebuildResp.json() : null;
+        payload.coverage = (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId)) || null;
+        payload.context_stale = (rebuild?.stale || []).find((b) => String(b.block_id) === String(blockId)) || null;
+      } catch (error) { /* 覆盖率/上下文版本失败不阻断计划 */ }
       return payload;
     };
     const openBindPicker = (requirement) => {
@@ -1165,11 +1176,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         : isParent
           ? `总述 ${wordPlan.written || 0} / ${wordPlan.total || '—'} 字 ｜ 子节 ${children.length} 个（计划 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页 · 已写 ${children.reduce((sum, c) => sum + (c.written_pages || 0), 0)} 页）`
           : `计划 ${pages || '—'} 页 · ${wordPlan.total || '—'} 字 ｜ 已写 ${wordPlan.written || 0} 字 ｜ 待办见右栏`;
+      const requirements = data.requirements || [];
+      const reqCoverage = data.coverage?.requirements || [];
+      const specRequirements = requirements.filter((r) => r.source === 'spec' || r.spec_requirement_id);
+      const normalRequirements = requirements.filter((r) => !(r.source === 'spec' || r.spec_requirement_id));
+      const coveredCount = reqCoverage.filter((r) => r.responded).length;
+      const staleContext = data.context_stale;
       const detected = deliverables.reduce((sum, item) => sum + (item.written_words || 0), 0);
       const wordTooltip = `全章已写 ${wordPlan.written || 0} 字；能按小节标题对应到交付物的是 ${detected} 字，逐项"已写"为估算值，以正文为准`;
       body.innerHTML = `
         <div class="cs-cp-head">
-          <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
+          <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}${staleContext ? '<span class="cs-cp-tag cs-cp-tag-warn">上下文旧</span><button type="button" class="cs-cp-link" data-cp-rebuild-context>按新上下文重写</button>' : ''}</h4>
           <div class="cs-cp-toprow">
             <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
 
@@ -1223,6 +1240,34 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
 
+
+        <details class="cs-cp-block" data-cp-sec="requirements" open>
+          <summary><b><span class="cs-cp-idx">2</span>本章要求与技术规范</b>
+            <em>${requirements.length} 条${specRequirements.length ? ` · 规范 ${specRequirements.length}` : ''}${reqCoverage.length ? ` · 已回应 ${coveredCount}/${reqCoverage.length}` : ''}</em>
+            <button type="button" class="cs-cp-link" data-cp-edit-req title="编辑本章要求">编辑</button></summary>
+          <div class="cs-cp-fold-body cs-cp-req-wrap">
+            ${requirements.length ? `
+              ${specRequirements.length ? `<div class="cs-cp-req-group"><h5>技术规范条款 <small>${specRequirements.length}</small></h5>
+                ${specRequirements.map((req) => {
+                  const idx = requirements.indexOf(req);
+                  const responded = reqCoverage[idx]?.responded;
+                  return `<details class="cs-cp-req-item">
+                    <summary><span class="cs-cp-req-kind">${esc(req.spec_requirement_id || '规范')}</span>
+                      <b>${esc(String(req.text || '').replace(/^技术规范条款：/, '').slice(0, 46))}</b>
+                      <em class="${responded ? 'ok' : ''}">${responded ? '已回应' : '未回应'}</em></summary>
+                    <p>${esc(String(req.text || '').replace(/^技术规范条款：/, ''))}</p>
+                  </details>`;
+                }).join('')}</div>` : ''}
+              ${normalRequirements.length ? `<div class="cs-cp-req-group"><h5>编写与交付要求 <small>${normalRequirements.length}</small></h5>
+                ${normalRequirements.slice(0, 8).map((req) => {
+                  const idx = requirements.indexOf(req);
+                  const responded = reqCoverage[idx]?.responded;
+                  return `<div class="cs-cp-req-line"><span class="cs-cp-req-kind">${kindLabel[req.type] || '写作'}</span>
+                    <b>${esc(String(req.text || '').slice(0, 52))}</b><em class="${responded ? 'ok' : ''}">${responded ? '已回应' : '未回应'}</em></div>`;
+                }).join('')}${normalRequirements.length > 8 ? `<p class="cs-dim">还有 ${normalRequirements.length - 8} 条，点「编辑」查看全部</p>` : ''}</div>` : ''}
+            ` : '<p class="cs-cp-empty">还没有本章要求。点「编辑」添加，或重新生成计划。</p>'}
+          </div>
+        </details>
 
 
         ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
@@ -1303,6 +1348,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         await select(blockId);
         if (item) locateInEditor(item.title);
       }));
+      body.querySelector('[data-cp-rebuild-context]')?.addEventListener('click', async () => {
+        if (!globalThis.confirm('按新上下文重写本章？会覆盖现有正文，但会写版本记录，可回滚。')) return;
+        dialog.close();
+        await runChapterWriteJob(null, {forceRewrite: true});
+      });
       body.querySelector('[data-cp-close]')?.addEventListener('click', () => dialog.close());
       body.querySelector('[data-cp-generate]')?.addEventListener('click', () => runAction('regen'));
       body.querySelectorAll('[data-cp-kid]').forEach((row) => {
@@ -3261,7 +3311,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 章节级 SSE 作业：一条 EventSource 驱动 4 头像与正文流式（v3 M2）。 */
-  async function runChapterWriteJob(slot) {
+  async function runChapterWriteJob(slot, options = {}) {
     if (!active) return { started: false };
     const states = { chief: 'queued', text: 'queued', diagram: 'queued', table: 'queued' };
     const models = {};
@@ -3274,7 +3324,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     try {
       const resp = await fetch(`/api/projects/${projectId}/studio/chapter-writes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: threadId, block_id: String(active.block_id || ''), settings_override: {} }),
+        body: JSON.stringify({ thread_id: threadId, block_id: String(active.block_id || ''), settings_override: {},
+                              force_rewrite: !!options.forceRewrite }),
         signal: AbortSignal.timeout(30000),
       });
       const data = await resp.json().catch(() => ({}));

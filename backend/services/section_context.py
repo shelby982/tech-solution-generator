@@ -14,6 +14,7 @@ import re
 
 from db import get_db
 
+SECTION_CONTEXT_VERSION = 2
 _SPEC_MAX = 4
 _REQ_MAX = 8
 _MATERIAL_MAX = 4
@@ -114,6 +115,30 @@ async def _load_manual_materials(db, block: dict, section: str) -> str:
 async def _search_materials(db, block: dict, section: dict, spec: list[dict], reqs: list[dict]) -> list[dict]:
     from services.material_rerank import search_materials
     return await search_materials(db, int(block.get("project_id") or 0), section, spec, reqs, limit=_MATERIAL_MAX)
+
+
+def _select_spec_for_section(spec: list[dict], section: dict) -> list[dict]:
+    """章节规范条款较多时，优先取与本节标题/要点/依据相关的条款。"""
+    if len(spec) <= 2:
+        return spec
+    from services.material_search import extract_terms
+    section_text = " ".join([
+        str(section.get("title") or ""),
+        " ".join(str(x) for x in (section.get("points") or [])),
+        " ".join(str((b or {}).get("ref") or "") for b in (section.get("basis") or [])),
+    ])
+    section_terms = set(extract_terms(section_text, limit=24))
+    if not section_terms:
+        return spec[:3]
+    scored = []
+    for clause in spec:
+        blob = str(clause.get("title") or "") + " " + str(clause.get("text") or "")
+        clause_terms = set(extract_terms(blob, limit=16))
+        hits = len(section_terms & clause_terms)
+        scored.append((hits, clause))
+    scored.sort(key=lambda item: (-item[0], spec.index(item[1])))
+    picked = [clause for hits, clause in scored if hits > 0][:2]
+    return picked or spec[:3]
 
 
 async def build_section_context(block: dict, section: dict, thread_id: str = "") -> dict:

@@ -15,10 +15,17 @@ from services import chapter_sse
 router = APIRouter(tags=["chapter-sse"])
 
 
+class RebuildBody(BaseModel):
+    thread_id: str = Field(min_length=1)
+    block_ids: list[str] = Field(default_factory=list)
+    dry_run: bool = False
+
+
 class WriteBody(BaseModel):
     thread_id: str = Field(min_length=8)
     block_id: str = Field(min_length=1)          # 章节编码（s1.2.1.1）
     settings_override: dict[str, str] = Field(default_factory=dict)
+    force_rewrite: bool = False
 
 
 async def _resolve_block(project_id: int, block_code: str) -> dict:
@@ -30,11 +37,62 @@ async def _resolve_block(project_id: int, block_code: str) -> dict:
     return dict(row)
 
 
+@router.get('/projects/{project_id}/studio/context-rebuild')
+async def context_rebuild_preview(project_id: int, thread_id: str = ''):
+    """列出正文已存在但写作上下文版本过期的章节。"""
+    from db import get_db
+    from services.section_context import SECTION_CONTEXT_VERSION
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT id, block_id, title, length(content) AS words, COALESCE(context_version,0) AS context_version "
+            "FROM blocks WHERE project_id=? AND (?='' OR run_thread_id=?) AND length(trim(COALESCE(content,'')))>0 "
+            "AND COALESCE(context_version,0)<? ORDER BY order_idx, id",
+            (project_id, thread_id, thread_id, SECTION_CONTEXT_VERSION),
+        )).fetchall()
+    stale = [dict(row) for row in rows]
+    return {"current_version": SECTION_CONTEXT_VERSION, "stale": stale, "count": len(stale)}
+
+
+@router.post('/projects/{project_id}/studio/context-rebuild')
+async def context_rebuild(project_id: int, body: RebuildBody):
+    """按新写作上下文重写旧章节；dryRun 只返回清单，不创建作业。"""
+    from db import get_db
+    from services.section_context import SECTION_CONTEXT_VERSION
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT id, block_id, title, length(content) AS words, COALESCE(context_version,0) AS context_version "
+            "FROM blocks WHERE project_id=? AND (?='' OR run_thread_id=?) AND length(trim(COALESCE(content,'')))>0 "
+            "AND COALESCE(context_version,0)<? ORDER BY order_idx, id",
+            (project_id, body.thread_id, body.thread_id, SECTION_CONTEXT_VERSION),
+        )).fetchall()
+        stale = [dict(row) for row in rows]
+        wanted = {str(x) for x in body.block_ids or []}
+        if wanted:
+            stale = [row for row in stale if str(row["block_id"]) in wanted]
+        if body.dry_run:
+            return {"current_version": SECTION_CONTEXT_VERSION, "stale": stale, "created": [], "skipped": []}
+        created, skipped = [], []
+        for row in stale:
+            existing = await (await db.execute(
+                "SELECT id FROM chapter_writing_jobs WHERE block_id=? AND status IN ('queued','running')",
+                (int(row["id"]),),
+            )).fetchone()
+            if existing:
+                skipped.append({"block_id": row["block_id"], "reason": "已有运行中作业"})
+                continue
+            job_id = await chapter_sse.create_job(project_id, body.thread_id, int(row["id"]),
+                                                  force_rewrite=True)
+            chapter_sse.start_runner(job_id)
+            created.append({"block_id": row["block_id"], "job_id": job_id})
+    return {"current_version": SECTION_CONTEXT_VERSION, "stale": stale, "created": created, "skipped": skipped}
+
+
 @router.post('/projects/{project_id}/studio/chapter-writes')
 async def create_chapter_write(project_id: int, body: WriteBody):
     block = await _resolve_block(project_id, body.block_id)
     try:
-        job_id = await chapter_sse.create_job(project_id, body.thread_id, int(block["id"]), body.settings_override)
+        job_id = await chapter_sse.create_job(project_id, body.thread_id, int(block["id"]),
+                                              body.settings_override, body.force_rewrite)
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     chapter_sse.start_runner(job_id)

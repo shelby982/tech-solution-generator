@@ -378,6 +378,23 @@
 
 /* 编写计划弹窗 —— 按定稿效果图实现 */
 .cs-cp-head { padding-bottom: 12px; border-bottom: 1px solid var(--line, #eef2f7); }
+.cs-cp-tag-warn { background: #fff7ed; color: #9a3412; }
+.cs-cp-req-wrap { max-height: 360px; overflow: auto; padding-right: 4px; }
+.cs-cp-req-group { margin: 8px 0 12px; }
+.cs-cp-req-group > h5 { margin: 0 0 6px; font-size: 12px; color: #334155; display: flex; gap: 6px; align-items: center; }
+.cs-cp-req-group > h5 small { color: #64748b; font-weight: 400; }
+.cs-cp-req-item { border: 1px solid #e2e8f0; border-radius: 6px; margin: 4px 0; background: #fff; }
+.cs-cp-req-item > summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 7px 8px; cursor: pointer; }
+.cs-cp-req-item > summary::-webkit-details-marker { display: none; }
+.cs-cp-req-item > summary b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.cs-cp-req-item > summary em { font-style: normal; font-size: 11px; color: #b45309; white-space: nowrap; }
+.cs-cp-req-item > summary em.ok, .cs-cp-req-line em.ok { color: #15803d; }
+.cs-cp-req-item > p { margin: 0; padding: 0 8px 8px; font-size: 12px; line-height: 1.7; color: #475569; max-height: 140px; overflow: auto; }
+.cs-cp-req-kind { font-size: 10px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 1px 5px; white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.cs-cp-req-line { display: flex; align-items: center; gap: 6px; padding: 5px 2px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
+.cs-cp-req-line b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.cs-cp-req-line em { font-style: normal; font-size: 11px; color: #b45309; white-space: nowrap; }
+@media (max-width: 720px) { .cs-cp-req-wrap { max-height: 300px; } }
 .cs-cp-head h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 17px; font-weight: 600; color: #0f172a; }
 .cs-cp-facts { margin: 0; font-size: 13px; color: #334155; font-variant-numeric: tabular-nums; }
 .cs-cp-info { display: inline-flex; width: 13px; height: 13px; border-radius: 50%; border: 1px solid #cbd5e1; color: #94a3b8; font-size: 9px; align-items: center; justify-content: center; margin-left: 3px; vertical-align: 1px; cursor: help; }
