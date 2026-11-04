@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · 质量检查</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v456" />
-    <link rel="stylesheet" href="./assets/review.css?v=20261016-v456" />
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v456" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v457" />
+    <link rel="stylesheet" href="./assets/review.css?v=20261016-v457" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v457" />
   <style>
     /* 返回作业面板：与项目名同级的次级入口 */
     .back-to-panel { margin-left:10px; font-size:12.5px; color:var(--muted); text-decoration:none;
       border:1px solid var(--line); border-radius:8px; padding:3px 10px; }
     .back-to-panel:hover { color:var(--text); background:var(--bg-2); }
   </style>
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v456" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v457" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body>
     <div class="workspace-shell">
@@ -54,6 +54,11 @@
             <div class="verdict-head">
               <h2>按评分点</h2>
               <span class="ws-muted">得分按评分点计；点一行看该评分点下的章节明细</span>
+            </div>
+            <div class="verdict-actions">
+              <button type="button" id="batch-review-btn" class="ws-btn">评审未评章节</button>
+              <span class="verdict-batch-status" id="batch-review-status"></span>
+              <button type="button" id="verdict-refresh" class="ws-btn">刷新</button>
             </div>
             <div class="verdict-kpis" id="verdict-kpis"><span class="ws-muted">加载中…</span></div>
             <div class="verdict-rows" id="verdict-rows"></div>
@@ -96,7 +101,7 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/review.js?v=20261016-v456"></script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v456"></script>
+    <script type="module" src="./assets/review.js?v=20261016-v457"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v457"></script>
   </body>
 </html>

@@ -219,16 +219,19 @@ async def run_job(job_id: str) -> None:
                                              "recoverable": True})
                 await emit(job_id, "section", {"index": index, "title": title, "state": "failed", "words": 0})
                 continue
+            from services.section_context import coverage_for_section
+            coverage = await coverage_for_section(block, thread_id, text)
             draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
             words = len(re.sub(r"\s+", "", text))
             section_records.append({"index": index, "title": title, "role": "text",
                                     "model": models.get("text", ""), "words": words,
                                     "ms": int((time.monotonic() - started_at) * 1000),
                                     "charts": [{"role": c.get("role"), "model": c.get("model"),
-                                                "ok": bool(c.get("ok"))} for c in charts]})
+                                                "ok": bool(c.get("ok"))} for c in charts],
+                                    "coverage": coverage})
             await emit(job_id, "section", {"index": index, "title": title, "state": "done",
                                            "words": words, "model": models.get("text", ""),
-                                           "ms": section_records[-1]["ms"]})
+                                           "ms": section_records[-1]["ms"], "coverage": coverage})
             await emit(job_id, "role", {"role": "text", "state": "done", "model": models.get("text", ""),
                                         "section_index": index})
             if not chart_deliverables:
@@ -297,43 +300,48 @@ def _placeholder_hint(section: dict) -> str:
 
 
 async def _stream_section(block: dict, section: dict, thread_id: str, model: str):
-    """流式写一节（复用分节提示词；模型来自设置解析）。"""
+    """流式写一节：标包规范/计划要求/本节正文/素材 + 分节提示词。"""
     from agents.chapter_team import RULES
     from services.config_store import OPENAI_COMPATIBLE_PROVIDERS, config_store
     from services.section_outline import SECTION_SYSTEM, build_section_payload
+    from services.section_context import build_section_context, render_context
     from infra.llm.clients import stream_claude, stream_openai
 
-    payload = build_section_payload({}, {"title": section.get("title"), "points": section.get("points") or [],
-                                         "words": section.get("words") or 900,
-                                         "basis": section.get("basis") or [],
-                                         "how": section.get("how") or {},
-                                         "deliverables": section.get("deliverables") or []},
-                                    str(block.get("content") or "")[:2000])
+    try:
+        context = await build_section_context(block, section, thread_id)
+        context_text = render_context(context)
+    except Exception:  # noqa: BLE001
+        context = {"chapter_requirements": [], "spec_clauses": [], "materials": [],
+                   "manual_materials": "", "section_text": ""}
+        context_text = ""
+    payload = build_section_payload(
+        {"title": str(block.get("title") or ""),
+         "requirements": [str(x.get("text") or "") for x in context.get("chapter_requirements") or []]},
+        {"title": section.get("title"), "points": section.get("points") or [],
+         "words": section.get("words") or 900,
+         "basis": section.get("basis") or [],
+         "how": section.get("how") or {},
+         "deliverables": section.get("deliverables") or []},
+        str(context.get("section_text") or "")[:2500],
+    )
     from services.section_contract import contract_for
     contract = contract_for(section.get("title") or "")
-    # 计划面板里可编辑的"写法"（= 该节提示词）优先
     from services.section_practice import practice_of
     practice = await practice_of(int(block.get("project_id") or 0), str(block.get("block_id") or ""),
                                  str(section.get("title") or ""))
-    # 本章已选素材（cite/data/context 三种用法）
-    from services.material_context import material_prompt_for_block
-    material_prompt = await material_prompt_for_block(int(block.get("id") or 0),
-                                                      str(block.get("block_id") or ""),
-                                                      str(section.get("title") or ""))
-    if not material_prompt:
-        from services.material_context import NO_MATERIAL_HINT
-        material_prompt = NO_MATERIAL_HINT
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
+        + (f"{context_text}\n\n" if context_text else "")
         + (f"【本节写法（按计划执行）】{practice}\n" if practice else "")
-        + (f"{material_prompt}\n" if material_prompt else "")
         + (f"【本节硬性要求】{contract}\n" if contract else "")
         + f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
         + _placeholder_hint(section)
+        + "硬性要求：如果【本章技术规范条款】存在，正文必须逐条回应；每条都要有\n"
+        "「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n"
         + "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
     )
     configs = config_store.get_all() or []
@@ -545,15 +553,18 @@ async def write_sections(job_id: str, block: dict, block_pk: int, sections: list
         charts = [await task for task in chart_tasks] if chart_tasks else []
         if charts:
             text, _missing = merge_charts(text, charts)
+        from services.section_context import coverage_for_section
+        coverage = await coverage_for_section(block, thread_id, text)
         draft = replace_section_text(draft, title, text)[:_CONTENT_LIMIT]
         records.append({"index": index, "title": title, "role": "text",
                         "model": models.get("text", ""), "words": len(re.sub(r"\s+", "", text)),
                         "ms": int((time.monotonic() - started_at) * 1000),
                         "charts": [{"role": c.get("role"), "model": c.get("model"), "ok": bool(c.get("ok"))}
-                                   for c in charts]})
+                                   for c in charts],
+                        "coverage": coverage})
         await emit(job_id, "section", {"index": index, "title": title, "state": "done",
                                       "words": records[-1]["words"], "model": models.get("text", ""),
-                                      "ms": records[-1]["ms"]})
+                                      "ms": records[-1]["ms"], "coverage": coverage})
         if on_section_done:
             await on_section_done(index, section, text, charts)
     return draft, records

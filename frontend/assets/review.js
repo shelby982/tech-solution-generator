@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v456';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v456';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v457';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v457';
 const $ = id => document.getElementById(id);
 
 // 「← 作业面板」带上当前项目/线程/标包 —— 回面板仍是同一条作业、同一个标包
@@ -84,6 +84,46 @@ function renderDetail() {
 const RISK_LABEL = {ok:'满足', medium:'部分满足', high:'不满足', unreviewed:'未评审'};
 const RISK_CLASS = {ok:'ok', medium:'part', high:'bad', unreviewed:'none'};
 let verdictCache = {key:'', data:null};
+let batchTimer = null;
+
+/** 批量评审：建任务 → 轮询进度 → 完成后刷新评分点结论 */
+async function runBatchReview() {
+  const btn = document.getElementById('batch-review-btn');
+  const label = document.getElementById('batch-review-status');
+  if (!workspace.projectId || !btn) return;
+  btn.disabled = true;
+  if (label) label.textContent = '正在创建任务…';
+  try {
+    const body = { thread_id: workspace.threadId || '', only_unreviewed: true, limit: 0 };
+    const resp = await fetch(`/api/projects/${workspace.projectId}/reviews/batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    const jobId = data.job_id;
+    if (label) label.textContent = '已开始，正在逐章评审…';
+    if (batchTimer) clearInterval(batchTimer);
+    batchTimer = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/projects/${workspace.projectId}/reviews/batch/${jobId}`);
+        const job = await r.json();
+        if (label) {
+          label.textContent = `${job.status === 'running' ? '评审中' : job.status === 'done' ? '已完成' : job.status}`
+            + ` ${job.done || 0}/${job.total || 0} 章`
+            + (job.failed ? ` · 失败 ${job.failed}` : '');
+        }
+        if (!['queued', 'running'].includes(String(job.status))) {
+          clearInterval(batchTimer); batchTimer = null; btn.disabled = false;
+          verdictCache.key = ''; await renderVerdict();
+        }
+      } catch (error) { /* 轮询失败忽略，下次再试 */ }
+    }, 3000);
+  } catch (error) {
+    if (label) label.textContent = `启动失败：${error.message}`;
+    btn.disabled = false;
+  }
+}
+
 async function renderVerdict() {
   if (!workspace.projectId) return;
   // 只在"项目/线程/阶段"变化时重拉，避免工作区每次 tick 都打接口
@@ -106,6 +146,7 @@ async function renderVerdict() {
     ['score ok',  '得分预估', `${s.score_estimated ?? 0} / ${s.score_max ?? 0}`, `${pct}% 满分${s.score_pending ? ` · 另有 ${s.score_pending} 分待评` : ''}`],
     ['warn',      '缺口',     `${s.gaps ?? 0} 项`, '未满足的得分要点'],
     ['',          '不满足 / 部分满足', `${s.high ?? 0} / ${s.medium ?? 0}`, `满足 ${s.ok ?? 0} · 未评审 ${s.unreviewed ?? 0}`],
+    ['',          '已评章节', `${s.chapters_reviewed ?? 0} / ${s.chapters_total ?? 0} 章`, `${s.reviewed_ratio ?? 0}% 已评审${s.unlinked_points ? ` · ${s.unlinked_points} 个评分点无章节` : ''}`],
     ['',          '需举证章节', `${s.evidence_chapters ?? 0} 章`, '有 evidence_required 的章节'],
     ['',          '成本',     `${Math.round((s.cost_tokens||0)/10000)} 万 token`, '本标包累计'],
   ].map(([cls,label,value,sub]) => `<div class="verdict-kpi ${cls}">
@@ -189,3 +230,7 @@ $('quality-approve').onclick = () => {
     }catch(error){dialog.querySelector('[role="status"]').textContent=error.message;e.target.disabled=false;}
   };
 };
+
+
+document.getElementById('batch-review-btn')?.addEventListener('click', runBatchReview);
+document.getElementById('verdict-refresh')?.addEventListener('click', () => { verdictCache.key = ''; void renderVerdict(); });

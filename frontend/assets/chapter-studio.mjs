@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v456';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v456';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v457';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v457';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -3304,7 +3304,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       source.addEventListener('section', (event) => {
         const data = JSON.parse(event.data || '{}');
         flush();
-        status(`已完成第 ${Number(data.index || 0) + 1} 节${data.words ? ` · ${data.words} 字` : ''}`);
+        const coverage = data.coverage || {};
+        const cover = coverage.total ? ` · 规范覆盖 ${coverage.covered || 0}/${coverage.total}` : '';
+        const missing = (coverage.missing || []).length ? `，缺：${coverage.missing.slice(0, 2).join('、')}` : '';
+        status(`已完成第 ${Number(data.index || 0) + 1} 节${data.words ? ` · ${data.words} 字` : ''}${cover}${missing}`);
       });
       source.addEventListener('done', async (event) => {
         const data = JSON.parse(event.data || '{}');

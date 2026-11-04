@@ -626,3 +626,11 @@
 .v-chapters th, .v-chapters td { text-align: left; padding: 5px 10px;
   border-bottom: 1px solid var(--line2, #eef1f5); vertical-align: top; }
 .v-chapters th { color: var(--muted); font-weight: 600; background: #fafbfc; }
+
+/* 批量评审操作条 */
+.verdict-actions { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.verdict-actions .ws-btn { border: 1px solid #e2e8f0; background: #fff; color: #334155; border-radius: 7px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.verdict-actions .ws-btn:hover { border-color: #bfdbfe; color: #1d4ed8; }
+.verdict-actions .ws-btn[disabled] { opacity: .55; cursor: default; }
+.verdict-batch-status { font-size: 11px; color: #64748b; }
