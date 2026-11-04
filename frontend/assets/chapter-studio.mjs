@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v454';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v454';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v455';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v455';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -2197,7 +2197,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <label class="cs-field"><span>图号 / 图名</span><input data-dp-title maxlength="120" value="${esc(figureNo + ' 部署拓扑图')}" /></label>
           <label class="cs-field"><span>对应章节</span><select data-dp-section>${(sectionNames.length ? sectionNames : [defaultSection]).map((name) => `<option value="${esc(name)}"${name === defaultSection ? ' selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
         </div>
-        <label class="cs-field"><span>对应评分点 / 条款（可选）</span><input data-dp-score maxlength="360" value="${esc((scoreRefsFor(sectionFor(defaultSection)) || []).slice(0, 2).join('；'))}" placeholder="多个用分号分隔" /></label>
+        <label class="cs-field"><span>关联评分点 / 条款（可选，不必填）</span><input data-dp-score maxlength="360" value="" placeholder="不填也可以；只有明确关联时才填" /></label>
         <label class="cs-field"><span>部署结论（可选）</span><input data-dp-claim maxlength="300" placeholder="例：双中心双活部署，业务 RTO ≤ 30 分钟" /></label>
         <label class="cs-field"><span>正文来源（自动带出，可修改）</span><textarea data-dp-text rows="7" maxlength="12000">${esc(sectionBodyFor(defaultSection))}</textarea></label>
         <p class="cs-muted" data-dp-hint>会从正文抽取区域、节点、连接；抽取不足会报错，不会硬画。</p>
@@ -2276,8 +2276,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
     sectionEl.addEventListener('change', () => {
       textEl.value = sectionBodyFor(sectionEl.value);
-      const refs = scoreRefsFor(sectionFor(sectionEl.value));
-      if (refs.length) scoreEl.value = refs.slice(0, 2).join('；');
     });
     dlg.addEventListener('click', (event) => {
       if (event.target.closest('[data-dp-close]') || event.target.closest('[data-dp-cancel]')) dlg.close();
@@ -2331,7 +2329,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <label class="cs-field"><span>对应章节</span><select data-pr-section>${(sectionNames.length ? sectionNames : [defaultSection]).map((name) => `<option value="${esc(name)}"${name === defaultSection ? ' selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
         </div>
         <label class="cs-field"><span>图号 / 图名</span><input data-pr-title maxlength="160" value="${esc(figureNo + ' ' + labelOf(defaultTemplate))}" /></label>
-        <label class="cs-field"><span>对应评分点 / 条款（可选）</span><input data-pr-score maxlength="360" value="${esc((scoreRefsFor(sectionFor(defaultSection)) || []).slice(0, 2).join('；'))}" /></label>
+        <label class="cs-field"><span>关联评分点 / 条款（可选，不必填）</span><input data-pr-score maxlength="360" value="" placeholder="不填也可以；只有明确关联时才填" /></label>
         <label class="cs-field"><span>结论（可选）</span><input data-pr-claim maxlength="300" placeholder="例：目标与现状差距集中在数据治理与安全合规" /></label>
         <label class="cs-field"><span>正文来源（自动带出，可修改）</span><textarea data-pr-text rows="7" maxlength="12000">${esc(sectionBodyFor(defaultSection))}</textarea></label>
         <p class="cs-muted" data-pr-hint>抽取不足会报错，不会硬画；标签会限制在 18 字内。</p>
@@ -2417,8 +2415,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     templateEl.addEventListener('change', syncTemplate);
     sectionEl.addEventListener('change', () => {
       textEl.value = sectionBodyFor(sectionEl.value);
-      const refs = scoreRefsFor(sectionFor(sectionEl.value));
-      if (refs.length) scoreEl.value = refs.slice(0, 2).join('；');
     });
     dlg.addEventListener('click', (event) => {
       if (event.target.closest('[data-pr-close]') || event.target.closest('[data-pr-cancel]')) dlg.close();
