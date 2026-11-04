@@ -3874,6 +3874,91 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     dlg.showModal();
   }
 
+  /** 评审 issue 定点重写：只改问题对应的那一段（before/after 对照，确认后落库） */
+  async function openReviewPatchDialog(issue, issueIndex) {
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog';
+    const head = `<header><h3>定点重写</h3><button type="button" data-rp-close>×</button></header>`;
+    const body = (inner) => `<div class="cs-plan-body">${inner}</div>`;
+    const issueHtml = `<p class="cs-rp-issue"><span class="cs-review-sev is-${esc(String(issue.severity || 'medium').toLowerCase())}">${esc(issue.severity || 'medium')}</span>
+      ${esc(String(issue.point || '').slice(0, 160))}</p>
+      ${issue.suggestion ? `<p class="cs-rp-sug">建议：${esc(String(issue.suggestion).slice(0, 160))}</p>` : ''}`;
+    dlg.innerHTML = `${head}${body(`${issueHtml}<p class="cs-muted">正在定位问题片段并生成改法…</p>`)}
+      <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-rp-close2>取消</button></footer>`;
+    globalThis.document.body.appendChild(dlg);
+    dlg.showModal();
+
+    const load = async () => {
+      const resp = await fetch(`/api/blocks/${active.id}/studio/review/patch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue_index: issueIndex }),
+        signal: AbortSignal.timeout(240000),
+      });
+      return resp.json().catch(() => ({}));
+    };
+
+    const render = (data) => {
+      if (!data?.found) {
+        dlg.innerHTML = `${head}${body(`${issueHtml}
+          <p class="cs-warning">${esc(data?.hint || '没能定位到这段原文，无法定点修改')}</p>`)}
+          <footer class="cs-ins-foot">
+            <button type="button" class="cs-cp-ghost" data-rp-close3>关闭</button>
+            <button type="button" class="cs-cp-primary" data-rp-whole>整节重写</button>
+          </footer>`;
+        return;
+      }
+      dlg._patch = data;
+      dlg.innerHTML = `${head}${body(`${issueHtml}
+        <div class="cs-rp-cols">
+          <div class="cs-rp-col is-before"><p class="cs-rp-label">原文</p><p class="cs-rp-text">${esc(data.before)}</p></div>
+          <div class="cs-rp-col is-after"><p class="cs-rp-label">改成</p><p class="cs-rp-text">${esc(data.after)}</p></div>
+        </div>
+        ${data.section ? `<p class="cs-muted">所在小节：${esc(data.section)}</p>` : ''}`)}
+        <footer class="cs-ins-foot">
+          <button type="button" class="cs-cp-ghost" data-rp-close3>取消</button>
+          <button type="button" class="cs-cp-ghost" data-rp-regenerate>换一种改法</button>
+          <button type="button" class="cs-cp-primary" data-rp-apply>应用到正文</button>
+        </footer>`;
+    };
+
+    try { render(await load()); } catch (error) {
+      render({ found: false, hint: `生成失败：${error.message}` });
+    }
+
+    dlg.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-rp-close]') || event.target.closest('[data-rp-close2]') || event.target.closest('[data-rp-close3]')) { dlg.close(); return; }
+      if (event.target.closest('[data-rp-whole]')) {
+        dlg.close();
+        await openRecomposeDialog({ prefillPrompt: `${issue.point || ''}${issue.suggestion ? `（建议：${issue.suggestion}）` : ''}` });
+        return;
+      }
+      if (event.target.closest('[data-rp-regenerate]')) {
+        dlg.innerHTML = `${head}${body(`${issueHtml}<p class="cs-muted">正在重新生成…</p>`)}<footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-rp-close3>取消</button></footer>`;
+        try { render(await load()); } catch (error) { render({ found: false, hint: `生成失败：${error.message}` }); }
+        return;
+      }
+      if (event.target.closest('[data-rp-apply]')) {
+        const patch = dlg._patch;
+        if (!patch) return;
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/studio/review/apply`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ before: patch.before, after: patch.after, issue_index: issueIndex }),
+            signal: AbortSignal.timeout(60000),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.applied) throw new Error(data.hint || data.detail || `HTTP ${resp.status}`);
+          editor.value = data.content || editor.value;
+          context = await json(`/api/blocks/${active.id}/studio`);
+          dlg.close();
+          await loadBasis(active.block_id); paintAside();
+          status('已应用到正文（写了版本，可回退）；再点「重新评审」看分数变化');
+        } catch (error) { status(`应用失败：${error.message}`); }
+      }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+  }
+
   /** 调整某一节的素材（时机②：重写前确认） */
   async function openSectionMaterialDialog(sectionTitle) {
     await loadPlanMaterials();
@@ -4893,9 +4978,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
     const rwBtn=event.target.closest('[data-review-rewrite]');
     if(rwBtn && chapterReview){
-      const issue=(chapterReview.issues||[])[Number(rwBtn.dataset.reviewRewrite||0)];
+      const index=Number(rwBtn.dataset.reviewRewrite||0);
+      const issue=(chapterReview.issues||[])[index];
       if(!issue){status('这条意见已失效，请重新评审');return;}
-      await openRecomposeDialog({ prefillPrompt: `${issue.point||''}${issue.suggestion?`（建议：${issue.suggestion}）`:''}` });
+      await openReviewPatchDialog(issue, index);
       return;
     }
     const recBtn=event.target.closest('[data-mrec]');

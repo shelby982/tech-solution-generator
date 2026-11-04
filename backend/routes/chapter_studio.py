@@ -1032,3 +1032,32 @@ async def get_chapter_review(block_id: int):
 
     data = await load_review(block_id)
     return {"reviewed": bool(data), "review": data}
+
+
+class ReviewPatchBody(BaseModel):
+    issue_index: int = 0
+
+
+class ReviewPatchApplyBody(BaseModel):
+    before: str = ""
+    after: str = ""
+    issue_index: int = -1
+
+
+@router.post('/blocks/{block_id}/studio/review/patch')
+async def review_patch(block_id: int, body: ReviewPatchBody):
+    """评审 issue 级定点重写：只改问题对应的那一小段（返回补丁，不落库）。"""
+    from services.review_rewrite import build_patch
+
+    return await build_patch(block_id, int(body.issue_index))
+
+
+@router.post('/blocks/{block_id}/studio/review/apply')
+async def review_patch_apply(block_id: int, body: ReviewPatchApplyBody):
+    """应用评审定点补丁（精确匹配替换 + 写 revision）。"""
+    from services.review_rewrite import apply_patch
+
+    try:
+        return await apply_patch(block_id, body.before, body.after, issue_index=int(body.issue_index))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))

@@ -142,6 +142,14 @@ def _edge(x1, y1, x2, y2, label="", kind="call", dashed=False):
 
 
 # ── 分层架构 ─────────────────────────────────────────────────────────────
+def _layer_arrow(x, y1, y2, label):
+    out = [f'<path d="M {x:.1f} {y1:.1f} V {y2:.1f}" fill="none" stroke="{ACCENT}" stroke-width="1.5" marker-end="url(#p-arrow)"/>']
+    mid = (y1 + y2) / 2
+    out.append(f'<rect x="{x - 36:.1f}" y="{mid - 9:.1f}" width="32" height="17" rx="3" fill="{PAPER}"/>')
+    out.append(_text(x - 20, mid + 3, label, 8, "#475569", anchor="middle"))
+    return "".join(out)
+
+
 def render_layered(spec: dict, meta: dict) -> str:
     bands = [b for b in (spec.get("bands") or []) if isinstance(b, dict) and b.get("label")][:7]
     if not bands:
@@ -173,7 +181,15 @@ def render_layered(spec: dict, meta: dict) -> str:
             parts.append(_rect(cx, y + 18, card_w, 34, PAPER, "#dbe3ef", 5))
             parts.append(_text(cx + 12, y + 39, _clip(item, max(6, int(card_w / 13))), 11, "#172033", 500))
         y += bh + row_gap
-    return _doc("".join(parts), height, meta)
+    # 层间依赖：在右侧留一条独立竖向轨道，避免压住组件
+    track_x = W - MARGIN - 20
+    rail = []
+    for i in range(len(bands) - 1):
+        upper = top + sum(heights[:i + 1]) + row_gap * i
+        lower = top + sum(heights[:i + 1]) + row_gap * (i + 1)
+        rail.append(_layer_arrow(track_x, upper - 4, lower + 4, "依赖"))
+    return _doc("".join(parts) + "".join(rail), height, meta,
+                legend=[("层带", "#e2e8f0", ""), ("组件", "#cbd5e1", ""), ("层间依赖", ACCENT, "")])
 
 
 # ── 数据流 ───────────────────────────────────────────────────────────────
@@ -222,7 +238,8 @@ def render_data_flow(spec: dict, meta: dict) -> str:
             width = min(140, max(38, len(label) * 10 + 12))
             parts.append(f'<rect x="{mid - width / 2:.1f}" y="{ly - 9:.1f}" width="{width}" height="17" rx="3" fill="{PAPER}"/>')
             parts.append(_text(mid, ly + 3, label, 9, "#475569", anchor="middle"))
-    return _doc("".join(parts), height, meta)
+    return _doc("".join(parts), height, meta,
+                legend=[("阶段", "#e2e8f0", ""), ("数据流", ACCENT, "")])
 
 
 # ── 时序图 ───────────────────────────────────────────────────────────────
@@ -256,41 +273,87 @@ def render_sequence(spec: dict, meta: dict) -> str:
 
 
 # ── 甘特/阶段 ─────────────────────────────────────────────────────────────
+def _month_value(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    match = re.match(r"^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?", text)
+    if not match:
+        return None
+    year, month = int(match.group(1)), int(match.group(2))
+    day = int(match.group(3) or 1)
+    return year * 12 + (month - 1) + (day - 1) / 31
+
+
+def _month_label(value: float) -> str:
+    index = int(round(value))
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+def _time_axis(tasks: list[dict], timeline: dict) -> tuple[bool, float, float, list[tuple[float, str]], str]:
+    """返回：是否日期模式、起点、终点、刻度、说明。"""
+    start_raw = timeline.get("start") or timeline.get("start_date")
+    end_raw = timeline.get("end") or timeline.get("end_date")
+    task_starts = [_month_value(t.get("start", t.get("start_date"))) for t in tasks]
+    task_ends = [_month_value(t.get("end", t.get("end_date"))) for t in tasks]
+    date_mode = bool(start_raw or end_raw or any(v is not None for v in task_starts + task_ends))
+    if date_mode:
+        values = [v for v in ([_month_value(start_raw), _month_value(end_raw)] + task_starts + task_ends) if v is not None]
+        start = min(values) if values else 0
+        end = max(values) if values else start + 6
+        if end <= start:
+            end = start + 1
+        span = end - start
+        tick_count = max(2, min(8, int(math.ceil(span)) + 1))
+        ticks = [(start + span * i / (tick_count - 1), _month_label(start + span * i / (tick_count - 1))) for i in range(tick_count)]
+        return True, start, end, ticks, f"时间：{_month_label(start)} ~ {_month_label(end)}"
+    unit = str(timeline.get("unit") or "阶段")
+    values = [v for v in task_ends if v is not None] or [1]
+    start, end = 0, max(1, max(values))
+    ticks = [(i, f"{int(i)}{unit}") for i in range(0, int(end) + 1, max(1, int(math.ceil(end / 6))))]
+    return False, start, end, ticks, f"相对周期（{unit}）"
+
+
 def render_gantt(spec: dict, meta: dict) -> str:
     tasks = [t for t in (spec.get("tasks") or []) if isinstance(t, dict) and t.get("name")][:14]
     if not tasks:
-        tasks = [{"name": "阶段一", "start": 0, "end": 2}, {"name": "阶段二", "start": 2, "end": 5}]
+        tasks = [{"name": "阶段一", "start": 0, "end": 2}, {"name": "阶段二", "start": 2, "end": 4}]
     label_w = 250
-    top = HEADER_H + 42
+    top = HEADER_H + 48
     row_h = 30
-    height = int(top + max(1, len(tasks)) * row_h + 60 + FOOTER_H)
-    max_end = max(1, max(float(t.get("end") or 1) for t in tasks))
+    height = int(top + max(1, len(tasks)) * row_h + 66 + FOOTER_H)
+    date_mode, start_v, end_v, ticks, axis_note = _time_axis(tasks, spec.get("timeline") or {})
     chart_x = MARGIN + label_w
     chart_w = W - MARGIN - chart_x
     parts = [_arrow_defs()]
-    parts.append(_text(MARGIN, top - 14, "任务 / 阶段", 10, MUTED))
-    ticks = min(8, int(max_end) + 1)
-    for i in range(ticks):
-        x = chart_x + chart_w * i / max(1, ticks - 1)
+    parts.append(_text(MARGIN, top - 18, "任务 / 阶段", 10, MUTED))
+    parts.append(_text(chart_x, top - 18, axis_note, 9, MUTED))
+    for tick, label in ticks:
+        x = chart_x + chart_w * (tick - start_v) / max(0.0001, end_v - start_v)
         parts.append(_line(x, top - 10, x, top + len(tasks) * row_h + 4, "#e2e8f0", 1))
-        if i == 0 or i == ticks - 1 or i % 2 == 0:
-            parts.append(_text(x, top - 8, str(i), 8.5, SOFT, anchor="middle"))
+        parts.append(_text(x, top - 8, label, 8.5, SOFT, anchor="middle"))
     for i, task in enumerate(tasks):
         y = top + i * row_h
         parts.append(_text(MARGIN, y + 18, _clip(task.get("name"), 18), 10.5, INK, 600))
         owner = _clip(task.get("owner") or task.get("phase") or "", 10)
         if owner:
             parts.append(_text(MARGIN + label_w - 8, y + 18, owner, 8.5, MUTED, anchor="end"))
-        start = float(task.get("start") or 0)
-        end = max(start + 0.6, float(task.get("end") or start + 1))
-        x1 = chart_x + chart_w * start / max(1, max_end)
-        x2 = chart_x + chart_w * end / max(1, max_end)
+        start_raw = _month_value(task.get("start", task.get("start_date")))
+        end_raw = _month_value(task.get("end", task.get("end_date")))
+        if start_raw is None:
+            start_raw = start_v
+        if end_raw is None or end_raw <= start_raw:
+            end_raw = start_raw + 0.6
+        x1 = chart_x + chart_w * (start_raw - start_v) / max(0.0001, end_v - start_v)
+        x2 = chart_x + chart_w * (end_raw - start_v) / max(0.0001, end_v - start_v)
         if task.get("milestone"):
             cx = x1
-            parts.append(f'<path d="M {cx} {y + 8} L {cx + 7} {y + 15} L {cx} {y + 22} L {cx - 7} {y + 15} z" fill="{ACCENT}"/>')
+            parts.append(f'<path d="M {cx:.1f} {y + 8} L {cx + 7:.1f} {y + 15} L {cx:.1f} {y + 22} L {cx - 7:.1f} {y + 15} z" fill="{ACCENT}"/>')
         else:
             parts.append(_rect(x1, y + 8, max(5, x2 - x1), 14, "#dbeafe", ACCENT, 3))
-    return _doc("".join(parts), height, meta)
+            parts.append(_text(min(x2 + 6, W - MARGIN - 8), y + 19, _clip(task.get("phase") or "", 8), 8, MUTED))
+    return _doc("".join(parts), height, meta,
+                legend=[("任务", "#dbeafe", ""), ("里程碑", ACCENT, "")])
 
 
 # ── 矩阵对照 ─────────────────────────────────────────────────────────────
@@ -390,22 +453,23 @@ def render_radar(spec: dict, meta: dict) -> str:
             angle = -math.pi / 2 + 2 * math.pi * i / n
             pts.append(f"{cx + radius * ring * math.cos(angle):.1f},{cy + radius * ring * math.sin(angle):.1f}")
         parts.append(f'<polygon points="{" ".join(pts)}" fill="none" stroke="#e2e8f0" stroke-width="1"/>')
-    def value_polygon(key, color, fill):
+    def value_polygon(key, color, fill, dash=""):
         pts = []
         for i, metric in enumerate(metrics):
             angle = -math.pi / 2 + 2 * math.pi * i / n
             maximum = float(metric.get("max") or 5) or 5
             value = max(0, min(maximum, float(metric.get(key) or 0))) / maximum
             pts.append(f"{cx + radius * value * math.cos(angle):.1f},{cy + radius * value * math.sin(angle):.1f}")
-        return f'<polygon points="{" ".join(pts)}" fill="{fill}" stroke="{color}" stroke-width="1.8"/>'
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+        return f'<polygon points="{" ".join(pts)}" fill="{fill}" stroke="{color}" stroke-width="1.8"{dash_attr}/>'
     parts.append(value_polygon("target", ACCENT, "rgba(29,78,216,0.08)"))
-    parts.append(value_polygon("current", MUTED, "rgba(100,116,139,0.08)"))
+    parts.append(value_polygon("current", MUTED, "rgba(100,116,139,0.08)", "6,4"))
     for i, metric in enumerate(metrics):
         angle = -math.pi / 2 + 2 * math.pi * i / n
         lx, ly = cx + (radius + 34) * math.cos(angle), cy + (radius + 34) * math.sin(angle)
         parts.append(_text(lx, ly, _clip(metric.get("label"), 10), 10, INK, anchor="middle"))
-    parts.append(_text(MARGIN, height - 64, "实线：目标  虚线：现状", 9, MUTED))
-    return _doc("".join(parts), height, meta)
+    return _doc("".join(parts), height, meta,
+                legend=[("目标", ACCENT, ""), ("现状", MUTED, "6,4")])
 
 
 # ── 组织/职责 ─────────────────────────────────────────────────────────────

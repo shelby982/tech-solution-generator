@@ -372,3 +372,21 @@ def test_chapter_review_combine_and_readiness_merge():
     merged = _with_review(payload, {"score": 54, "tech": 50, "comp": 58})
     assert merged["summary"]["readiness"] == 82                  # 100*0.6 + 54*0.4
     assert merged["summary"]["readiness_rule"] == 100
+
+
+def test_review_patch_locate_and_clean():
+    """评审定点重写：能从 issue 里定位原文片段，并清洗模型输出。"""
+    from services.review_rewrite import candidate_quotes, clean_output, locate
+
+    point = "正文多处保留未完成占位（如“缺失的招标文件条款原文与发文信息按处理，待取得后据实补全”）"
+    quotes = candidate_quotes(point)
+    assert quotes and any("缺失的招标文件条款原文" in quote for quote in quotes)
+
+    content = "## 一\n\n本项目政策依据如下。缺失的招标文件条款原文与发文信息按处理，待取得后据实补全。\n"
+    hit = locate(content, point)
+    assert hit and "缺失的招标文件条款原文" in hit["before"]
+    assert hit["before"].startswith("本项目政策依据如下") or "缺失的招标文件" in hit["before"]
+
+    assert clean_output("```\n修正后的片段：这是一段完整表述。\n```") == "这是一段完整表述。"
+    # 没有对应原文时不应硬定位
+    assert locate(content, "完全无关的一句话，正文里肯定没有这句话") is None
