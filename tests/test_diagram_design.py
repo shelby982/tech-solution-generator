@@ -307,6 +307,7 @@ def test_evaluator_prompt_contains_score_and_claim():
         ],
     })
     assert "评标正式版" in system and "对应评分点" in system
+    assert "产品图标库" in system and "data-icon=\"database\"" in system
     assert "技术架构先进性" in user and "满足双活要求" in user
     assert "双中心双活" in user
 
