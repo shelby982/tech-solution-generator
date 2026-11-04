@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v455';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v455';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v456';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v456';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -4508,15 +4508,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const isImage = state.tab === 'image';
       pickedEl.textContent = '';
       bodyEl.innerHTML = isImage ? `
-        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>生产级部署拓扑图</b>
-            <small>从本节正文抽取真实区域 / 节点 / 连接，模板化渲染；适合正式投标部署架构</small></div>
-          <button type="button" class="cs-ins-chip" data-ins-deploy="1">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>生产级图模板</b>
             <small>分层 / 数据流 / 时序 / 甘特 / 矩阵 / 鱼骨 / 金字塔 / 雷达 / 组织职责</small></div>
           <button type="button" class="cs-ins-chip" data-ins-prod="layered">生成</button></div>
-        <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>AI 生成图表（设计版）</b>
-            <small>按 Diagram Design 规范生成：架构 / 分层 / 流程 / 时间线 / 矩阵等；默认架构图，可换图型</small></div>
-          <button type="button" class="cs-ins-chip" data-ins-design="architecture">生成</button></div>
         <div class="cs-ins-entry"><div class="cs-ins-entry-main"><b>快速结构图</b>
             <small>把文字抽成可编辑的层次 / 流程 / 时间线（纯文本，可手改）</small></div>
           <button type="button" class="cs-ins-chip" data-ins-generate="info">生成</button></div>
@@ -4569,21 +4563,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tab = el.closest('[data-ins-tab]');
       if (tab) { state.tab = tab.dataset.insTab; for (const b of dlg.querySelectorAll('[data-ins-tab]')) b.setAttribute('aria-pressed', String(b.dataset.insTab === state.tab)); showMenu(); return; }
       if (el.closest('[data-ins-goto]')) { dlg.close(); showPanel('materials'); return; }
-      if (el.closest('[data-ins-deploy]')) {
-        dlg.close();
-        openDeploymentDiagramDialog();
-        return;
-      }
       const prod = el.closest('[data-ins-prod]');
       if (prod) {
         dlg.close();
         openProductionDiagramDialog(prod.dataset.insProd || 'layered');
-        return;
-      }
-      const design = el.closest('[data-ins-design]');
-      if (design) {
-        dlg.close();
-        openDesignDiagramDialog(design.dataset.insDesign || 'architecture');
         return;
       }
       const gen = el.closest('[data-ins-generate]');
