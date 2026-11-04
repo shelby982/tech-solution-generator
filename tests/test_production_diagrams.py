@@ -109,3 +109,11 @@ def test_gantt_has_real_time_axis():
     }, {"title": "甘特图", "claim": "结论", "score_refs": [], "section": "", "evidence": []})
     assert "2026-01" in html and "2026-06" in html
     assert "时间：" in html
+
+
+def test_score_is_optional_not_required_for_templates():
+    html = production_diagrams.render_layered(SPECS["layered"], {
+        "title": "分层图", "claim": "结论", "score_refs": [], "section": "", "evidence": [],
+    })
+    assert "对应评分点" not in html
+    assert not any("评分点" in item for items in production_diagrams.TEMPLATE_ELEMENTS.values() for item in items)
