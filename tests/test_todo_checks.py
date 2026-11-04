@@ -437,3 +437,22 @@ def test_review_estimate_and_needs_shape():
     assert pending * 2 == 20
     assert pending * default_tokens == 120000
     assert round(pending * 50 / concurrency / 60, 1) == 4.2
+
+
+def test_review_cards_into_delivery_tasks():
+    """评审结论进待办：需补料 → 需要你；可修项 → 系统任务（带 issue_index）。"""
+    from services.writing_plans import _with_review
+
+    payload = {"need_user": [], "system": [], "summary": {"readiness": 100}}
+    review = {"score": 60, "tech": 64, "comp": 53, "issue_count": 3,
+              "needs_material_count": 2,
+              "fixable_items": [{"index": 0, "severity": "high", "point": "缺量化指标", "suggestion": "补数字"}],
+              "needs_material_items": [{"query": "现网系统清单", "severity": "high"}]}
+    merged = _with_review(payload, review)
+    assert len(merged["need_user"]) == 1
+    assert merged["need_user"][0]["action"]["type"] == "review_need"
+    assert len(merged["system"]) == 1
+    assert merged["system"][0]["action"]["payload"]["issue_index"] == 0
+    assert merged["summary"]["need_user_count"] == 1
+    assert merged["summary"]["readiness_rule"] == 95   # 1 条软任务 → -5
+    assert merged["summary"]["readiness"] == 81        # 95*0.6 + 60*0.4
