@@ -71,8 +71,17 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
     score_est = round(sum(x["estimated_score"] for x in reviewed), 2)
     score_pending = round(sum(x["points"] for x in points if x["estimated_score"] is None), 2)
 
+    chapters_total = sum(int(x["chapters_total"] or 0) for x in points)
+    chapters_reviewed = sum(int(x["chapters_reviewed"] or 0) for x in points)
+    unlinked_points = [{"point_id": x["point_id"], "factor": x["factor"], "item": x["item"]}
+                       for x in points if not int(x["chapters_total"] or 0)]
     summary = {
         "points_total": len(points),
+        "chapters_total": chapters_total,
+        "chapters_reviewed": chapters_reviewed,
+        "reviewed_ratio": round(chapters_reviewed / chapters_total * 100) if chapters_total else 0,
+        "unlinked_points": len(unlinked_points),
+        "unlinked_points_detail": unlinked_points[:10],
         "score_max": score_max,
         "score_estimated": score_est,
         "score_pending": score_pending,

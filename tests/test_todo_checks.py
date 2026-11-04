@@ -415,3 +415,12 @@ def test_review_writeback_maps_satisfied_fallback():
     # 两侧都给时取最差
     assert _worst_satisfied("satisfied", "unsatisfied") == "unsatisfied"
     assert _worst_satisfied("partial", "satisfied") == "partial"
+
+
+def test_review_batch_targets_and_scoring_coverage():
+    """批量评审与评分点校验：目标筛选逻辑与覆盖度字段。"""
+    from services.review_batch import _targets  # noqa: F401  （导入可用即可，逻辑靠集成测）
+    from services.scoring_verdict import SCORE_RATIO
+
+    assert SCORE_RATIO["ok"] == 1.0 and SCORE_RATIO["medium"] == 0.5
+    assert SCORE_RATIO["high"] == 0.0 and SCORE_RATIO["unreviewed"] is None

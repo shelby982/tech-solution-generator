@@ -250,6 +250,21 @@ CREATE TABLE IF NOT EXISTS chapter_material_chunks (
     PRIMARY KEY (block_id, chunk_id)
 );
 
+CREATE TABLE IF NOT EXISTS review_jobs (
+    id             TEXT PRIMARY KEY,
+    project_id     INTEGER NOT NULL,
+    thread_id      TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | partial | failed
+    only_unreviewed INTEGER NOT NULL DEFAULT 1,
+    limit_n        INTEGER NOT NULL DEFAULT 0,
+    total          INTEGER NOT NULL DEFAULT 0,
+    done           INTEGER NOT NULL DEFAULT 0,
+    failed         INTEGER NOT NULL DEFAULT 0,
+    current_block  TEXT NOT NULL DEFAULT '',
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS chapter_reviews (
     block_id      INTEGER PRIMARY KEY,
     project_id    INTEGER NOT NULL,

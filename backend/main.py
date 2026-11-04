@@ -28,6 +28,7 @@ from routes.materials import router as materials_router
 from routes.export import router as export_router
 from routes.workflow import router as workflow_router, set_runner as set_workflow_runner
 from routes.review import router as review_router
+from routes.review_batch import router as review_batch_router
 from routes.blocks import router as blocks_router
 from routes.revisions import router as revisions_router
 from routes.packages import router as packages_router
@@ -247,6 +248,7 @@ app.include_router(export_router,   prefix="/api")
 app.include_router(blocks_router,    prefix="/api")
 app.include_router(revisions_router, prefix="/api")
 app.include_router(workflow_router,  prefix="/api")
+app.include_router(review_batch_router, prefix="/api")
 app.include_router(review_router,    prefix="/api")
 app.include_router(packages_router,  prefix="/api")
 app.include_router(studio_router,    prefix="/api")
