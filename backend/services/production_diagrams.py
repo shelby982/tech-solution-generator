@@ -40,6 +40,18 @@ TEMPLATES = {
     "org": "组织/职责图",
 }
 
+TEMPLATE_ELEMENTS = {
+    "layered": ["图号/标题", "评分点/结论", "层带", "层内组件", "层间箭头", "图例", "依据"],
+    "data_flow": ["阶段列", "节点", "有向数据流", "关系标签", "图例", "依据"],
+    "sequence": ["参与角色", "生命线", "消息顺序", "请求/响应", "标题/评分点", "依据"],
+    "gantt": ["时间轴/日期", "任务/阶段", "起止时间", "负责人", "里程碑", "依据"],
+    "matrix": ["行头", "列头", "单元格", "状态", "标题/评分点", "依据"],
+    "fishbone": ["结果/问题", "原因类", "原因", "主骨/分支", "标题/评分点", "依据"],
+    "pyramid": ["分层目标", "层级说明", "支撑要素", "标题/评分点", "依据"],
+    "radar": ["维度轴", "现状多边形", "目标多边形", "量程/图例", "依据"],
+    "org": ["组织根节点", "下级角色/组", "汇报/职责连线", "角色说明", "依据"],
+}
+
 SCHEMAS = {
     "layered": '{"bands":[{"label":"层名","description":"一句说明","items":["组件1","组件2"]}],"edges":[{"from":"组件1","to":"组件2","label":"调用"}]}',
     "data_flow": '{"stages":[{"label":"数据源","items":["节点1","节点2"]}],"edges":[{"from":"节点1","to":"节点2","label":"采集"}]}',
@@ -175,9 +187,12 @@ def render_layered(spec: dict, meta: dict) -> str:
         if desc:
             parts.append(_text(x + 22, y + 45, desc, 9, MUTED))
         items = [str(v) for v in (band.get("items") or []) if str(v).strip()][:6]
-        card_w = min(180, (W - MARGIN * 2 - label_w - 24) / max(1, len(items)))
+        available = W - MARGIN * 2 - label_w - 24
+        card_w = min(230, max(150, available / max(1, len(items))))
+        total_w = len(items) * card_w + max(0, len(items) - 1) * 10
+        start_x = MARGIN + label_w + 12 + max(0, (available - total_w) / 2)
         for i, item in enumerate(items):
-            cx = MARGIN + label_w + 12 + i * (card_w + 10)
+            cx = start_x + i * (card_w + 10)
             parts.append(_rect(cx, y + 18, card_w, 34, PAPER, "#dbe3ef", 5))
             parts.append(_text(cx + 12, y + 39, _clip(item, max(6, int(card_w / 13))), 11, "#172033", 500))
         y += bh + row_gap
@@ -187,7 +202,7 @@ def render_layered(spec: dict, meta: dict) -> str:
     for i in range(len(bands) - 1):
         upper = top + sum(heights[:i + 1]) + row_gap * i
         lower = top + sum(heights[:i + 1]) + row_gap * (i + 1)
-        rail.append(_layer_arrow(track_x, upper - 4, lower + 4, "依赖"))
+        rail.append(_layer_arrow(track_x, upper - 4, lower + 4, "调用"))
     return _doc("".join(parts) + "".join(rail), height, meta,
                 legend=[("层带", "#e2e8f0", ""), ("组件", "#cbd5e1", ""), ("层间依赖", ACCENT, "")])
 
@@ -223,16 +238,26 @@ def render_data_flow(spec: dict, meta: dict) -> str:
         b = positions.get(str(edge.get("to")))
         if not a or not b:
             continue
+        label = _clip(edge.get("label") or "", 14)
+        if b["stage"] < a["stage"]:
+            # 回流边统一走底部回程线，避免和正向数据流/标签打架
+            lane_y = height - FOOTER_H - 18 - (edge_index % 3) * 14
+            sx, tx = a["x2"], b["x2"]
+            path = f"M {sx:.1f} {a['y'] + 24:.1f} V {lane_y:.1f} H {tx:.1f} V {b['y'] + 24:.1f}"
+            parts.append(f'<path d="{path}" fill="none" stroke="{MUTED}" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#p-arrow-soft)"/>')
+            if label:
+                width = min(140, max(38, len(label) * 10 + 12))
+                lx = (sx + tx) / 2
+                parts.append(f'<rect x="{lx - width / 2:.1f}" y="{lane_y - 9:.1f}" width="{width}" height="17" rx="3" fill="{PAPER}"/>')
+                parts.append(_text(lx, lane_y + 3, label, 9, "#475569", anchor="middle"))
+            continue
         if b["stage"] > a["stage"]:
             sx, tx = a["x2"], b["x1"]
-        elif b["stage"] < a["stage"]:
-            sx, tx = a["x1"], b["x2"]
         else:
             sx, tx = a["x2"], b["x2"]
         mid = (sx + tx) / 2
         path = f"M {sx:.1f} {a['y']:.1f} H {mid:.1f} V {b['y']:.1f} H {tx:.1f}"
         parts.append(f'<path d="{path}" fill="none" stroke="{ACCENT}" stroke-width="1.5" marker-end="url(#p-arrow)"/>')
-        label = _clip(edge.get("label") or "", 14)
         if label:
             ly = (a["y"] + b["y"]) / 2 + (edge_index % 3 - 1) * 12
             width = min(140, max(38, len(label) * 10 + 12))
@@ -260,6 +285,7 @@ def render_sequence(spec: dict, meta: dict) -> str:
         parts.append(_line(xs[i], top + 40, xs[i], height - FOOTER_H - 16, "#cbd5e1", 1, "4,4"))
     for row, message in enumerate(messages):
         y = top + 78 + row * 42
+        parts.append(_text(MARGIN - 2, y + 3, str(row + 1), 8, SOFT, anchor="end"))
         a = ids.get(str(message.get("from") or message.get("source") or ""))
         b = ids.get(str(message.get("to") or message.get("target") or ""))
         if a is None or b is None:
@@ -296,7 +322,11 @@ def _time_axis(tasks: list[dict], timeline: dict) -> tuple[bool, float, float, l
     end_raw = timeline.get("end") or timeline.get("end_date")
     task_starts = [_month_value(t.get("start", t.get("start_date"))) for t in tasks]
     task_ends = [_month_value(t.get("end", t.get("end_date"))) for t in tasks]
-    date_mode = bool(start_raw or end_raw or any(v is not None for v in task_starts + task_ends))
+    has_date_task = any(
+        isinstance(t.get("start", t.get("start_date")), str) or isinstance(t.get("end", t.get("end_date")), str)
+        for t in tasks
+    )
+    date_mode = bool(start_raw or end_raw or has_date_task)
     if date_mode:
         values = [v for v in ([_month_value(start_raw), _month_value(end_raw)] + task_starts + task_ends) if v is not None]
         start = min(values) if values else 0
@@ -310,7 +340,7 @@ def _time_axis(tasks: list[dict], timeline: dict) -> tuple[bool, float, float, l
     unit = str(timeline.get("unit") or "阶段")
     values = [v for v in task_ends if v is not None] or [1]
     start, end = 0, max(1, max(values))
-    ticks = [(i, f"{int(i)}{unit}") for i in range(0, int(end) + 1, max(1, int(math.ceil(end / 6))))]
+    ticks = [(i, f"第{int(i) + 1}{unit}") for i in range(0, int(end) + 1, max(1, int(math.ceil(end / 6))))]
     return False, start, end, ticks, f"相对周期（{unit}）"
 
 
@@ -388,7 +418,8 @@ def render_matrix(spec: dict, meta: dict) -> str:
             parts.append(_text(x + 10, y + 20, text, 9.5, "#172033"))
             if cell.get("status"):
                 parts.append(_text(x + 10, y + 35, _clip(cell["status"], 12), 8.5, ACCENT_2))
-    return _doc("".join(parts), height, meta)
+    return _doc("".join(parts), height, meta,
+                legend=[("满足", ACCENT_2, ""), ("待核对", MUTED, "5,4")])
 
 
 # ── 鱼骨图 ───────────────────────────────────────────────────────────────
@@ -429,6 +460,7 @@ def render_pyramid(spec: dict, meta: dict) -> str:
         width = (W - MARGIN * 2) * (0.44 + 0.56 * (i / max(1, len(levels) - 1)))
         x = (W - width) / 2
         parts.append(f'<polygon points="{x:.1f},{y:.1f} {x + width:.1f},{y:.1f} {x + width - 24:.1f},{y + 50:.1f} {x + 24:.1f},{y + 50:.1f}" fill="{BAND if i else "#eff6ff"}" stroke="{LINE}" stroke-width="1"/>')
+        parts.append(_text(x + 24, y + 18, f"L{i + 1}", 8.5, SOFT))
         parts.append(_text(W / 2, y + 22, _clip(level.get("label"), 18), 12, ACCENT if i == 0 else INK, 600, "middle"))
         items = [str(v) for v in (level.get("items") or [])][:4]
         if items:
@@ -464,6 +496,9 @@ def render_radar(spec: dict, meta: dict) -> str:
         return f'<polygon points="{" ".join(pts)}" fill="{fill}" stroke="{color}" stroke-width="1.8"{dash_attr}/>'
     parts.append(value_polygon("target", ACCENT, "rgba(29,78,216,0.08)"))
     parts.append(value_polygon("current", MUTED, "rgba(100,116,139,0.08)", "6,4"))
+    maximum = max([float(m.get("max") or 5) for m in metrics] or [5]) or 5
+    for ratio in (0.25, 0.5, 0.75, 1):
+        parts.append(_text(cx + 4, cy - radius * ratio + 3, str(round(maximum * ratio, 1)), 7.5, SOFT))
     for i, metric in enumerate(metrics):
         angle = -math.pi / 2 + 2 * math.pi * i / n
         lx, ly = cx + (radius + 34) * math.cos(angle), cy + (radius + 34) * math.sin(angle)
@@ -484,10 +519,15 @@ def render_org(spec: dict, meta: dict) -> str:
     parts.append(_text(cx, top + 27, _clip(root.get("label"), 16), 13, ACCENT, 700, "middle"))
     child_w = min(180, (W - MARGIN * 2 - 24 * max(1, len(children) - 1)) / max(1, len(children)))
     start_x = (W - (child_w * len(children) + 24 * max(0, len(children) - 1))) / 2
+    if children:
+        bus_y = top + 76
+        first_cx = start_x + child_w / 2
+        last_cx = start_x + (len(children) - 1) * (child_w + 24) + child_w / 2
+        parts.append(_line(min(cx, first_cx), bus_y, max(cx, last_cx), bus_y, LINE, 1.5))
+        parts.append(_line(cx, top + 44, cx, bus_y, LINE, 1.5))
     for i, child in enumerate(children):
         x = start_x + i * (child_w + 24)
         y = top + 110
-        parts.append(_line(cx, top + 44, cx, top + 76, LINE, 1.5))
         parts.append(_line(x + child_w / 2, top + 76, x + child_w / 2, y, LINE, 1.5))
         parts.append(_rect(x, y, child_w, 48, PAPER, "#dbe3ef", 6))
         parts.append(_text(x + child_w / 2, y + 22, _clip(child.get("label"), 12), 10.5, INK, 600, "middle"))
