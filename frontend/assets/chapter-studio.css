@@ -1243,3 +1243,12 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-practice-row p { flex: 1; margin: 0; font-size: 11px; color: #334155; line-height: 1.55; }
 .cs-review-ev { display: block; color: #64748b !important; font-size: 10px !important; margin-top: 3px; }
 .cs-review-ev.is-miss { color: #b45309 !important; }
+.cs-sec-result { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:4px 0 2px 22px; padding:4px 6px; border-left:2px solid #bfdbfe; background:#f8fafc; font-size:10.5px; color:#475569; }
+.cs-sec-result .is-ok { color:#15803d; }
+.cs-sec-result .is-generic { color:#b45309; }
+.cs-sec-result small { color:#94a3b8; }
+.cs-sec-result button { font-size:10px; }
+.cs-readiness { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:10.5px; border:1px solid #e2e8f0; color:#64748b; }
+.cs-readiness.is-ok, .cs-sec-ready.is-ok { color:#15803d; border-color:#bbf7d0; background:#f0fdf4; }
+.cs-readiness.is-warn, .cs-sec-ready.is-warn { color:#9a3412; border-color:#fed7aa; background:#fff7ed; }
+.cs-readiness.is-bad { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }

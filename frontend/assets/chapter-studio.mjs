@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v466';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v466';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v467';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v467';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -241,6 +241,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let materialLib = null;
   let materialEvidence = null;
   let pendingEvidenceNeed = null;
+  let sectionResults = {};
+  let writingReadiness = null;
 
   /** 拉素材库数据（项目级素材 + 本章引用） */
   async function loadMaterialLibrary() {
@@ -1063,10 +1065,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   async function loadBasis(blockKey) {
     if (!blockKey) { basisInfo = null; planBrief = null; return; }
     try {
-      const [basisResp, planResp] = await Promise.all([
+      const [basisResp, planResp, resultResp, readyResp] = await Promise.all([
         fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)}),
         fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}&_=${Date.now()}`, {signal: AbortSignal.timeout(30000), cache: 'no-store'}),
+        fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/section-results`, {signal: AbortSignal.timeout(20000), cache:'no-store'}).catch(() => null),
+        fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(20000), cache:'no-store'}).catch(() => null),
       ]);
+      sectionResults = resultResp?.ok ? ((await resultResp.json()).sections || {}) : {};
+      writingReadiness = readyResp?.ok ? await readyResp.json() : null;
       basisInfo = basisResp.ok ? await basisResp.json() : null;
       if (planResp.ok) {
         const plan = await planResp.json();
@@ -1390,7 +1396,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                   <span class="cs-ol-idx">${i + 1}</span>
                   <span class="cs-ol-main"><b>${esc(sec.title)}</b>
                     <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
-                  <span class="cs-ol-meta">${sec.words || 900} 字</span>
+                  <span class="cs-ol-meta">${(sec.requirement_ids || []).length ? `要求 ${(sec.requirement_ids || []).length} · ` : '章节级 · '}${sec.words || 900} 字</span>
                 </summary>
                 <div class="cs-ol-detail">
                   <div class="cs-ol-how">
@@ -2864,6 +2870,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   };
   let autoSaveTimer = null, saveState = 'idle', savedAt = 0;
   const fmtClock = (ts) => { try { return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+
+  function readinessChipHtml() {
+    const r = writingReadiness;
+    if (!r) return '';
+    if (r.status === 'no_outline' || r.has_outline === false) return '<span class="cs-readiness is-bad">无大纲</span>';
+    const total = (r.sections || []).length;
+    const ready = (r.sections || []).filter((x) => x.status === 'ready').length;
+    return `<span class="cs-readiness ${ready === total ? 'is-ok' : 'is-warn'}">可写 ${ready}/${total}</span>`;
+  }
+  function paintReadinessChip() {
+    const el = get('chapter-head')?.querySelector('[data-readiness]');
+    if (el) el.innerHTML = readinessChipHtml();
+  }
 
   /** 章头状态胶囊：未保存 / 保存中 / 已保存·时间 / 保存失败 / 已确认完成 */
   function paintSaveState() {
@@ -4735,6 +4754,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const rows = outline.map((sec, i) => {
       const written = done.has(sec.title);
       const words = written ? sectionWordCount(bodyText, sec.title) : 0;
+      const ready = (writingReadiness?.sections || []).find((x) => String(x.section) === String(sec.title));
+      const readyLabel = ready ? (ready.status === 'ready' ? '可写' : ready.status === 'no_evidence' ? '缺证据' : ready.status === 'partial' ? `缺 ${ready.missing}` : '无大纲') : '';
       const secFigs = figures.filter((f) => f.section === sec.title);
       const secPending = pendingFigures([sec]);
       const figBlock = (secFigs.length || secPending.length)
@@ -4758,9 +4779,22 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-todo-row">
             <span class="cs-todo-idx">${i + 1}</span>
             <span class="cs-todo-text" title="${esc(sectionTrace(sec.title))}"><b>${esc(sec.title)}</b>
-              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}</small></span>
+              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}${readyLabel ? ` · <button type="button" class="cs-sec-ready ${ready?.status === 'ready' ? 'is-ok' : 'is-warn'}" data-sec-readiness="${i}">${readyLabel}</button>` : ''}</small></span>
             <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button>
           </div>
+          ${(() => {
+            const result = sectionResults?.[sec.title];
+            if (!result) return '';
+            const cov = result.coverage_after || {};
+            const ctx = (result.context_evidence || result.used_evidence || []).length;
+            const cited = (result.cited_evidence || []).length;
+            const labels = (result.context_evidence || []).slice(0, 3).map((e) => e.source_title || e.filename || '证据').filter(Boolean);
+            return `<div class="cs-sec-result">
+              <span class="${result.generic ? 'is-generic' : 'is-ok'}">${result.generic ? '未使用证据（概括写法）' : `上下文证据 ${ctx} 条`} · 引用 ${cited} 处${cov.total ? ` · 覆盖 ${cov.covered || 0}/${cov.total}` : ''}</span>
+              ${labels.length ? `<small>${labels.map((x) => esc(String(x).slice(0, 18))).join(' · ')}</small>` : ''}
+              <button type="button" class="cs-todo-act" data-material-admin>补证据</button>
+            </div>`;
+          })()}
           ${figBlock}
         </div>`;
     }).join('');
@@ -4996,7 +5030,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 详见 docs/design/原型到代码-落点对照.md 「四、【挂起·待办】编写模块：技术规范书关键要求」。
   let planRetryPending = false;
   const paintAside = () => {
-    profile[active.id]=context.profile;paintTree();stats();paintTodoBadge();
+    profile[active.id]=context.profile;paintTree();stats();paintTodoBadge();paintReadinessChip();
     // 自愈：计划数据还没到（或拉取失败）→ 补拉一次后重绘
     if (!planBrief && !planRetryPending && active?.block_id) {
       planRetryPending = true;
@@ -5076,7 +5110,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span><span class="cs-save-state" data-save-state></span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span><span class="cs-readiness-slot" data-readiness>${readinessChipHtml()}</span><span class="cs-save-state" data-save-state></span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
       paintPlanAction(block);
       host.querySelector('[data-action="save"]').disabled=true;
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
@@ -5188,6 +5222,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(sec) openFigureAdjustDialog({id:'new',kind:'ai',section:sec.title,title:`${sec.title}图示`,type:'layered',nodes:0,raw:''});
       return;
     }
+    const readyBtn=event.target.closest('[data-sec-readiness]');
+    if(readyBtn){
+      showPanel('materials');
+      status('已打开本章证据：按节补证据后再写');
+      return;
+    }
     const secBtn=event.target.closest('[data-aside-write-section]');
     if(secBtn && active){
       const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
@@ -5200,6 +5240,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`),prompt,'rewrite',generic);
           const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
           if(fresh.block)editor.value=fresh.block.content||'';
+          await loadBasis(active.block_id);
           const meta=lastSectionWrite||{};
           const used=(meta.used_evidence||[]).length;
           const cov=meta.coverage_after||{};

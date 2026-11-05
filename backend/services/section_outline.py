@@ -37,11 +37,14 @@ def fallback_outline(chapter: dict) -> list[dict]:
             "basis": list(chapter_basis),
             "how": {"structure": "", "style": _clean(task.get("purpose"), 120), "pitfalls": []},
             "deliverables": _normalize_deliverables([], need),
+            "requirement_ids": [],
             "source": "task",
         })
     if not sections:
-        sections.append({"title": "现状与问题", "points": ["说明现状事实与差距"], "words": 900, "need": "", "source": "fallback"})
-        sections.append({"title": "思路与措施", "points": ["给出解决思路与措施"], "words": 900, "need": "", "source": "fallback"})
+        sections.append({"title": "现状与问题", "points": ["说明现状事实与差距"], "words": 900, "need": "",
+                         "requirement_ids": [], "source": "fallback"})
+        sections.append({"title": "思路与措施", "points": ["给出解决思路与措施"], "words": 900, "need": "",
+                         "requirement_ids": [], "source": "fallback"})
     return sections[:MAX_SECTIONS]
 
 
@@ -176,7 +179,10 @@ OUTLINE_SYSTEM = (
     "（b）写法 how：本节怎么写——结构（先写什么再写什么）、句式要求、禁止项；\n"
     "（c）交付物 deliverables：本节要交什么——文字（多少字）、表格（表名与列名）、图（图名与图型）；\n"
     "要求：节标题是名词性短语（≤20 字）且互不重叠；每节 2~5 条要点（≤40 字/条）；覆盖评分点。\n"
+    "每一节还必须写 requirement_ids：从用户给出的 requirements[].id 中选择本节要回应的要求，"
+    "可多选，不能编造 ID；没有对应要求时给空数组。\n"
     "只输出 JSON：{\"sections\":[{\"title\":\"…\",\"points\":[\"…\"],\"words\":900,"
+    "\"requirement_ids\":[\"r1\"],"
     "\"basis\":[{\"type\":\"score_point|clause|policy|material\",\"ref\":\"…\",\"use\":\"…\"}],"
     "\"how\":{\"structure\":\"…\",\"style\":\"…\",\"pitfalls\":[\"…\"]},"
     "\"deliverables\":[{\"kind\":\"text|table|figure\",\"title\":\"…\",\"words\":600,\"cols\":[\"…\"],\"type\":\"layered|flow|timeline\",\"elements\":[\"图中要素\"]}]}]}"

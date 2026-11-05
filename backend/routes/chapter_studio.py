@@ -362,15 +362,42 @@ async def build_outline(block_id: int, body: OutlineBody):
     sections = None
     model = ''
     try:
+        req_rows = []
+        for index, requirement in enumerate(chapter.get('requirements') or []):
+            if not isinstance(requirement, dict):
+                continue
+            rid = str(requirement.get('spec_requirement_id') or requirement.get('id') or f'r{index + 1}')
+            req_rows.append({'id': rid, 'text': str(requirement.get('text') or '')[:500]})
         payload = {
             'chapter': chapter.get('title') or block.get('title') or '',
             'objective': chapter.get('objective') or '',
             'pages': chapter.get('pages') or 0,
-            'requirements': [r.get('text') if isinstance(r, dict) else str(r) for r in (chapter.get('requirements') or [])][:10],
+            'requirements': req_rows[:10],
             'tasks': [t.get('title') for t in (chapter.get('tasks') or [])],
         }
         raw, model = await call_role('chief', OUTLINE_SYSTEM, payload, {})
         sections = normalize_outline(raw, chapter)
+        valid_ids = {item['id'] for item in req_rows}
+        assigned = set()
+        for section in sections:
+            kept = [str(x) for x in (section.get('requirement_ids') or []) if str(x) in valid_ids]
+            section['requirement_ids'] = kept
+            assigned.update(kept)
+        # 模型漏分配时，按关键词重合兜底，至少让每条要求有落点
+        missing_ids = [item for item in req_rows if item['id'] not in assigned]
+        for requirement in missing_ids:
+            words = {w for w in str(requirement.get('text') or '') if '\u4e00' <= w <= '\u9fff'}
+            best = None
+            best_score = -1
+            for section in sections:
+                body = str(section.get('title') or '') + ' ' + ' '.join(section.get('points') or [])
+                score = len(words & set(body))
+                if score > best_score:
+                    best, best_score = section, score
+            if best is not None:
+                best.setdefault('requirement_ids', []).append(requirement['id'])
+                best['requirement_assignment'] = 'system_fallback'
+                assigned.add(requirement['id'])
     except Exception:
         sections = fallback_outline(chapter)
     chapter['outline'] = sections
@@ -407,6 +434,13 @@ async def coverage_review(block_id: int, body: CoverageReviewBody):
     return result
 
 
+@router.get('/blocks/{block_id}/section-results')
+async def section_results(block_id: int):
+    """每节最近一次写作结果（持久化，刷新后可核对）。"""
+    from services.section_results import list_results
+    return {"sections": await list_results(block_id)}
+
+
 @router.get('/blocks/{block_id}/studio/section/stream')
 async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = '', generic: bool = False):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
@@ -417,6 +451,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     from services.section_context import build_section_context, render_context
     from services.material_cards import bound_cards, public_dto
     from services.coverage_review import review_coverage
+    from services.section_results import cited_sources, save_result
     from services.block_store import add_revision, update_block_content
     from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
     from infra.llm.clients import stream_openai, stream_claude
@@ -566,10 +601,23 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
             _coverage_after = await review_coverage(block, section['title'], text, thread_id=thread_id)
         except Exception:  # noqa: BLE001
             _coverage_after = {}
+        _result = {
+            "section": section['title'], "model": getattr(config, 'model', ''),
+            "context_evidence": _used_cards[:8],
+            "cited_evidence": cited_sources(text),
+            "coverage_before": _coverage_before, "coverage_after": _coverage_after,
+            "generic": bool(generic), "words": len(_re.sub(r'\s+', '', text)),
+        }
+        try:
+            await save_result(block_id, section['title'], _result)
+        except Exception:  # noqa: BLE001
+            pass
         yield format_sse_event('done', {'title': section['title'], 'content': after, 'quality': quality,
                                        'words': len(_re.sub(r'\s+', '', text)), 'replaced': replaced,
                                        'model': getattr(config, 'model', ''),
                                        'used_evidence': _used_cards[:8],
+                                       'context_evidence': _used_cards[:8],
+                                       'cited_evidence': _result["cited_evidence"],
                                        'coverage_before': _coverage_before,
                                        'coverage_after': _coverage_after,
                                        'generic': bool(generic)})

@@ -21,11 +21,12 @@ def test_fallback_outline_from_tasks():
 
 def test_normalize_outline_accepts_model_output():
     raw = '{"sections":[{"title":"政策要求","points":["国家文件","行业标准"],"words":800,"need":"table"},' \
-          '{"title":"现状差距","points":["数据对比"],"words":1000}]}'
+          '{"title":"现状差距","points":["数据对比"],"words":1000,"requirement_ids":["r1","r2"]}]}'
     sections = normalize_outline(raw, {"title": "x"})
     assert len(sections) == 2
     assert sections[0]["need"] == "table"
     assert sections[0]["words"] == 800
+    assert sections[1]["requirement_ids"] == ["r1", "r2"]
 
 
 def test_normalize_outline_falls_back_on_garbage():

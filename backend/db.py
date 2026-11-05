@@ -269,6 +269,14 @@ CREATE TABLE IF NOT EXISTS chapter_material_chunks (
     PRIMARY KEY (block_id, chunk_id)
 );
 
+CREATE TABLE IF NOT EXISTS section_write_results (
+    block_id    INTEGER NOT NULL,
+    section     TEXT NOT NULL,
+    result_json TEXT DEFAULT '{}',
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (block_id, section)
+);
+
 CREATE TABLE IF NOT EXISTS evidence_need_actions (
     block_id    INTEGER NOT NULL,
     section     TEXT NOT NULL DEFAULT '',

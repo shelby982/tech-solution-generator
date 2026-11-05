@@ -229,6 +229,18 @@ async def run_job(job_id: str) -> None:
                 continue
             from services.coverage_review import review_coverage
             coverage = await review_coverage(block, title, text, thread_id=thread_id)
+            try:
+                from services.material_cards import bound_cards, public_dto
+                from services.section_results import cited_sources, save_result
+                async with get_db() as _db:
+                    _cards = [public_dto(item) for item in await bound_cards(_db, int(block.get("id") or 0), title)]
+                await save_result(int(block.get("id") or 0), title, {
+                    "section": title, "context_evidence": _cards[:8],
+                    "cited_evidence": cited_sources(text), "coverage_before": {},
+                    "coverage_after": coverage, "generic": bool(section.get("generic")),
+                })
+            except Exception:
+                pass
             if coverage.get("missing_detail"):
                 await emit(job_id, "todo", {"index": index, "items": [{
                     "group": "proof", "severity": "suggest",
@@ -577,6 +589,18 @@ async def write_sections(job_id: str, block: dict, block_pk: int, sections: list
             text, _missing = merge_charts(text, charts)
         from services.coverage_review import review_coverage
         coverage = await review_coverage(block, title, text, thread_id=thread_id)
+        try:
+            from services.material_cards import bound_cards, public_dto
+            from services.section_results import cited_sources, save_result
+            async with get_db() as _db:
+                _cards = [public_dto(item) for item in await bound_cards(_db, int(block.get("id") or 0), title)]
+            await save_result(int(block.get("id") or 0), title, {
+                "section": title, "context_evidence": _cards[:8],
+                "cited_evidence": cited_sources(text), "coverage_before": {},
+                "coverage_after": coverage, "generic": bool(section.get("generic")),
+            })
+        except Exception:
+            pass
         if coverage.get("missing_detail"):
             await emit(job_id, "todo", {"index": index, "items": [{
                 "group": "proof", "severity": "suggest",
