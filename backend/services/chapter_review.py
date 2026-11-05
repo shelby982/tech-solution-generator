@@ -133,6 +133,15 @@ async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
     combined = _combine(tech, comp)
     combined["block_id"] = output.block_id
 
+    # ── issue 状态机（评审 v2 C）：本轮出现→open；上轮消失→verified ──
+    try:
+        from services.review_issues import sync_issues
+        async with get_db() as db:
+            await sync_issues(db, block_pk, combined.get("issues") or [])
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"issue 状态机同步失败（不影响评审）：{e}")
+
     # ── 写历史（每轮一条，用于对比"改完有没有变好"）──
     async with get_db() as db:
         await db.execute(

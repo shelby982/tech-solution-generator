@@ -120,8 +120,8 @@ async def test_unreviewed_point_is_pending_not_zero(db):
 
 
 @pytest.mark.asyncio
-async def test_point_takes_worst_chapter(db):
-    """一个评分点挂多章：有一章不满足，这一项就是"不满足"（不能平均掉）。"""
+async def test_point_verdict_worst_but_score_weighted(db):
+    """评分点挂多章（评审 v2 A）：verdict 仍取最差（颜色语义），但预估分按加权覆盖，允许部分得分。"""
     await _seed(
         db,
         blocks=[
@@ -136,6 +136,8 @@ async def test_point_takes_worst_chapter(db):
     )
     out = await build_scoring_verdict(db, 1, "t1")
     p = out["points"][0]
-    assert p["verdict"] == "high" and p["estimated_score"] == 0
+    assert p["verdict"] == "high"                      # 颜色：有一章不满足 → 该项悬
+    assert p["estimated_score"] == 10.0                 # 分数：20 × (1.0+0.0)/2 = 10
+    assert p["estimated_basis"]["reviewed"] == 2 and p["estimated_basis"]["avg"] == 0.5
     assert p["chapters_total"] == 2 and p["chapters_reviewed"] == 2
     assert p["chapters"][1]["missing_points"] == ["缺证据"]     # 章节明细可下钻

@@ -1180,3 +1180,20 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-ev-file small { color:#94a3b8; font-size:10px; }
 .cs-ml-empty { color:#94a3b8; font-size:12px; padding:8px 0; }
 .cs-ev-sub { margin:7px 0 4px; font-size:10.5px; color:#64748b; }
+.cs-ev-actions { display:flex; gap:6px; margin:6px 0 8px; flex-wrap:wrap; }
+.cs-ev-actions .cs-gate-act { font-size:11px; }
+.cs-ev-need-acts { display:flex; gap:3px; flex-wrap:wrap; margin-left:auto; }
+.cs-ev-need-acts button { font-size:10px; }
+.cs-ev-need.is-ignored { opacity:.58; }
+.cs-ev-need.is-ignored p { text-decoration:line-through; }
+
+/* issue 状态徽标（评审 v2 C） */
+.cs-issue-state { flex-shrink: 0; font-size: 9px; padding: 1px 4px; border-radius: 4px; margin-left: 2px; }
+.cs-issue-state.is-open { background: #f1f5f9; color: #64748b; }
+.cs-issue-state.is-fixed { background: #eff6ff; color: #1d4ed8; }
+.cs-issue-state.is-verified { background: #dcfce7; color: #15803d; }
+/* 需求卡：文字必须占满剩余宽度，动作单独一行，避免被按钮挤成竖排 */
+.cs-ev-need { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 6px; align-items:start; }
+.cs-ev-need > p { min-width:0; overflow-wrap:anywhere; }
+.cs-ev-need-acts { grid-column:1 / -1; display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap; margin-left:0; }
+.cs-ev-need-acts button { white-space:nowrap; }

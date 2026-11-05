@@ -156,28 +156,46 @@ async def evidence_board(block_id: int, thread_id: str = ""):
         sections = []
         total_needs = total_covered = 0
         pool = await _pool(db, int(block.get("project_id") or 0))
+        # 无大纲：回退到章节级需求，不伪造节名，也不显示成“0 需求”
+        chapter_level = not outline
+        if chapter_level:
+            outline = [{"title": "", "chapter_level": True}]
         for section in outline:
             title = str(section.get("title") or "")
+            chapter_flag = bool(section.get("chapter_level"))
             cards = [public_dto(item) for item in await bound_cards(db, block_id, title)]
             needs = await section_evidence_needs(block, section, thread_id or str(block.get("run_thread_id") or ""))
-            total_needs += len(needs)
-            total_covered += sum(1 for item in needs if item.get("covered"))
+            active = [item for item in needs if not item.get("ignored")]
+            total_needs += len(active)
+            total_covered += sum(1 for item in active if item.get("covered"))
             recommend_items = []
-            try:
-                profile = section_profile(section, found[1] if found else {})
-                for picked in recommend(profile, pool, limit=3, min_score=0.12):
-                    kind = "cite" if picked.get("source_kind") == "web" else "file"
-                    signed = -int(picked["chunk_id"]) if kind == "cite" else int(picked["chunk_id"])
-                    item = await card(db, signed, kind, section=title)
-                    if item:
-                        item["reason"] = picked.get("reason") or ""
-                        recommend_items.append(public_dto(item))
-            except Exception:
-                recommend_items = []
-            sections.append({"section": title, "needs": needs, "cards": cards,
+            active_needs = [item for item in needs if not item.get("ignored")]
+            if active_needs:
+                try:
+                    profile_section = section if not chapter_flag else {"title": str(block.get("title") or ""), "points": []}
+                    profile = section_profile(profile_section, found[1] if found else {})
+                    need_text = " ".join(str(item.get("text") or "") for item in active_needs)
+                    profile["raw"] = (str(profile.get("raw") or "") + " " + need_text).strip()
+                    from services.material_match import _terms, _expand
+                    profile["keywords"] = set(profile.get("keywords") or set()) | _expand(_terms(need_text))
+                    for picked in recommend(profile, pool, limit=3, min_score=0.12):
+                        kind = "cite" if picked.get("source_kind") == "web" else "file"
+                        signed = -int(picked["chunk_id"]) if kind == "cite" else int(picked["chunk_id"])
+                        item = await card(db, signed, kind, section=title)
+                        if item:
+                            need = active_needs[0]
+                            item["matched_need_id"] = need.get("need_id") or ""
+                            item["requirement_id"] = need.get("requirement_id") or ""
+                            item["reason"] = (picked.get("reason") or "") + " · 对应：" + str(need.get("text") or "")[:32]
+                            recommend_items.append(public_dto(item))
+                except Exception:
+                    recommend_items = []
+            sections.append({"section": title, "chapter_level": chapter_flag,
+                             "needs": needs, "cards": cards,
                              "recommend": recommend_items,
-                             "summary": {"needs": len(needs),
-                                         "covered": sum(1 for item in needs if item.get("covered")),
+                             "summary": {"needs": len(active),
+                                         "covered": sum(1 for item in active if item.get("covered")),
+                                         "ignored": sum(1 for item in needs if item.get("ignored")),
                                          "cards": len(cards)}})
     from services.citations import search_configured
     return {
@@ -185,8 +203,30 @@ async def evidence_board(block_id: int, thread_id: str = ""):
         "search_available": search_configured(),
         "summary": {"needs": total_needs, "covered": total_covered,
                     "cards": sum(len(item["cards"]) for item in sections),
-                    "coverage": round(total_covered / total_needs, 3) if total_needs else 1.0},
+                    "coverage": round(total_covered / total_needs, 3) if total_needs else None},
     }
+
+
+@router.post('/blocks/{block_id}/materials/needs/action')
+async def need_action(block_id: int, body: NeedActionBody):
+    """忽略/恢复一条证据需求；持久化到 evidence_need_actions。"""
+    async with get_db() as db:
+        block = await (await db.execute("SELECT id FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        if body.action == "restore":
+            await db.execute(
+                "DELETE FROM evidence_need_actions WHERE block_id=? AND section=? AND need_id=?",
+                (block_id, body.section, body.need_id))
+        else:
+            await db.execute(
+                "INSERT INTO evidence_need_actions(block_id,section,need_id,action,reason,updated_at) "
+                "VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(block_id,section,need_id) DO UPDATE SET "
+                "action=excluded.action,reason=excluded.reason,updated_at=CURRENT_TIMESTAMP",
+                (block_id, body.section, body.need_id, body.action, body.reason))
+        await db.commit()
+    return {"ok": True, "action": body.action, "need_id": body.need_id}
 
 
 @router.get('/blocks/{block_id}/materials/evidence')
@@ -207,10 +247,13 @@ async def evidence(block_id: int, section: str = "", thread_id: str = ""):
         "section": section, "needs": needs, "cards": cards,
         "search_available": search_configured(),
         "summary": {
-            "needs": len(needs),
-            "covered": sum(1 for item in needs if item.get("covered")),
+            "needs": len([item for item in needs if not item.get("ignored")]),
+            "covered": sum(1 for item in needs if item.get("covered") and not item.get("ignored")),
             "cards": len(cards),
-            "missing": [item.get("text") for item in needs if not item.get("covered")][:5],
+            "coverage": (round(sum(1 for item in needs if item.get("covered") and not item.get("ignored")) /
+                               max(1, len([item for item in needs if not item.get("ignored")])), 3)
+                         if any(not item.get("ignored") for item in needs) else None),
+            "missing": [item.get("text") for item in needs if not item.get("covered") and not item.get("ignored")][:5],
         },
     }
 
@@ -238,6 +281,13 @@ async def bound(block_id: int):
                        "text": r[7] or "", "filename": r[8] or "", "chunk_kind": r[9] or "file",
                        "requirement_id": r[10] or ""}
                       for r in rows]}
+
+
+class NeedActionBody(BaseModel):
+    section: str = ""
+    need_id: str = Field(min_length=1, max_length=80)
+    action: str = Field(default="ignore", pattern="^(ignore|restore)$")
+    reason: str = Field(default="", max_length=300)
 
 
 class BindBody(BaseModel):

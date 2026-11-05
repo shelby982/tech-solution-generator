@@ -251,6 +251,16 @@ CREATE TABLE IF NOT EXISTS chapter_material_chunks (
     PRIMARY KEY (block_id, chunk_id)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_need_actions (
+    block_id    INTEGER NOT NULL,
+    section     TEXT NOT NULL DEFAULT '',
+    need_id     TEXT NOT NULL,
+    action      TEXT NOT NULL DEFAULT 'ignored',
+    reason      TEXT DEFAULT '',
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (block_id, section, need_id)
+);
+
 CREATE TABLE IF NOT EXISTS review_jobs (
     id             TEXT PRIMARY KEY,
     project_id     INTEGER NOT NULL,
@@ -265,6 +275,21 @@ CREATE TABLE IF NOT EXISTS review_jobs (
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS review_issue_states (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    block_id      INTEGER NOT NULL,
+    fingerprint   TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'open',   -- open | fixed | verified
+    severity      TEXT NOT NULL DEFAULT 'medium',
+    point         TEXT NOT NULL DEFAULT '',
+    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fixed_at      DATETIME,
+    verified_at   DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_issue_unique ON review_issue_states(block_id, fingerprint);
+CREATE INDEX IF NOT EXISTS idx_review_issue_status ON review_issue_states(status);
 
 CREATE TABLE IF NOT EXISTS review_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,77 @@ logger = logging.getLogger(__name__)
 # 满足度 → 得分系数（None = 未评审，不计入预估，单列"待评"）
 SCORE_RATIO = {"ok": 1.0, "medium": 0.5, "high": 0.0, "unreviewed": None}
 VERDICT_LABEL = {"ok": "满足", "medium": "部分满足", "high": "不满足", "unreviewed": "未评审"}
+
+# 否决/废标类关键词（fatal_risks 启发式；宁多勿漏，UI 标注"仅供参考"）
+FATAL_KEYWORDS = (
+    "废标", "否决", "无效投标", "实质性响应", "实质性条款", "★", "▲",
+    "资格条件", "资格审查", "不满足招标文件", "未响应", "拒收",
+)
+
+
+def estimate_point(points: float, chapters: list[dict]) -> dict:
+    """评分点预估（加权覆盖）：已评章节系数平均 × 分值，未评不计入分母。
+
+    chapters: [{"risk": ok|medium|high|unreviewed}, ...]
+    """
+    from services.scoring_risk import RISK_ORDER  # noqa: F401  （保持口径一致）
+
+    reviewed = [c for c in (chapters or []) if str(c.get("risk") or "unreviewed") != "unreviewed"]
+    total = len(chapters or [])
+    if not reviewed:
+        return {"estimated_score": None,
+                "basis": {"reviewed": 0, "total": total, "ratio": 0.0, "avg": None}}
+    ratios = [SCORE_RATIO.get(str(c.get("risk") or ""), 0.0) or 0.0 for c in reviewed]
+    avg = round(sum(ratios) / len(ratios), 4)
+    return {
+        "estimated_score": round(float(points or 0) * avg, 2),
+        "basis": {"reviewed": len(reviewed), "total": total,
+                  "ratio": round(len(reviewed) / total, 4) if total else 0.0, "avg": avg},
+    }
+
+
+# 评审自身/输入侧的元问题（不是投标风险，别当成废标）
+META_PATTERNS = ("评审输入缺失", "无法开展", "无法评审", "无法进行评审", "输入缺失",
+                 "未配置", "没有评分点", "缺少评分口径")
+
+
+def collect_fatal_risks(issues: list[dict], limit: int = 20) -> list[dict]:
+    """从 issues 里挑出否决/废标风险（severity=critical + 关键词，或明确指向资格否决）。"""
+    risks: list[dict] = []
+    seen: set[str] = set()
+    for issue in issues or []:
+        text = str(issue.get("point") or "") + " " + str(issue.get("suggestion") or "")
+        severity = str(issue.get("severity") or "").lower()
+        is_meta = any(pattern in text for pattern in META_PATTERNS)
+        if is_meta:
+            continue                                  # 评审输入元问题不算废标风险
+        hit_keyword = any(keyword in text for keyword in FATAL_KEYWORDS)
+        if not hit_keyword:
+            continue                                  # 无否决关键词 → 不判废标（由 risk_level 的 yellow 兜）
+        key = f"{issue.get('block_id')}|{str(issue.get('point'))[:40]}"
+        if key in seen:
+            continue
+        seen.add(key)
+        risks.append({
+            "block_id": str(issue.get("block_id") or ""),
+            "chapter": str(issue.get("chapter") or ""),
+            "point": str(issue.get("point") or "")[:200],
+            "severity": severity or "critical",
+            "source": "review",
+            "keyword_hit": hit_keyword,
+        })
+        if len(risks) >= limit:
+            break
+    return risks
+
+
+def build_risk_level(fatal_risks: list[dict], issues: list[dict]) -> str:
+    """三色风险：red（有否决风险）/ yellow（有 high 或覆盖不足）/ green。"""
+    if fatal_risks:
+        return "red"
+    if any(str(i.get("severity") or "").lower() in ("critical", "high") for i in issues or []):
+        return "yellow"
+    return "green"
 
 
 async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> dict:
@@ -43,12 +115,19 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
     }
 
     points: list[dict] = []
+    all_review_issues: list[dict] = []
+    chapter_titles = {str(b.get("block_id")): str(b.get("title") or "") for b in blocks}
     for p in base.get("points") or []:
         pts = float(p.get("points") or 0)
         verdict = p.get("risk") or "unreviewed"
-        ratio = SCORE_RATIO.get(verdict)
         chapters = p.get("chapters") or []
         ev_chapters = [c for c in chapters if need_evidence.get(str(c.get("block_id")))]
+        # A：加权覆盖（已评章节系数平均 × 分值；未评不计入分母）
+        weighted = estimate_point(pts, chapters)
+        for chapter in chapters:
+            for raw in (chapter.get("missing_points") or []):
+                all_review_issues.append({"severity": "high", "point": str(raw),
+                                          "block_id": str(chapter.get("block_id") or "")})
         points.append({
             "point_id": p.get("point_id"),
             "factor": p.get("factor") or "",
@@ -57,7 +136,8 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
             "criterion_text": p.get("criterion_text") or "",
             "verdict": verdict,
             "verdict_label": VERDICT_LABEL.get(verdict, verdict),
-            "estimated_score": None if ratio is None else round(pts * ratio, 2),
+            "estimated_score": weighted["estimated_score"],
+            "estimated_basis": weighted["basis"],
             "chapters_total": p.get("chapters_total") or 0,
             "chapters_reviewed": p.get("chapters_reviewed") or 0,
             "missing_points": p.get("missing_points") or [],
@@ -65,6 +145,34 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
             "evidence_tracked": False,     # 引用素材尚未落库（如实标注）
             "chapters": chapters,
         })
+
+    # B：否决风险（从 reviews 最近一轮 issues 里挑）
+    recent_issues: list[dict] = []
+    try:
+        latest_rows = {}
+        if thread_id:
+            rows = await (await db.execute(
+                "SELECT block_id, issues FROM reviews WHERE thread_id=? ORDER BY id", (thread_id,))).fetchall()
+        else:
+            rows = await (await db.execute("SELECT block_id, issues FROM reviews ORDER BY id")).fetchall()
+        for block_id, raw in rows:
+            latest_rows[str(block_id)] = raw          # 每章取最后一条
+        for block_id, raw in latest_rows.items():
+            try:
+                items = json.loads(raw or "[]") or []
+            except Exception:
+                items = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item = dict(item)
+                item["block_id"] = block_id
+                item["chapter"] = chapter_titles.get(block_id, "")
+                recent_issues.append(item)
+    except Exception as e:
+        logger.warning(f"scoring_verdict：读取评审 issues 失败（{e}）")
+    fatal_risks = collect_fatal_risks(recent_issues)
+    risk_level = build_risk_level(fatal_risks, recent_issues)
 
     reviewed = [x for x in points if x["estimated_score"] is not None]
     score_max = round(sum(x["points"] for x in points), 2)
@@ -82,6 +190,9 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
         "reviewed_ratio": round(chapters_reviewed / chapters_total * 100) if chapters_total else 0,
         "unlinked_points": len(unlinked_points),
         "unlinked_points_detail": unlinked_points[:10],
+        "risk_level": risk_level,
+        "fatal_risk_count": len(fatal_risks),
+        "issues_total": len(recent_issues),
         "score_max": score_max,
         "score_estimated": score_est,
         "score_pending": score_pending,
@@ -93,7 +204,8 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
         "evidence_chapters": sum(x["evidence_chapters"] for x in points),
         "cost_tokens": await _cost_tokens(db, project_id, thread_id),
     }
-    return {"points": points, "summary": summary, "unlinked_chapters": base.get("unlinked_chapters") or []}
+    return {"points": points, "summary": summary, "fatal_risks": fatal_risks,
+            "unlinked_chapters": base.get("unlinked_chapters") or []}
 
 
 async def _cost_tokens(db, project_id: int, thread_id: str | None) -> int:

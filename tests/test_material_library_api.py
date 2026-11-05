@@ -28,7 +28,7 @@ async def _seed():
         plan = {"chapters": [{"block_id": "s1", "title": "技术方案",
                               "outline": [{"title": "节一", "points": ["云原生"], "words": 300,
                                            "basis": [], "deliverables": []}],
-                              "requirements": [{"id": "r1", "text": "写清楚云原生架构", "source": "point"}]}]}
+                              "requirements": [{"id": "r1", "text": "提供 Kubernetes 服务治理案例", "source": "point"}]}]}
         await db.execute("INSERT INTO writing_plans(id,project_id,thread_id,root_block_id,status,plan) "
                          "VALUES(?,?,?,?,?,?)",
                          ("api-plan", pid, "api-thread", "s1", "confirmed", json.dumps(plan)))
@@ -86,6 +86,8 @@ async def test_evidence_board_groups_by_section(client):
     assert data["sections"] and data["sections"][0]["section"] == "节一"
     assert data["sections"][0]["cards"]
     assert data["summary"]["needs"] >= 2
+    recs = data["sections"][0]["recommend"]
+    assert all(item.get("matched_need_id") for item in recs)
 
 
 async def test_bind_requirement_id(client):
@@ -115,3 +117,50 @@ async def test_library_exposes_parse_error_and_retry(client):
     assert item["parse_status"] == "failed"
     assert item["parse_error"] == "OCR 超时"
     assert item["can_retry"] is True
+
+
+async def test_need_action_ignore_and_restore(client):
+    block, chunk = await _seed()
+    data = (await client.get(f"/api/blocks/{block['id']}/materials/evidence",
+                             params={"section": "节一", "thread_id": "api-thread"})).json()
+    need = data["needs"][0]
+    resp = await client.post(f"/api/blocks/{block['id']}/materials/needs/action",
+                             json={"section": "节一", "need_id": need["need_id"],
+                                   "action": "ignore", "reason": "非强制"})
+    assert resp.status_code == 200
+    after = (await client.get(f"/api/blocks/{block['id']}/materials/evidence",
+                              params={"section": "节一", "thread_id": "api-thread"})).json()
+    hit = next(item for item in after["needs"] if item["need_id"] == need["need_id"])
+    assert hit["ignored"] is True and hit["status"] == "ignored"
+    await client.post(f"/api/blocks/{block['id']}/materials/needs/action",
+                      json={"section": "节一", "need_id": need["need_id"], "action": "restore"})
+    restored = (await client.get(f"/api/blocks/{block['id']}/materials/evidence",
+                                 params={"section": "节一", "thread_id": "api-thread"})).json()
+    hit = next(item for item in restored["needs"] if item["need_id"] == need["need_id"])
+    assert hit["ignored"] is False
+
+
+async def test_board_falls_back_to_chapter_level_without_outline(client):
+    block, chunk = await _seed()
+    async with get_db() as db:
+        plan = json.loads((await (await db.execute("SELECT plan FROM writing_plans WHERE id='api-plan'")).fetchone())["plan"])
+        plan["chapters"][0]["outline"] = []
+        await db.execute("UPDATE writing_plans SET plan=? WHERE id='api-plan'", (json.dumps(plan),))
+        await db.commit()
+    data = (await client.get(f"/api/blocks/{block['id']}/materials/evidence-board",
+                             params={"thread_id": "api-thread"})).json()
+    assert data["sections"][0]["chapter_level"] is True
+    assert data["summary"]["needs"] >= 1
+    assert data["summary"]["coverage"] is not None
+
+
+async def test_board_zero_needs_has_no_fake_coverage(client):
+    async with get_db() as db:
+        pid = (await db.execute("INSERT INTO projects(name) VALUES('无需求章节')")).lastrowid
+        block = (await db.execute("INSERT INTO blocks(project_id,block_id,title,content,run_thread_id) "
+                                  "VALUES(?,?,?,?,?)", (pid, "s-empty", "空章", "", "empty-board"))).lastrowid
+        await db.commit()
+    data = (await client.get(f"/api/blocks/{block}/materials/evidence-board",
+                             params={"thread_id": "empty-board"})).json()
+    assert data["summary"]["needs"] == 0
+    assert data["summary"]["coverage"] is None

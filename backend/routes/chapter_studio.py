@@ -1092,3 +1092,13 @@ async def chapter_review_history(block_id: int, limit: int = 10):
     from services.chapter_review import load_history
 
     return {"items": await load_history(block_id, limit)}
+
+
+@router.get('/blocks/{block_id}/studio/review/issues')
+async def chapter_review_issues(block_id: int):
+    """本章评审 issue 状态机（open/fixed/verified）——用于验证"是否真修好"。"""
+    from db import get_db
+    from services.review_issues import list_issues
+
+    async with get_db() as db:
+        return await list_issues(db, block_id)

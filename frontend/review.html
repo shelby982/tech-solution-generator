@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AiBidding · 质量检查</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v462" />
-    <link rel="stylesheet" href="./assets/review.css?v=20261016-v462" />
-  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v462" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261016-v465" />
+    <link rel="stylesheet" href="./assets/review.css?v=20261016-v465" />
+  <link rel="stylesheet" href="./assets/workspace.css?v=20261016-v465" />
   <style>
     /* 返回作业面板：与项目名同级的次级入口 */
     .back-to-panel { margin-left:10px; font-size:12.5px; color:var(--muted); text-decoration:none;
       border:1px solid var(--line); border-radius:8px; padding:3px 10px; }
     .back-to-panel:hover { color:var(--text); background:var(--bg-2); }
   </style>
-  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v462" />   <!-- 组件最小集：最后加载以统一历史类名 -->
+  <link rel="stylesheet" href="./assets/ui.css?v=20261016-v465" />   <!-- 组件最小集：最后加载以统一历史类名 -->
   </head>
   <body>
     <div class="workspace-shell">
@@ -51,6 +51,8 @@
         <div class="quality-content">
           <!-- 按评分点：得分是按评分点给的，这里回答"能拿多少分、差在哪"（评审页主视图） -->
           <section class="verdict" id="verdict" aria-label="评分点评审结论">
+            <div class="verdict-risk" id="verdict-risk" hidden></div>
+            <div class="verdict-fatal" id="verdict-fatal" hidden></div>
             <div class="verdict-head">
               <h2>按评分点</h2>
               <span class="ws-muted">得分按评分点计；点一行看该评分点下的章节明细</span>
@@ -101,7 +103,7 @@
       </main>
     </div>
 
-    <script type="module" src="./assets/review.js?v=20261016-v462"></script>
-  <script type="module" src="./assets/workspace.js?v=20261016-v462"></script>
+    <script type="module" src="./assets/review.js?v=20261016-v465"></script>
+  <script type="module" src="./assets/workspace.js?v=20261016-v465"></script>
   </body>
 </html>

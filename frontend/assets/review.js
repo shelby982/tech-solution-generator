@@ -1,5 +1,5 @@
-import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v462';
-import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v462';
+import {workspace, subscribe, workspaceUrl, request, refreshWorkspace, confirmChapterAction, showHistory, openDialog, statusLabels, esc} from './workspace.js?v=20261016-v465';
+import {summarize, diffHtml} from './workspace-model.mjs?v=20261016-v465';
 const $ = id => document.getElementById(id);
 
 // 「← 作业面板」带上当前项目/线程/标包 —— 回面板仍是同一条作业、同一个标包
@@ -157,6 +157,31 @@ async function renderVerdict() {
   }
   const data = verdictCache.data; if (!data) return;
   const s = data.summary || {};
+
+  // 评审 v2 B：三色风险置顶 + 否决风险列表
+  const riskEl = document.getElementById('verdict-risk');
+  if (riskEl) {
+    const level = String(s.risk_level || 'green');
+    const label = { red: '有废标风险', yellow: '需要关注', green: '无明显风险' }[level] || level;
+    const fatalN = s.fatal_risk_count || 0;
+    riskEl.hidden = false;
+    riskEl.className = `verdict-risk is-${level}`;
+    riskEl.innerHTML = `<span class="risk-dot"></span><b>${esc(label)}</b>
+      <span class="risk-sub">${fatalN ? `否决风险 ${fatalN} 条，建议先处理` : `已评 ${s.chapters_reviewed ?? 0}/${s.chapters_total ?? 0} 章 · 问题 ${s.issues_total ?? 0} 条`}</span>`;
+  }
+  const fatalEl = document.getElementById('verdict-fatal');
+  if (fatalEl) {
+    const risks = data.fatal_risks || [];
+    fatalEl.hidden = !risks.length;
+    if (risks.length) {
+      fatalEl.innerHTML = `<details ${risks.length <= 3 ? 'open' : ''}><summary>否决风险 ${risks.length} 条（优先处理）</summary>
+        ${risks.slice(0, 12).map((r) => `<div class="fatal-row">
+          <span class="fatal-tag">废标</span>
+          <div><p>${esc(String(r.point || '').slice(0, 150))}</p>
+          <small>${esc(r.chapter || r.block_id || '')}</small></div></div>`).join('')}
+      </details>`;
+    }
+  }
   const pct = s.score_max ? Math.round((s.score_estimated||0)/s.score_max*100) : 0;
   $('verdict-kpis').innerHTML = [
     ['score ok',  '得分预估', `${s.score_estimated ?? 0} / ${s.score_max ?? 0}`, `${pct}% 满分${s.score_pending ? ` · 另有 ${s.score_pending} 分待评` : ''}`],
@@ -170,7 +195,7 @@ async function renderVerdict() {
 
   const rows = data.points || [];
   $('verdict-rows').innerHTML = rows.length ? rows.map(p => `
-    <details class="verdict-row" data-point="${esc(p.point_id)}">
+    <details class="verdict-row" data-point="${esc(p.point_id)}" title="${p.estimated_basis ? `预估依据：已评 ${p.estimated_basis.reviewed}/${p.estimated_basis.total} 章，平均满足系数 ${p.estimated_basis.avg}` : '未评审'}">
       <summary>
         <span class="v-point">${esc(p.item || p.factor || p.point_id)}
           <em>${esc(p.factor || '')}</em></span>

@@ -6,5 +6,6 @@ def test_raw_table_filtered_unless_table_wanted():
     prose = {"chunk_id": 1, "text": "本项目采用云原生架构，服务网关统一接入。", "tags": [], "role": "spec"}
     table = {"chunk_id": 2, "text": "| 项 | 值 |\n| --- | --- |\n| A | B |", "tags": [], "role": "spec"}
     profile = section_profile({"title": "总体架构", "points": ["云原生"], "deliverables": []})
-    picked = recommend(profile, [table, prose], limit=5, min_score=0.0)
+    scoring = {"chunk_id": 3, "text": "评分标准：技术方案（5分），优良得4-5分。", "tags": [], "role": "spec"}
+    picked = recommend(profile, [table, scoring, prose], limit=5, min_score=0.0)
     assert [item["chunk_id"] for item in picked] == [1]

@@ -48,3 +48,12 @@ async def batch_estimate(project_id: int, thread_id: str = "", only_unreviewed: 
     """全量评审前的成本预估（章节数 / 调用次数 / token / 耗时）。"""
     async with get_db() as db:
         return await estimate(db, project_id, thread_id, only_unreviewed, limit)
+
+
+@router.get('/projects/{project_id}/studio/review/issues/summary')
+async def project_review_issues(project_id: int):
+    """项目级 issue 状态汇总（open/fixed/verified + 已验证占比）。"""
+    from services.review_issues import project_summary
+
+    async with get_db() as db:
+        return await project_summary(db, project_id)

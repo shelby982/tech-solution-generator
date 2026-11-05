@@ -169,6 +169,13 @@ def recommend(profile: dict, chunks: list[dict], *, limit: int = 10, min_score: 
         # 原始 Markdown 表格不是“证据段落”：只有本节明确要表格时才允许进入推荐
         if not wants_table and text.count("|") >= 4:
             continue
+        raw = str(profile.get("raw") or "")
+        # 评分标准/评分办法/分值表不是证据；除非本节本身就在写评分响应
+        if "评分" not in raw and re.search(r"评分标准|评分办法|评审因素|评分因素|\(\s*\d+\s*分\s*\)|\d+\s*分\)", text):
+            continue
+        # 模板/目录/封面/承诺函没有证据价值
+        if "模板" not in raw and re.search(r"投标文件格式|格式要求|目录|封面|承诺函", text):
+            continue
         score, explain = score_chunk(profile, chunk, sem[index] if index < len(sem) else 0.0)
         if score < min_score:
             continue

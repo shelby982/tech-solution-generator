@@ -177,4 +177,16 @@ async def apply_patch(block_pk: int, before: str, after: str, *, issue_index: in
         updated = content[:at] + after + content[at + len(before):]
         await add_revision(db, block_pk, content, summary="评审定点重写", source="ai")
         await update_block_content(db, block_pk, updated)
+        # issue 状态机：这条问题标为"已修待验"（复评确认消失才 verified）
+        try:
+            from services.review_issues import mark_fixed
+            if issue_index >= 0:
+                from services.chapter_review import load_review
+                review = await load_review(block_pk)
+                issues = (review or {}).get("issues") or []
+                if 0 <= issue_index < len(issues):
+                    await mark_fixed(db, block_pk, [issues[issue_index]])
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(f"标记已修失败：{e}")
     return {"applied": True, "content": updated}

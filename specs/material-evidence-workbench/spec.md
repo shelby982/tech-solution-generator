@@ -100,9 +100,9 @@
 
 ### 自动化
 
-- [ ] 后端全量：`./.venv/bin/python -m pytest -q` 通过；
-- [ ] 前端：`node --test tests/frontend/*.test.mjs` 通过；
-- [ ] 新增测试覆盖：需求动作、绑定 section+requirement、0 需求覆盖、无大纲回退、推荐过滤；
+- [x] 后端全量：`./.venv/bin/python -m pytest -q` 通过（1087 passed）；
+- [x] 前端：`node --test tests/frontend/*.test.mjs` 通过（fail 0）；
+- [x] 新增测试覆盖：需求动作、绑定 section+requirement、0 需求覆盖、无大纲回退、推荐过滤；
 - [ ] 文档/接口变更已同步。
 
 ### 行为验收（人工/接口）

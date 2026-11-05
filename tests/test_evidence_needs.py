@@ -40,7 +40,8 @@ async def test_section_needs_include_plan_and_spec_without_duplicate():
     needs = await section_evidence_needs(block, {"title": "总体架构", "points": ["云原生"]}, "need-thread")
     assert needs
     texts = [item["text"] for item in needs]
-    assert any("云原生架构" in text for text in texts)
+    assert any("Kubernetes" in text for text in texts)
+    assert all("写清楚" not in text for text in texts)
     assert sum(1 for item in needs if item.get("requirement_id") == "sr-need") == 1
     assert all(item["section"] == "总体架构" for item in needs)
     assert all(item["query"] for item in needs)

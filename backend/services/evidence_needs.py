@@ -6,10 +6,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 
 def _need_id(kind: str, key: str) -> str:
     return f"{kind}:{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+
+
+def _is_evidence_text(text: str) -> bool:
+    """写作指令/评分档位不是证据需求；只保留需要外部事实支撑的要求。"""
+    text = str(text or "")
+    if re.search(r"优良|中等|一般|分值|得分|评分|响应度", text):
+        return False
+    if re.search(r"写清楚|写明|说明|阐述|描述", text) and not re.search(
+            r"提供|证明|材料|数据|案例|业绩|资质|证书|合同|报告|截图|指标|参数|配置|部署", text):
+        return False
+    return True
 
 
 def _query(text: str, section: dict) -> str:
@@ -74,7 +86,7 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
     def add(kind: str, key: str, text: str, source_label: str, *, requirement_id: str = "",
             required: bool = True, reason: str = ""):
         text = str(text or "").strip()
-        if not text:
+        if not text or not _is_evidence_text(text):
             return
         dedupe = requirement_id or text[:120]
         if dedupe in seen:
@@ -131,4 +143,19 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
                     key = str(need.get("requirement_id") or "")
                     need["evidence_count"] = counts.get(key, 0) if key else 0
                     need["covered"] = bool(key and counts.get(key, 0) > 0)
+
+    # 忽略/恢复状态：按 block + section + need_id 持久化
+    if needs:
+        async with get_db() as db:
+            rows = await (await db.execute(
+                "SELECT need_id, action, reason FROM evidence_need_actions "
+                "WHERE block_id=? AND section=?", (int(block.get("id") or 0), section_title))).fetchall()
+        actions = {str(row[0]): {"action": str(row[1] or ""), "reason": str(row[2] or "")} for row in rows}
+        for need in needs:
+            state = actions.get(str(need["need_id"]))
+            need["ignored"] = bool(state and state["action"] == "ignore")
+            need["ignore_reason"] = state["reason"] if state else ""
+            need["status"] = ("ignored" if need["ignored"] else
+                              "covered" if need.get("covered") else
+                              "candidate" if int(need.get("evidence_count") or 0) > 0 else "open")
     return needs
