@@ -37,6 +37,7 @@ from routes.chapter_writing import router as writing_router
 from routes.writing_specs import router as specs_router
 from routes.citations import router as citations_router
 from routes.diagram_assets import router as diagram_assets_router
+from routes.leads import router as leads_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -261,6 +262,7 @@ app.include_router(todo_v3_router, prefix="/api")
 app.include_router(material_library_router, prefix="/api")
 app.include_router(diagram_assets_router, prefix="/api")
 app.include_router(plan_materials_router, prefix="/api")
+app.include_router(leads_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -275,6 +277,7 @@ _project_intake_path = os.path.join(frontend_dir, "project-intake.html")
 _three_mode_path   = os.path.join(frontend_dir, "three-mode.html")
 _diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 _review_path       = os.path.join(frontend_dir, "review.html")
+_landing_path      = os.path.join(frontend_dir, "landing.html")
 
 if os.path.isdir(frontend_dir):
     class NoCacheStaticFiles(StaticFiles):
@@ -337,6 +340,14 @@ async def serve_workbench(request: Request):
     project_id = request.query_params.get("projectId", "")
     target = f"/project-intake?projectId={project_id}" if project_id.isdigit() else "/projects"
     return RedirectResponse(target, status_code=307)
+
+
+@app.get("/lp", include_in_schema=False)
+async def serve_landing():
+    """官网落地页（投放承接页，表单提交到 /api/leads）。"""
+    if os.path.isfile(_landing_path):
+        return FileResponse(_landing_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "landing.html 不存在"})
 
 
 @app.get("/diff-review", include_in_schema=False)

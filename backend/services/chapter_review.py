@@ -103,7 +103,7 @@ def _combine(tech, comp) -> dict:
     }
 
 
-async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
+async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto") -> dict:
     """对一章跑双评审（并行），返回合并结果并落库。"""
     from agents.bao_zheng import BaoZhengAgent
     from agents.wang_anshi import WangAnshiAgent
@@ -115,23 +115,40 @@ async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
         block = dict(row)
         output, matrix, chain = await _chapter_inputs(db, block)
 
+    # ── 分层调度（v3 B）：auto → L0 有 critical 走 fast，否则 full ──
+    from services.review_precheck import precheck, resolve_tier
+
+    precheck_result = precheck(output.content or "")
+    resolved_tier = resolve_tier(precheck_result, tier)
+
     blocks = {output.block_id: output}
     outline_matrix = {output.block_id: matrix}
     chain_by_block = {output.block_id: chain}
 
-    tech_agent, comp_agent = WangAnshiAgent(), BaoZhengAgent()
-    tech_result, comp_result = await asyncio.gather(
-        tech_agent.review(blocks=blocks, outline_matrix=outline_matrix, chain_by_block=chain_by_block),
-        comp_agent.review(blocks=blocks, outline_matrix=outline_matrix, chain_by_block=chain_by_block),
-        return_exceptions=True,
-    )
+    if resolved_tier == "fast":
+        # L1 快评：只跑合规角色（便宜一半），失败自动换非 reasoning 模型
+        comp_agent = BaoZhengAgent()
+        comp_result = await comp_agent.review(blocks=blocks, outline_matrix=outline_matrix,
+                                              chain_by_block=chain_by_block)
+        tech_result = None
+    else:
+        tech_agent, comp_agent = WangAnshiAgent(), BaoZhengAgent()
+        tech_result, comp_result = await asyncio.gather(
+            tech_agent.review(blocks=blocks, outline_matrix=outline_matrix, chain_by_block=chain_by_block),
+            comp_agent.review(blocks=blocks, outline_matrix=outline_matrix, chain_by_block=chain_by_block),
+            return_exceptions=True,
+        )
     tech = tech_result.get(output.block_id) if isinstance(tech_result, dict) else None
     comp = comp_result.get(output.block_id) if isinstance(comp_result, dict) else None
+    if resolved_tier == "fast" and tech is None:
+        tech = comp                      # 单角色（L1）时用合规结果代表整体，合并口径不变
     if tech is None and comp is None:
         raise ValueError("评审失败（两个评审 agent 都没有返回结果）")
 
     combined = _combine(tech, comp)
     combined["block_id"] = output.block_id
+    combined["tier"] = resolved_tier
+    combined["precheck"] = precheck_result
 
     # ── issue 状态机（评审 v2 C）：本轮出现→open；上轮消失→verified ──
     try:
@@ -158,18 +175,20 @@ async def review_block(block_pk: int, *, thread_id: str = "") -> dict:
     async with get_db() as db:
         await db.execute(
             "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
-            "criterion_text, covered_points, missing_points, issues, needs_material, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+            "criterion_text, covered_points, missing_points, issues, needs_material, tier, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
             "ON CONFLICT(block_id) DO UPDATE SET tech_score=excluded.tech_score, comp_score=excluded.comp_score, "
             "score=excluded.score, satisfied=excluded.satisfied, criterion_text=excluded.criterion_text, "
             "covered_points=excluded.covered_points, missing_points=excluded.missing_points, "
-            "issues=excluded.issues, needs_material=excluded.needs_material, updated_at=CURRENT_TIMESTAMP",
+            "issues=excluded.issues, needs_material=excluded.needs_material, "
+            "tier=excluded.tier, updated_at=CURRENT_TIMESTAMP",
             (block_pk, int(block.get("project_id") or 0), combined["tech_score"], combined["comp_score"],
              combined["score"], combined["satisfied"], combined["criterion_text"],
              json.dumps(combined["covered_points"], ensure_ascii=False),
              json.dumps(combined["missing_points"], ensure_ascii=False),
              json.dumps(combined["issues"], ensure_ascii=False),
-             json.dumps(combined["needs_material"], ensure_ascii=False)))
+             json.dumps(combined["needs_material"], ensure_ascii=False),
+             resolved_tier))
         await db.commit()
     return combined
 
@@ -201,6 +220,7 @@ async def load_review(block_pk: int) -> dict | None:
         "issues": issues,
         "needs_material": _loads(data.get("needs_material")),
         "fixable": [item for item in issues if not item.get("needs_material")],
+        "tier": data.get("tier") or "",
         "updated_at": data.get("updated_at") or "",
     }
 

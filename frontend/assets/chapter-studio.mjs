@@ -609,6 +609,61 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let reviewHistory = [];
   let reviewDelta = null;
   let reviewIssueStates = {};      // fingerprint → status（open/fixed/verified）
+  let precheckResult = null;       // L0 规则预检
+  let deliveryVerdict = null;      // 统一交付判断
+
+  /** L0 规则预检 + 统一交付判断（v3） */
+  async function loadPrecheckAndVerdict() {
+    if (!active) return;
+    try {
+      const [pre, verdict] = await Promise.all([
+        fetch(`/api/blocks/${active.id}/studio/review/precheck`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`/api/blocks/${active.id}/delivery-verdict`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      precheckResult = pre;
+      deliveryVerdict = verdict;
+    } catch (error) { precheckResult = null; deliveryVerdict = null; }
+  }
+
+  /** 统一交付判断条（一个数字 + 三条必办） */
+  function deliveryVerdictHtml() {
+    const verdict = deliveryVerdict;
+    if (!verdict) return '';
+    const cls = { red: 'is-red', yellow: 'is-yellow', green: 'is-green' }[verdict.level] || 'is-yellow';
+    const top = verdict.top3 || [];
+    return `<div class="cs-verdict ${cls}">
+      <div class="cs-verdict-head">
+        <b>交付判断 ${verdict.score}</b>
+        <span class="cs-verdict-label">${esc(verdict.label)}</span>
+        ${verdict.can_submit ? '<span class="cs-verdict-done">可以提交</span>' : '<span class="cs-verdict-todo">未达可提交</span>'}
+        <span class="cs-dim">规则 ${verdict.explain?.rule ?? '-'} · 评审 ${verdict.explain?.review ?? '未评'} · 规则预检 ${(verdict.explain?.precheck?.critical ?? 0)} 硬伤 · 否决 ${verdict.explain?.fatal ?? 0}</span>
+      </div>
+      ${top.length ? `<ol class="cs-verdict-list">${top.map((item) => `<li>${esc(item.title)} <small>${esc(item.why)}</small></li>`).join('')}</ol>` : '<p class="cs-verdict-ok">没有必办事项</p>'}
+    </div>`;
+  }
+
+  /** L0 规则预检条 */
+  function precheckHtml() {
+    const pre = precheckResult;
+    if (!pre) return '';
+    const counts = pre.counts || {};
+    const critical = counts.critical || 0;
+    const high = counts.high || 0;
+    const medium = counts.medium || 0;
+    if (!critical && !high && !medium) {
+      return `<div class="cs-precheck is-pass"><b>规则预检通过</b><span class="cs-dim">${pre.body_len || 0} 字 · ${pre.sections || 0} 节</span></div>`;
+    }
+    const items = pre.items || [];
+    return `<details class="cs-precheck ${critical ? 'is-fail' : 'is-warn'}">
+      <summary><b>规则预检：${critical} 个硬伤 · ${high} 个问题 · ${medium} 个提醒</b>
+        <span class="cs-dim">（秒级，未调模型）</span></summary>
+      ${items.map((item) => `<div class="cs-precheck-row">
+        <span class="cs-precheck-sev is-${esc(item.severity)}">${item.severity === 'critical' ? '硬伤' : item.severity === 'high' ? '问题' : '提醒'}</span>
+        <div><p>${esc(item.message)}${item.section ? `（${esc(String(item.section).slice(0, 14))}）` : ''}</p>
+          ${item.hint ? `<small>${esc(item.hint)}</small>` : ''}</div>
+      </div>`).join('')}
+    </details>`;
+  }
 
   /** 拉本章评审（最近一次） */
   async function loadChapterReview() {
@@ -663,10 +718,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
     const issues = review.issues || [];
     return `<div class="cs-review">
+      ${precheckHtml()}
       <div class="cs-review-head">
         <b>评审 ${review.score}</b>
         ${reviewDelta === null ? '' : `<span class="cs-review-delta ${reviewDelta >= 0 ? 'is-up' : 'is-down'}">${reviewDelta >= 0 ? '↑' : '↓'} ${Math.abs(reviewDelta)}</span>`}
-        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}</span>
+        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}${review.tier === 'fast' ? ' · 本次=快评（单角色）' : ''}</span>
         <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
         <label class="cs-auto-review" title="应用补丁/重写完成后自动重评一次">
           <input type="checkbox" data-auto-review ${globalThis.localStorage.getItem('cs_auto_review') === 'off' ? '' : 'checked'} />
@@ -4051,7 +4107,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const resp = await fetch(`/api/blocks/${active.id}/studio/review`, { method: 'POST', signal: AbortSignal.timeout(300000) });
       if (!resp.ok) { status(`${label}；复评审失败，可手动点「重新评审」`); return; }
       const data = await resp.json().catch(() => ({}));
-      await loadChapterReview(); await loadBasis(active.block_id); paintAside();
+      await loadChapterReview(); await loadPrecheckAndVerdict(); await loadBasis(active.block_id); paintAside();
       const delta = reviewDelta;
       const trend = delta === null || delta === undefined ? '' : (delta >= 0 ? `（↑${delta}）` : `（↓${Math.abs(delta)}）`);
       status(`${label}；复评审 ${data.score ?? '-'} 分${trend}`);
@@ -4409,10 +4465,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
            <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
       : '';
     const reviewHtml = reviewBlockHtml();
+    const verdictHtml = deliveryVerdictHtml();
     if (!need.length) {
-      return `${scoreHtml}${reviewHtml}<h4>待办</h4><p class="cs-todo-ok">本章没有需要你处理的事</p>`;
+      return `${verdictHtml}${scoreHtml}${reviewHtml}<h4>待办</h4><p class="cs-todo-ok">本章没有需要你处理的事</p>`;
     }
-    return `${scoreHtml}${reviewHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
+    return `${verdictHtml}${scoreHtml}${reviewHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
         ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}
@@ -4957,6 +5014,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       void loadWritingModels().then(() => paintAside());
       void autoCleanChapter();
       void loadChapterReview().then(() => paintAside());
+      void loadPrecheckAndVerdict().then(() => paintAside());
       void loadMaterialNeeds().then(() => paintAside());
       void loadMaterialLibrary().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
@@ -5225,7 +5283,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const resp=await fetch(`/api/blocks/${active.id}/studio/review`,{method:'POST',signal:AbortSignal.timeout(240000)});
         const data=await resp.json().catch(()=>({}));
         if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
-        await loadChapterReview(); await loadBasis(active.block_id); paintAside();
+        await loadChapterReview(); await loadPrecheckAndVerdict(); await loadBasis(active.block_id); paintAside();
         status(`评审完成：${data.score} 分（技术 ${data.tech_score} / 合规 ${data.comp_score}），问题 ${(data.issues||[]).length} 条`);
       }catch(error){status(`评审失败：${error.message}`);}
       finally{btn.disabled=false;}

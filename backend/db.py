@@ -21,6 +21,24 @@ _this_dir = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.path.join(_this_dir, "data", "ge_solution.db")
 DB_PATH = os.path.normpath(DB_PATH)
 
+_LEADS_DDL = """
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    company TEXT NOT NULL,
+    contact TEXT NOT NULL,
+    topic TEXT NOT NULL DEFAULT '',
+    utm_source TEXT NOT NULL DEFAULT '',
+    utm_medium TEXT NOT NULL DEFAULT '',
+    utm_campaign TEXT NOT NULL DEFAULT '',
+    utm_content TEXT NOT NULL DEFAULT '',
+    referer TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS chapter_writing_jobs (
     id TEXT PRIMARY KEY,
@@ -316,6 +334,7 @@ CREATE TABLE IF NOT EXISTS chapter_reviews (
     missing_points TEXT DEFAULT '[]',
     issues         TEXT DEFAULT '[]',
     needs_material TEXT DEFAULT '[]',
+    tier           TEXT DEFAULT '',
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -615,9 +634,26 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_site ON llm_usage(call_site, model);
 """
 
 
+async def _migrate_review_v3() -> None:
+    """评审 v3：老库补 chapter_reviews.tier 列（新库已含，忽略异常）。"""
+    try:
+        async with get_db() as db:
+            await db.execute("ALTER TABLE chapter_reviews ADD COLUMN tier TEXT DEFAULT ''")
+            await db.commit()
+    except Exception:
+        pass
+
+
 async def init_db(conn: aiosqlite.Connection) -> None:
     """执行建表 DDL（CREATE TABLE IF NOT EXISTS，幂等）。"""
     await conn.executescript(_DDL)
+    try:
+        # 老库补列（评审 v3）：新库 DDL 已含 tier，这里只会对老库生效
+        await conn.execute("ALTER TABLE chapter_reviews ADD COLUMN tier TEXT DEFAULT ''")
+        await conn.commit()
+    except Exception:
+        pass
+    await conn.executescript(_LEADS_DDL)
     await conn.executescript('''
         CREATE TRIGGER IF NOT EXISTS cleanup_chapter_studio AFTER DELETE ON blocks BEGIN
             DELETE FROM chapter_studio WHERE block_id=OLD.id;

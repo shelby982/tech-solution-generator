@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>智能应标 · 让每一个评分点，都有对应的答案</title>
+<!--
+  视觉稿 v2 · 2026-10-26
+  依据：最新产品设计（2026-10-21/22 界面截图 + 2026-10-22/23 产品设计文档）
+  截图：todo-v3b / plan-outline / materials-v321 / agent-bar-4 / project-todo
+  旧版（10-13/14）三模式四页签截图已全部弃用
+-->
+<style>
+  :root{
+    --ink:#0F172A; --ink-2:#334155; --muted:#64748B; --muted-2:#94A3B8;
+    --bg:#F6F8FB; --panel:#FFFFFF; --line:#E2E8F0; --line-2:#EDF2F7;
+    --blue:#2563EB; --blue-d:#1D4ED8; --blue-soft:#EAF1FF;
+    --green:#0F9F6E; --amber:#D97706; --navy:#0B1220; --navy-2:#111C2E;
+    --r-lg:18px; --r-md:12px; --r-sm:9px;
+    --shadow:0 24px 60px rgba(15,23,42,.16);
+    --font: "PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,-apple-system,sans-serif;
+    --mono: "SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  a{color:inherit;text-decoration:none}
+  img{display:block;max-width:100%}
+  button{font:inherit;cursor:pointer}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ── 导航 ── */
+  .nav{
+    position:sticky;top:0;z-index:50;
+    background:rgba(11,18,32,.82);backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .nav .wrap{display:flex;align-items:center;gap:36px;height:64px}
+  .brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:600;letter-spacing:.01em}
+  .brand-mark{
+    width:28px;height:28px;border-radius:8px;background:linear-gradient(160deg,#3B82F6,#1D4ED8);
+    display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;flex:none;
+  }
+  .nav-links{display:flex;gap:28px;margin-left:8px}
+  .nav-links a{color:#C7D2E0;font-size:14px;transition:color .15s}
+  .nav-links a:hover{color:#fff}
+  .nav-cta{margin-left:auto;display:flex;align-items:center;gap:18px}
+  .nav-login{color:#C7D2E0;font-size:14px}
+  .nav-login:hover{color:#fff}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    border-radius:10px;border:1px solid transparent;padding:11px 20px;
+    font-size:14px;font-weight:600;line-height:1;transition:.18s;white-space:nowrap;
+  }
+  .btn-blue{background:var(--blue);color:#fff}
+  .btn-blue:hover{background:var(--blue-d);transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.22)}
+  .btn-ghost:hover{border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.06)}
+
+  /* ── Hero ── */
+  .hero{
+    position:relative;overflow:hidden;color:#fff;
+    background:
+      radial-gradient(900px 480px at 78% -10%, rgba(37,99,235,.32), transparent 62%),
+      radial-gradient(700px 420px at 8% 8%, rgba(37,99,235,.12), transparent 60%),
+      linear-gradient(180deg,#0B1220 0%,#0C1526 62%,#0B1220 100%);
+    padding:78px 0 0;
+  }
+  .hero::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 55%,transparent 100%);
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 55%,transparent 100%);
+  }
+  .hero .wrap{position:relative;z-index:2}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;
+    font-size:12.5px;letter-spacing:.08em;color:#9DB4D6;text-transform:uppercase;
+    border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:7px 14px;
+    background:rgba(255,255,255,.04);
+  }
+  .eyebrow i{width:6px;height:6px;border-radius:50%;background:#60A5FA;display:block}
+  h1{
+    font-size:clamp(38px,4.9vw,60px);font-weight:600;line-height:1.14;letter-spacing:-.02em;
+    margin:26px 0 0;max-width:15em;
+  }
+  h1 .hl{
+    color:#fff;background:linear-gradient(180deg,transparent 74%,rgba(37,99,235,.62) 74%);
+    padding:0 .06em;
+  }
+  .hero-sub{
+    margin:22px 0 0;max-width:47em;font-size:16.5px;line-height:1.85;color:#B6C6DA;
+  }
+  .hero-cta{display:flex;align-items:center;gap:14px;margin-top:32px;flex-wrap:wrap}
+  .hero-cta .btn{padding:14px 24px;font-size:15px;border-radius:11px}
+  .hero-trust{display:flex;gap:22px;flex-wrap:wrap;margin-top:24px;color:#8FA6C2;font-size:13px}
+  .hero-trust span{display:inline-flex;align-items:center;gap:7px}
+
+  /* 产品截图窗口 */
+  .shot-wrap{position:relative;margin-top:54px;z-index:2}
+  .window{
+    border-radius:14px 14px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+    border-bottom:none;background:#0E1727;box-shadow:0 -20px 80px rgba(0,0,0,.5);
+  }
+  .window-bar{
+    display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;
+    background:#111C2E;border-bottom:1px solid rgba(255,255,255,.07);
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:#33415A}
+  .url{
+    margin-left:10px;font-family:var(--mono);font-size:11.5px;color:#7C90AC;
+    background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;padding:4px 12px;
+  }
+  .window img{width:100%;height:auto}
+
+  /* ── 通用 section ── */
+  section{position:relative}
+  .sec{padding:100px 0;scroll-margin-top:64px}
+  .sec-head{max-width:760px}
+  .kicker{
+    display:inline-flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;
+    letter-spacing:.1em;color:var(--blue);text-transform:uppercase;
+  }
+  .kicker::before{content:"";width:22px;height:1.5px;background:var(--blue);display:block}
+  h2{font-size:clamp(30px,3.3vw,40px);font-weight:600;line-height:1.26;letter-spacing:-.015em;margin:16px 0 0}
+  .lead{margin:18px 0 0;font-size:16.5px;line-height:1.85;color:var(--muted);max-width:52em}
+
+  /* ── 行业条 ── */
+  .strip{padding:26px 0;border-bottom:1px solid var(--line);background:#fff}
+  .strip .wrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+  .strip-label{font-size:13px;color:var(--muted-2);white-space:nowrap}
+  .strip-items{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{
+    font-size:13px;color:var(--ink-2);border:1px solid var(--line);background:#FBFCFE;
+    border-radius:999px;padding:6px 14px;
+  }
+
+  /* ── 问题 ── */
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:44px}
+  .pain{
+    background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:22px;
+    display:flex;flex-direction:column;gap:10px;
+  }
+  .pain .idx{font-family:var(--mono);font-size:12px;color:var(--muted-2)}
+  .pain h3{margin:0;font-size:16.5px;font-weight:600}
+  .pain p{margin:0;font-size:13.8px;line-height:1.75;color:var(--muted)}
+  .link-more{
+    display:inline-flex;align-items:center;gap:6px;margin-top:26px;font-size:14.5px;
+    font-weight:600;color:var(--blue);
+  }
+
+  /* ── 能力卡 ── */
+  .cap-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:46px}
+  .cap{
+    background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;
+    display:flex;flex-direction:column;transition:.2s;
+  }
+  .cap:hover{border-color:#CBD5E1;box-shadow:0 16px 40px rgba(15,23,42,.07);transform:translateY(-2px)}
+  .cap-body{padding:24px 24px 18px;display:flex;gap:14px}
+  .cap-idx{
+    font-family:var(--mono);font-size:12px;color:var(--blue);background:var(--blue-soft);
+    border-radius:7px;height:26px;padding:0 8px;display:inline-flex;align-items:center;flex:none;
+  }
+  .cap h3{margin:0 0 8px;font-size:17.5px;font-weight:600}
+  .cap p{margin:0;font-size:14px;line-height:1.75;color:var(--muted)}
+  .cap-shot{
+    margin:0 24px 24px;border-radius:10px;overflow:hidden;border:1px solid var(--line);
+    background:#F1F5F9;
+  }
+  .cap-shot img{width:100%;height:auto}
+
+  /* ── 流程 ── */
+  .flow{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);scroll-margin-top:64px}
+  .flow-grid{display:grid;grid-template-columns:340px 1fr;gap:48px;margin-top:44px;align-items:start}
+  .steps{display:flex;flex-direction:column;gap:6px}
+  .step{
+    display:flex;gap:14px;padding:15px 16px;border-radius:12px;border:1px solid transparent;
+    background:transparent;text-align:left;width:100%;transition:.15s;align-items:flex-start;
+  }
+  .step:hover{background:#F8FAFC}
+  .step.on{background:var(--blue-soft);border-color:#CFE0FF}
+  .step-n{
+    font-family:var(--mono);font-size:12px;width:26px;height:26px;border-radius:8px;flex:none;
+    display:grid;place-items:center;background:#EEF2F7;color:var(--muted);
+  }
+  .step.on .step-n{background:var(--blue);color:#fff}
+  .step-t{display:block;font-size:15px;font-weight:600;color:var(--ink-2)}
+  .step.on .step-t{color:var(--blue-d)}
+  .step-d{display:block;font-size:12.8px;color:var(--muted);margin-top:4px;line-height:1.6}
+
+  .stage-panel{
+    background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    box-shadow:0 18px 46px rgba(15,23,42,.07);
+  }
+  .stage-head{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:18px 24px;border-bottom:1px solid var(--line-2);background:#FAFBFD;
+  }
+  .stage-head .sh-l{display:flex;align-items:center;gap:12px}
+  .stage-no{
+    font-family:var(--mono);font-size:12px;color:var(--blue);background:var(--blue-soft);
+    border-radius:7px;padding:5px 9px;
+  }
+  .stage-head h3{margin:0;font-size:17px;font-weight:600}
+  .stage-body{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .stage-cell{padding:22px 24px}
+  .stage-cell + .stage-cell{border-left:1px solid var(--line-2)}
+  .cell-label{
+    font-size:11.5px;letter-spacing:.1em;color:var(--muted-2);font-weight:600;
+    text-transform:uppercase;margin-bottom:12px;
+  }
+  .out-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+  .out-list li{
+    display:flex;align-items:flex-start;gap:9px;font-size:14px;color:var(--ink-2);line-height:1.6;
+  }
+  .out-list li::before{
+    content:"";width:5px;height:5px;border-radius:50%;background:#94A3B8;margin-top:9px;flex:none;
+  }
+  .human-tag{
+    display:flex;align-items:flex-start;gap:8px;font-size:13.5px;color:var(--ink-2);
+    background:#FFF9EE;border:1px solid #FCE7C4;border-radius:10px;padding:11px 13px;line-height:1.6;
+  }
+  .human-tag b{color:#B45309;font-weight:600;white-space:nowrap}
+  .stage-foot{
+    border-top:1px solid var(--line-2);padding:12px 24px;font-size:12.5px;color:var(--muted-2);
+    display:flex;align-items:center;gap:8px;
+  }
+
+  /* ── 对比表 ── */
+  .compare{overflow-x:auto;margin-top:44px;border:1px solid var(--line);border-radius:var(--r-lg);background:#fff}
+  table{border-collapse:collapse;width:100%;min-width:820px}
+  th,td{text-align:left;padding:16px 20px;font-size:14px;border-bottom:1px solid var(--line-2);vertical-align:top}
+  thead th{font-size:13px;color:var(--muted);font-weight:600;background:#F8FAFC;border-bottom:1px solid var(--line)}
+  thead th.ours{background:var(--blue-soft);color:var(--blue-d)}
+  tbody th{
+    font-weight:500;color:var(--ink-2);font-size:13.5px;background:#FBFCFE;width:150px;
+  }
+  td.ours{background:#F4F8FF;color:var(--ink);font-weight:500}
+  td .yes{color:var(--green);font-weight:600}
+  td .no{color:var(--muted-2)}
+  tr:last-child th,tr:last-child td{border-bottom:none}
+
+  /* ── 可追溯 ── */
+  .trace{background:var(--navy);color:#fff}
+  .trace .kicker{color:#7FB0FF}
+  .trace .kicker::before{background:#7FB0FF}
+  .trace .lead{color:#A9BDD6}
+  .chain{display:grid;grid-template-columns:1fr 40px 1fr 40px 1fr;align-items:stretch;gap:0;margin-top:48px}
+  .chain-card{
+    background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.12);border-radius:14px;
+    padding:20px;
+  }
+  .chain-card .tag{font-family:var(--mono);font-size:11px;color:#7FB0FF;letter-spacing:.08em}
+  .chain-card h4{margin:10px 0 8px;font-size:16px;font-weight:600}
+  .chain-card p{margin:0;font-size:13.2px;line-height:1.7;color:#9FB3CB}
+  .chain-card .val{font-family:var(--mono);font-size:22px;color:#fff;margin-top:12px}
+  .chain-arrow{display:grid;place-items:center;color:#3B82F6;font-size:18px}
+  .divide{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:30px}
+  .divide-box{
+    border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:20px;
+    background:rgba(255,255,255,.03);
+  }
+  .divide-box .dl{
+    font-size:12px;letter-spacing:.1em;font-weight:600;text-transform:uppercase;
+    color:#93C5FD;margin-bottom:14px;
+  }
+  .divide-box ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .divide-box li{font-size:13.8px;color:#CAD7E6;line-height:1.6;display:flex;gap:9px;align-items:flex-start}
+  .divide-box li i{
+    font-style:normal;font-family:var(--mono);font-size:11px;color:#7FB0FF;flex:none;margin-top:2px;
+  }
+  .divide-box.bright{background:rgba(37,99,235,.12);border-color:rgba(96,165,250,.35)}
+  .divide-box.bright li{color:#E4EEFB}
+
+  /* ── 安全 ── */
+  .sec-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:44px}
+  .safe{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}
+  .safe svg{margin-bottom:14px}
+  .safe h3{margin:0 0 8px;font-size:15.5px;font-weight:600}
+  .safe p{margin:0;font-size:13.6px;line-height:1.75;color:var(--muted)}
+
+  /* ── 最终 CTA ── */
+  .final{
+    background:linear-gradient(180deg,#F6F8FB 0%,#EEF3FA 100%);
+    padding:96px 0 100px;border-top:1px solid var(--line);
+  }
+  .final-grid{display:grid;grid-template-columns:1fr 430px;gap:60px;align-items:start}
+  .faq{margin-top:36px;border-top:1px solid var(--line)}
+  details{border-bottom:1px solid var(--line);padding:16px 0}
+  summary{
+    cursor:pointer;list-style:none;font-size:14.5px;font-weight:600;color:var(--ink-2);
+    display:flex;justify-content:space-between;align-items:center;gap:16px;
+  }
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";color:var(--muted-2);font-size:18px;line-height:1}
+  details[open] summary::after{content:"–"}
+  details p{margin:12px 0 0;font-size:13.8px;line-height:1.8;color:var(--muted)}
+  .form{
+    background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:28px;
+    box-shadow:0 16px 44px rgba(15,23,42,.07);
+  }
+  .form h3{margin:0 0 6px;font-size:19px;font-weight:600}
+  .form .hint{margin:0 0 22px;font-size:13px;color:var(--muted)}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;color:var(--ink-2);margin-bottom:7px;font-weight:500}
+  .field input,.field select{
+    width:100%;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:14px;
+    font-family:inherit;color:var(--ink);background:#fff;outline:none;transition:.15s;
+  }
+  .field input:focus,.field select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .form .btn{width:100%;padding:13px;margin-top:6px}
+  .form .fine{margin:12px 0 0;font-size:12px;color:var(--muted-2);text-align:center}
+
+  /* ── Footer ── */
+  footer{background:var(--navy);color:#8FA6C2;padding:44px 0 34px;font-size:13px}
+  .foot-grid{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}
+  .foot-brand{color:#fff;font-weight:600;display:flex;align-items:center;gap:10px}
+  .foot-links{display:flex;gap:22px;flex-wrap:wrap}
+  .foot-links a:hover{color:#fff}
+  .copyright{margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,.08);color:#66799A;font-size:12.5px}
+
+  /* ── 响应式 ── */
+  @media (max-width:1080px){
+    .grid-4,.sec-grid{grid-template-columns:repeat(2,1fr)}
+    .flow-grid{grid-template-columns:1fr}
+    .final-grid{grid-template-columns:1fr}
+    .chain{grid-template-columns:1fr;gap:12px}
+    .chain-arrow{display:none}
+    .divide{grid-template-columns:1fr}
+    .stage-body{grid-template-columns:1fr}
+    .stage-cell + .stage-cell{border-left:none;border-top:1px solid var(--line-2)}
+  }
+  @media (max-width:760px){
+    .wrap{padding:0 20px}
+    .nav-links,.nav-login{display:none}
+    .cap-grid,.grid-4,.sec-grid{grid-template-columns:1fr}
+    .sec{padding:68px 0}
+    .hero{padding-top:52px}
+    h1{font-size:34px}
+    .hero-sub{font-size:15px}
+    .hero-cta .btn{flex:1 1 100%}
+    .strip-items{gap:8px}
+    .compare{border-radius:12px}
+  }
+  @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- 导航 -->
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span class="brand-mark">应</span>
+      <span>智能应标</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#capability">核心能力</a>
+      <a href="#flow">如何工作</a>
+      <a href="#compare">差异对比</a>
+      <a href="#security">安全与交付</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="nav-login" href="#">登录</a>
+      <a class="btn btn-blue" href="#demo">预约演示</a>
+    </div>
+  </div>
+</header>
+
+<!-- S1 Hero -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <span class="eyebrow"><i></i>面向政企投标团队 · 计划驱动编写</span>
+    <h1>让每一个<span class="hl">评分点</span>，<br />都有对应的答案。</h1>
+    <p class="hero-sub">
+      读取招标文件与评分办法，拆出评分点和技术条款；每一章先给出可执行的编写计划，主编、文字、图片、表格四个角色并行落稿；
+      系统自己补引用、补依据、单节重写——只把材料与口径留给你；最后按评分点质检、带风险导出 Word。
+    </p>
+    <div class="hero-cta">
+      <a class="btn btn-blue" href="#demo">预约 30 分钟演示 →</a>
+      <a class="btn btn-ghost" href="#flow">看 3 分钟怎么跑通一标</a>
+    </div>
+    <div class="hero-trust">
+      <span>✓ 计划驱动，不是标题扩写</span>
+      <span>✓ 待办只留人能给的</span>
+      <span>✓ 引用可回溯原文</span>
+      <span>✓ Word 原生交付</span>
+    </div>
+
+    <div class="shot-wrap">
+      <div class="window">
+        <div class="window-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="url">智能应标 / 应答编写 · 正文与待办</span>
+        </div>
+        <img src="/assets/landing/todo-v3b.png" alt="应答编写工作台：正文、对比表与右侧待办" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- S2 行业条 -->
+<div class="strip">
+  <div class="wrap">
+    <span class="strip-label">已在这样的投标场景里跑通</span>
+    <div class="strip-items">
+      <span class="chip">政企信息化</span>
+      <span class="chip">能源 · 电力</span>
+      <span class="chip">金融</span>
+      <span class="chip">医疗</span>
+      <span class="chip">交通</span>
+      <span class="chip">技术分占比高</span>
+      <span class="chip">标包多</span>
+      <span class="chip">评分办法细</span>
+    </div>
+  </div>
+</div>
+
+<!-- S3 问题 -->
+<section class="sec">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">问题不在写手</span>
+      <h2>方案写了 300 页，<br />评分表上还是漏了 6 分。</h2>
+      <p class="lead">投标不是写作比赛，是按得分口径组织证据的比赛。读标、排计划、找素材、逐条对评分表——每一步都靠人脑记住，漏项就发生在交接处。</p>
+    </div>
+    <div class="grid-4">
+      <div class="pain">
+        <span class="idx">01</span>
+        <h3>读标靠人</h3>
+        <p>评分办法上百条，拆解口径因人而异，漏项往往到评审阶段才被发现。</p>
+      </div>
+      <div class="pain">
+        <span class="idx">02</span>
+        <h3>计划靠拍脑袋</h3>
+        <p>每章写什么、交付几页、要几个要点，全装在负责人脑子里，写手只能猜。</p>
+      </div>
+      <div class="pain">
+        <span class="idx">03</span>
+        <h3>素材靠翻</h3>
+        <p>业绩、资质、数据散在共享盘，写完才发现该引用的没引用，引用过的不敢保证真。</p>
+      </div>
+      <div class="pain">
+        <span class="idx">04</span>
+        <h3>返工靠感觉</h3>
+        <p>缺什么、补没补上，只能再翻一遍评分表；改完也不知道这分拿没拿到。</p>
+      </div>
+    </div>
+    <a class="link-more" href="#capability">这不是写手能力问题，是缺一套按得分口径的作业系统 ↓</a>
+  </div>
+</section>
+
+<!-- S4 能力 -->
+<section class="sec" id="capability" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">核心能力</span>
+      <h2>把评分办法，变成可执行的作业路线。</h2>
+      <p class="lead">产品现在的做法是：先计划、再落稿、只把只有人能给的事留给你。下面四张图都是最新版界面。</p>
+    </div>
+    <div class="cap-grid">
+      <article class="cap">
+        <div class="cap-body">
+          <span class="cap-idx">01</span>
+          <div>
+            <h3>计划即入口</h3>
+            <p>每章先给出一份可执行的编写计划：写给谁、写什么、交付文字/表格/图示、各多少字。AI 严格按计划写，不满意对单节重新给要求。</p>
+          </div>
+        </div>
+        <div class="cap-shot"><img src="/assets/landing/plan-outline.png" alt="本章计划：逐节要点、交付物与字数预算" /></div>
+      </article>
+      <article class="cap">
+        <div class="cap-body">
+          <span class="cap-idx">02</span>
+          <div>
+            <h3>素材按节绑定</h3>
+            <p>素材库分三个页签：素材、我的文件、联网来源。计划阶段就能按节挑选，缺哪类材料直接标出来，而不是写完才发现。</p>
+          </div>
+        </div>
+        <div class="cap-shot"><img src="/assets/landing/materials-v321.png" alt="素材页签：素材缺口与来源" /></div>
+      </article>
+      <article class="cap">
+        <div class="cap-body">
+          <span class="cap-idx">03</span>
+          <div>
+            <h3>四个角色并行</h3>
+            <p>主编定结构、文字写正文、图片与表格同时产出；按节落稿、可单节重写，图表不用等正文写完。</p>
+          </div>
+        </div>
+        <div class="cap-shot"><img src="/assets/landing/agent-bar-4.png" alt="主编 / 文字 / 图片 / 表格 四角色并行" /></div>
+      </article>
+      <article class="cap">
+        <div class="cap-body">
+          <span class="cap-idx">04</span>
+          <div>
+            <h3>待办只留人能给的</h3>
+            <p>你要给的（材料 / 口径）、系统去挖的（检索、引用核对、自动重写）、建议优化——分开列清楚，系统能做的不用你点。</p>
+          </div>
+        </div>
+        <div class="cap-shot"><img src="/assets/landing/project-todo.png" alt="待办三区：你要给的、要你拍板的、系统去挖的" /></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- S5 流程 -->
+<section class="sec flow" id="flow">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">如何工作</span>
+      <h2>四阶段工作台，五步走到交付。</h2>
+      <p class="lead">项目准备完进入标包工作空间：解析依据 → 应答策划 → 应答编写 → 评审与交付。每一阶段都有明确产物，人只在必须由人决定的地方出现。</p>
+    </div>
+    <div class="flow-grid">
+      <div class="steps" id="steps">
+        <button class="step on" data-i="1"><span class="step-n">01</span><span><span class="step-t">项目准备</span><span class="step-d">上传招标文件、技术规范书与素材，识别并确认标包</span></span></button>
+        <button class="step" data-i="2"><span class="step-n">02</span><span><span class="step-t">解析依据</span><span class="step-d">拆评分点与技术条款，记录分值、得分口径、否决项</span></span></button>
+        <button class="step" data-i="3"><span class="step-n">03</span><span><span class="step-t">应答策划</span><span class="step-d">目录承载评分点，逐章生成编写计划</span></span></button>
+        <button class="step" data-i="4"><span class="step-n">04</span><span><span class="step-t">应答编写</span><span class="step-d">四角色并行落稿，缺失项进待办</span></span></button>
+        <button class="step" data-i="5"><span class="step-n">05</span><span><span class="step-t">评审与交付</span><span class="step-d">按评分点质检，只查阻塞项，导出 Word</span></span></button>
+      </div>
+      <div class="stage-panel">
+        <div class="stage-head">
+          <div class="sh-l">
+            <span class="stage-no" id="stageNo">01 / 05</span>
+            <h3 id="stageTitle">项目准备</h3>
+          </div>
+          <span class="chip" id="stageBadge">标包确认</span>
+        </div>
+        <div class="stage-body">
+          <div class="stage-cell">
+            <div class="cell-label">本阶段产物</div>
+            <ul class="out-list" id="stageOut"></ul>
+          </div>
+          <div class="stage-cell">
+            <div class="cell-label">需要人做的事</div>
+            <div class="human-tag" id="stageHuman"></div>
+          </div>
+        </div>
+        <div class="stage-foot">
+          <span style="font-family:var(--mono);font-size:11px;color:#94A3B8">NOTE</span>
+          <span id="stageNote">这一步决定后面所有产物的边界，标包错了就全错。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- S6 对比 -->
+<section class="sec" id="compare">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">差异对比</span>
+      <h2>通用写作工具，回答不了“这页为什么写”。</h2>
+      <p class="lead">同样是“生成一段文字”，有的按标题扩写，有的按计划和得分口径举证。差别不在模型，在有没有评分点和编写计划这两个对象。</p>
+    </div>
+    <div class="compare">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>传统人工</th>
+            <th>通用 AI 写作</th>
+            <th class="ours">智能应标</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th>目录依据</th><td>经验 + 范本，易漂移</td><td>按标题扩写</td><td class="ours">评分点 + 技术条款映射</td></tr>
+          <tr><th>写作输入</th><td>负责人口头分工</td><td>一句 prompt</td><td class="ours">逐章编写计划（要点 / 交付物 / 字数）</td></tr>
+          <tr><th>素材使用</th><td>人工翻找，凭记忆引用</td><td>不引用，容易编造</td><td class="ours"><span class="yes">按节绑定，来源可回看原文</span></td></tr>
+          <tr><th>收口方式</th><td>逐条翻评分表</td><td>润色文字</td><td class="ours">待办三区：你给材料、系统补依据</td></tr>
+          <tr><th>可追溯性</th><td>Excel + 记忆</td><td><span class="no">无</span></td><td class="ours"><span class="yes">评分点 → 章节 → 素材 全链</span></td></tr>
+          <tr><th>交付</th><td>Word，人工合稿</td><td>复制粘贴</td><td class="ours">按评分点质检、带风险导出 Word</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- S7 可追溯 -->
+<section class="sec trace">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">可追溯 · 人机分工</span>
+      <h2>每一页正文，都能回答“凭什么这么写”。</h2>
+      <p class="lead">内容不是凭空生成：从评分点出发、按编写计划落笔、用素材举证、被质检收敛。人的工作也被收窄成三件必须人来做的事。</p>
+    </div>
+    <div class="chain">
+      <div class="chain-card">
+        <span class="tag">评分点</span>
+        <h4>项目重难点分析</h4>
+        <p>分值 8 分 · 得分口径：重点分析 / 难点分析 / 解决措施</p>
+        <div class="val num">8 <span style="font-size:13px;color:#8FA6C2">分</span></div>
+      </div>
+      <div class="chain-arrow">→</div>
+      <div class="chain-card">
+        <span class="tag">章节 · 编写计划</span>
+        <h4>3.4.2 自主可控要求</h4>
+        <p>计划 12 页 / 8 节；每节写明要点、交付文字与图表、字数预算</p>
+        <div class="val num">8 <span style="font-size:13px;color:#8FA6C2">节 · 8/8 已写</span></div>
+      </div>
+      <div class="chain-arrow">→</div>
+      <div class="chain-card">
+        <span class="tag">素材 · 引用</span>
+        <h4>同类项目业绩 · 电力行业</h4>
+        <p>引用 2 份业绩 + 1 份资质；正文标注来源，可回看原文片段</p>
+        <div class="val num">2 <span style="font-size:13px;color:#8FA6C2">处引用</span></div>
+      </div>
+    </div>
+
+    <div class="divide">
+      <div class="divide-box">
+        <div class="dl">你只做三件事</div>
+        <ul>
+          <li><i>01</i><span><b style="color:#fff">定范围</b>：确认标包与评分点，决定这标怎么写</span></li>
+          <li><i>02</i><span><b style="color:#fff">定口径</b>：同一句话的 2–3 种说法里选一种</span></li>
+          <li><i>03</i><span><b style="color:#fff">给材料</b>：上传业绩、资质、内部数据</span></li>
+        </ul>
+      </div>
+      <div class="divide-box bright">
+        <div class="dl">其余系统完成</div>
+        <ul>
+          <li><i>→</i><span>按计划落稿，图表一起产出</span></li>
+          <li><i>→</i><span>检索补依据、补引用来源、核对条款</span></li>
+          <li><i>→</i><span>写完自动质检、缺口自动重写、单节可重做</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- S8 安全 -->
+<section class="sec" id="security">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">安全与交付</span>
+      <h2>投标资料出不了公司的门，才敢用。</h2>
+      <p class="lead">招标文件、企业业绩、报价策略都是敏感资产。部署方式、数据留痕、交付格式，三条都要说清楚。</p>
+    </div>
+    <div class="sec-grid">
+      <div class="safe">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.6"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3z"/></svg>
+        <h3>私有化部署</h3>
+        <p>支持部署在企业自有环境，招标文件与素材不出域。</p>
+      </div>
+      <div class="safe">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.6"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+        <h3>全程留痕</h3>
+        <p>编写计划、待办处理、质检结论与修订记录都可回看，责任可追溯。</p>
+      </div>
+      <div class="safe">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="M10 12h5M10 16h5"/></svg>
+        <h3>Word 原生交付</h3>
+        <p>导出标准 docx，直接进标书排版流程，不用二次搬运。</p>
+      </div>
+      <div class="safe">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.6"><path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/></svg>
+        <h3>中断可恢复</h3>
+        <p>长任务离开页面仍可继续，回来接着写，不用从头再来。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- S10 最终 CTA -->
+<section class="final" id="demo">
+  <div class="wrap final-grid">
+    <div>
+      <span class="kicker">下一步</span>
+      <h2>先让一次投标，<br />跑通这条路。</h2>
+      <p class="lead">30 分钟演示，用你手上的一个真实标包走一遍：拆评分点、对目录、看编写计划与待办缺口。不合适也没关系，你会带走一份评分点自查清单。</p>
+      <div class="faq">
+        <details open>
+          <summary>生成的正文能直接用吗？</summary>
+          <p>产品按编写计划直接落稿，图表一起产出；材料与口径缺失列进待办。不满意可以对单节重新给要求重写，而不是从头再来。</p>
+        </details>
+        <details>
+          <summary>编写计划可以改吗？</summary>
+          <p>可以。改计划后按新计划重写该章或该节；已有正文不会被整章推倒。</p>
+        </details>
+        <details>
+          <summary>企业素材会不会泄露？</summary>
+          <p>支持私有化部署与权限控制；演示时会按你们的合规要求说明数据流向与留痕方式。</p>
+        </details>
+        <details>
+          <summary>支持哪些文件格式？</summary>
+          <p>招标文件与技术规范书支持 PDF / DOCX；导出为标准 Word 文档。</p>
+        </details>
+        <details>
+          <summary>怎么计费？</summary>
+          <p>按项目或席位计费，具体方案在演示时结合投标量给出。</p>
+        </details>
+      </div>
+    </div>
+    <form class="form" id="lead-form" novalidate>
+      <h3>预约 30 分钟演示</h3>
+      <p class="hint">填写后 1 个工作日内联系你，用真实标包演示。</p>
+      <div class="field"><label for="lf-name">姓名</label><input id="lf-name" name="name" maxlength="64" placeholder="怎么称呼你" /></div>
+      <div class="field"><label for="lf-company">公司</label><input id="lf-company" name="company" maxlength="64" placeholder="公司 / 单位名称" /></div>
+      <div class="field"><label for="lf-contact">手机或微信</label><input id="lf-contact" name="contact" maxlength="64" placeholder="便于联系的号码" /></div>
+      <div class="field"><label for="lf-topic">你更关心</label>
+        <select id="lf-topic" name="topic">
+          <option>评分点拆解与目录</option>
+          <option>编写计划与按节编写</option>
+          <option>素材引用与举证</option>
+          <option>待办与质检交付</option>
+          <option>私有化部署与安全</option>
+        </select>
+      </div>
+      <input id="lf-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+      <button class="btn btn-blue" type="submit">提交预约</button>
+      <p class="fine" id="lf-status">我们不会把你的信息用于其他用途。</p>
+    </form>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand"><span class="brand-mark">应</span> 智能应标</div>
+        <p style="margin:12px 0 0;max-width:34em;line-height:1.7;color:#7C90AC">
+          计划驱动的投标应答作业系统。从评分点拆解到按计划成稿，让投标团队按得分口径作业。
+        </p>
+      </div>
+      <div class="foot-links">
+        <a href="#capability">核心能力</a>
+        <a href="#flow">如何工作</a>
+        <a href="#compare">差异对比</a>
+        <a href="#security">安全与交付</a>
+        <a href="#demo">预约演示</a>
+      </div>
+    </div>
+    <div class="copyright">
+      © 2026 智能应标 · 保留所有权利　|　备案号待补　|　隐私政策　|　联系：contact@example.com
+    </div>
+  </div>
+</footer>
+
+<script>
+  // 五步流程：切换阶段产物与人工动作
+  const stages = {
+    1:{no:"01 / 05",title:"项目准备",badge:"标包确认",
+       out:["已确认的标包与文件范围","招标文件 / 技术规范书 / 企业素材清单","按标包隔离的工作上下文"],
+       human:"<b>确认标包</b>：识别结果对不对、这个标段要投哪个包。",
+       note:"这一步决定后面所有产物的边界，标包错了就全错。"},
+    2:{no:"02 / 05",title:"解析依据",badge:"评分点确认",
+       out:["评分点清单：分值、得分口径、否决项","技术规范要求与条款","评分点 → 章节 映射矩阵"],
+       human:"<b>确认评分点</b>：拆得全不全、分值对不对、口径怎么理解。",
+       note:"评分点是整条链的锚，后面目录、计划、质检都对齐它。"},
+    3:{no:"03 / 05",title:"应答策划",badge:"目录与计划",
+       out:["应答目录：章节承载评分点","逐章编写计划：要点 / 交付物 / 字数","章节类型与写法要求"],
+       human:"<b>确认目录与计划</b>：结构合不合理、这一章交付什么。",
+       note:"计划是唯一入口——写出来的东西，按计划验收。"},
+    4:{no:"04 / 05",title:"应答编写",badge:"四角色并行",
+       out:["可交付正文（按节落稿）","表格与图示（与正文一起产出）","待办：你要给的材料 / 要你定的口径"],
+       human:"<b>给材料、定口径</b>：其余检索、引用、重写由系统完成。",
+       note:"单节可重写；不满意给要求重做，不用整章推倒。"},
+    5:{no:"05 / 05",title:"评审与交付",badge:"质检与导出",
+       out:["按评分点的质检结论与失分点","阻塞项清单（只查会卡交付的）","Word 文档：章节树 + 引用清单"],
+       human:"<b>最终确认</b>：接受风险、签字交付。",
+       note:"带风险导出：改了什么、缺什么，交付前一次看清。"}
+  };
+  const steps = document.querySelectorAll('.step');
+  const setStage = (i) => {
+    const s = stages[i];
+    document.getElementById('stageNo').textContent = s.no;
+    document.getElementById('stageTitle').textContent = s.title;
+    document.getElementById('stageBadge').textContent = s.badge;
+    document.getElementById('stageOut').innerHTML = s.out.map(t=>'<li>'+t+'</li>').join('');
+    document.getElementById('stageHuman').innerHTML = s.human;
+    document.getElementById('stageNote').textContent = s.note;
+  };
+  steps.forEach(btn => {
+    btn.addEventListener('click', () => {
+      steps.forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      setStage(btn.dataset.i);
+    });
+  });
+  setStage(1);
+</script>
+
+<script>
+(function () {
+  var form = document.getElementById('lead-form');
+  if (!form) return;
+  var q = new URLSearchParams(location.search);
+  var status = document.getElementById('lf-status');
+  function val(id) { var el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
+  function fail(msg) { if (!status) return; status.textContent = msg; status.style.color = '#DC2626'; }
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var payload = {
+      name: val('lf-name'), company: val('lf-company'), contact: val('lf-contact'),
+      topic: val('lf-topic'),
+      utm_source: q.get('utm_source') || '', utm_medium: q.get('utm_medium') || '',
+      utm_campaign: q.get('utm_campaign') || '', utm_content: q.get('utm_content') || '',
+      referer: document.referrer || '', website: val('lf-website')
+    };
+    if (!payload.name || !payload.company || payload.contact.length < 5) {
+      fail('请填写姓名、公司，以及至少 5 位的联系方式。'); return;
+    }
+    var btn = form.querySelector('button[type=submit]');
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = '提交中…';
+    try {
+      var res = await fetch('/api/leads', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        form.innerHTML = '<h3>已收到</h3><p class="hint">我们会在 1 个工作日内联系你，用你真实的标包演示。</p>';
+        return;
+      }
+      var data = null; try { data = await res.json(); } catch (_) {}
+      fail((data && data.detail) || '提交失败，请稍后再试。');
+    } catch (err) {
+      fail('网络异常，请稍后再试。');
+    }
+    btn.disabled = false; btn.textContent = label;
+  });
+})();
+</script>
+</body>
+</html>

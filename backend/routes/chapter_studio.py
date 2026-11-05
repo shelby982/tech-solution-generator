@@ -1036,13 +1036,17 @@ async def project_todo(project_id: int, thread_id: str = ''):
     }
 
 
+class ReviewRunBody(BaseModel):
+    tier: str = "auto"          # auto | fast | full（v3 分层调度）
+
+
 @router.post('/blocks/{block_id}/studio/review')
-async def review_chapter(block_id: int):
-    """对本章跑"技术 + 合规"双评审（编写 ↔ 评审结合）。"""
+async def review_chapter(block_id: int, body: ReviewRunBody | None = None):
+    """章节评审（v3 分层）：auto 先跑 L0 规则，有硬伤走快评（单角色），否则完整双评审。"""
     from services.chapter_review import review_block
 
     try:
-        result = await review_block(block_id)
+        result = await review_block(block_id, tier=(body.tier if body else "auto"))
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     return result
@@ -1102,3 +1106,59 @@ async def chapter_review_issues(block_id: int):
 
     async with get_db() as db:
         return await list_issues(db, block_id)
+
+
+@router.get('/blocks/{block_id}/studio/review/precheck')
+async def review_precheck(block_id: int):
+    """L0 规则预检（零成本、秒级，不发 LLM）。"""
+    from db import get_db
+    from services.block_store import get_block
+    from services.review_precheck import precheck
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    return precheck(str(block.get("content") or ""))
+
+
+@router.get('/blocks/{block_id}/delivery-verdict')
+async def delivery_verdict(block_id: int):
+    """统一交付判断（一个数字 + 三条必办）——把规则分/评审/L0/否决风险收成一条结论。"""
+    from db import get_db
+    from services.block_store import get_block
+    from services.chapter_review import load_review
+    from services.delivery_verdict import build_delivery_verdict
+    from services.review_precheck import precheck
+    from services.writing_plans import chapter_plan
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        project_id = int(block.get("project_id") or 0)
+        thread_id = str(block.get("run_thread_id") or "")
+
+    plan = None
+    try:
+        plan = await chapter_plan(project_id, thread_id, block_id)
+    except Exception:
+        plan = None
+    summary = (plan or {}).get("summary") or {}
+    tasks = ((plan or {}).get("delivery_tasks") or {})
+    need_user = tasks.get("need_user") or []
+    rule_score = int(summary.get("readiness_rule") or summary.get("readiness") or 100)
+    review = await load_review(block_id)
+    pre = precheck(str(block.get("content") or ""))
+
+    fatal = []
+    try:
+        from services.scoring_verdict import collect_fatal_risks
+        if review:
+            fatal = collect_fatal_risks([{**item, "block_id": str(block.get("block_id") or "")}
+                                         for item in (review.get("issues") or [])])
+    except Exception:
+        fatal = []
+
+    return build_delivery_verdict(rule_score=rule_score, review=review, precheck=pre,
+                                  fatal_risks=fatal, need_user=need_user)
