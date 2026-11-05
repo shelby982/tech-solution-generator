@@ -105,9 +105,9 @@
 
 ### 自动化
 
-- [ ] 后端全量：`./.venv/bin/python -m pytest -q` 通过；
-- [ ] 前端：`node --test tests/frontend/*.test.mjs` 通过；
-- [ ] 新增测试覆盖：readiness 状态、节级写、证据使用、按节映射、0 证据显式写法、上传/选库 need 绑定；
+- [x] 后端全量：`./.venv/bin/python -m pytest -q` 通过（1110 passed）；
+- [x] 前端：`node --test tests/frontend/*.test.mjs` 通过（fail 0）；
+- [x] 新增测试覆盖：readiness 状态、节级写、证据使用、按节映射、0 证据显式写法、上传/选库 need 绑定；
 - [ ] 文档/接口变更同步。
 
 ### 行为验收（人工/接口）

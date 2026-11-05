@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v465';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v465';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v466';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v466';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -608,9 +608,54 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let chapterReview = null;
   let reviewHistory = [];
   let reviewDelta = null;
-  let reviewIssueStates = {};      // fingerprint → status（open/fixed/verified）
+  let reviewIssueStates = {};      // 归一化问题文本 → status（open/fixed/verified）
+  let reviewIssueEvidence = {};    // 归一化问题文本 → evidence（原文/口径）
   let precheckResult = null;       // L0 规则预检
   let deliveryVerdict = null;      // 统一交付判断
+  let rubricResult = null;         // 章节达标线
+  let practiceCandidates = [];     // 评审写法候选
+
+  /** 达标线 + 写法候选（评审 v4） */
+  async function loadRubricAndPractices() {
+    if (!active) return;
+    try {
+      const [rubric, practices] = await Promise.all([
+        fetch(`/api/blocks/${active.id}/studio/review/rubric`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`/api/blocks/${active.id}/studio/practice-candidates`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      rubricResult = rubric;
+      practiceCandidates = practices?.candidates || [];
+    } catch (error) { rubricResult = null; practiceCandidates = []; }
+  }
+
+  /** 达标线卡片：按章类型给出满分要素 + 逐条核对 */
+  function rubricHtml() {
+    const rubric = rubricResult;
+    if (!rubric || !(rubric.items || []).length) return '';
+    const met = rubric.met_count || 0;
+    const total = rubric.total || 0;
+    return `<details class="cs-rubric" ${met < total ? 'open' : ''}>
+      <summary><b>达标线 ${met}/${total}</b>
+        <span class="cs-dim">${esc(rubric.chapter_type === 'generic' ? '通用清单' : (rubric.chapter_type || '') + '类')} · 加权 ${rubric.ratio || 0}%</span></summary>
+      ${rubric.items.map((item) => `<div class="cs-rubric-row ${item.met ? 'is-met' : 'is-miss'}">
+        <span class="cs-rubric-mark">${item.met ? '✓' : '✗'}</span>
+        <div><p><b>${esc(item.name)}</b> ${esc(item.need)}</p>
+          <small>${item.met ? esc(String(item.evidence || '已满足')) : `建议：${esc(item.hint || '')}`}</small></div>
+      </div>`).join('')}
+    </details>`;
+  }
+
+  /** 写法候选：评审 strengths → 采用为写法 */
+  function practiceCandidatesHtml() {
+    if (!practiceCandidates.length) return '';
+    return `<details class="cs-practice">
+      <summary><b>评审建议写法 ${practiceCandidates.length} 条</b> <span class="cs-dim">采用后写入本节写法，下次生成会遵循</span></summary>
+      ${practiceCandidates.map((item, index) => `<div class="cs-practice-row">
+        <p>${esc(String(item.text || '').slice(0, 120))}</p>
+        <button type="button" class="cs-gate-act" data-practice-adopt="${index}">采用为写法</button>
+      </div>`).join('')}
+    </details>`;
+  }
 
   /** L0 规则预检 + 统一交付判断（v3） */
   async function loadPrecheckAndVerdict() {
@@ -683,7 +728,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const resp = await fetch(`/api/blocks/${active.id}/studio/review/issues`, { cache: 'no-store' });
       const data = resp.ok ? await resp.json() : null;
       reviewIssueStates = {};
-      (data?.items || []).forEach((item) => { reviewIssueStates[normalizeIssuePoint(item.point)] = item.status; });
+      reviewIssueEvidence = {};
+      (data?.items || []).forEach((item) => {
+        const key = normalizeIssuePoint(item.point);
+        reviewIssueStates[key] = item.status;
+        if (item.evidence) reviewIssueEvidence[key] = item.evidence;
+      });
     } catch (error) { reviewIssueStates = {}; }
   }
 
@@ -719,6 +769,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const issues = review.issues || [];
     return `<div class="cs-review">
       ${precheckHtml()}
+      ${rubricHtml()}
       <div class="cs-review-head">
         <b>评审 ${review.score}</b>
         ${reviewDelta === null ? '' : `<span class="cs-review-delta ${reviewDelta >= 0 ? 'is-up' : 'is-down'}">${reviewDelta >= 0 ? '↑' : '↓'} ${Math.abs(reviewDelta)}</span>`}
@@ -760,10 +811,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <p>${esc(String(issue.point || '').slice(0, 120))}</p>
             ${issue.suggestion ? `<small>建议：${esc(String(issue.suggestion).slice(0, 90))}</small>` : ''}
             ${issue.needs_material ? '<small class="cs-review-mat">需补料</small>' : ''}
+            ${(() => {
+              const ev = reviewIssueEvidence[normalizeIssuePoint(issue.point)] || null;
+              if (!ev) return '';
+              if (!ev.locatable) return '<small class="cs-review-ev is-miss">依据：无法定位到原文</small>';
+              return `<small class="cs-review-ev">依据：${esc(String(ev.quote || '').slice(0, 70))}${ev.criterion ? ` · 口径「${esc(String(ev.criterion).slice(0, 30))}」` : ''}</small>`;
+            })()}
           </div>
           ${issue.needs_material ? '' : `<button type="button" class="cs-todo-ignore" data-review-rewrite="${index}">按此重写</button>`}
         </div>`).join('')}
       </details>` : '<p class="cs-todo-ok">✓ 评审没有发现问题</p>'}
+      ${practiceCandidatesHtml()}
     </div>`;
   }
 
@@ -3440,7 +3498,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const resp = await fetch(`/api/projects/${projectId}/studio/chapter-writes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_id: threadId, block_id: String(active.block_id || ''), settings_override: {},
-                              force_rewrite: !!options.forceRewrite }),
+                              force_rewrite: !!options.forceRewrite, generic: !!options.generic }),
         signal: AbortSignal.timeout(30000),
       });
       const data = await resp.json().catch(() => ({}));
@@ -3663,7 +3721,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 流式写一节：切到预览 → 高亮该节 → 逐字落入 → 完成后回正文 */
-  async function streamWriteSection(blockIdNum, sec, onProgress, extraPrompt = '', role = 'text') {
+  async function streamWriteSection(blockIdNum, sec, onProgress, extraPrompt = '', role = 'text', generic = false) {
     const base = String(editor.value || '');
     let acc = '';
     paintView(true);                       // 预览态（可高亮）
@@ -3683,6 +3741,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       prompt: String(extraPrompt || ''),
       role: String(role || 'text'),
       model: modelChoice.get(role === 'text' ? 'text' : role) || '',
+      generic: generic ? 'true' : 'false',
     });
     try {
       const finalContent = await new Promise((resolve, reject) => {
@@ -3697,9 +3756,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           source.close();
           let data = {};
           try { data = JSON.parse(event.data); } catch (e) { /* ignore */ }
+          lastSectionWrite = data || null;
           resolve(data.content || mergeSectionText(base, sec.title, acc));
         });
-        source.addEventListener('error', () => { source.close(); reject(new Error('推流中断，请重试')); });
+        source.addEventListener('error', (event) => {
+          source.close();
+          let data = {};
+          try { data = JSON.parse(event.data || '{}'); } catch (e) { /* ignore */ }
+          reject(new Error(data.message || '推流中断，请重试'));
+        });
       });
       if (typeof finalContent === 'string') {
         editor.value = finalContent;
@@ -3722,6 +3787,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let writingModels = {};          // 服务端生效值：{role: used}
   let lastSections = [];            // 最近一次作业的节级留痕（模型/字数/耗时）
   let currentJobId = '';           // 当前章节级作业（停止/重试用）
+  let lastSectionWrite = null;     // 最近一次节级写作：used_evidence / coverage
 
   /** 读服务端设置（章节覆盖 + 生效值） */
   async function loadWritingModels() {
@@ -4107,7 +4173,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const resp = await fetch(`/api/blocks/${active.id}/studio/review`, { method: 'POST', signal: AbortSignal.timeout(300000) });
       if (!resp.ok) { status(`${label}；复评审失败，可手动点「重新评审」`); return; }
       const data = await resp.json().catch(() => ({}));
-      await loadChapterReview(); await loadPrecheckAndVerdict(); await loadBasis(active.block_id); paintAside();
+      await loadChapterReview(); await loadPrecheckAndVerdict(); await loadRubricAndPractices(); await loadBasis(active.block_id); paintAside();
       const delta = reviewDelta;
       const trend = delta === null || delta === undefined ? '' : (delta >= 0 ? `（↑${delta}）` : `（↓${Math.abs(delta)}）`);
       status(`${label}；复评审 ${data.score ?? '-'} 分${trend}`);
@@ -4972,9 +5038,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           await json(`/api/blocks/${block.id}/studio/materials`, {method: 'POST', body: form});
         } catch (error) { status(`${file.name}：${error.message}`); return; }
       }
-      pendingEvidenceNeed = null;
       if (active.id === block.id) { await loadMaterialLibrary(); paintAside(); }
-      status('已上传；解析完成后从素材库选片段，采用到对应要求。');
+      if (pendingEvidenceNeed) {
+        status('已上传；解析完成后在素材库选片段，采用到当前要求。');
+        await openMaterialAdminDialog();
+      } else {
+        status('已上传；解析完成后从素材库选片段，采用到对应要求。');
+      }
     };
   };
   /** 工具栏「编写计划」：只在当前章属于某个一级目录时出现（动作与树无关，树只看结构）。 */
@@ -5015,6 +5085,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       void autoCleanChapter();
       void loadChapterReview().then(() => paintAside());
       void loadPrecheckAndVerdict().then(() => paintAside());
+      void loadRubricAndPractices().then(() => paintAside());
       void loadMaterialNeeds().then(() => paintAside());
       void loadMaterialLibrary().then(() => paintAside());
       let local;try{local=JSON.parse(sessionStorage.getItem(draftKey(block))||'null');}catch{local=null;}
@@ -5121,21 +5192,43 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(secBtn && active){
       const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
       if(!sec) return;
-      const doWrite = async (prompt) => {
+      const doWrite = async (prompt, generic=false) => {
         const label0=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
         try{
           status(`正在编写「${sec.title}」…（正文预览区高亮该节）`);
           secBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`),prompt,'rewrite');
+          await streamWriteSection(active.id,sec,(chars)=>status(`正在编写「${sec.title}」… 已 ${chars} 字`),prompt,'rewrite',generic);
           const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
           if(fresh.block)editor.value=fresh.block.content||'';
-          status(`已${label0.startsWith('重写')?'重写':'编写'}「${sec.title}」；记得保存`);
+          const meta=lastSectionWrite||{};
+          const used=(meta.used_evidence||[]).length;
+          const cov=meta.coverage_after||{};
+          status(`已${label0.startsWith('重写')?'重写':'编写'}「${sec.title}」；使用证据 ${used} 条${cov.total?` · 覆盖 ${cov.covered||0}/${cov.total}`:''}${meta.generic?'（概括写法）':''}`);
           paintAside();
         }catch(error){status(error.message);}
         secBtn.disabled=false; secBtn.textContent=label0;
       };
       if(secBtn.textContent.trim()==='重写'){ openRewriteDialog(sec, doWrite); }
-      else { doWrite(''); }
+      else {
+        try {
+          const resp = await fetch(`/api/blocks/${active.id}/writing-readiness?threadId=${encodeURIComponent(threadId)}&section=${encodeURIComponent(sec.title)}`, {cache:'no-store'});
+          const ready = resp.ok ? await resp.json() : null;
+          if (ready?.status === 'no_outline') {
+            status('还没有章节大纲：请先在「本章计划」生成大纲');
+            await openChapterPlan(active.block_id);
+            return;
+          }
+          if (ready?.status === 'no_evidence') {
+            if (!globalThis.confirm('本节没有证据。仍按「概括写法」生成？\n\n建议先补证据，生成后也可补证据再重写。')) return;
+            await doWrite('', true);
+            return;
+          }
+          if (ready?.status === 'partial') {
+            status(`本节证据覆盖 ${ready.covered}/${ready.needs_total}，继续写会使用现有证据`);
+          }
+          await doWrite('');
+        } catch (error) { status(`写前检查失败：${error.message}`); }
+      }
       return;
     }
     if(event.target.closest('[data-job-stop]') && currentJobId){
@@ -5263,6 +5356,20 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       status(autoReviewBox.checked?'已开启：改完自动复评审':'已关闭自动复评审');
       return;
     }
+    const adoptBtn=event.target.closest('[data-practice-adopt]');
+    if(adoptBtn){
+      const candidate=practiceCandidates[Number(adoptBtn.dataset.practiceAdopt||0)];
+      if(!candidate){status('候选已失效，请重新评审');return;}
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/studio/practice-candidates/apply`,{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({section:'', text:candidate.text})});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(data.detail||`HTTP ${resp.status}`);
+        status(`已写入整章写法（${data.section}）：下次生成本章会遵循`);
+      }catch(error){status(`采用失败：${error.message}`);}
+      return;
+    }
     if(event.target.closest('[data-need-upload]')){
       await openMaterialAdminDialog();
       return;
@@ -5283,7 +5390,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const resp=await fetch(`/api/blocks/${active.id}/studio/review`,{method:'POST',signal:AbortSignal.timeout(240000)});
         const data=await resp.json().catch(()=>({}));
         if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
-        await loadChapterReview(); await loadPrecheckAndVerdict(); await loadBasis(active.block_id); paintAside();
+        await loadChapterReview(); await loadPrecheckAndVerdict(); await loadRubricAndPractices(); await loadBasis(active.block_id); paintAside();
         status(`评审完成：${data.score} 分（技术 ${data.tech_score} / 合规 ${data.comp_score}），问题 ${(data.issues||[]).length} 条`);
       }catch(error){status(`评审失败：${error.message}`);}
       finally{btn.disabled=false;}
@@ -5615,8 +5722,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           const outline = plan.outline || [];
           const bodyNow = String(editor.value || '');
           const pending = outline.filter((sec) => sectionWordCount(bodyNow, sec.title) < 20);
-          if (!outline.length) { status('还没有章节大纲：请先在「本章计划」生成大纲'); return; }
+          if (!outline.length) { status('还没有章节大纲：先打开「本章计划」生成大纲'); await openChapterPlan(active.block_id); return; }
           if (!pending.length) { status('整章已按大纲写完；要改某节请用「进度 → 重写」'); return; }
+          let generic = false;
+          try {
+            const r = await fetch(`/api/blocks/${active.id}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {cache:'no-store'});
+            const ready = r.ok ? await r.json() : null;
+            if (ready?.status === 'no_evidence') {
+              if (!globalThis.confirm('本章没有证据覆盖。仍按「概括写法」生成？\n\n建议先在素材页补证据。')) return;
+              generic = true;
+            } else if (ready?.status === 'partial') {
+              status(`本章证据覆盖 ${ready.covered}/${ready.needs_total}，将使用现有证据继续写`);
+            }
+          } catch (error) { /* readiness 失败不阻断旧路径 */ }
           const charts = pending.reduce((sum, sec) => sum + (sec.deliverables || []).filter((d) => d.kind !== 'text').length, 0);
           const calls = pending.length + charts;
           const ok = await confirmChapterWriteCost(pending.length, charts, calls);
@@ -5627,7 +5745,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         }
         const headBtnEarly = globalThis.document.querySelector('[data-action="ai"]');
         const headLabelEarly = headBtnEarly ? headBtnEarly.textContent : '';
-        const engine = await runChapterWriteJob(slot);
+        const engine = await runChapterWriteJob(slot, {generic});
         if (engine.started) {
           if (headBtnEarly && headLabelEarly) headBtnEarly.textContent = headLabelEarly;
           return;

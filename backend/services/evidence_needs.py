@@ -13,6 +13,17 @@ def _need_id(kind: str, key: str) -> str:
     return f"{kind}:{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
 
 
+def _section_ids(section: dict) -> set[str]:
+    ids = []
+    for key in ("requirement_ids", "evidence_need_ids"):
+        value = (section or {}).get(key)
+        if isinstance(value, list):
+            ids.extend(str(x) for x in value if str(x).strip())
+        elif isinstance(value, str):
+            ids.extend(str(x) for x in value.split(",") if str(x).strip())
+    return set(ids)
+
+
 def _is_evidence_text(text: str) -> bool:
     """写作指令/评分档位不是证据需求；只保留需要外部事实支撑的要求。"""
     text = str(text or "")
@@ -77,6 +88,11 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
     section_title = str(section.get("title") or "")
     requirements = await _plan_requirements(block, thread_id)
     specs = await _spec_clauses(block, thread_id, section)
+    wanted = _section_ids(section)
+    if wanted:
+        requirements = [item for item in requirements
+                        if str((item or {}).get("spec_requirement_id") or (item or {}).get("id") or "") in wanted]
+        specs = [item for item in specs if str(item.get("requirement_id") or "") in wanted]
     reviews = await _review_needs(block, section_title)
 
     # 用 requirement id / 文本去重，避免 plan 已带 spec 条款又重复派生
@@ -92,13 +108,14 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
         if dedupe in seen:
             return
         seen.add(dedupe)
+        need_id = _need_id(kind, key)
         needs.append({
-            "need_id": _need_id(kind, key),
+            "need_id": need_id,
             "section": section_title,
             "kind": kind,
             "text": text,
             "source_label": source_label,
-            "requirement_id": requirement_id,
+            "requirement_id": requirement_id or need_id,
             "required": bool(required),
             "reason": reason,
             "query": _query(text, section),

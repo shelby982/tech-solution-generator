@@ -73,3 +73,10 @@ async def test_no_requirements_returns_empty():
         block = dict(await (await db.execute("SELECT * FROM blocks WHERE project_id=?", (pid,))).fetchone())
     needs = await section_evidence_needs(block, {"title": "空节"}, "empty-thread")
     assert needs == []
+
+
+async def test_section_requirement_ids_filter_needs():
+    block = await _seed()
+    needs = await section_evidence_needs(block, {"title": "总体架构", "requirement_ids": ["sr-need"]}, "need-thread")
+    assert needs
+    assert all(item.get("requirement_id") in ("sr-need",) for item in needs)

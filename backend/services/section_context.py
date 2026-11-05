@@ -20,6 +20,18 @@ _REQ_MAX = 8
 _MATERIAL_MAX = 4
 
 
+def section_requirement_ids(section: dict) -> set[str]:
+    """大纲节可显式声明 requirement_ids / evidence_need_ids。"""
+    ids = []
+    for key in ("requirement_ids", "evidence_need_ids"):
+        value = (section or {}).get(key)
+        if isinstance(value, list):
+            ids.extend(str(x) for x in value if str(x).strip())
+        elif isinstance(value, str):
+            ids.extend(str(x) for x in value.split(",") if str(x).strip())
+    return set(ids)
+
+
 def _json_list(value) -> list:
     if isinstance(value, list):
         return value
@@ -83,8 +95,13 @@ async def _load_plan_requirements(db, block: dict, thread_id: str) -> list[dict]
                     if str(item.get("block_id")) == str(block.get("block_id"))), None)
     if not chapter:
         return []
+    wanted = section_requirement_ids(block.get("_section") or {})
     out = []
     for item in (chapter.get("requirements") or [])[:_REQ_MAX]:
+        if wanted:
+            rid = str((item or {}).get("spec_requirement_id") or (item or {}).get("id") or "")
+            if rid not in wanted:
+                continue
         text = str((item or {}).get("text") or "").strip()
         if text:
             out.append({"id": item.get("id") or "", "text": text,
@@ -144,8 +161,11 @@ def _select_spec_for_section(spec: list[dict], section: dict) -> list[dict]:
 async def build_section_context(block: dict, section: dict, thread_id: str = "") -> dict:
     async with get_db() as db:
         spec = await _load_spec_clauses(db, block, thread_id)
+        wanted = section_requirement_ids(section)
+        if wanted:
+            spec = [item for item in spec if str(item.get("requirement_id")) in wanted]
         spec = _select_spec_for_section(spec, section)
-        reqs = await _load_plan_requirements(db, block, thread_id)
+        reqs = await _load_plan_requirements(db, dict(block, _section=section), thread_id)
         package = await _load_package(db, thread_id or str(block.get("run_thread_id") or ""))
         manual = await _load_manual_materials(db, block, str(section.get("title") or ""))
         materials = await _search_materials(db, block, section, spec, reqs)

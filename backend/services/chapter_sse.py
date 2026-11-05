@@ -75,7 +75,7 @@ async def _set_job(job_id: str, **fields) -> None:
 
 
 async def create_job(project_id: int, thread_id: str, block_pk: int, settings_override: dict | None = None,
-                     force_rewrite: bool = False) -> str:
+                     force_rewrite: bool = False, generic: bool = False) -> str:
     """建作业（同 block 只允许一个 queued/running；已存在则复用）。"""
     async with get_db() as db:
         block = await get_block(db, block_pk)
@@ -96,6 +96,7 @@ async def create_job(project_id: int, thread_id: str, block_pk: int, settings_ov
             "base_content": block.get("content") or "",
             "settings_override": settings_override or {},
             "force_rewrite": bool(force_rewrite),
+            "generic": bool(generic),
             "created_at": time.time(),
         }
         await db.execute(
@@ -157,6 +158,7 @@ async def run_job(job_id: str) -> None:
         all_checks: list[dict] = []
         section_records: list[dict] = []
         force_rewrite = bool(snapshot.get("force_rewrite"))
+        generic = bool(snapshot.get("generic"))
         pending = list(outline) if force_rewrite else [
             s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
         total = max(1, len(pending))
@@ -167,6 +169,8 @@ async def run_job(job_id: str) -> None:
                                            "progress": 0})
                 return
             title = str(section.get("title"))
+            section = dict(section)
+            section["generic"] = generic
             await _set_job(job_id, stage=f"正在写：{title}")
             await emit(job_id, "job", {"job_id": job_id, "status": "running", "stage": f"正在写：{title}",
                                        "progress": round(index / total * 100)})
@@ -357,6 +361,7 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
         + _placeholder_hint(section)
+        + (f"【用户选择】本节按概括写法生成：没有可用证据，不要编造具体项目事实；在结论处说明依据待补。\n" if section.get("generic") else "")
         + "硬性要求：如果【本章技术规范条款】存在，正文必须逐条回应；每条都要有\n"
         "「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n"
         + "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"

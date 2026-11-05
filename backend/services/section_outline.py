@@ -79,6 +79,7 @@ def normalize_outline(raw, chapter: dict) -> list[dict]:
             "basis": _normalize_basis(item.get("basis")),
             "how": _normalize_how(item.get("how")),
             "deliverables": _normalize_deliverables(item.get("deliverables"), need, points),
+            "requirement_ids": [str(x) for x in (item.get("requirement_ids") or []) if str(x).strip()][:8],
             "source": "model",
         })
     return sections if len(sections) >= 2 else fallback_outline(chapter)

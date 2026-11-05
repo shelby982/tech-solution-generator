@@ -26,6 +26,7 @@ class WriteBody(BaseModel):
     block_id: str = Field(min_length=1)          # 章节编码（s1.2.1.1）
     settings_override: dict[str, str] = Field(default_factory=dict)
     force_rewrite: bool = False
+    generic: bool = False
 
 
 async def _resolve_block(project_id: int, block_code: str) -> dict:
@@ -92,7 +93,7 @@ async def create_chapter_write(project_id: int, body: WriteBody):
     block = await _resolve_block(project_id, body.block_id)
     try:
         job_id = await chapter_sse.create_job(project_id, body.thread_id, int(block["id"]),
-                                              body.settings_override, body.force_rewrite)
+                                              body.settings_override, body.force_rewrite, body.generic)
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     chapter_sse.start_runner(job_id)

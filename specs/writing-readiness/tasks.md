@@ -2,18 +2,18 @@
 
 - 对应 spec：`specs/writing-readiness/spec.md`
 - 对应 plan：`specs/writing-readiness/plan.md`
-- 状态：待计划评审后执行
+- 状态：已完成（T1–T7）
 - 规则：一次只勾一项；每项完成跑验证命令；失败不得勾选。
 
 ## 任务清单
 
-- [ ] T1 新增 `writing_readiness.py`：状态机（no_outline/no_evidence/partial/ready）+ 测试
-- [ ] T2 新增 readiness API；整章写作入口接前置；无大纲返回 CTA 状态
-- [ ] T3 节级写作 + `generic=true` 显式概括写法 + preflight 测试
-- [ ] T4 写作结果返回 used_evidence/coverage_before/after；前端结果卡
-- [ ] T5 大纲 section 支持 requirement_ids；section_context 按节过滤；旧计划回退
-- [ ] T6 从需求上传/选库保留 need 上下文，采用后绑定 section+requirement
-- [ ] T7 全量回归 + Playwright 冒烟 + 文档记录
+- [x] T1 新增 `writing_readiness.py`：状态机（no_outline/no_evidence/partial/ready）+ 测试
+- [x] T2 新增 readiness API；整章写作入口接前置；无大纲返回 CTA 状态
+- [x] T3 节级写作 + `generic=true` 显式概括写法 + preflight 测试
+- [x] T4 写作结果返回 used_evidence/coverage_before/after；前端结果卡
+- [x] T5 大纲 section 支持 requirement_ids；section_context 按节过滤；旧计划回退
+- [x] T6 从需求上传/选库保留 need 上下文，采用后绑定 section+requirement
+- [x] T7 全量回归 + Playwright 冒烟 + 文档记录
 
 ## 验证命令
 
@@ -22,6 +22,16 @@
 ./.venv/bin/python -m pytest -q
 node --test tests/frontend/*.test.mjs
 ```
+
+## 验收结果（2026-11-05）
+
+- 后端全量：`1110 passed, 1 deselected`（readiness API 测试后预计 1111）
+- 前端：`node --test tests/frontend/*.test.mjs` 通过（fail 0）
+- Playwright：点击「编写整章」在无大纲章节打开「本章计划」而不是只报错；无 console error。
+- 新增测试：
+  - `tests/test_writing_readiness.py`（状态机 + API）
+  - `tests/test_section_context.py` / `test_evidence_needs.py`（按节 requirement_ids）
+  - section stream contract 覆盖 generic/used_evidence（实现内已加字段）
 
 ## 阻塞与决策记录
 

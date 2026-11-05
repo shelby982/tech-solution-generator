@@ -306,6 +306,24 @@ class SectionBody(BaseModel):
     words: int = Field(default=900, ge=400, le=1600)
 
 
+@router.get('/blocks/{block_id}/writing-readiness')
+async def writing_readiness(block_id: int, thread_id: str = "", section: str = ""):
+    """写作前置：大纲/证据覆盖/是否允许概括写法。"""
+    from services.writing_readiness import chapter_readiness, section_readiness
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+    block = dict(block)
+    if section:
+        from services.writing_plans import chapter_plan
+        async with get_db() as db:
+            plan = await chapter_plan(db, block["project_id"], thread_id or str(block.get("run_thread_id") or ""),
+                                      str(block.get("block_id") or ""))
+        target = next((item for item in (plan.get("outline") or [])
+                       if str(item.get("title")) == section), {"title": section})
+        return await section_readiness(block, target, thread_id)
+    return await chapter_readiness(block, thread_id)
+
+
 @router.get('/blocks/{block_id}/studio/outline')
 async def get_outline(block_id: int, thread_id: str = ''):
     """章节大纲（P0-1）：存在就返回，不存在返回空（前端按钮生成）。"""
@@ -390,13 +408,15 @@ async def coverage_review(block_id: int, body: CoverageReviewBody):
 
 
 @router.get('/blocks/{block_id}/studio/section/stream')
-async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = ''):
+async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = '', generic: bool = False):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
     import asyncio as _aio
     from services.writing_plans import plan_of_block
     from services.section_outline import (SECTION_REWRITE_SYSTEM, SECTION_SYSTEM,
                                           build_section_payload, replace_section)
     from services.section_context import build_section_context, render_context
+    from services.material_cards import bound_cards, public_dto
+    from services.coverage_review import review_coverage
     from services.block_store import add_revision, update_block_content
     from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
     from infra.llm.clients import stream_openai, stream_claude
@@ -415,13 +435,36 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     # 带上该节的三问（依据/写法/交付物）
     planned = next((x for x in (chapter.get('outline') or []) if str(x.get('title')) == title.strip()), {})
     section.update({'basis': planned.get('basis') or [], 'how': planned.get('how') or {},
-                    'deliverables': planned.get('deliverables') or []})
+                    'deliverables': planned.get('deliverables') or [], 'generic': bool(generic)})
+    from services.writing_readiness import section_readiness
+    _ready = await section_readiness(block, section, thread_id)
+    if _ready.get("status") == "no_outline":
+        async def _blocked():
+            yield format_sse_event('error', {'message': '还没有章节大纲：请先在「本章计划」生成大纲', 'code': 'no_outline'})
+        return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
+    if _ready.get("status") == "no_evidence" and not generic:
+        async def _blocked():
+            yield format_sse_event('error', {'message': '本节没有证据：请先补证据，或选择「按概括写法」生成', 'code': 'no_evidence'})
+        return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
+    _coverage_before = {"total": _ready.get("needs_total", 0), "covered": _ready.get("covered", 0),
+                        "missing": _ready.get("missing", 0)}
     try:
         _context = await build_section_context(block, section, thread_id)
         _context_text = render_context(_context)
     except Exception:  # noqa: BLE001
-        _context = {"section_text": ""}
+        _context = {"section_text": "", "materials": []}
         _context_text = ""
+    try:
+        async with get_db() as _db:
+            _used_cards = [public_dto(item) for item in await bound_cards(_db, block_id, title)]
+        for _item in (_context.get("materials") or []):
+            _used_cards.append({"chunk_id": _item.get("material_id"), "chunk_kind": "file",
+                                "source_title": _item.get("filename") or "素材",
+                                "locator": (f"第 {_item.get('page')} 页" if _item.get("page") else ""),
+                                "text": _item.get("content") or "", "authority": "自动检索",
+                                "confidence_label": "中", "used": True, "section": title})
+    except Exception:  # noqa: BLE001
+        _used_cards = []
     payload = build_section_payload(chapter, section,
                                     str(_context.get("section_text") or block.get('content') or '')[:2500])
     extra_request = str(prompt or '').strip()
@@ -458,8 +501,9 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
         + (f"【本节写法（按计划执行）】{_practice}\n" if _practice else "")
         + (f"【本节硬性要求】{_contract}\n" if _contract else "")
-        + "硬性要求：如果上下文中有【本章技术规范条款】，正文必须逐条回应；\n"
-          "每条要有「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n"
+        + ("【用户选择】本节按概括写法生成：没有可用证据，不要编造具体项目事实；在结论处说明依据待补。\n" if generic else
+           "硬性要求：如果上下文中有【本章技术规范条款】，正文必须逐条回应；\n"
+           "每条要有「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n")
         + (f"【本次额外要求】{extra_request}\n" if extra_request else '')
         + (f"【本节原文】\n{original_text[:4000]}\n" if is_rewrite and original_text else '')
         + ("这是**改写**：在【本节原文】基础上调整，保留引用与数字。" if is_rewrite and original_text
@@ -518,9 +562,17 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
                 warn.append(f'字数缩水到 {int(after_words / before_words * 100)}%')
             quality = {'warnings': warn, 'words_before': before_words, 'words_after': after_words,
                        'citations_before': before_cites, 'citations_after': after_cites}
+        try:
+            _coverage_after = await review_coverage(block, section['title'], text, thread_id=thread_id)
+        except Exception:  # noqa: BLE001
+            _coverage_after = {}
         yield format_sse_event('done', {'title': section['title'], 'content': after, 'quality': quality,
                                        'words': len(_re.sub(r'\s+', '', text)), 'replaced': replaced,
-                                       'model': getattr(config, 'model', '')})
+                                       'model': getattr(config, 'model', ''),
+                                       'used_evidence': _used_cards[:8],
+                                       'coverage_before': _coverage_before,
+                                       'coverage_after': _coverage_after,
+                                       'generic': bool(generic)})
 
     return StreamingResponse(events(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
 
@@ -1100,12 +1152,26 @@ async def chapter_review_history(block_id: int, limit: int = 10):
 
 @router.get('/blocks/{block_id}/studio/review/issues')
 async def chapter_review_issues(block_id: int):
-    """本章评审 issue 状态机（open/fixed/verified）——用于验证"是否真修好"。"""
+    """本章评审 issue（状态机 + 证据链）：用于验证"是否真修好"，以及"凭什么这么说"。"""
     from db import get_db
+    from services.block_store import get_block
+    from services.chapter_review import load_review
+    from services.review_evidence import attach_evidence
     from services.review_issues import list_issues
 
     async with get_db() as db:
-        return await list_issues(db, block_id)
+        data = await list_issues(db, block_id)
+        block = await get_block(db, block_id)
+    review = await load_review(block_id)
+    issues = (review or {}).get("issues") or []
+    enriched = attach_evidence(str((block or {}).get("content") or ""), issues,
+                               str((review or {}).get("criterion_text") or ""))
+    by_point = {}
+    for item in enriched:
+        by_point[str(item.get("point") or "")[:80]] = item.get("evidence") or {}
+    for item in data.get("items") or []:
+        item["evidence"] = by_point.get(str(item.get("point") or "")[:80]) or {}
+    return data
 
 
 @router.get('/blocks/{block_id}/studio/review/precheck')
@@ -1162,3 +1228,54 @@ async def delivery_verdict(block_id: int):
 
     return build_delivery_verdict(rule_score=rule_score, review=review, precheck=pre,
                                   fatal_risks=fatal, need_user=need_user)
+
+
+@router.get('/blocks/{block_id}/studio/review/rubric')
+async def chapter_rubric(block_id: int):
+    """章节达标线（按章类型给出满分要素 + 逐条核对）。"""
+    from db import get_db
+    from services.block_store import get_block
+    from services.chapter_rubric import check_rubric, rubric_for
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+    if not block:
+        raise HTTPException(404, "章节不存在")
+    content = str(block.get("content") or "")
+    rubric = rubric_for(str(block.get("title") or ""), content)
+    return check_rubric(content, rubric)
+
+
+@router.get('/blocks/{block_id}/studio/practice-candidates')
+async def practice_candidates(block_id: int):
+    """写法候选（来自评审 strengths），只读；采用需显式 POST。"""
+    from db import get_db
+    from services.chapter_review import load_review
+    from services.practice_recycle import candidates_from_review
+
+    review = await load_review(block_id)
+    return {"candidates": candidates_from_review(review)}
+
+
+class PracticeApplyBody(BaseModel):
+    section: str = ""
+    text: str = ""
+
+
+@router.post('/blocks/{block_id}/studio/practice-candidates/apply')
+async def practice_candidate_apply(block_id: int, body: PracticeApplyBody):
+    """采用某条写法候选 → 写入该节写法（section_practices）。"""
+    from db import get_db
+    from services.block_store import get_block
+    from services.practice_recycle import apply_candidate
+
+    async with get_db() as db:
+        block = await get_block(db, block_id)
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        try:
+            return await apply_candidate(db, project_id=int(block.get("project_id") or 0),
+                                         block_id=str(block.get("block_id") or ""),
+                                         section=body.section, text=body.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))

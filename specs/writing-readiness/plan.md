@@ -2,7 +2,7 @@
 
 - 对应 spec：`specs/writing-readiness/spec.md`
 - 日期：2026-11-05
-- 状态：待计划评审
+- 状态：已实施（T1–T7，验证见 tasks.md）
 
 ## 1. 方案概览
 
