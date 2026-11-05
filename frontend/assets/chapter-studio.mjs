@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v459';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v459';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v462';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v462';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -239,22 +239,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
 
   let materialLib = null;
+  let materialEvidence = null;
 
   /** 拉素材库数据（项目级素材 + 本章引用） */
   async function loadMaterialLibrary() {
     if (!active) return;
     try {
-      const [recommendList, citeList, lib, pend, boundList] = await Promise.all([
+      const [recommendList, citeList, lib, pend, boundList, board] = await Promise.all([
         fetch(`/api/blocks/${active.id}/materials/recommend?limit=8`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/blocks/${active.id}/citations`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=confirmed&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/projects/${projectId}/materials/library?status=pending&limit=80`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
         fetch(`/api/blocks/${active.id}/materials/bound`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
+        fetch(`/api/blocks/${active.id}/materials/evidence-board?threadId=${encodeURIComponent(threadId)}`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null),
       ]);
+      materialEvidence = board;
       materialLib = { confirmed: lib?.items || [], counts: lib?.counts || {}, pending: pend?.items || [],
-                      bound: boundList?.items || [], citations: citeList || { points: [], missing: [], summary: {} },
+                      files: lib?.files || [], bound: boundList?.items || [],
+                      citations: citeList || { points: [], missing: [], summary: {} },
                       recommend: recommendList || { items: [] } };
-    } catch (error) { materialLib = null; }
+    } catch (error) { materialLib = null; materialEvidence = null; }
   }
 
   /** 素材库：两页签（我的文件 / 联网来源）+ 展开挑片段（勾选=素材）+ 应用到本章（选小节） */
@@ -686,12 +690,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   function materialLibraryHtml() {
-    const lib = materialLib || { confirmed: [], pending: [], bound: [], citations: { points: [], missing: [], summary: {} } };
+    const lib = materialLib || { confirmed: [], pending: [], bound: [], files: [], citations: { points: [], missing: [], summary: {} } };
     const citations = lib.citations || { points: [], missing: [], summary: {} };
     const summary = citations.summary || {};
-    const byKind = summary.by_kind || {};
+    const board = materialEvidence || { sections: [], summary: { needs: 0, covered: 0, cards: 0, coverage: 1 } };
+    const ev = board.summary || {};
+    const coverage = Math.round(Number(ev.coverage || 0) * 100);
+    const evidenceSections = board.sections || [];
 
-    // ① 引用清单：按小节分组
+    // 引用清单：按小节分组
     const groups = new Map();
     for (const point of (citations.points || [])) {
       const key = point.section || '（正文）';
@@ -731,52 +738,77 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
       </details>` : '';
 
-    // ② 素材库（折叠）：按来源类型分区
-    const pickId = (item) => (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
-    const uploadItems = (lib.confirmed || []).filter((item) => item.source_type !== 'web');
-    const webItems = (lib.confirmed || []).filter((item) => item.source_type === 'web');
-    const pickHtml = (items, empty) => (items.length ? items.slice(0, 30).map((item) => `
-      <label class="cs-ml-item is-pick">
-        <input type="checkbox" data-ml-pick="${pickId(item)}" />
-        <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
-          <p>${esc(String(item.text || '').slice(0, 70))}…</p>
-          <small>${item.page ? `第 ${item.page} 页` : '网页片段'}</small></div>
-      </label>`).join('') : `<p class="cs-muted">${empty}</p>`);
+    const modeLabel = { cite: '引用出处', data: '数据依据', context: '仅上下文', paste: '粘贴原文' };
+    const cardHtml = (item, section) => {
+      const signed = item.signed_id ?? (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
+      return `<div class="cs-ev-card ${item.used ? 'is-used' : ''}">
+        <div class="cs-ev-card-head">
+          <span class="cs-cite-kind ${item.source_type === 'web' ? 'is-web' : 'is-upload'}">${esc(item.authority || '来源')}</span>
+          <b>${esc(String(item.source_title || '素材').slice(0, 32))}</b>
+          <em>${esc(item.confidence_label || '待确认')}</em>
+        </div>
+        <p>${esc(String(item.text || '').slice(0, 150))}${(item.text || '').length > 150 ? '…' : ''}</p>
+        <small>${esc(item.locator || '')}${item.requirement_id ? ` · 要求 ${esc(item.requirement_id)}` : ''}</small>
+        ${item.used
+          ? `<span class="cs-ev-bound">已绑定${item.mode ? ` · ${esc(modeLabel[item.mode] || item.mode)}` : ''}</span>`
+          : `<button type="button" class="cs-todo-ignore" data-evidence-bind="${signed}" data-evidence-kind="${esc(item.chunk_kind || 'file')}" data-evidence-section="${esc(section || '')}" data-evidence-need="${esc(item.requirement_id || '')}">采用到本节</button>`}
+      </div>`;
+    };
+    const sectionsHtml = evidenceSections.length ? evidenceSections.map((section) => {
+      const needs = section.needs || [];
+      const cards = section.cards || [];
+      const recs = section.recommend || [];
+      const missing = needs.filter((item) => !item.covered).length;
+      return `<details class="cs-ev-section" ${missing ? 'open' : ''}>
+        <summary><b>${esc(section.section || '（未命名节）')}</b>
+          <em>${needs.length ? `需求 ${needs.length} · 覆盖 ${needs.length - missing} · 证据 ${cards.length}` : `证据 ${cards.length}`}</em>
+          ${missing ? `<span class="cs-ev-miss">缺 ${missing}</span>` : ''}</summary>
+        <div class="cs-ev-body">
+          ${needs.length ? `<div class="cs-ev-needs">${needs.map((need) => `<div class="cs-ev-need ${need.covered ? 'is-covered' : ''}">
+            <span class="cs-cp-req-kind">${need.kind === 'spec' ? '规范' : need.kind === 'review' ? '评审' : '要求'}</span>
+            <p>${esc(String(need.text || '').slice(0, 140))}</p>
+            <em>${need.covered ? '已覆盖' : '缺证据'}</em>
+          </div>`).join('')}</div>` : '<p class="cs-dim">本节没有强制证据需求</p>'}
+          <div class="cs-ev-cards">${cards.length ? cards.slice(0, 6).map((item) => cardHtml(item, section.section)).join('') : (recs.length ? recs.slice(0, 3).map((item) => cardHtml(item, section.section)).join('') : '<p class="cs-muted">还没有绑定证据。可从推荐或素材库采用。</p>')}</div>
+          ${recs.length && cards.length ? `<div class="cs-ev-sub">推荐证据</div><div class="cs-ev-cards">${recs.slice(0, 3).map((item) => cardHtml(item, section.section)).join('')}</div>` : ''}
+        </div>
+      </details>`;
+    }).join('') : `<p class="cs-ml-empty">还没有证据需求：先确认本章计划/大纲，或从素材库添加证据。</p>`;
+
+    const recs = (lib.recommend?.items || []).slice(0, 3);
+    const files = (lib.files || []).filter((item) => item.parse_status !== 'done' || item.parse_error);
+    const fileHtml = files.length ? files.map((item) => `<div class="cs-ev-file">
+      <b>${esc(item.filename || '素材')}</b>
+      <span class="cs-ev-file-state ${item.parse_error ? 'is-bad' : ''}">${esc(item.parse_status || 'pending')}${item.parse_error ? ` · ${esc(item.parse_error)}` : ''}</span>
+      ${item.chunks ? `<small>${item.chunks} 段 · 已确认 ${item.confirmed || 0}</small>` : ''}
+      ${item.can_retry ? `<button type="button" class="cs-todo-ignore" data-material-reparse="${item.id}">重试解析</button>` : ''}
+    </div>`).join('') : '';
 
     return `<div class="cs-ml">
-      <div class="cs-ml-head"><h4>本章素材 <small>${(lib.bound || []).length}</small></h4>
-        <button type="button" class="cs-gate-act" data-material-admin>素材库</button></div>
-      ${(() => {
-        const modeLabel = { cite: '引用出处', data: '数据依据', context: '仅上下文', paste: '粘贴原文' };
-        const bounds = lib.bound || [];
-        if (!bounds.length) return '<p class="cs-muted">本章还没有引用素材（用推荐或素材库添加）</p>';
-        return `<div class="cs-ml-list">${bounds.map((item) => `
-          <div class="cs-ml-item">
-            <div class="cs-ml-body"><b>${esc(item.filename || '素材')}</b>
-              <p>${esc(String(item.text || '').slice(0, 80))}…</p>
-              <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(modeLabel[item.mode] || '引用出处')}${item.section ? ` · ${esc(item.section)}` : ''}</small></div>
-            <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button>
-          </div>`).join('')}</div>`;
-      })()}
+      <div class="cs-ev-head">
+        <div><b>本章证据</b><small>需求 ${ev.needs || 0} · 已覆盖 ${ev.covered || 0} · 证据 ${ev.cards || 0}</small></div>
+        <button type="button" class="cs-gate-act" data-material-admin>素材库</button>
+      </div>
+      <div class="cs-ev-bar"><i style="width:${coverage}%"></i><span>规范覆盖 ${coverage}%</span></div>
+      ${board.search_available === false ? '<p class="cs-ev-note">未配置联网检索：当前只能使用已有素材与上传文件。</p>' : ''}
+      <div class="cs-ev-sections">${sectionsHtml}</div>
+      ${recs.length ? `<details class="cs-ml-fold" open>
+        <summary>推荐证据（${recs.length}）— 最多 3 条，按本节要求排序</summary>
+        <div class="cs-ml-list">${recs.map((item) => `<div class="cs-cite-row">
+          <span class="cs-cite-kind ${item.source_kind === 'web' ? 'is-web' : 'is-upload'}">${item.source_kind === 'web' ? '联网' : '文件'}</span>
+          <div class="cs-cite-body"><p class="cs-cite-quote">${esc(String(item.text || '').slice(0, 70))}…</p>
+            <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(item.reason || '')}</small></div>
+          <button type="button" class="cs-todo-ignore" data-mrec="${item.chunk_id}|${item.source_kind}">采用</button>
+        </div>`).join('')}</div>
+      </details>` : ''}
+      ${fileHtml ? `<details class="cs-ml-fold"><summary>上传/解析状态（${files.length}）</summary><div class="cs-ev-files">${fileHtml}</div></details>` : ''}
+      ${(lib.bound || []).length ? `<details class="cs-ml-fold"><summary>本章已绑定素材（${lib.bound.length}）</summary>
+        <div class="cs-ml-list">${(lib.bound || []).map((item) => `<div class="cs-ml-item"><div class="cs-ml-body">
+          <b>${esc(item.filename || '素材')}</b><p>${esc(String(item.text || '').slice(0, 80))}…</p>
+          <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(modeLabel[item.mode] || '引用出处')}${item.section ? ` · ${esc(item.section)}` : ''}</small></div>
+          <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button></div>`).join('')}</div>
+      </details>` : ''}
       <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4></div>
-      ${(() => {
-        const recommends = lib.recommend?.items || [];
-        if (!recommends.length) return '';
-        return `<details class="cs-ml-fold" open>
-          <summary>本章推荐素材（${recommends.length}）— 按本节要点匹配</summary>
-          <div class="cs-ml-list">
-            ${recommends.map((item) => `<div class="cs-cite-row">
-              <span class="cs-cite-kind ${item.source_kind === 'web' ? 'is-web' : 'is-upload'}">${item.source_kind === 'web' ? '联网' : '文件'}</span>
-              <div class="cs-cite-body">
-                <p class="cs-cite-quote">${esc(String(item.text || '').slice(0, 56))}…</p>
-                <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(item.reason || '')}</small>
-              </div>
-              <button type="button" class="cs-todo-ignore" data-mrec="${item.chunk_id}|${item.source_kind}">采用</button>
-            </div>`).join('')}
-          </div>
-        </details>`;
-      })()}
-      <p class="cs-ml-sum">招标文件 ${byKind.upload || 0} · 联网来源 ${byKind.web || 0} · 法规标准 ${byKind.doc || 0}</p>
       ${pointsHtml || '<p class="cs-muted">正文里还没有【来源：…】标注</p>'}
       ${missingHtml}
     </div>`;
@@ -4825,8 +4857,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
     get('aside').innerHTML = `${todoPaneHtml()}
       ${progressPaneHtml()}
-      <section data-pane="materials">${materialRequestsHtml()}${materialLibraryHtml()}${(() => { const gaps = planBrief?.gaps || []; const lackTotal = gaps.reduce((sum, g) => sum + (g.lack || 0), 0); const title = gaps.length ? `素材缺口 <small>缺 ${gaps.length} 类 · 共 ${lackTotal} 项</small>` : `素材缺口 <small>没有缺口</small>`; return `<h4>${title}</h4>${gaps.length ? gapGroupsHtml() : `<p class="cs-mat-empty">计划要求的素材已齐，可直接生成。</p>`}`; })()}
-      </section>
+      <section data-pane="materials">${materialRequestsHtml()}${materialLibraryHtml()}</section>
       `;
     const asideLayout = get('layout');      // 右栏「编排建议」已移除（章节类型移入计划面板），这里可能为 null
     if (asideLayout) asideLayout.onchange = async event => {
@@ -5120,6 +5151,32 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const issue=(chapterReview.issues||[])[index];
       if(!issue){status('这条意见已失效，请重新评审');return;}
       await openReviewPatchDialog(issue, index);
+      return;
+    }
+    const evBind=event.target.closest('[data-evidence-bind]');
+    if(evBind && active){
+      const signed=Number(evBind.dataset.evidenceBind);
+      try{
+        const resp=await fetch(`/api/blocks/${active.id}/materials/bind`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({chunk_ids:[signed],section:evBind.dataset.evidenceSection||'',
+                               requirement_id:evBind.dataset.evidenceNeed||'',mode:'data'})});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        await loadMaterialLibrary(); paintAside();
+        status(`已采用到「${evBind.dataset.evidenceSection||'本章'}」`);
+      }catch(error){status(`采用失败：${error.message}`);}
+      return;
+    }
+    const matReparse=event.target.closest('[data-material-reparse]');
+    if(matReparse){
+      try{
+        const resp=await fetch(`/api/materials/${matReparse.dataset.materialReparse}/reparse`,{method:'POST'});
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(typeof data.detail==='string'?data.detail:`HTTP ${resp.status}`);
+        await loadMaterialLibrary(); paintAside();
+        status('已重新排队解析');
+      }catch(error){status(`重试失败：${error.message}`);}
       return;
     }
     const recBtn=event.target.closest('[data-mrec]');

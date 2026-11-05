@@ -2,7 +2,7 @@
 
 - 对应 spec：`specs/material-evidence-supply-chain/spec.md`
 - 日期：2026-11-05
-- 状态：待计划评审
+- 状态：已实施（T1–T9，验证见 tasks.md）
 
 ## 1. 方案概览
 

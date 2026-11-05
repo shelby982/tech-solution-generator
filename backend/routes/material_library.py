@@ -80,7 +80,8 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
         files = await (await db.execute(
             "SELECT m.id, m.filename, m.role, m.parse_status, "
             "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id) AS chunks, "
-            "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id AND COALESCE(c.status,'confirmed')='confirmed') AS confirmed "
+            "(SELECT COUNT(*) FROM material_chunks c WHERE c.material_id=m.id AND COALESCE(c.status,'confirmed')='confirmed') AS confirmed, "
+            "COALESCE(m.parse_error,'') AS parse_error "
             "FROM materials m WHERE m.project_id=? AND m.deleted_at IS NULL ORDER BY m.id DESC",
             (project_id,))).fetchall()
     items = [{"chunk_id": row[0], "material_id": row[1], "index": row[2], "page": row[3],
@@ -94,7 +95,8 @@ async def library(project_id: int, status: str = "confirmed", q: str = "",
     items.sort(key=lambda item: (item["status"] != status, item["chunk_id"]), reverse=False)
     return {"items": items, "counts": counts,
             "files": [{"id": r[0], "filename": r[1], "role": r[2], "parse_status": r[3],
-                       "chunks": r[4], "confirmed": r[5]} for r in files]}
+                       "chunks": r[4], "confirmed": r[5], "parse_error": r[6] or "",
+                       "can_retry": str(r[3] or "") in ("failed", "pending")} for r in files]}
 
 
 class ChunkActionBody(BaseModel):
@@ -130,25 +132,111 @@ async def confirm_chunks(project_id: int, body: ChunkActionBody):
     return {"changed": changed, "status": status}
 
 
+@router.get('/blocks/{block_id}/materials/evidence-board')
+async def evidence_board(block_id: int, thread_id: str = ""):
+    """素材页主视图：按节聚合需求/已绑定证据/覆盖摘要。"""
+    from services.evidence_needs import section_evidence_needs
+    from services.material_cards import bound_cards, card, public_dto
+    from services.material_match import recommend, section_profile
+    from services.writing_plans import plan_of_block
+    from routes.plan_materials import _pool
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        block = dict(block)
+        found = await plan_of_block(db, int(block.get("project_id") or 0),
+                                    thread_id or str(block.get("run_thread_id") or ""),
+                                    str(block.get("block_id") or ""))
+        outline = []
+        if found:
+            chapter = next((item for item in found[1].get("chapters") or []
+                            if str(item.get("block_id")) == str(block.get("block_id"))), {})
+            outline = chapter.get("outline") or []
+        sections = []
+        total_needs = total_covered = 0
+        pool = await _pool(db, int(block.get("project_id") or 0))
+        for section in outline:
+            title = str(section.get("title") or "")
+            cards = [public_dto(item) for item in await bound_cards(db, block_id, title)]
+            needs = await section_evidence_needs(block, section, thread_id or str(block.get("run_thread_id") or ""))
+            total_needs += len(needs)
+            total_covered += sum(1 for item in needs if item.get("covered"))
+            recommend_items = []
+            try:
+                profile = section_profile(section, found[1] if found else {})
+                for picked in recommend(profile, pool, limit=3, min_score=0.12):
+                    kind = "cite" if picked.get("source_kind") == "web" else "file"
+                    signed = -int(picked["chunk_id"]) if kind == "cite" else int(picked["chunk_id"])
+                    item = await card(db, signed, kind, section=title)
+                    if item:
+                        item["reason"] = picked.get("reason") or ""
+                        recommend_items.append(public_dto(item))
+            except Exception:
+                recommend_items = []
+            sections.append({"section": title, "needs": needs, "cards": cards,
+                             "recommend": recommend_items,
+                             "summary": {"needs": len(needs),
+                                         "covered": sum(1 for item in needs if item.get("covered")),
+                                         "cards": len(cards)}})
+    from services.citations import search_configured
+    return {
+        "sections": sections,
+        "search_available": search_configured(),
+        "summary": {"needs": total_needs, "covered": total_covered,
+                    "cards": sum(len(item["cards"]) for item in sections),
+                    "coverage": round(total_covered / total_needs, 3) if total_needs else 1.0},
+    }
+
+
+@router.get('/blocks/{block_id}/materials/evidence')
+async def evidence(block_id: int, section: str = "", thread_id: str = ""):
+    """本节证据：需求 + 已绑定证据卡 + 覆盖摘要。"""
+    from services.evidence_needs import section_evidence_needs
+    from services.material_cards import bound_cards, public_dto
+    async with get_db() as db:
+        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
+        if not block:
+            raise HTTPException(404, "章节不存在")
+        cards = await bound_cards(db, block_id, section)
+    block = dict(block)
+    needs = await section_evidence_needs(block, {"title": section}, thread_id or str(block.get("run_thread_id") or ""))
+    cards = [public_dto(item) for item in cards]
+    from services.citations import search_configured
+    return {
+        "section": section, "needs": needs, "cards": cards,
+        "search_available": search_configured(),
+        "summary": {
+            "needs": len(needs),
+            "covered": sum(1 for item in needs if item.get("covered")),
+            "cards": len(cards),
+            "missing": [item.get("text") for item in needs if not item.get("covered")][:5],
+        },
+    }
+
+
 @router.get('/blocks/{block_id}/materials/bound')
 async def bound(block_id: int):
     """本章已引用的素材（片段级）。"""
     async with get_db() as db:
         rows = await (await db.execute(
             "SELECT b.chunk_id, mc.material_id, b.section, b.mode, 1, "
-            "       mc.chunk_index, mc.page, mc.content, m.filename, COALESCE(b.chunk_kind,'file') "
+            "       mc.chunk_index, mc.page, mc.content, m.filename, COALESCE(b.chunk_kind,'file'), "
+            "       COALESCE(b.requirement_id,'') "
             "FROM chapter_material_chunks b JOIN material_chunks mc ON mc.id=b.chunk_id "
             "LEFT JOIN materials m ON m.id=mc.material_id "
             "WHERE b.block_id=? AND COALESCE(b.chunk_kind,'file')='file'",
             (block_id,))).fetchall()
         cite_rows = await (await db.execute(
-            "SELECT b.chunk_id, 0, b.section, b.mode, 1, cc.chunk_index, 0, cc.content, cc.heading, 'cite' "
+            "SELECT b.chunk_id, 0, b.section, b.mode, 1, cc.chunk_index, 0, cc.content, cc.heading, 'cite', "
+            "       COALESCE(b.requirement_id,'') "
             "FROM chapter_material_chunks b JOIN citation_chunks cc ON cc.id=ABS(b.chunk_id) "
             "WHERE b.block_id=? AND b.chunk_kind='cite'", (block_id,))).fetchall()
         rows = list(rows) + list(cite_rows)
     return {"items": [{"chunk_id": r[0], "material_id": r[1], "section": r[2] or "", "mode": r[3] or "cite",
                        "confirmed": bool(r[4]), "index": r[5], "page": r[6],
-                       "text": r[7] or "", "filename": r[8] or "", "chunk_kind": r[9] or "file"}
+                       "text": r[7] or "", "filename": r[8] or "", "chunk_kind": r[9] or "file",
+                       "requirement_id": r[10] or ""}
                       for r in rows]}
 
 
@@ -156,6 +244,7 @@ class BindBody(BaseModel):
     chunk_ids: list[int] = Field(default_factory=list)
     material_id: int = 0
     section: str = ""
+    requirement_id: str = ""
     mode: str = Field(default="cite", pattern="^(cite|data|context|paste)$")
 
 
@@ -185,10 +274,11 @@ async def bind(block_id: int, body: BindBody):
             if not row or str(row[2] or "") not in ("selected", "confirmed"):
                 continue                                    # 只有"已选为素材"的片段可应用
             await db.execute(
-                "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode, chunk_kind) "
-                "VALUES (?,?,?,?,?) ON CONFLICT(block_id, chunk_id) DO UPDATE SET "
-                "section=excluded.section, mode=excluded.mode, chunk_kind=excluded.chunk_kind",
-                (block_id, int(chunk_id), body.section, body.mode, kind))
+                "INSERT INTO chapter_material_chunks (block_id, chunk_id, section, mode, chunk_kind, requirement_id) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(block_id, chunk_id) DO UPDATE SET "
+                "section=excluded.section, mode=excluded.mode, chunk_kind=excluded.chunk_kind, "
+                "requirement_id=excluded.requirement_id",
+                (block_id, int(chunk_id), body.section, body.mode, kind, body.requirement_id))
             added += 1
         await db.commit()
     return {"added": added}

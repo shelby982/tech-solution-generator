@@ -61,6 +61,7 @@ async def suggestions(block_id: int, per_section: int = 3):
         block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
         if not block:
             raise HTTPException(404, "章节不存在")
+        block = dict(block)
         project_id = int(block["project_id"])
         outline = []
         try:
@@ -74,12 +75,25 @@ async def suggestions(block_id: int, per_section: int = 3):
         bound = await _bound(db, block_id)
 
     result = []
+    from services.evidence_needs import section_evidence_needs
     for section in outline:
         title = str(section.get("title") or "")
         profile = section_profile(section, plan)
-        picked = recommend(profile, pool, limit=max(1, min(8, per_section + 3)), min_score=0.12)
+        try:
+            needs = await section_evidence_needs(block, section, str(block.get("run_thread_id") or ""))
+            need_text = " ".join(str(item.get("text") or "") for item in needs)
+            if need_text:
+                from services.material_match import _terms, _expand
+                profile["keywords"] = set(profile.get("keywords") or set()) | _expand(_terms(need_text))
+                profile["raw"] = (str(profile.get("raw") or "") + " " + need_text).strip()
+        except Exception:
+            needs = []
+        picked = recommend(profile, pool, limit=max(1, min(6, per_section)), min_score=0.12)
         confirmed = bound.get(title, [])
-        confirmed_ids = {int(item["chunk_id"]) for item in confirmed}
+        confirmed_ids = {
+            (-abs(int(item["chunk_id"])) if item.get("chunk_kind") == "cite" else abs(int(item["chunk_id"])))
+            for item in confirmed
+        }
         candidates = []
         for item in picked:
             chunk_id = int(item["chunk_id"])
@@ -89,7 +103,7 @@ async def suggestions(block_id: int, per_section: int = 3):
                 "source_kind": item["source_kind"], "source_title": item.get("source_title") or "",
                 "score": item["score"], "reason": item["reason"],
                 "tags": item.get("tags") or [],
-                "confirmed": signed in {(-abs(cid) if kind == "cite" else abs(cid)) for cid in confirmed_ids} or chunk_id in confirmed_ids,
+                "confirmed": signed in confirmed_ids,
                 "suggested_mode": next((_MODE_BY_TAG[tag] for tag in (item.get("tags") or []) if tag in _MODE_BY_TAG), "cite"),
             })
         # 已确认但不在候选里的（用户手工换过的）也带上
@@ -104,7 +118,8 @@ async def suggestions(block_id: int, per_section: int = 3):
                                   "suggested_mode": item.get("mode") or "cite"})
         result.append({"section": title, "words": section.get("words") or 0,
                        "types_wanted": profile["types_wanted"],
-                       "candidates": candidates,
+                       "needs": needs,
+                       "candidates": candidates[:max(1, per_section)],
                        "confirmed_count": len(confirmed),
                        "has_material": bool(candidates)})
     return {"sections": result, "pool": len(pool)}
@@ -123,6 +138,7 @@ async def apply_suggestion(block_id: int, body: ApplyBody):
         block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
         if not block:
             raise HTTPException(404, "章节不存在")
+        block = dict(block)
         project_id = int(block["project_id"])
         # 清空该节原绑定
         await db.execute("DELETE FROM chapter_material_chunks WHERE block_id=? AND section=?",

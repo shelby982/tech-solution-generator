@@ -246,6 +246,7 @@ CREATE TABLE IF NOT EXISTS chapter_material_chunks (
     chunk_id   INTEGER NOT NULL,
     section    TEXT NOT NULL DEFAULT '',
     mode       TEXT NOT NULL DEFAULT 'cite',
+    requirement_id TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (block_id, chunk_id)
 );
@@ -658,6 +659,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     cmc_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_material_chunks)')).fetchall()}
     if cmc_cols and 'chunk_kind' not in cmc_cols:
         await conn.execute("ALTER TABLE chapter_material_chunks ADD COLUMN chunk_kind TEXT DEFAULT 'file'")
+    if cmc_cols and 'requirement_id' not in cmc_cols:
+        await conn.execute("ALTER TABLE chapter_material_chunks ADD COLUMN requirement_id TEXT DEFAULT ''")
     await conn.commit()
     usage_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(llm_usage)')).fetchall()}
     for name, kind in [('block_id', 'INTEGER'), ('section', "TEXT DEFAULT ''"), ('role', "TEXT DEFAULT ''")]:
@@ -779,6 +782,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if "page_budget_pinned" not in existing_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN page_budget_pinned INTEGER NOT NULL DEFAULT 0")
     _block_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(blocks)")).fetchall()}
+    _mat_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(materials)")).fetchall()}
+    if _mat_cols and "parse_error" not in _mat_cols:
+        await conn.execute("ALTER TABLE materials ADD COLUMN parse_error TEXT DEFAULT ''")
     if "context_version" not in _block_cols:
         await conn.execute("ALTER TABLE blocks ADD COLUMN context_version INTEGER DEFAULT 0")
 

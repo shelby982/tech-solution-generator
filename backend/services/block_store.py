@@ -226,17 +226,18 @@ async def update_material_parse_status(
     db: aiosqlite.Connection,
     material_id: int,
     status: str,
+    error: str = "",
 ) -> None:
-    """status: pending | parsing | done | failed"""
+    """status: pending | parsing | done | failed；error 只对 failed 保留。"""
     if status == "done":
         await db.execute(
-            "UPDATE materials SET parse_status = ?, parsed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE materials SET parse_status = ?, parse_error = '', parsed_at = CURRENT_TIMESTAMP WHERE id = ?",
             (status, material_id),
         )
     else:
         await db.execute(
-            "UPDATE materials SET parse_status = ? WHERE id = ?",
-            (status, material_id),
+            "UPDATE materials SET parse_status = ?, parse_error = ? WHERE id = ?",
+            (status, error[:300] if status == "failed" else "", material_id),
         )
     await db.commit()
 

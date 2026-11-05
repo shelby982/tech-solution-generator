@@ -17,18 +17,20 @@ async def chapter_material_context(db, block_id: int, block_code: str = "",
                                    section: str = "") -> dict:
     """返回 {cite: [labels], data: [texts], context: [texts], count}。
 
-    section 非空时：优先取"绑定到该节"的素材；该节没有绑定则回退整章素材（兼容历史数据）。
+    section 非空时：**只取绑定到该节**的素材；没有就返回空，不回退整章。
+    这是为了避免"本节有素材"的错觉——别的节素材不能拿来写本节。
     """
     rows = []
     if section:
         rows = await (await db.execute(
             "SELECT b.chunk_id, COALESCE(b.mode,'cite'), COALESCE(b.chunk_kind,'file') "
             "FROM chapter_material_chunks b WHERE b.block_id=? AND b.section=?", (block_id, section))).fetchall()
-    if not rows:
+    else:
         rows = await (await db.execute(
             "SELECT b.chunk_id, COALESCE(b.mode,'cite'), COALESCE(b.chunk_kind,'file') "
             "FROM chapter_material_chunks b WHERE b.block_id=?", (block_id,))).fetchall()
-    result: dict = {"cite": [], "data": [], "context": [], "count": 0}
+    result: dict = {"cite": [], "data": [], "context": [], "count": 0,
+                    "section": section, "section_missing": bool(section and not rows)}
     for chunk_id, mode, kind in rows:
         mode = mode if mode in MODE_LIMITS else "cite"
         if kind == "cite":

@@ -136,7 +136,7 @@ async def _parse_and_chunk_in_background(
             logger.warning(f"素材 {material_id} 解析失败：{e}")
             try:
                 async with get_db() as db:
-                    await update_material_parse_status(db, material_id, "failed")
+                    await update_material_parse_status(db, material_id, "failed", str(e))
             except Exception:
                 pass
 

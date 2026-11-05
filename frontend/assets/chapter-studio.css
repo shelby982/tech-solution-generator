@@ -1140,3 +1140,43 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 /* 评审：自动复评开关 */
 .cs-auto-review { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: #64748b; cursor: pointer; }
 .cs-auto-review input { margin: 0; }
+
+/* 素材证据供应链：本章证据主视图 */
+.cs-ev-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cs-ev-head b { font-size:14px; color:#0f172a; }
+.cs-ev-head small { display:block; margin-top:2px; color:#64748b; font-size:11px; }
+.cs-ev-bar { position:relative; height:6px; background:#eef2f7; border-radius:999px; margin:8px 0 6px; overflow:hidden; }
+.cs-ev-bar i { display:block; height:100%; background:linear-gradient(90deg,#2563eb,#16a34a); border-radius:999px; }
+.cs-ev-bar span { position:absolute; right:0; top:-16px; font-size:10px; color:#64748b; }
+.cs-ev-note { margin:6px 0; padding:6px 8px; border-radius:6px; background:#fff7ed; color:#9a3412; font-size:11px; }
+.cs-ev-sections { margin:8px 0; }
+.cs-ev-section { border:1px solid #e2e8f0; border-radius:8px; margin:6px 0; background:#fff; }
+.cs-ev-section > summary { list-style:none; display:flex; align-items:center; gap:6px; padding:8px 9px; cursor:pointer; }
+.cs-ev-section > summary::-webkit-details-marker { display:none; }
+.cs-ev-section > summary b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.cs-ev-section > summary em { font-style:normal; font-size:11px; color:#64748b; white-space:nowrap; }
+.cs-ev-miss { font-size:10px; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:4px; padding:1px 5px; }
+.cs-ev-body { padding:0 9px 9px; }
+.cs-ev-needs { margin:2px 0 6px; }
+.cs-ev-need { display:flex; align-items:flex-start; gap:6px; padding:5px 0; border-bottom:1px dashed #f1f5f9; }
+.cs-ev-need p { flex:1; margin:0; font-size:12px; line-height:1.55; color:#334155; }
+.cs-ev-need em { font-style:normal; font-size:10px; color:#b45309; white-space:nowrap; }
+.cs-ev-need.is-covered em { color:#15803d; }
+.cs-ev-cards { display:grid; gap:6px; }
+.cs-ev-card { border:1px solid #e2e8f0; border-radius:6px; padding:7px 8px; background:#f8fafc; }
+.cs-ev-card.is-used { border-color:#bbf7d0; background:#f0fdf4; }
+.cs-ev-card-head { display:flex; align-items:center; gap:5px; }
+.cs-ev-card-head b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; font-weight:500; }
+.cs-ev-card-head em { font-style:normal; font-size:10px; color:#64748b; }
+.cs-ev-card p { margin:5px 0 3px; font-size:11.5px; line-height:1.6; color:#475569; }
+.cs-ev-card small { color:#94a3b8; font-size:10.5px; }
+.cs-ev-bound { display:inline-block; margin-top:4px; font-size:10px; color:#15803d; }
+.cs-ev-card > button { margin-top:5px; }
+.cs-ev-files { display:grid; gap:5px; }
+.cs-ev-file { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid #f1f5f9; font-size:11.5px; }
+.cs-ev-file b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.cs-ev-file-state { color:#64748b; font-size:10px; }
+.cs-ev-file-state.is-bad { color:#b91c1c; }
+.cs-ev-file small { color:#94a3b8; font-size:10px; }
+.cs-ml-empty { color:#94a3b8; font-size:12px; padding:8px 0; }
+.cs-ev-sub { margin:7px 0 4px; font-size:10.5px; color:#64748b; }

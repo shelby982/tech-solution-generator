@@ -163,7 +163,12 @@ def recommend(profile: dict, chunks: list[dict], *, limit: int = 10, min_score: 
     sem = score_documents(profile.get("raw") or profile.get("title") or "",
                           [str(chunk.get("text") or "") for chunk in chunks])
     scored = []
+    wants_table = "table" in set(profile.get("types_wanted") or [])
     for index, chunk in enumerate(chunks):
+        text = str(chunk.get("text") or "")
+        # 原始 Markdown 表格不是“证据段落”：只有本节明确要表格时才允许进入推荐
+        if not wants_table and text.count("|") >= 4:
+            continue
         score, explain = score_chunk(profile, chunk, sem[index] if index < len(sem) else 0.0)
         if score < min_score:
             continue
