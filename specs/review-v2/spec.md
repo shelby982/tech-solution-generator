@@ -2,7 +2,7 @@
 
 - slug：review-v2
 - 日期：2026-11-05
-- 状态：待审（人审后改为「已批准」）
+- 状态：已实现（A/B/C 全部落地，实测见 tasks.md）
 
 ## 1. 背景与问题
 
@@ -95,7 +95,7 @@
 - [ ] `node --test tests/frontend/*.test.mjs` 全过
 - [ ] 手测：`GET /api/projects/29/scoring-verdict?thread_id=…` 返回 `risk_level`、`fatal_risks`、`points[].estimated_basis`
 - [ ] 手测：应用一条补丁后 `GET /api/blocks/41828/studio/review/issues` 该条状态由 `open` → `fixed`，自动复评后 → `verified`（或 `open` 表示未修好）
-- [ ] 文档/配置变更已同步（本 spec + plan + tasks 状态更新）
+- [x] 文档/配置变更已同步（本 spec + plan + tasks 状态更新）
 - [ ] 评审结论为 approve
 
 ## 6. 风险与待决问题
