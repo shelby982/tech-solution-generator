@@ -116,10 +116,42 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         output, matrix, chain = await _chapter_inputs(db, block)
 
     # ── 分层调度（v3 B）：auto → L0 有 critical 走 fast，否则 full ──
-    from services.review_precheck import precheck, resolve_tier
+    from services.review_precheck import precheck, resolve_tier, should_skip_llm
 
     precheck_result = precheck(output.content or "")
     resolved_tier = resolve_tier(precheck_result, tier)
+
+    # 空章/极短章：没必要烧 LLM —— 直接用 L0 结论（实测出现过 0 字章被评 2 分的噪音）
+    if should_skip_llm(precheck_result):
+        skipped = {
+            "block_id": output.block_id, "tech_score": 0, "comp_score": 0, "score": 0,
+            "satisfied": "unsatisfied", "criterion_text": chain.get("criterion_text") or "",
+            "covered_points": [], "missing_points": [item["message"] for item in precheck_result.get("items") or []],
+            "issues": [{"severity": item.get("severity") or "high", "point": item.get("message") or "",
+                        "suggestion": item.get("hint") or "", "needs_material": False,
+                        "material_query": "", "agent": "rule"} for item in precheck_result.get("items") or []],
+            "needs_material": [], "fixable": [], "error": "",
+            "tier": "skip", "precheck": precheck_result,
+        }
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
+                "criterion_text, covered_points, missing_points, issues, needs_material, tier, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(block_id) DO UPDATE SET score=excluded.score, satisfied=excluded.satisfied, "
+                "issues=excluded.issues, missing_points=excluded.missing_points, tier=excluded.tier, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
+                 skipped["criterion_text"], "[]", json.dumps(skipped["missing_points"], ensure_ascii=False),
+                 json.dumps(skipped["issues"], ensure_ascii=False), "[]", "skip"))
+            await db.commit()
+            await db.execute(
+                "INSERT INTO review_history (block_id, project_id, score, tech_score, comp_score, satisfied, "
+                "issues_count, needs_material_count) VALUES (?,?,?,?,?,?,?,?)",
+                (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
+                 len(skipped["issues"]), 0))
+            await db.commit()
+        return skipped
 
     blocks = {output.block_id: output}
     outline_matrix = {output.block_id: matrix}

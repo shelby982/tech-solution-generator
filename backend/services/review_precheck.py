@@ -124,3 +124,8 @@ def resolve_tier(precheck_result: dict, requested: str = "auto") -> str:
         return requested
     has_critical = int((precheck_result or {}).get("counts", {}).get("critical") or 0) > 0
     return "fast" if has_critical else "full"
+
+
+def should_skip_llm(precheck_result: dict, min_body_len: int = 200) -> bool:
+    """空章/极短章不调 LLM：直接用 L0 结论（省钱，且避免 0 字章被评 2 分的噪音）。"""
+    return int((precheck_result or {}).get("body_len") or 0) < int(min_body_len)

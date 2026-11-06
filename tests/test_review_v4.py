@@ -103,3 +103,14 @@ def test_practice_apply_writes_section():
         await db.close()
 
     asyncio.run(run())
+
+
+def test_should_skip_llm_for_empty_chapter():
+    """空章/极短章不调 LLM（实测：0 字章被评 2 分是噪音）。"""
+    from services.review_precheck import precheck, should_skip_llm
+
+    empty = precheck("")
+    assert should_skip_llm(empty) is True
+    assert should_skip_llm(precheck("## 一\n太短。")) is True
+    long_text = precheck("## 一\n" + "现有服务器 12 台，用户 3000 人，数据量 2TB，2026 年完成改造。" * 12)
+    assert should_skip_llm(long_text) is False
