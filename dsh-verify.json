@@ -1,0 +1,19 @@
+{
+  "checks": [
+    {
+      "name": "backend-tests",
+      "command": "./.venv/bin/python -m pytest -q",
+      "timeoutMs": 600000
+    },
+    {
+      "name": "frontend-tests",
+      "command": "node --test tests/frontend/*.test.mjs",
+      "timeoutMs": 300000
+    },
+    {
+      "name": "frontend-syntax",
+      "command": "node --check frontend/assets/chapter-studio.mjs",
+      "timeoutMs": 30000
+    }
+  ]
+}
