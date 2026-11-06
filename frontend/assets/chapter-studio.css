@@ -1252,8 +1252,3 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-readiness.is-ok, .cs-sec-ready.is-ok { color:#15803d; border-color:#bbf7d0; background:#f0fdf4; }
 .cs-readiness.is-warn, .cs-sec-ready.is-warn { color:#9a3412; border-color:#fed7aa; background:#fff7ed; }
 .cs-readiness.is-bad { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
-.cs-p2p-preview { max-height: 58vh; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; background: #fff; margin: 8px 0; }
-.cs-p2p-preview table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.cs-p2p-preview th, .cs-p2p-preview td { border: 1px solid #e2e8f0; padding: 4px 5px; vertical-align: top; }
-.cs-p2p-preview th { background: #f1f5f9; position: sticky; top: 0; }
-.cs-p2p-preview td { max-width: 300px; word-break: break-word; }
