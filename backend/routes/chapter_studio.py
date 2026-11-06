@@ -294,6 +294,13 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
     return chr(10).join(out)
 
 
+
+
+class PointToPointBody(BaseModel):
+    save: bool = False
+    mode: str = Field(default="replace", pattern="^(replace|append)$")
+
+
 class OutlineBody(BaseModel):
     thread_id: str = Field(min_length=8)
     regenerate: bool = Field(default=False)
@@ -304,6 +311,27 @@ class SectionBody(BaseModel):
     title: str = Field(min_length=1, max_length=60)
     points: list[str] = Field(default_factory=list)
     words: int = Field(default=900, ge=400, le=1600)
+
+
+@router.post('/blocks/{block_id}/point-to-point')
+async def point_to_point(block_id: int, body: PointToPointBody):
+    """按技术规范书原文顺序生成标准点对点应答表。"""
+    from services.point_to_point import collect_clauses, render_table
+    from services.block_store import add_revision, update_block_content
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        data = await collect_clauses(db, block["project_id"], str(block.get("run_thread_id") or ""),
+                                     str(block.get("block_id") or ""))
+        rendered = render_table(data["clauses"])
+        saved = False
+        if body.save and rendered["count"]:
+            before = str(block.get("content") or "")
+            after = rendered["markdown"] if body.mode == "replace" else (before.rstrip() + "\n\n" + rendered["markdown"])
+            await add_revision(db, block_id, before, summary="生成技术规范书点对点应答表", source="ai")
+            await update_block_content(db, block_id, after, status=block.get("status") or "draft")
+            saved = True
+    return {"table": rendered["markdown"], "rows": rendered["rows"], "count": rendered["count"],
+            "missing": data.get("missing") or [], "saved": saved}
 
 
 @router.get('/blocks/{block_id}/writing-readiness')

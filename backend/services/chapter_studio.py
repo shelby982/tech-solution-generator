@@ -45,6 +45,8 @@ def recommend_layout(block, source=None):
     title = block.get('title') or ''
     if (source or {}).get('response_part') == 'point_to_point':
         return 'point_to_point'
+    if re.search('点对点|技术规范书应答|逐条应答', title):
+        return 'point_to_point'
     if re.search('人员|资质|业绩|证书|案例', title):
         return 'evidence'
     if re.search('实施|进度|培训|交付|计划', title):

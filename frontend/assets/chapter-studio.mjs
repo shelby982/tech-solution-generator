@@ -1,5 +1,5 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v467';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v467';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v468';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v468';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -176,6 +176,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-agent-slot" data-cs="agents"></div>
         <div class="cs-toolbar">
           <button data-action="ai" class="cs-primary" title="按章节大纲逐节编写整章（已有内容的节保留）">编写整章</button>
+          <button data-action="point-to-point" hidden title="按技术规范书原文顺序生成标准点对点应答表">点对点应答表</button>
           <button data-action="save" disabled>保存</button>
           <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
           <div class="cs-toolbar-right">
@@ -1250,6 +1251,43 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     } catch (err) {
       body.innerHTML = `<p class="cs-warning">质检失败：${esc(String(err.message || err))}</p>`;
     }
+  }
+
+  /** 技术规范书点对点应答表：模板生成、预览、写入本章。 */
+  async function openPointToPointDialog() {
+    if (!active) return;
+    status('正在生成点对点应答表…');
+    let data;
+    try {
+      data = await json(`/api/blocks/${active.id}/point-to-point`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({save:false})});
+    } catch (error) { status(`生成失败：${error.message}`); return; }
+    const dlg = globalThis.document.createElement('dialog');
+    dlg.className = 'cs-plan-dialog cs-p2p-dialog';
+    dlg.innerHTML = `<header><h3>技术规范书点对点应答表</h3><button type="button" aria-label="关闭">×</button></header>
+      <div class="cs-plan-body">
+        <p class="cs-muted">按技术规范书原文顺序逐条应答；共 <b>${data.count || 0}</b> 条${data.missing?.length ? `，${data.missing.length} 条缺少原文/映射` : ''}。</p>
+        <div class="cs-p2p-preview">${previewContent(data.table || '')}</div>
+        <div class="cs-plan-actions"><button type="button" class="mw-btn" data-p2p-cancel>取消</button>
+          <button type="button" class="mw-btn primary" data-p2p-save ${data.count ? '' : 'disabled'}>写入本章</button></div>
+        <p class="cs-dim" data-p2p-msg></p>
+      </div>`;
+    globalThis.document.body.appendChild(dlg);
+    dlg.querySelector('header button').onclick = () => dlg.close();
+    dlg.querySelector('[data-p2p-cancel]').onclick = () => dlg.close();
+    dlg.addEventListener('close', () => dlg.remove());
+    dlg.querySelector('[data-p2p-save]')?.addEventListener('click', async () => {
+      const btn = dlg.querySelector('[data-p2p-save]');
+      btn.disabled = true; btn.textContent = '写入中…';
+      try {
+        const saved = await json(`/api/blocks/${active.id}/point-to-point`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({save:true, mode:'replace'})});
+        const fresh = await json(`/api/blocks/${active.id}/studio`); context = fresh;
+        if (fresh.block) editor.value = fresh.block.content || '';
+        await loadBasis(active.block_id); paintAside();
+        dlg.close();
+        status(`已写入点对点应答表（${saved.count || 0} 条）`);
+      } catch (error) { btn.disabled = false; btn.textContent = '写入本章'; dlg.querySelector('[data-p2p-msg]').textContent = `写入失败：${error.message}`; }
+    });
+    dlg.showModal();
   }
 
   /** 本章编写计划（可执行版）：交付物 / 对内要求 / 字数分配 / 素材清单 / 怎么写 / 自检。
@@ -5048,7 +5086,10 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const previous = context.profile.layout;
       try {
         const updated=await json(`/api/blocks/${active.id}/studio`,send('PUT',{layout:event.target.value,writing_status:context.profile.writing_status}));
-        context.profile={...context.profile,...updated}; paintAside();
+        context.profile={...context.profile,...updated};
+        const p2pBtn = host.querySelector('[data-action="point-to-point"]');
+        if (p2pBtn) p2pBtn.hidden = (context.profile.layout || '') !== 'point_to_point';
+        paintAside();
       } catch(error) { event.target.value=previous;status(error.message); }
     };
     const uploadInput = get('upload');
@@ -5112,6 +5153,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
       get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span><span class="cs-readiness-slot" data-readiness>${readinessChipHtml()}</span><span class="cs-save-state" data-save-state></span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
       paintPlanAction(block);
+      const p2pBtn = host.querySelector('[data-action="point-to-point"]');
+      if (p2pBtn) p2pBtn.hidden = (context.profile.layout || '') !== 'point_to_point';
       host.querySelector('[data-action="save"]').disabled=true;
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
       hydrateIgnored();
@@ -5751,6 +5794,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     host.querySelector('.cs-more').removeAttribute('open');
     try {
       if(action==='save') await save();
+      if(action==='point-to-point'){await openPointToPointDialog();return;}
       if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
       if(action==='ai'){
