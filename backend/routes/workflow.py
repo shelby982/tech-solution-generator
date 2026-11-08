@@ -172,6 +172,15 @@ async def confirm_response_plan(thread_id: str):
                     'missing_sections':checks['missing_risk_requirements'],
                     'original_structure_matches':checks['original_structure_matches'],
                     'point_to_point_missing':checks['point_to_point_requirements_total']-checks['point_to_point_requirements']})
+        # 确认目录前自愈：已存在计划但没有大纲的章节，用确定性 fallback 补齐。
+        # 这是数据修复，不改变目录结构，因此即使目录已确认也允许执行。
+        try:
+            from services.outline_self_heal import heal_thread_outlines
+            healed = await heal_thread_outlines(db, state['project_id'], thread_id)
+            if healed.get('healed'):
+                logger.info('确认目录时自愈大纲：%s 章', healed['healed'])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('确认目录时大纲自愈失败：%s', exc)
         await set_answer(db, state['project_id'], thread_id, 'response_plan', {**plan, 'confirmed': True})
     return {'confirmed': True, 'response_type': plan['type']}
 

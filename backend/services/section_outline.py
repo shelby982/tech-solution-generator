@@ -173,8 +173,10 @@ def _normalize_deliverables(raw, need: str = "", points: list | None = None) -> 
 
 
 OUTLINE_SYSTEM = (
-    "你是标书主编。根据章节标题、编写要求（评分点/招标条款）、交付物与素材情况，"
-    "把这一章拆成 6~10 个**节**（每节 600~1200 字），并为**每一节**写清三件事：\n"
+    "你是标书主编。根据章节标题、章节类型（chapter_type / chapter_type_structure）、"
+    "编写要求（评分点/招标条款）、交付物与素材情况，"
+    "把这一章拆成 6~10 个**节**（每节 600~1200 字），每节必须服务于该章节类型的必备结构。\n"
+    "如果输入提供 chapter_type_prompt，优先遵循用户填写的生成提示词。\n"
     "（a）依据 basis：本节凭什么写——从评分点/招标条款/政策文件/素材中挑选，给出名称与用途；\n"
     "（b）写法 how：本节怎么写——结构（先写什么再写什么）、句式要求、禁止项；\n"
     "（c）交付物 deliverables：本节要交什么——文字（多少字）、表格（表名与列名）、图（图名与图型）；\n"
@@ -231,12 +233,52 @@ def build_section_payload(chapter: dict, section: dict, evidence: str = "") -> d
 
 
 _HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
+# 正文里常见的小节标题还有两种：独占一行的加粗标题、带编号的短行
+_BOLD_HEADING_RE = re.compile(r"(?m)^\*\*(.{1,60}?)\*\*\s*$")
+_NUM_HEADING_RE = re.compile(r"(?m)^(\d+(?:\.\d+){0,2})[.、]?\s+(\S.{0,48}?)\s*$")
+
+# 标题归一化：去加粗标记、去编号前缀、去尾部标点空白
+_LEAD_NUM = re.compile(r"^\d+(?:\.\d+)*[.、]?\s*")
+_TAIL_PUNCT = re.compile(r"[\s:：。，,、.]+$")
+
+
+def normalize_title(title: str) -> str:
+    """标题归一化：`**3. 项目背景**` → `项目背景`（用于跨写法匹配）。"""
+    text = str(title or "").strip()
+    text = re.sub(r"^#+\s+", "", text)          # 去 markdown 标题前缀
+    text = re.sub(r"^\*+|\*+$", "", text).strip()
+    text = _LEAD_NUM.sub("", text)
+    return _TAIL_PUNCT.sub("", text).strip()
+
+
+def _heading_style(line: str) -> str:
+    """原标题的写法风格：markdown 标题（##）/ 加粗 / 编号加粗。"""
+    if line.lstrip().startswith("#"):
+        return "md"
+    if line.lstrip().startswith("**"):
+        return "bold"
+    return "plain"
 
 
 def section_ranges(content: str) -> list[tuple[str, int, int]]:
-    """正文里的 `## 标题` 分段 → [(title, start, end)]（end 为下一标题起点）。"""
+    """正文分段 → [(title, start, end)]（end 为下一标题起点）。
+
+    支持三种标题写法（真实正文里很常见的是加粗行，只有部分用了 `## `）：
+      1. `## 标题`
+      2. `**标题**`（独占一行、≤60 字）
+      3. `3. 标题` / `3.2 标题`（独占一行、≤50 字，且**后面紧跟正文**而不是列表项）
+    """
     text = str(content or "")
-    marks = [(m.group(1).strip(), m.start()) for m in _HEADING_RE.finditer(text)]
+    marks: list[tuple[str, int]] = [(m.group(1).strip(), m.start()) for m in _HEADING_RE.finditer(text)]
+    if not marks:
+        marks = [(m.group(1).strip(), m.start()) for m in _BOLD_HEADING_RE.finditer(text)]
+    if not marks:
+        # 编号权威标题：要求该行后面有空行（避免把正文里的有序列表当成标题）
+        for match in _NUM_HEADING_RE.finditer(text):
+            line_end = text.find("\n", match.end())
+            tail = text[line_end + 1: line_end + 3] if line_end >= 0 else ""
+            if tail.startswith("\n") or tail == "":
+                marks.append((f"{match.group(1)}. {match.group(2).strip()}", match.start()))
     ranges = []
     for i, (title, start) in enumerate(marks):
         end = marks[i + 1][1] if i + 1 < len(marks) else len(text)
@@ -244,13 +286,40 @@ def section_ranges(content: str) -> list[tuple[str, int, int]]:
     return ranges
 
 
+def _match_score(name: str, target: str) -> float:
+    """标题匹配度：1.0 完全一致（归一化后），0.6~0.99 包含关系，0 不匹配。"""
+    left, right = normalize_title(name), normalize_title(target)
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) >= 4 and shorter in longer:
+        return 0.6 + 0.3 * (len(shorter) / max(1, len(longer)))
+    return 0.0
+
+
 def replace_section(content: str, title: str, body: str) -> tuple[str, bool]:
-    """把 `## title` 这一节替换为 body；不存在则追加到末尾。返回 (新正文, 是否替换)。"""
+    """把「title 这一节」替换为 body；不存在则追加到末尾。返回 (新正文, 是否替换)。
+
+    关键：**必须优先替换**。此前只认 `## 标题`，而真实正文多用 `**标题**`，
+    导致每次重写都在末尾追加 —— 表现为"点重新编写后正文出现重复的一块"。
+    """
     text = str(content or "")
     target = str(title or "").strip()
+    best: tuple[float, str, int, int] | None = None
     for name, start, end in section_ranges(text):
-        if name == target:
-            return (text[:start] + f"## {target}\n\n{body.strip()}\n\n" + text[end:]).strip() + "\n", True
+        score = _match_score(name, target)
+        if score <= 0:
+            continue
+        if best is None or score > best[0]:
+            best = (score, name, start, end)
+    if best:
+        _, name, start, end = best
+        original_line = text[start:text.find("\n", start) if text.find("\n", start) >= 0 else len(text)]
+        style = _heading_style(original_line)
+        heading = f"## {name}" if style == "md" else f"**{name}**"
+        return (text[:start] + f"{heading}\n\n{body.strip()}\n\n" + text[end:]).strip() + "\n", True
     addition = f"## {target}\n\n{body.strip()}"
     return ((text.rstrip() + "\n\n" + addition).strip() + "\n"), False
 

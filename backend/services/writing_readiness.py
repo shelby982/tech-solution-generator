@@ -4,15 +4,16 @@ from __future__ import annotations
 
 async def _outline(block: dict, thread_id: str) -> tuple[bool, list[dict]]:
     from db import get_db
-    from services.writing_plans import plan_of_block
+    from services.writing_plans import chapter_plan
     async with get_db() as db:
-        found = await plan_of_block(db, int(block.get("project_id") or 0), str(thread_id or ""),
-                                    str(block.get("block_id") or ""))
-    if not found:
-        return False, []
-    chapter = next((item for item in found[1].get("chapters") or []
-                    if str(item.get("block_id")) == str(block.get("block_id"))), {})
-    return bool(chapter.get("outline")), list(chapter.get("outline") or [])
+        plan = await chapter_plan(db, int(block.get("project_id") or 0), str(thread_id or ""),
+                                  str(block.get("block_id") or ""))
+    chapter = {"outline": plan.get("outline") or [], "requirements": plan.get("requirements") or [],
+               "tasks": plan.get("tasks") or []}
+    if chapter.get("outline"):
+        return True, list(chapter["outline"])
+    # 只认计划大纲；正文小节不作为大纲来源。
+    return False, []
 
 
 async def section_readiness(block: dict, section: dict, thread_id: str = "") -> dict:

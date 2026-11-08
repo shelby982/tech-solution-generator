@@ -661,6 +661,16 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.commit()
     except Exception:
         pass
+    await conn.execute("CREATE TABLE IF NOT EXISTS project_writing_facts(project_id INTEGER PRIMARY KEY REFERENCES projects(id), facts TEXT NOT NULL DEFAULT '{}')")
+    issue_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(review_issue_states)")).fetchall()}
+    for column in ('verified_content_version', 'verified_evidence_version'):
+        if column not in issue_cols:
+            await conn.execute(f"ALTER TABLE review_issue_states ADD COLUMN {column} TEXT DEFAULT ''")
+    review_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(chapter_reviews)")).fetchall()}
+    for column in ('content_version', 'evidence_version'):
+        if column not in review_cols:
+            await conn.execute(f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT ''")
+    await conn.commit()
     await conn.executescript(_LEADS_DDL)
     await conn.executescript('''
         CREATE TRIGGER IF NOT EXISTS cleanup_chapter_studio AFTER DELETE ON blocks BEGIN
@@ -725,6 +735,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN chunk_id INTEGER")
     if material_cols and 'mode' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN mode TEXT DEFAULT 'cite'")
+    cs_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_studio)')).fetchall()}
+    if cs_cols and 'layout_prompt' not in cs_cols:
+        await conn.execute("ALTER TABLE chapter_studio ADD COLUMN layout_prompt TEXT DEFAULT ''")
     cmc_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_material_chunks)')).fetchall()}
     if cmc_cols and 'chunk_kind' not in cmc_cols:
         await conn.execute("ALTER TABLE chapter_material_chunks ADD COLUMN chunk_kind TEXT DEFAULT 'file'")

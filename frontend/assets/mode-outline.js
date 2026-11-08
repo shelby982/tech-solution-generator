@@ -2,9 +2,9 @@
    抽成模块的目的：两段内联脚本有 90 个同名顶层标识符 + 18 个重复 DOM id，
    同页拼接必然互相覆盖；各自成为一个模块即各自一个作用域。
    本文件在抽取时**未改任何逻辑**。 */
-import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v467';
-import { api } from './api.js?v=20261016-v467';
-import { specContentHtml } from './spec-content.mjs?v=20261016-v467';
+import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v503';
+import { api } from './api.js?v=20261016-v503';
+import { specContentHtml } from './spec-content.mjs?v=20261016-v503';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
 // outline_review，只看它的话顶栏永远显示"待确认目录"（实测就是这个问题）。
@@ -12,7 +12,7 @@ import { workspace, renderWorkspaceChrome,
          REQUIREMENT_ROLES, SELECTABLE_REQUIREMENT_ROLES, ROLE_LABEL_SHARED, ROLE_HINT_SHARED,
          roleMismatchWarning, inferRoleFromFilename,
          uiAlert, uiConfirm,
-       } from './workspace.js?v=20261016-v467';
+       } from './workspace.js?v=20261016-v503';
 import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, instructionDirty, newOutlineId, outlineSubtreeRange,
          moveOutlineNode, indentOutlineNode, outdentOutlineNode,
          moveManyOutlineNodes, indentManyOutlineNodes, outdentManyOutlineNodes,
@@ -31,7 +31,7 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
          chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
-       } from './workspace-model.mjs?v=20261016-v467';
+       } from './workspace-model.mjs?v=20261016-v503';
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -180,7 +180,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 // 左栏章节树：行标记与「方案编辑」共用一份（2026-10-13 左栏归一）。
 // 此前两侧各拼一套（.ot-row / .doc-outline-item），数据投影虽已共用，
 // 但标记重复维护会漂移（workspace-model.mjs 注释里记着 "#undefined" 那次）。
-import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v467';
+import { chapterNode, chapterBadgesHtml as sharedBadgesHtml } from './chapter-tree.mjs?v=20261016-v503';
 const blocksEmpty = document.getElementById('blocks-empty');
 const sidebarToc  = document.getElementById('sidebar-toc');
 const ringFill    = document.getElementById('ring-fill');
@@ -3534,6 +3534,7 @@ async function renderWritePane() {
   try {
     const tid = await resolvePanelThreadId();
     chapterStudio = await mountChapterStudio(body, {projectId, threadId:tid, getModel:()=>selectedModel,
+      searchPoints: JSON.parse(body.dataset.searchPoints || "{}"),
       onStats: stats => { writeStats = stats; refreshStageHint(); }});
   } catch(error) {
     body.innerHTML = `<div class="sr-flash err">编制工作台加载失败：${escapeHtml(error.message)}</div>`;
@@ -4561,21 +4562,10 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     price: catTable(priceStat, '报价'),
     spec: specHtml,
   };
-  // 产物子页签的角标：**没生成就不显示数字**。截图里"目录 134 / 映射 8"和
-  // "产物还没到出现的时候"并列，数字来自上一次运行，会让人以为已经生成好了。
-  const prodSubs = [
-    { id: 'writing', label: '正文编写', n: '' },
-    { id: 'directory', label: '目录总览', n: generated ? structBlocks.length : '—' },
-    { id: 'map', label: '按评分点查找',
-      n: generated ? (mp.point_to_requirement || []).length : '—' },
-  ];
-  const prodPanes = {
-    writing: productsGate || '<div id="sr-write-body"><div class="sr-note">正在加载章节…</div></div>',
-    directory: productsGate || `
-      <div class="sr-answer"><strong>${responsePlan.type === 'commerce' ? '商务应答' : '技术应答'}目录 · ${structBlocks.length} 个目录节点</strong><span class="sr-dim">点击章节进入编写</span></div>
-      ${responseWarningsHtml}<div class="sr-struct">${structBlocks.map(b=>`<div class="response-map-row" style="padding-left:${10+(Math.max(1,Number(b.level)||1)-1)*16}px"><button class="mw-btn" data-write-chapter="${escapeHtml(String(b.block_id || b.id))}">${escapeHtml(b.title)}</button></div>`).join('')}</div>`,
-    map: productsGate || `<table class="sr-table"><thead><tr><th>评分点</th><th>分值</th><th>承接章节 · 点击编写</th></tr></thead><tbody>${(mp.point_to_requirement || []).map(p=>`<tr><td>${escapeHtml(p.item || p.factor)}</td><td>${p.points ?? '—'}</td><td>${structBlocks.filter(b=>parseIds(b.review_point_ids).map(String).includes(String(p.point_id))).map(b=>`<button class="mw-btn" data-write-chapter="${escapeHtml(String(b.block_id || b.id))}">${escapeHtml(b.title)}</button>`).join(' ') || '待补充'}</td></tr>`).join('')}</tbody></table>`,
-  };
+  const chapterSearchPoints = Object.fromEntries(structBlocks.map(block => [
+    block.block_id, parseIds(block.review_point_ids).map(reqNameOf).filter(Boolean),
+  ]));
+  const writingPane = productsGate || `<div id="sr-write-body" data-search-points="${escapeHtml(JSON.stringify(chapterSearchPoints))}"><div class="sr-note">正在加载章节…</div></div>`;
   // 阶段状态（默认 ① 评分点）：点左侧竖条切换，子页签在阶段内切换
   const STAGES = [
     { id: '1', label: '解析依据', sub: '评分点 · 技术规范' },
@@ -4583,7 +4573,7 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     // ④⑤ **也在这个面板里**（用户强调的布局约定：左侧五步，点每一步在右侧展示对应内容，
     // 不做整页跳转）。编写面板＝章节列表 + 章头(本章回应) + 正文 + 按需素材；
     // 评审面板＝评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻。
-    { id: '4', label: '应答编写', sub: '正文 · 目录 · 依据' },
+    { id: '4', label: '应答编写', sub: '按章节编写' },
     { id: '5', label: '评审与交付', sub: '检查缺口 · 导出应答' },
   ];
   const stageState = (st) => {
@@ -4663,11 +4653,8 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
           </div>
           <div class="sr-stage" data-stage="4">
             <div class="sr-stage-head"><span class="t">应答编写</span><span class="hint">${stageHint('4')}</span>
-              <div class="sr-subtabs sr-subtabs--head">${prodSubs.map(x => `<span class="sr-subtab" data-sub="${x.id}">${x.label}<span class="n">${x.n}</span></span>`).join('')}</div>
             </div>
-            <div class="sr-stage-body">
-              ${prodSubs.map(x => `<div class="sr-subpane" data-sub="${x.id}">${prodPanes[x.id] || ''}</div>`).join('')}
-            </div>
+            <div class="sr-stage-body"><div class="sr-subpane" data-sub="writing">${writingPane}</div></div>
           </div>
           <!-- ⑤ 评审：评分点 verdict（得分预估 / 缺口 / 举证）+ 章节下钻 -->
           <div class="sr-stage" data-stage="5">
@@ -5055,12 +5042,6 @@ async function openSplitReport({ auto = false, tab = '', stage: stageIn = '', su
     applySub();
   }));
   el.querySelector('[data-act="response-write"]')?.addEventListener('click', () => openSplitReport({stage:'4', sub:'writing'}));
-  el.querySelectorAll('[data-write-chapter]').forEach(button => button.addEventListener('click', async () => {
-    panelStage = '4'; panelSub = 'writing';
-    applyStage(); applySub();
-    await renderWritePane();
-    await chapterStudio?.select(button.dataset.writeChapter);
-  }));
   el.querySelector('[data-act="open-draft"]')?.addEventListener('click', async (event) => {
     event.stopPropagation();
     const d = draftOfType(responseType);

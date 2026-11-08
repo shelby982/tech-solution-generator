@@ -114,6 +114,8 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
             raise ValueError("章节不存在")
         block = dict(row)
         output, matrix, chain = await _chapter_inputs(db, block)
+        from services.writing_workspace import versions
+        reviewed_versions = await versions(db, block)
 
     # ── 分层调度（v3 B）：auto → L0 有 critical 走 fast，否则 full ──
     from services.review_precheck import precheck, resolve_tier, should_skip_llm
@@ -136,14 +138,14 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         async with get_db() as db:
             await db.execute(
                 "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
-                "criterion_text, covered_points, missing_points, issues, needs_material, tier, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+                "criterion_text, covered_points, missing_points, issues, needs_material, tier, content_version, evidence_version, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
                 "ON CONFLICT(block_id) DO UPDATE SET score=excluded.score, satisfied=excluded.satisfied, "
                 "issues=excluded.issues, missing_points=excluded.missing_points, tier=excluded.tier, "
-                "updated_at=CURRENT_TIMESTAMP",
+                "content_version=excluded.content_version, evidence_version=excluded.evidence_version, updated_at=CURRENT_TIMESTAMP",
                 (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
                  skipped["criterion_text"], "[]", json.dumps(skipped["missing_points"], ensure_ascii=False),
-                 json.dumps(skipped["issues"], ensure_ascii=False), "[]", "skip"))
+                 json.dumps(skipped["issues"], ensure_ascii=False), "[]", "skip", reviewed_versions["content_version"], reviewed_versions["evidence_version"]))
             await db.commit()
             await db.execute(
                 "INSERT INTO review_history (block_id, project_id, score, tech_score, comp_score, satisfied, "
@@ -151,7 +153,7 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
                 (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
                  len(skipped["issues"]), 0))
             await db.commit()
-        return skipped
+        return await load_review(block_pk)
 
     blocks = {output.block_id: output}
     outline_matrix = {output.block_id: matrix}
@@ -182,7 +184,7 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
     combined["tier"] = resolved_tier
     combined["precheck"] = precheck_result
 
-    # ── issue 状态机（评审 v2 C）：本轮出现→open；上轮消失→verified ──
+    # ── issue 状态机（评审 v2 C）：本轮出现→open；遗漏问题保留待复核 ──
     try:
         from services.review_issues import sync_issues
         async with get_db() as db:
@@ -202,33 +204,40 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         await db.commit()
 
     # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
-    await _write_back_reviews(block, tech, comp, combined)
+    async with get_db() as db:
+        latest = await (await db.execute('SELECT * FROM blocks WHERE id=?', (block_pk,))).fetchone()
+        still_current = bool(latest and await versions(db, dict(latest)) == reviewed_versions)
+    if still_current:
+        await _write_back_reviews(block, tech, comp, combined)
 
     async with get_db() as db:
         await db.execute(
             "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
-            "criterion_text, covered_points, missing_points, issues, needs_material, tier, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+            "criterion_text, covered_points, missing_points, issues, needs_material, tier, content_version, evidence_version, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
             "ON CONFLICT(block_id) DO UPDATE SET tech_score=excluded.tech_score, comp_score=excluded.comp_score, "
             "score=excluded.score, satisfied=excluded.satisfied, criterion_text=excluded.criterion_text, "
             "covered_points=excluded.covered_points, missing_points=excluded.missing_points, "
             "issues=excluded.issues, needs_material=excluded.needs_material, "
-            "tier=excluded.tier, updated_at=CURRENT_TIMESTAMP",
+            "tier=excluded.tier, content_version=excluded.content_version, evidence_version=excluded.evidence_version, updated_at=CURRENT_TIMESTAMP",
             (block_pk, int(block.get("project_id") or 0), combined["tech_score"], combined["comp_score"],
              combined["score"], combined["satisfied"], combined["criterion_text"],
              json.dumps(combined["covered_points"], ensure_ascii=False),
              json.dumps(combined["missing_points"], ensure_ascii=False),
              json.dumps(combined["issues"], ensure_ascii=False),
              json.dumps(combined["needs_material"], ensure_ascii=False),
-             resolved_tier))
+             resolved_tier, reviewed_versions["content_version"], reviewed_versions["evidence_version"]))
         await db.commit()
-    return combined
+    return await load_review(block_pk)
 
 
 async def load_review(block_pk: int) -> dict | None:
     """读取最近一次评审结果（没有则 None）。"""
     async with get_db() as db:
         row = await (await db.execute("SELECT * FROM chapter_reviews WHERE block_id=?", (block_pk,))).fetchone()
+        block = await (await db.execute('SELECT * FROM blocks WHERE id=?', (block_pk,))).fetchone()
+        from services.writing_workspace import review_freshness
+        freshness = await review_freshness(db, dict(block), dict(row)) if row and block else 'unknown'
     if not row:
         return None
     data = dict(row)
@@ -242,6 +251,9 @@ async def load_review(block_pk: int) -> dict | None:
     issues = _loads(data.get("issues"))
     return {
         "block_id": data.get("block_id"),
+        "freshness": freshness,
+        "content_version": data.get('content_version') or '',
+        "evidence_version": data.get('evidence_version') or '',
         "tech_score": int(data.get("tech_score") or 0),
         "comp_score": int(data.get("comp_score") or 0),
         "score": int(data.get("score") or 0),

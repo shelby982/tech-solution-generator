@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>逐帧工作台</title>
+<style>
+:root{--bg:#14171c;--panel:#1c2028;--line:#2b323d;--text:#e6eaf0;--muted:#8f9bab;--accent:#4f8cff;--warn:#e0a145;--ok:#3fbf8f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;overflow:hidden}
+header{height:46px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:14px;margin:0 8px 0 0;font-weight:600;letter-spacing:1px}
+select,input,button{background:#232a34;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;outline:none}
+button{cursor:pointer}button:hover{border-color:#3d4655}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.danger{color:#ff8f8f}
+main{display:grid;grid-template-columns:1fr 300px;height:calc(100vh - 46px)}
+.stage{display:flex;flex-direction:column;min-width:0}
+.canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;background:#0e1116;position:relative;overflow:hidden}
+canvas{border-radius:4px;box-shadow:0 10px 40px #0008;cursor:crosshair;max-width:100%;max-height:100%}
+.tools{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap;align-items:center}
+.tool{padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#232a34;cursor:pointer;font-size:12px}
+.tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.timeline{padding:8px 12px 12px;background:var(--panel);border-top:1px solid var(--line)}
+.strip{display:flex;gap:2px;height:44px;overflow:hidden;border-radius:4px;background:#0e1116}
+.strip img{height:100%;width:auto;opacity:.55;cursor:pointer}
+.strip img.on{opacity:1;outline:2px solid var(--accent)}
+.ctrl{display:flex;align-items:center;gap:10px;margin-top:8px}
+input[type=range]{flex:1;accent-color:var(--accent);padding:0}
+.timecode{font-family:ui-monospace,Menlo,monospace;color:var(--muted);min-width:132px}
+aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.sect{padding:10px 12px;border-bottom:1px solid var(--line)}
+.sect h2{font-size:12px;margin:0 0 8px;color:var(--muted);font-weight:500;letter-spacing:1px;text-transform:uppercase}
+.row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.row input[type=number]{width:64px}
+.ops{flex:1;overflow:auto;padding:6px 8px}
+.op{display:flex;gap:6px;align-items:center;padding:5px 6px;border-radius:6px;margin-bottom:3px;background:#232a34;font-size:12px}
+.op.sel{outline:1px solid var(--accent)}
+.op .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op .rng{color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.op button{background:none;border:none;color:var(--muted);padding:0 2px;cursor:pointer}
+.op button:hover{color:#fff}
+.hint{color:var(--muted);font-size:11px;line-height:1.6}
+.badge{font-size:11px;color:var(--muted)}
+#log{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);max-height:80px;overflow:auto;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>逐帧工作台</h1>
+  <select id="film"></select>
+  <span class="badge" id="meta"></span>
+  <span style="flex:1"></span>
+  <button id="save">保存 ops</button>
+  <button class="primary" id="render">导出成片</button>
+</header>
+<main>
+  <div class="stage">
+    <div class="canvas-wrap"><canvas id="cv" width="960" height="540"></canvas></div>
+    <div class="tools" id="tools">
+      <span class="tool active" data-tool="select">选择</span>
+      <span class="tool" data-tool="box">框选</span>
+      <span class="tool" data-tool="arrow">箭头</span>
+      <span class="tool" data-tool="highlight">高亮</span>
+      <span class="tool" data-tool="text">文字</span>
+      <span class="tool" data-tool="mosaic">马赛克</span>
+      <span class="tool" data-tool="replace">贴图</span>
+      <span class="tool" data-tool="crop">裁剪全片</span>
+      <span class="tool" data-tool="grade">调色</span>
+      <span class="tool" data-tool="freeze">定格</span>
+      <span class="tool" data-tool="speed">区间变速</span>
+      <span class="badge" id="tip" style="margin-left:auto"></span>
+    </div>
+    <div class="timeline">
+      <div class="strip" id="strip"></div>
+      <div class="ctrl">
+        <button id="play">▶ 播放</button>
+        <button id="prev">◀ 帧</button>
+        <button id="next">帧 ▶</button>
+        <input type="range" id="scrub" min="0" max="100" value="0">
+        <span class="timecode" id="tc">0000 / 0000 · 0.00s</span>
+        <label class="badge">帧区间 <input type="number" id="from" value="0" style="width:70px"> – <input type="number" id="to" value="45" style="width:70px"></label>
+      </div>
+    </div>
+  </div>
+  <aside>
+    <div class="sect">
+      <h2>当前操作</h2>
+      <div class="row"><span class="badge">颜色</span><input type="color" id="color" value="#2563eb"></div>
+      <div class="row"><span class="badge">线宽</span><input type="number" id="width" value="4" style="width:60px"><span class="badge">字号</span><input type="number" id="size" value="34" style="width:60px"></div>
+      <div class="row"><span class="badge">不透明</span><input type="range" id="opacity" min="0.05" max="1" step="0.05" value="0.25"></div>
+      <div class="row"><span class="badge">变速</span><input type="number" id="rate" value="1.5" step="0.1" style="width:60px"><span class="badge">定格帧</span><input type="number" id="freezeFrame" value="0" style="width:70px"></div>
+      <div class="row"><span class="badge">调色</span><input type="number" id="brightness" value="1.05" step="0.01" style="width:60px"><input type="number" id="contrast" value="1.05" step="0.01" style="width:60px"></div>
+      <div class="hint" id="tip2">选工具后在画面上拖拽即可。<br>文字：点一下画面输入内容。<br>贴图：先选图片，再拖框。</div>
+    </div>
+    <div class="sect"><h2>操作列表 <span class="badge" id="count"></span></h2>
+      <div class="hint">勾选控制是否参与导出</div>
+    </div>
+    <div class="ops" id="ops"></div>
+    <div class="sect"><h2>渲染</h2><div id="log">就绪</div></div>
+  </aside>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let films = [], meta = null, fid = null, frame = 0, playing = false, tool = 'select';
+let ops = [], sel = -1, cropRect = null, drag = null, replaceImg = null, imgCache = new Map();
+
+async function api(path, opts) { const r = await fetch(path, opts); if (!r.ok) throw new Error(path + ' ' + r.status); return r.json(); }
+
+async function init() {
+  films = await api('/bench/films');
+  const sel = $('#film');
+  sel.innerHTML = films.map(f => `<option value="${f.id}">${f.name} · ${(f.size/1048576).toFixed(1)}MB</option>`).join('');
+  sel.onchange = () => load(sel.value);
+  if (films.length) load(films[0].id);
+}
+async function load(id) {
+  fid = id; frame = 0; ops = []; sel = -1;
+  meta = await api('/bench/meta/' + fid);
+  const proj = await api('/bench/project/' + fid);
+  ops = proj.ops || [];
+  cropRect = ops.find(o => o.type === 'crop' && !o.disabled)?.rect || null;
+  $('#meta').textContent = `${meta.width}×${meta.height} · ${meta.fps}fps · ${meta.frames} 帧 · ${meta.duration.toFixed(2)}s`;
+  $('#scrub').max = meta.frames - 1;
+  $('#from').value = 0; $('#to').value = Math.min(meta.frames, 45);
+  buildStrip(); renderOps(); show(0);
+}
+function buildStrip() {
+  const n = 40, step = Math.max(1, Math.floor(meta.frames / n));
+  $('#strip').innerHTML = Array.from({length: n}, (_, i) => {
+    const f = Math.min(meta.frames - 1, i * step);
+    return `<img src="/bench/frames/${fid}/${f + 1}.jpg" data-f="${f}" title="帧 ${f}">`;
+  }).join('');
+  $('#strip').querySelectorAll('img').forEach(el => el.onclick = () => show(+el.dataset.f));
+}
+function activeOps(f) { return ops.filter(o => !o.disabled && f >= (+o.from) && f < (+o.to)); }
+function show(f) {
+  frame = Math.max(0, Math.min(meta.frames - 1, f));
+  $('#scrub').value = frame;
+  const sec = (frame / meta.fps).toFixed(2).padStart(5, '0');
+  $('#tc').textContent = `${String(frame).padStart(4,'0')} / ${String(meta.frames-1).padStart(4,'0')} · ${sec}s`;
+  $('#strip').querySelectorAll('img').forEach(el => el.classList.toggle('on', Math.abs(+el.dataset.f - frame) < meta.frames/40/2 + 1));
+  draw();
+}
+async function draw() {
+  const cv = $('#cv'), ctx = cv.getContext('2d');
+  const act = activeOps(frame);
+  const crop = cropRect;
+  const sw = crop ? crop[2] : meta.width, sh = crop ? crop[3] : meta.height;
+  const W = 960, H = Math.round(W * sh / sw);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const scale = W / sw, ox = crop ? crop[0] : 0, oy = crop ? crop[1] : 0;
+  ctx.clearRect(0, 0, W, H);
+  const grade = act.find(o => o.type === 'grade');
+  ctx.filter = grade ? `brightness(${grade.brightness||1}) contrast(${grade.contrast||1}) saturate(${grade.saturation||1})` : 'none';
+  const img = await frameImg(frame);
+  // 缓存帧是 960 宽缩略图，源矩形按缩略图像素换算
+  const k = (img.naturalWidth || meta.width) / meta.width;
+  ctx.drawImage(img, ox * k, oy * k, sw * k, sh * k, 0, 0, W, H);
+  ctx.filter = 'none';
+  for (const o of act) {
+    const X = v => (v - ox) * scale, Y = v => (v - oy) * scale;
+    if (o.type === 'highlight') {
+      ctx.fillStyle = hexA(o.color || '#2563eb', o.opacity ?? .25);
+      ctx.fillRect(X(o.rect[0]), Y(o.rect[1]), o.rect[2]*scale, o.rect[3]*scale);
+    } else if (o.type === 'box') {
+      ctx.strokeStyle = o.color || '#2563eb'; ctx.lineWidth = Math.max(1,(o.width||4)*scale);
+      roundRect(ctx, X(o.rect[0]), Y(o.rect[1]), o.rect[2]*scale, o.rect[3]*scale, (o.radius||0)*scale); ctx.stroke();
+    } else if (o.type === 'arrow') {
+      const [x1,y1,x2,y2] = o.rect; ctx.strokeStyle = o.color||'#2563eb'; ctx.lineWidth = Math.max(1,(o.width||5)*scale);
+      ctx.beginPath(); ctx.moveTo(X(x1),Y(y1)); ctx.lineTo(X(x2),Y(y2)); ctx.stroke();
+      const a = Math.atan2(y2-y1, x2-x1), hd = (14 + (o.width||5)*4)*scale*.6;
+      ctx.beginPath(); ctx.moveTo(X(x2),Y(y2)); ctx.lineTo(X(x2)-hd*Math.cos(a-.5), Y(y2)-hd*Math.sin(a-.5));
+      ctx.moveTo(X(x2),Y(y2)); ctx.lineTo(X(x2)-hd*Math.cos(a+.5), Y(y2)-hd*Math.sin(a+.5)); ctx.stroke();
+    } else if (o.type === 'mosaic') {
+      const [x,y,w,h] = o.rect, blk = Math.max(2, o.block||14);
+      const tmp = document.createElement('canvas'); tmp.width = Math.max(1, Math.round(w/blk)); tmp.height = Math.max(1, Math.round(h/blk));
+      tmp.getContext('2d').drawImage(img, (x+ox)*((img.naturalWidth||meta.width)/meta.width), (y+oy)*((img.naturalHeight||meta.height)/meta.height), w*k, h*k, 0, 0, tmp.width, tmp.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(tmp, 0,0,tmp.width,tmp.height, X(x), Y(y), w*scale, h*scale);
+      ctx.imageSmoothingEnabled = true;
+    } else if (o.type === 'text') {
+      const size = (o.size||34)*scale, x = X(o.at[0]), y = Y(o.at[1]);
+      ctx.font = `600 ${size}px "PingFang SC",sans-serif`; ctx.textBaseline = 'top';
+      const tw = ctx.measureText(o.text||'').width;
+      if (o.bg) { ctx.fillStyle = o.bg; ctx.fillRect(x-6, y-6, tw+12, size*1.4+8); }
+      ctx.fillStyle = o.color || '#16202c'; ctx.fillText(o.text||'', x, y);
+    } else if (o.type === 'replace' && o.image && imgCache.has(o.image)) {
+      ctx.drawImage(imgCache.get(o.image), X(o.rect[0]), Y(o.rect[1]), o.rect[2]*scale, o.rect[3]*scale);
+    }
+  }
+  if (drag) {
+    const [x1,y1,x2,y2] = drag; ctx.setLineDash([6,4]); ctx.strokeStyle = '#4f8cff'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(Math.min(x1,x2)*scale - ox*scale, Math.min(y1,y2)*scale - oy*scale, Math.abs(x2-x1)*scale, Math.abs(y2-y1)*scale); ctx.setLineDash([]);
+  }
+}
+const hexA = (h, a) => { h = h.replace('#',''); if (h.length===3) h = h.split('').map(c=>c+c).join(''); return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`; };
+function roundRect(ctx,x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+async function frameImg(f) {
+  const key = 'f' + f;
+  if (imgCache.has(key)) return imgCache.get(key);
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = `/bench/frames/${fid}/${f + 1}.jpg`; });
+  imgCache.set(key, img); return img;
+}
+function toImg(ev) {
+  const cv = $('#cv'), r = cv.getBoundingClientRect();
+  const crop = cropRect, sw = crop ? crop[2] : meta.width, sh = crop ? crop[3] : meta.height;
+  const sx = (ev.clientX - r.left) / r.width * sw + (crop ? crop[0] : 0);
+  const sy = (ev.clientY - r.top) / r.height * sh + (crop ? crop[1] : 0);
+  return [Math.round(sx), Math.round(sy)];
+}
+const cv = $('#cv');
+cv.addEventListener('mousedown', async ev => {
+  if (tool === 'select') return;
+  const [x, y] = toImg(ev);
+  if (tool === 'text') {
+    const text = prompt('文字内容'); if (!text) return;
+    addOp({type:'text', from: +$('#from').value, to: +$('#to').value, at:[x,y], text, size:+$('#size').value, color:'#16202c', bg:'#ffffffdd'});
+    return;
+  }
+  drag = [x, y, x, y];
+});
+cv.addEventListener('mousemove', ev => { if (drag) { const [x,y] = toImg(ev); drag[2]=x; drag[3]=y; draw(); } });
+cv.addEventListener('mouseup', ev => {
+  if (!drag) return;
+  const [x1,y1,x2,y2] = drag; drag = null;
+  const r = [Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1)];
+  if (r[2] < 6 || r[3] < 6) { draw(); return; }
+  const from = +$('#from').value, to = +$('#to').value;
+  const base = {from, to};
+  if (tool === 'box') addOp({...base, type:'box', rect:r, color:$('#color').value, width:+$('#width').value});
+  else if (tool === 'highlight') addOp({...base, type:'highlight', rect:r, color:$('#color').value, opacity:+$('#opacity').value});
+  else if (tool === 'mosaic') addOp({...base, type:'mosaic', rect:r, block:14});
+  else if (tool === 'arrow') addOp({...base, type:'arrow', rect:[r[0], r[1], r[0]+r[2], r[1]+r[3]], color:$('#color').value, width:+$('#width').value});
+  else if (tool === 'replace') { if (!replaceImg) { log('先选择一张图片'); return; } addOp({...base, type:'replace', rect:r, image:replaceImg, fit:'cover'}); }
+  else if (tool === 'crop') { const c = {type:'crop', from:0, to:meta.frames, rect:r}; ops = ops.filter(o=>o.type!=='crop'); cropRect = r; addOp(c); }
+  draw();
+});
+document.querySelectorAll('#tools .tool').forEach(el => el.onclick = () => {
+  document.querySelectorAll('#tools .tool').forEach(x => x.classList.remove('active'));
+  el.classList.add('active'); tool = el.dataset.tool;
+  if (tool === 'grade') addOp({type:'grade', from:+$('#from').value, to:+$('#to').value, brightness:+$('#brightness').value, contrast:+$('#contrast').value, saturation:1});
+  if (tool === 'freeze') addOp({type:'freeze', from:+$('#from').value, to:+$('#to').value, frame:+( $('#freezeFrame').value || frame)});
+  if (tool === 'speed') addOp({type:'speed', from:+$('#from').value, to:+$('#to').value, rate:+$('#rate').value});
+  if (tool === 'replace') pickImage();
+});
+async function pickImage() {
+  const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.onchange = async () => {
+    const fd = new FormData(); fd.append('file', inp.files[0]);
+    const r = await fetch('/bench/upload/' + fid, {method:'POST', body: fd}).then(r=>r.json());
+    replaceImg = r.path;
+    const name = r.path.split('/').pop();
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = '/bench/asset/' + fid + '/' + name; });
+    imgCache.set(r.path, img);
+    log('贴图已就绪：' + r.path + '，现在拖框');
+  };
+  inp.click();
+}
+function addOp(o) { ops.push(o); sel = ops.length - 1; renderOps(); draw(); }
+function renderOps() {
+  $('#count').textContent = ops.length;
+  $('#ops').innerHTML = ops.map((o, i) => `
+    <div class="op ${i===sel?'sel':''}" data-i="${i}">
+      <input type="checkbox" ${o.disabled?'':'checked'} data-act="toggle">
+      <span class="t">${label(o)}</span>
+      <span class="rng">${o.from}–${o.to}</span>
+      <button data-act="del">✕</button>
+    </div>`).join('');
+  $('#ops').querySelectorAll('.op').forEach(el => {
+    const i = +el.dataset.i;
+    el.onclick = e => { if (e.target.dataset.act) return; sel = i; renderOps(); };
+    el.querySelector('[data-act=toggle]').onclick = e => { ops[i].disabled = !e.target.checked; renderOps(); draw(); };
+    el.querySelector('[data-act=del]').onclick = () => { ops.splice(i,1); sel=-1; renderOps(); draw(); };
+  });
+}
+const label = o => ({box:'框选',arrow:'箭头',highlight:'高亮',text:'文字：'+(o.text||'').slice(0,8),mosaic:'马赛克',replace:'贴图',crop:'裁剪',grade:'调色',freeze:'定格',speed:'变速 '+o.rate+'×'}[o.type] || o.type);
+function log(s) { $('#log').textContent = s; }
+$('#play').onclick = () => { playing = !playing; $('#play').textContent = playing ? '⏸ 暂停' : '▶ 播放'; if (playing) tick(); };
+function tick() { if (!playing) return; show(frame + 1); setTimeout(() => requestAnimationFrame(tick), 1000 / meta.fps); }
+$('#prev').onclick = () => show(frame - 1);
+$('#next').onclick = () => show(frame + 1);
+$('#scrub').oninput = e => show(+e.target.value);
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft') { show(frame-1); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { show(frame+1); e.preventDefault(); }
+  if (e.key === ' ') { $('#play').click(); e.preventDefault(); }
+});
+async function doSave() {
+  const r = await fetch('/bench/project/' + fid, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({film: fid, source: meta.mp4.replace(/^.*ge-solution\//,''), fps: meta.fps, ops})}).then(r=>r.json());
+  log('已保存 ' + r.saved + '（' + r.ops + ' 项）');
+  return r;
+}
+$('#save').onclick = doSave;
+$('#render').onclick = async () => {
+  await doSave();
+  const {job} = await fetch('/bench/render/' + fid, {method:'POST'}).then(r=>r.json());
+  log('渲染中…');
+  const t = setInterval(async () => {
+    const j = await fetch('/bench/render/' + job).then(r=>r.json());
+    if (j.progress) log(`渲染 ${j.progress.done}/${j.progress.total}`);
+    if (j.status === 'done') { clearInterval(t); log('完成：' + j.out); }
+    if (j.status === 'error') { clearInterval(t); log('失败：' + (j.stderr||'').slice(-300)); }
+  }, 1000);
+};
+init();
+</script>
+</body>
+</html>

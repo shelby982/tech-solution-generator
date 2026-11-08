@@ -17,9 +17,9 @@ def seeded_block():
     async def main():
         async with db_module.get_db() as db:
             await db.execute(
-                "INSERT INTO blocks (project_id, block_id, title, content, level, status) "
-                "VALUES (?,?,?,?,?,?)",
-                (29, "s1.1", "测试章", "## 背景\n\n（本节待写）\n", 2, "draft"))
+                "INSERT INTO blocks (project_id, block_id, title, content, level, status, run_thread_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (29, "s1.1", "测试章", "## 背景\n\n（本节待写）\n", 2, "draft", "t" * 10))
             await db.commit()
             row = await (await db.execute("SELECT * FROM blocks WHERE block_id='s1.1'")).fetchone()
             outline = normalize_outline({"sections": [
@@ -55,13 +55,14 @@ def test_runner_emits_events_and_saves(monkeypatch, seeded_block):
         return job_id
 
     job_id = asyncio.run(main())
+    assert not [payload for name, payload in events if name == "error"], [payload for name, payload in events if name == "error"]
     names = [name for name, _ in events]
     assert names[0] == "job"
     assert "plan" in names
     assert any(n == "role" and p.get("state") == "working" for n, p in events)
     assert any(n == "delta" for n, _ in events)
     assert any(n == "section" and p.get("state") == "done" for n, p in events)
-    assert any(n == "done" for n, _ in events)
+    assert any(n == "done" for n, _ in events), events
 
 
 def test_merge_charts_replaces_placeholder_and_reports_missing():
@@ -127,3 +128,44 @@ def test_job_artifacts_carry_section_records(monkeypatch, seeded_block):
     assert sections and sections[0]["role"] == "text"
     assert sections[0]["words"] > 0
     assert "ms" in sections[0]
+
+
+def test_job_keeps_remote_edits_and_proposal(monkeypatch, seeded_block):
+    from services import chapter_sse
+    from db import get_db
+    async def fake_stream(block, section, thread_id, model):
+        async with get_db() as db:
+            await db.execute('UPDATE blocks SET content=? WHERE id=?', ('他人已保存的正文', block['id']))
+            await db.commit()
+        yield '拟按技术规范落实实施、验证与交付，所有事实应当以本项目已确认要求为依据。' * 4
+    monkeypatch.setattr(chapter_sse, '_stream_section', fake_stream)
+    async def main():
+        job = await chapter_sse.create_job(29, 't'*10, seeded_block['id'])
+        await chapter_sse.run_job(job)
+        row = await chapter_sse._job_row(job)
+        async with get_db() as db:
+            content = (await (await db.execute('SELECT content FROM blocks WHERE id=?', (seeded_block['id'],))).fetchone())[0]
+        assert content == '他人已保存的正文'
+        assert row['status'] == 'done' and not row['saved']
+        assert '拟按技术规范' in row['content']
+    asyncio.run(main())
+
+
+def test_cancelled_job_never_overwrites_body(monkeypatch, seeded_block):
+    from services import chapter_sse
+    from db import get_db
+    async def fake_stream(block, section, thread_id, model):
+        async with get_db() as db:
+            await db.execute("UPDATE chapter_writing_jobs SET status='cancelled'")
+            await db.commit()
+        yield '这部分生成的内容在取消后应保留在进度中，不能覆盖章节的服务器正文。' * 4
+    monkeypatch.setattr(chapter_sse, '_stream_section', fake_stream)
+    async def main():
+        job = await chapter_sse.create_job(29, 't'*10, seeded_block['id'])
+        await chapter_sse.run_job(job)
+        row = await chapter_sse._job_row(job)
+        async with get_db() as db:
+            content = (await (await db.execute('SELECT content FROM blocks WHERE id=?', (seeded_block['id'],))).fetchone())[0]
+        assert content == seeded_block['content']
+        assert row['status'] == 'cancelled' and not row['saved']
+    asyncio.run(main())

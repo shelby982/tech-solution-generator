@@ -16,7 +16,8 @@ async def _seed(with_outline=True, with_spec=True):
         await db.commit()
         block = dict(await (await db.execute("SELECT * FROM blocks WHERE project_id=?", (pid,))).fetchone())
         await db.execute("UPDATE blocks SET content=?, spec_requirement_ids=? WHERE id=?",
-                         ("## 节一\n\n旧正文", json.dumps(["sr-ready"] if with_spec else []), block["id"]))
+                         ("## 节一\n\n旧正文" if with_outline else "旧正文",
+                          json.dumps(["sr-ready"] if with_spec else []), block["id"]))
         plan = {"chapters": [{"block_id": "s1", "title": "技术方案",
                               "requirements": [{"id": "r1", "text": "提供 Kubernetes 服务治理案例", "source": "point"}],
                               "outline": ([{"title": "节一", "points": ["云原生"], "words": 300,
@@ -52,10 +53,13 @@ async def test_no_evidence_then_ready_after_binding():
     if before["needs_total"]:
         assert before["status"] in ("no_evidence", "partial")
         async with get_db() as db:
-            await db.execute("INSERT INTO material_chunks(material_id,chunk_index,content,page,status) "
-                             "VALUES(1,0,'Kubernetes 服务治理片段。',2,'selected')")
+            material = await db.execute(
+                "INSERT INTO materials(project_id, filename, type, role) VALUES(?, '依据.docx', 'docx', 'source')",
+                (block["project_id"],))
+            chunk = await db.execute("INSERT INTO material_chunks(material_id,chunk_index,content,page,status) "
+                             "VALUES(?,0,'Kubernetes 服务治理片段。',2,'selected')", (material.lastrowid,))
             await db.execute("INSERT INTO chapter_material_chunks(block_id,chunk_id,section,mode,chunk_kind,requirement_id) "
-                             "VALUES(?,?,?,?,?,?)", (block["id"], 1, "节一", "data", "file", "sr-ready"))
+                             "VALUES(?,?,?,?,?,?)", (block["id"], chunk.lastrowid, "节一", "data", "file", "sr-ready"))
             await db.commit()
         after = await section_readiness(block, section, "ready-thread")
         assert after["status"] in ("partial", "ready")

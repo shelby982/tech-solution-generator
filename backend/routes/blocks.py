@@ -167,6 +167,7 @@ class BlockUpdateRequest(BaseModel):
     （pydantic 把多余字段丢掉，后端 200 返回原值，只有前端本地副本变了，刷新即回退）。
     """
 
+    expected_content: str | None = Field(default=None, max_length=500_000)
     content: str | None = Field(default=None, max_length=500_000)
     requirement: str | None = Field(default=None, max_length=5000)
     key_points: str | None = Field(default=None, max_length=20_000)
@@ -196,29 +197,16 @@ class GenerateRequest(BaseModel):
 @router.put("/blocks/{block_id}")
 async def update_block(block_id: int, body: BlockUpdateRequest):
     async with get_db() as db:
+        await db.execute("BEGIN IMMEDIATE")
         existing = await get_block(db, block_id)
         if existing is None:
             raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
+        if body.expected_content is not None and body.expected_content != (existing.get('content') or ''):
+            raise HTTPException(409, '正文已被其他操作更新，本地修改已保留，请核对版本')
         updated = existing
         if body.content is not None and body.content != existing.get("content"):
             if existing.get("content") and not await list_revisions(db, block_id):
-                await add_revision(db, block_id, existing["content"], "首次编辑前正文", "baseline")
-            # 正文净化：**不留任何"待补充"字眼**（用户要求：内容可以浅，但必须完整）
-            from services.placeholder_purge import purge as purge_placeholders
-            purged, removed_items = purge_placeholders(body.content)
-            if removed_items:
-                body.content = purged
-                try:
-                    from services.chapter_cleanup import record_generation_gaps
-                    thread_id = (existing.get("run_thread_id")
-                                 or await current_run_thread_id(db, existing["project_id"]) or "")
-                    notes = [f"正文占位已清理（{item.get('kind')}）：{(item.get('reason') or item.get('quote') or '')[:40]}"
-                             for item in removed_items]
-                    if thread_id and notes:
-                        await record_generation_gaps(db, int(existing["project_id"]), str(thread_id),
-                                                     str(existing.get("block_id") or ""), notes)
-                except Exception:
-                    pass
+                await add_revision(db, block_id, existing["content"], "首次编辑前正文", "baseline", manage_transaction=False)
             # 交付门：内部语法残留 / 内部术语 —— 系统**自动清理**，不打扰用户
             from services.delivery_gate import auto_fix as gate_auto_fix
             cleaned, gate_changed, _ = gate_auto_fix(body.content)
@@ -232,9 +220,10 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
             content_with_captions, added = ensure_table_captions(body.content)
             if added:
                 body.content = content_with_captions
-            updated = await update_block_content(db, block_id, body.content)
+            updated = await update_block_content(db, block_id, body.content, commit=False)
             await add_revision(db, block_id_int=block_id, content=body.content,
-                               source="edit", summary="手动编辑")
+                               source="edit", summary="手动编辑", manage_transaction=False)
+            await db.commit()
         if body.requirement is not None:
             updated = await update_block_requirement(db, block_id, body.requirement)
         # 其余参考卡片字段（提炼 8 字段里除 requirement 外）：**局部**更新，

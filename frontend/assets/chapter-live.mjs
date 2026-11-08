@@ -17,7 +17,7 @@ export function withManualBlocks(base,custom){
 export function mountLiveWriting(host,{editor,render,onChange,scope}){
   let jobId=null,blocks=[],jobStatus='',edits=Object.create(null),removed=[],lastValue='',gaps=[];
   const nodes=new Map();
-  let custom=[],focused=null,lastJob=null;
+  let custom=[],focused=null,lastJob=null,selectionInput=null;
   const key=()=>`chapter-live:${scope}:${jobId}`;
   const merged=()=>mergeWritingBlocks(blocks,edits,removed);
   // 事实缺口不进正文（正文始终是完整正常的内容）：gaps 只在待办/质检里呈现
@@ -44,6 +44,9 @@ export function mountLiveWriting(host,{editor,render,onChange,scope}){
         nodes.set(block.id,node);host.append(node);
       }
       if(host.children[index]!==node)host.insertBefore(node,host.children[index]||null);
+      if(block.kind==='heading'){
+        node.className='cl-heading';node.textContent=block.title;continue;
+      }
       const own=Object.hasOwn(edits,block.id),state=own?'人工编辑已保留':block.state==='done'?'已完成':block.state==='stopped'?'已停止':block.state==='failed'?'未完成，可重试':block.state==='running'?(block.kind==='diagram'?'正在绘制关系图':block.kind==='table'?'正在编制表格':'正在编写'):'等待编制';
       node.querySelector('header span').textContent=`${block.manual?'手动添加':labels[block.kind]} · ${state}`;
       node.classList.toggle('cl-complete',block.state==='done'&&!own);
@@ -64,22 +67,27 @@ export function mountLiveWriting(host,{editor,render,onChange,scope}){
         if(input.value!==text){input.value=text;input.style.height='auto';input.style.height=Math.max(100,input.scrollHeight)+'px';}
         input.placeholder=job.status==='failed'?'本节尚未完成，已收到的文字保留。':'正文 Agent 正在准备输出…';
       }else if(block.state==='done'){
-        if(body.dataset.content!==block.content){body.innerHTML=render(block.content.replace('### '+block.title+'\n',''));body.dataset.content=block.content;}
+        if(body.dataset.content!==block.content){body.innerHTML=render(block.content);body.dataset.content=block.content;}
       }else{
-        body.innerHTML=`<div class="cl-placeholder"><b>${block.kind==='diagram'?'图示占位':'表格占位'} · ${esc(block.title)}</b><p>${esc(block.purpose)}</p><small>${esc(state)}；完成后在此替换</small></div>`;
+        body.innerHTML=`<div class="cl-placeholder"><b>${block.kind==='diagram'?'图示占位':'表格占位'} · ${esc(block.title)}</b><p>${esc(block.purpose)}</p><small>${esc(state)}；完成后在此替换</small>${block.state==='failed'?'<button type="button" data-retry-chart>重试这一项</button>':''}</div>`;
       }
     }
     for(const [id,node] of nodes)if(removed.includes(id)){node.remove();nodes.delete(id);}
     sync();return true;
   }
-  host.addEventListener('focusin',event=>{const node=event.target.closest('.cl-block');if(node)focused=node.dataset.id;});
+  host.addEventListener('focusin',event=>{const node=event.target.closest('.cl-block');if(node)focused=node.dataset.id;if(event.target.tagName==='TEXTAREA')selectionInput=event.target;});
   host.oninput=event=>{
     const node=event.target.closest('.cl-block');if(!node||event.target.tagName!=='TEXTAREA')return;
     const block=blocks.find(b=>b.id===node.dataset.id);
-    edits[node.dataset.id]=block.kind==='text'?'### '+block.title+'\n\n'+event.target.value:event.target.value;event.target.style.height='auto';event.target.style.height=Math.max(100,event.target.scrollHeight)+'px';
+    edits[node.dataset.id]=block.kind==='text'?(block.heading === undefined ? '### '+block.title+'\n\n' : '')+event.target.value:event.target.value;event.target.style.height='auto';event.target.style.height=Math.max(100,event.target.scrollHeight)+'px';
     node.querySelector('header span').textContent='人工编辑已保留 · 本块停止自动更新';sync();
   };
   host.onclick=event=>{
+    if(event.target.closest('[data-retry-chart]')){
+      const block=blocks.find(item=>item.id===event.target.closest('.cl-block').dataset.id);
+      host.dispatchEvent(new CustomEvent('chapter-chart-retry',{bubbles:true,detail:{jobId,index:block.section_index,title:block.title,role:block.kind}}));
+      return;
+    }
     const button=event.target.closest('[data-live]');if(!button)return;
     const node=button.closest('.cl-block'),block=merged().find(b=>b.id===node.dataset.id);focused=block.id;
     if(button.dataset.live==='remove'){removed.push(block.id);node.remove();nodes.delete(block.id);sync();return;}
@@ -99,7 +107,23 @@ export function mountLiveWriting(host,{editor,render,onChange,scope}){
     custom.push(block);edits[block.id]=block.content;update(lastJob);focused=block.id;
     nodes.get(block.id)?.querySelector('textarea')?.focus();return true;
   }
-  return {update,add,isActiveFor:id=>jobId===id, get pending(){return !!jobId&&blocks.some(b=>!removed.includes(b.id)&&b.state!=='done');},
+  function selectionRange(){
+    const input=selectionInput;
+    if(!input || !host.contains(input) || input.selectionEnd<=input.selectionStart)return null;
+    const blockId=input.closest('.cl-block')?.dataset.id;
+    const current=merged().filter(block=>block.content);
+    const index=current.findIndex(block=>block.id===blockId);
+    if(index<0)return null;
+    const content=current[index].content;
+    const offset=content.indexOf(input.value);
+    if(offset<0)return null;
+    const prefix=current.slice(0,index).map(block=>block.content).join('\n\n');
+    const start=(index ? prefix.length+2 : 0)+offset+input.selectionStart;
+    const end=start+input.selectionEnd-input.selectionStart;
+    const body=value();
+    return {before:body.slice(0,start),selection:body.slice(start,end),after:body.slice(end)};
+  }
+  return {update,add,selectionRange,isActiveFor:id=>jobId===id, get hasEdits(){return Object.keys(edits).length > 0 || removed.length > 0 || custom.length > 0;},get pending(){return !!jobId&&blocks.some(b=>!removed.includes(b.id)&&b.state!=='done'&&(b.kind!=='text'||['queued','running'].includes(jobStatus)));},
     get active(){return !!jobId;},get status(){return jobStatus;},show:()=>{host.hidden=false;editor.hidden=true;},hide:()=>{host.hidden=true;},
-    reset(){jobId=null;blocks=[];custom=[];focused=null;lastJob=null;nodes.clear();host.innerHTML='';host.hidden=true;}};
+    reset(){selectionInput=null;jobId=null;blocks=[];custom=[];focused=null;lastJob=null;nodes.clear();host.innerHTML='';host.hidden=true;}};
 }

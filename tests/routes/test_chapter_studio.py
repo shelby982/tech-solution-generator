@@ -81,12 +81,12 @@ async def test_complete_requires_real_content_and_content_change_invalidates_com
 
 async def test_complete_requires_explicit_acknowledgement_and_unchanged_content(env):
     c=env.client;bid=env.block['id']
-    # 正文净化：保存时自动清掉"待补充"占位（内容可以浅，但必须完整）
-    await c.put(f'/api/blocks/{bid}',json={'content':'实施方案。\n【待补充：测试报告】'})
-    saved=(await c.get(f'/api/blocks/{bid}')).json()
-    assert '待补充' not in (saved.get('content') or '')
+    # 缺证据标记保留在编辑正文，提交前明确核对。
+    response = await c.put(f'/api/blocks/{bid}',json={'content':'实施方案。\n【待补充：测试报告】'})
+    assert response.status_code == 200
+    assert '待补充' in response.json()['content']
     check=(await c.get(f'/api/blocks/{bid}/studio/completion-check')).json()
-    assert not check['running'] and len(check['gaps'])==0
+    assert not check['running'] and len(check['gaps'])==1
     request={'layout':'solution','writing_status':'complete','expected_content_hash':check['content_hash']}
     request['acknowledge_open_items']=True
     assert (await c.put(f'/api/blocks/{bid}/studio',json=request)).status_code==200
@@ -269,3 +269,71 @@ async def test_invalid_markdown_and_external_images_fail_before_export_queue(env
     await c.put(f'/api/blocks/{bid}',json={'content':'![远程](https://example.com/a.png)'})
     assert (await c.post(f'/api/projects/{env.pid}/studio/exports',json={'thread_id':'tech'})).status_code==422
     assert env.queued==[]
+
+
+async def test_save_conflict_preserves_current_body_and_revisions(env):
+    bid = env.block['id']
+    c = env.client
+    first = await c.put(f'/api/blocks/{bid}', json={'content': '第一份正文', 'expected_content': ''})
+    assert first.status_code == 200
+    conflict = await c.put(f'/api/blocks/{bid}', json={'content': '迟到的正文', 'expected_content': ''})
+    assert conflict.status_code == 409
+    async with get_db() as db:
+        block = await (await db.execute('SELECT content FROM blocks WHERE id=?', (bid,))).fetchone()
+        revisions = await (await db.execute('SELECT content FROM block_revisions WHERE block_id=?', (bid,))).fetchall()
+    assert block['content'] == '第一份正文'
+    assert all(row['content'] != '迟到的正文' for row in revisions)
+
+
+async def test_document_exposes_structure_scope_without_changing_directory(env):
+    data = (await env.client.get(f'/api/projects/{env.pid}/studio/document', params={'threadId': 'tech'})).json()
+    scopes = data['node_scopes']
+    parent_id = next(key for key, value in scopes.items() if value['role'] == 'structure')
+    assert scopes[parent_id]['pending_ids'] == [env.block['id']]
+    assert scopes[str(env.block['id'])]['role'] == 'content'
+
+
+async def test_targeted_verification_requires_explicit_quote_and_fresh_inputs(env, monkeypatch):
+    from services.review_issues import sync_issues, fingerprint
+    bid = env.block['id']
+    await env.client.put(f'/api/blocks/{bid}', json={'content': '拟按规范完成兼容验证，形成测试报告。'})
+    issue = {'point': '未说明兼容验证交付', 'severity': 'high'}
+    async with get_db() as db:
+        await sync_issues(db, bid, [issue])
+    async def fake_review(*args):
+        return json.dumps({'resolved': True, 'reason': '已明确交付测试报告', 'quote': '形成测试报告。'}), 'test'
+    monkeypatch.setattr('agents.chapter_team.call_role', fake_review)
+    response = await env.client.post(f'/api/blocks/{bid}/studio/review/verify-issue', json={'fingerprint': fingerprint(issue)})
+    assert response.status_code == 200
+    assert response.json()['resolved'] is True
+    await env.client.put(f'/api/blocks/{bid}', json={'content': '正文已经改变。'})
+    states = (await env.client.get(f'/api/blocks/{bid}/studio/review/issues')).json()
+    assert states['items'][0]['status'] == 'fixed'
+
+
+async def test_project_facts_are_reused_and_invalidate_review_version(env):
+    from services.writing_workspace import versions, review_freshness
+    response = await env.client.put(f'/api/projects/{env.pid}/studio/facts', json={'facts': {'系统名称': '客户档案系统'}})
+    assert response.status_code == 200
+    async with get_db() as db:
+        block = dict(await (await db.execute('SELECT * FROM blocks WHERE id=?', (env.block['id'],))).fetchone())
+        baseline = await versions(db, block)
+    await env.client.put(f'/api/projects/{env.pid}/studio/facts', json={'facts': {'系统名称': '档案认证系统'}})
+    async with get_db() as db:
+        assert await review_freshness(db, block, baseline) == 'stale'
+
+
+async def test_confirmed_directory_limits_writing_to_body(env):
+    from services.split_answers import set_answer
+    bid = env.block['id']
+    async with get_db() as db:
+        await set_answer(db, env.pid, 'tech', 'response_plan', {'type':'tech','confirmed':True})
+        before = [tuple(row) for row in await (await db.execute('SELECT id,title,level,order_idx FROM blocks WHERE project_id=? ORDER BY id',(env.pid,))).fetchall()]
+    saved = await env.client.put(f'/api/blocks/{bid}',json={'content':'# 自主可控\n\n## AI 新增章节\n完整正文。'})
+    assert saved.status_code == 200
+    assert saved.json()['content'] == '\n**AI 新增章节**\n完整正文。'
+    info = (await env.client.get(f'/api/blocks/{bid}/studio')).json()
+    assert info['directory_locked'] is True
+    async with get_db() as db:
+        after = [tuple(row) for row in await (await db.execute('SELECT id,title,level,order_idx FROM blocks WHERE project_id=? ORDER BY id',(env.pid,))).fetchall()]
+    assert before == after

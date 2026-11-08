@@ -68,6 +68,16 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
     for r in reviews:
         latest[str(r.get("block_id") or "")] = r
 
+    from services.writing_workspace import review_freshness
+    freshness = {}
+    for block in blocks:
+        row = await (await db.execute('SELECT * FROM chapter_reviews WHERE block_id=?', (block['id'],))).fetchone()
+        if row:
+            state = await review_freshness(db, block, dict(row))
+            freshness[str(block['block_id'])] = state
+            if state != 'current':
+                latest.pop(str(block['block_id']), None)
+
     cur = await db.execute(
         "SELECT * FROM review_points WHERE project_id = ? AND (run_thread_id = ? OR ? IS NULL) "
         "ORDER BY id", (project_id, thread_id, thread_id))
@@ -96,6 +106,7 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
             "level": b.get("level"),
             "score_weight": b.get("score_weight"),
             "risk": risk,
+            "review_freshness": freshness.get(bid, "unknown"),
             "missing_points": missing,
             "satisfied": (latest.get(bid) or {}).get("satisfied") or "",
         }

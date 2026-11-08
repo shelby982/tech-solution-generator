@@ -521,11 +521,21 @@ async def update_requirements(db, project_id: int, plan_id: str, block_id: str,
     if chapter is None:
         raise ValueError("计划里没有这一章")
     cleaned = []
-    for index, item in enumerate(requirements or [], 1):
+    normal_index = 0
+    for item in requirements or []:
         text = str((item or {}).get("text") or "").strip()
         if not text:
             continue
-        cleaned.append({"id": f"r{index}", "text": text[:300],
+        if str((item or {}).get("source") or "") == "spec" or (item or {}).get("spec_requirement_id"):
+            cleaned.append({
+                "id": str((item or {}).get("id") or f"spec-{(item or {}).get('spec_requirement_id')}"),
+                "text": text[:300], "type": "text", "source": "spec",
+                "source_label": (item or {}).get("source_label") or "技术规范书",
+                "spec_requirement_id": str((item or {}).get("spec_requirement_id") or ""),
+            })
+            continue
+        normal_index += 1
+        cleaned.append({"id": f"r{normal_index}", "text": text[:300],
                         "type": str((item or {}).get("type") or "text")})
     chapter["requirements"] = cleaned
     await db.execute("UPDATE writing_plans SET plan=?, version=COALESCE(version,1)+1, updated_at=CURRENT_TIMESTAMP WHERE id=?",

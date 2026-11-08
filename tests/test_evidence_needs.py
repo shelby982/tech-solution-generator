@@ -51,15 +51,26 @@ async def test_section_needs_include_plan_and_spec_without_duplicate():
 async def test_section_needs_cover_by_requirement_binding():
     block = await _seed()
     async with get_db() as db:
-        await db.execute("INSERT INTO material_chunks(material_id,chunk_index,content,page,status) "
-                         "VALUES(1,0,'Kubernetes 服务治理片段。',3,'confirmed')")
+        material = await db.execute(
+            "INSERT INTO materials(project_id, filename, type, role) VALUES(?, '依据.docx', 'docx', 'source')",
+            (block["project_id"],))
+        chunk = await db.execute("INSERT INTO material_chunks(material_id,chunk_index,content,page,status) "
+                         "VALUES(?,0,'Kubernetes 服务治理片段。',3,'confirmed')", (material.lastrowid,))
         await db.execute("INSERT INTO chapter_material_chunks(block_id,chunk_id,section,mode,chunk_kind,requirement_id) "
-                         "VALUES(?,?,?,?,?,?)", (block["id"], 1, "总体架构", "data", "file", "sr-need"))
+                         "VALUES(?,?,?,?,?,?)", (block["id"], chunk.lastrowid, "总体架构", "data", "file", "sr-need"))
         await db.commit()
     needs = await section_evidence_needs(block, {"title": "总体架构"}, "need-thread")
     spec_need = next(item for item in needs if item.get("requirement_id") == "sr-need")
     assert spec_need["covered"] is True
     assert spec_need["evidence_count"] == 1
+
+    async with get_db() as db:
+        await db.execute("UPDATE chapter_material_chunks SET mode='context' WHERE block_id=?", (block["id"],))
+        await db.commit()
+    needs = await section_evidence_needs(block, {"title": "总体架构"}, "need-thread")
+    spec_need = next(item for item in needs if item["requirement_id"] == "sr-need")
+    assert spec_need["status"] == "candidate"
+    assert spec_need["covered"] is False
 
 
 async def test_no_requirements_returns_empty():

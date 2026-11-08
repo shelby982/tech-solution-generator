@@ -169,7 +169,10 @@ async def build_section_context(block: dict, section: dict, thread_id: str = "")
         package = await _load_package(db, thread_id or str(block.get("run_thread_id") or ""))
         manual = await _load_manual_materials(db, block, str(section.get("title") or ""))
         materials = await _search_materials(db, block, section, spec, reqs)
-    return {"package": package, "spec_clauses": spec, "chapter_requirements": reqs,
+        facts_row = await (await db.execute('SELECT facts FROM project_writing_facts WHERE project_id=?', (block['project_id'],))).fetchone()
+        import json
+        facts = json.loads(facts_row['facts']) if facts_row else {}
+    return {"project_facts": facts, "package": package, "spec_clauses": spec, "chapter_requirements": reqs,
             "section_text": section_body(block.get("content") or "", str(section.get("title") or "")),
             "manual_materials": manual, "materials": materials}
 
@@ -182,6 +185,8 @@ def render_context(context: dict) -> str:
         label = package.get("name") or package.get("package_code") or package.get("package_no") or ""
         if label:
             parts.append("【当前标包】" + str(label)[:80])
+    if context.get('project_facts'):
+        parts.append('【用户确认的项目统一资料】\n' + '\n'.join(f'- {key}：{value}' for key, value in context['project_facts'].items()))
     spec = context.get("spec_clauses") or []
     if spec:
         lines = ["【本章技术规范条款（必须逐条回应）】"]
@@ -201,7 +206,7 @@ def render_context(context: dict) -> str:
     materials = context.get("materials") or []
     manual = str(context.get("manual_materials") or "").strip()
     if materials:
-        lines = ["【本节相关素材（必须优先使用；引用时标注来源）】"]
+        lines = ["【自动检索参考（仅用于理解背景，不得作为我方事实或承诺的依据）】"]
         for item in materials:
             page = f"第{item.get('page')}页" if item.get("page") else ""
             lines.append(f"- {item.get('filename')} {page}：{item.get('content')}")

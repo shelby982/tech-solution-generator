@@ -145,21 +145,16 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
         add("review", f"review:{section_title}:{index}", item.get("text") or "",
             "评审补料要求", required=False, reason=item.get("reason") or "")
 
-    # 绑定覆盖：requirement_id 精确匹配；老数据没有 requirement_id 时不做假覆盖
     if needs:
+        from services.material_cards import bound_cards, supports_need
         async with get_db() as db:
-            cols = {row[1] for row in await (await db.execute(
-                "PRAGMA table_info(chapter_material_chunks)")).fetchall()}
-            if "requirement_id" in cols:
-                rows = await (await db.execute(
-                    "SELECT requirement_id, COUNT(*) FROM chapter_material_chunks "
-                    "WHERE block_id=? AND section=? GROUP BY requirement_id",
-                    (int(block.get("id") or 0), section_title))).fetchall()
-                counts = {str(row[0] or ""): int(row[1] or 0) for row in rows}
-                for need in needs:
-                    key = str(need.get("requirement_id") or "")
-                    need["evidence_count"] = counts.get(key, 0) if key else 0
-                    need["covered"] = bool(key and counts.get(key, 0) > 0)
+            cards = await bound_cards(db, int(block.get("id") or 0), section_title)
+        for need in needs:
+            matching = [card for card in cards if card["section"] == section_title
+                        and card["requirement_id"] == need["requirement_id"]]
+            need["evidence_count"] = sum(supports_need(card, need["text"]) for card in matching)
+            need["candidate_count"] = len(matching) - need["evidence_count"]
+            need["covered"] = need["evidence_count"] > 0
 
     # 忽略/恢复状态：按 block + section + need_id 持久化
     if needs:
@@ -174,5 +169,5 @@ async def section_evidence_needs(block: dict, section: dict, thread_id: str = ""
             need["ignore_reason"] = state["reason"] if state else ""
             need["status"] = ("ignored" if need["ignored"] else
                               "covered" if need.get("covered") else
-                              "candidate" if int(need.get("evidence_count") or 0) > 0 else "open")
+                              "candidate" if need["candidate_count"] > 0 else "open")
     return needs

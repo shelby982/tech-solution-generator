@@ -1,5 +1,6 @@
-import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v467';
-import {specContentHtml} from './spec-content.mjs?v=20261016-v467';
+import {reverseAIChange, selectedRange, rebaseSelection} from './ai-revision.mjs?v=20261016-v503';
+import {mountLiveWriting} from './chapter-live.mjs?v=20261016-v503';
+import {specContentHtml} from './spec-content.mjs?v=20261016-v503';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = async (url, options = {}) => {
@@ -9,6 +10,14 @@ const json = async (url, options = {}) => {
   return data;
 };
 const send = (method, body) => ({method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+const LAYOUT_GUIDES = {
+  solution: {desc:'按“需求回应—技术路线—模块说明—验证交付”组织，突出架构、接口与可验证性。', required:['需求回应','技术路线','模块说明','验证交付'], prompt:'本章按技术方案类型拆节：先回应招标需求，再说明技术路线与架构，随后按模块说明功能与接口，最后给出验证方式与交付物。每一节都要能对应到评分要求或技术规范条款，避免写成通用介绍。'},
+  understanding: {desc:'按“背景—目标—范围—重难点”组织，突出对招标需求的理解深度与针对性。', required:['背景','目标','范围','重难点'], prompt:'本章按项目理解类型拆节：先说明项目背景与建设动因，再写目标、建设范围和边界，最后分析重难点与应对思路。要引用招标文件和技术规范书的实际条款，避免泛泛而谈。'},
+  implementation: {desc:'按“实施阶段—进度里程碑—交付保障”组织，突出工期、组织与风险控制。', required:['实施阶段','进度里程碑','交付保障'], prompt:'本章按实施计划类型拆节：按实施阶段展开，明确里程碑、工期安排、组织分工、质量与风险控制、验收交付。每节要有可执行的动作和时间点。'},
+  evidence: {desc:'按“响应说明—真实信息—证明清单”组织，人员、证书、业绩必须有对应材料。', required:['响应说明','真实信息','证明清单'], prompt:'本章按人员/业绩证明类型拆节：先写响应说明，再列真 实人员、证书、业绩信息，最后给出证明材料清单和对应页码。没有材料的事实不要编造。'},
+  point_to_point: {desc:'按“原文条款—逐项响应—证明材料”组织，保持条款顺序，不遗漏、不合并。', required:['原文条款','逐项响应','证明材料'], prompt:'本章按点对点应答类型拆节：按技术规范书原文顺序保留条款和编号，逐条给出响应、证明材料和偏离说明，不合并、不改写条款顺序。'},
+};
+
 
 /** 把 `:::diagram type=… 标题` + 结构行渲染成对应图型（flow / layered / timeline） */
 function renderDiagramFigure(head, bodyLines) {
@@ -150,7 +159,7 @@ async function monitorExport(projectId, id, slot) {
 }
 
 let currentStudio;
-export async function mountChapterStudio(host, {projectId, threadId, onStats, getModel}) {
+export async function mountChapterStudio(host, {projectId, threadId, onStats, getModel, searchPoints = {}}) {
   if (currentStudio?.host === host && host.querySelector('.cs-editor')) return currentStudio;
   currentStudio?.dispose();
   host.innerHTML = '<p class="cs-muted">正在加载章节编制工作台…</p>';
@@ -162,35 +171,29 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   let active, context, dirty = false, selecting = 0, disposed = false;
   const units = new Set(document.unit_ids);
   const profile = document.profiles || {};
+  const reviewStates = document.review_states || {};
   const draftKey = b => `chapter-draft:${threadId}:${b.id}`;
   host.innerHTML = `
     <div class="cs-document-head"><div hidden><strong>章节编写</strong><span data-cs="progress"></span></div>
       <div class="cs-document" hidden><select data-cs="template">${Object.entries(document.templates).map(([key,tt])=>`<option value="${key}" ${key===document.template?'selected':''}>${esc(tt.label)}</option>`).join('')}</select><span class="cs-muted" data-cs="format-summary"></span><a data-cs="format-sample" target="_blank" rel="noopener"></a></div>
     </div>
-</details></div>
     <div class="cs-workspace">
-      <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节" aria-label="搜索章节"><div data-cs="tree"></div></aside>
+      <aside class="cs-tree"><div class="cs-tree-label">应答目录</div><input type="search" data-cs="search" placeholder="搜索章节或评分点" aria-label="搜索章节或评分点"><div data-cs="tree"></div></aside>
       <main class="cs-main">
         <div class="cs-chapter-heading" data-cs="chapter-head"></div>
 
-        <div class="cs-agent-slot" data-cs="agents"></div>
+        <div data-cs="overview" hidden></div>
         <div class="cs-toolbar">
-          <button data-action="ai" class="cs-primary" title="按章节大纲逐节编写整章（已有内容的节保留）">编写整章</button>
-          <button data-action="save" disabled>保存</button>
+          <button data-action="ai" hidden aria-hidden="true" tabindex="-1">AI 编制</button>
+          <span class="cs-plan-slot" data-plan-slot></span>
+          <button data-action="save" disabled>保存</button><button data-action="submit-review">提交评审</button>
           <div class="cs-view-switch" role="group" aria-label="正文显示方式"><button data-action="edit" aria-pressed="true">编辑</button><button data-action="preview" aria-pressed="false">预览</button></div>
           <div class="cs-toolbar-right">
-            <button type="button" class="cs-insert-btn" data-open-insert title="从官方来源 / 素材 / 结构模板插入内容">插入…</button>
+            <button type="button" class="cs-insert-btn" data-open-insert title="从官方来源 / 素材 / 结构模板插入内容">添加内容</button>
+            <button type="button" data-open-panel="write" aria-controls="cs-chapter-inspector" aria-expanded="false">编制进度</button>
             <details class="cs-more"><summary>更多 ▾</summary><div class="cs-more-menu">
-              <button data-action="recompose">重新编写本模块…</button>
-              <button data-action="review-batch">批量评审（最多 3 章）</button>
-              <button data-action="plan-materials-all">全项目：生成素材建议并采用</button>
-              <div class="cs-more-sep"></div>
-              <button data-action="project-todo">全书待办</button>
               <button data-action="writing-settings">编写设置</button>
-              <button data-action="complete">确认本章完成</button>
-              <div class="cs-more-sep"></div>
-              <button data-action="export-chapter">导出本章 Word</button>
-              <button data-action="export-group">导出本组 Word</button>
+              <button data-action="delivery">前往评审与交付</button>
             </div></details>
           </div>
         </div>
@@ -202,14 +205,25 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <dialog class="cs-completion" data-cs="completion"><div data-cs="completion-summary"></div><div class="cs-completion-actions"><button data-action="completion-cancel">继续编辑</button><button data-action="completion-confirm">已核对，确认本章完成</button></div></dialog><div data-cs="export-status" role="status"></div>
 
       </main>
-      <aside class="cs-aside cs-inspector" data-cs="inspector" data-panel="write"><nav class="cs-inspector-tabs" aria-label="本章助手"><button data-panel="write" aria-pressed="true">编写</button><button data-panel="materials" aria-pressed="false">素材</button></nav><div data-cs="aside"></div></aside>
+      <aside class="cs-aside cs-inspector" id="cs-chapter-inspector" data-cs="inspector" hidden>
+        <div class="cs-inspector-head"><strong data-cs="panel-title"></strong><button type="button" data-close-panel aria-label="关闭侧栏">关闭</button></div>
+        <section data-pane="write"><div class="cs-agent-slot" data-cs="agents"></div></section>
+        <div data-cs="aside"></div>
+      </aside>
     </div>`;
   const get = key => host.querySelector(`[data-cs="${key}"]`);
   const editor = get('editor');
-  const showPanel = panel => {
-    get('inspector').dataset.panel=panel;
-    for(const button of host.querySelectorAll('.cs-inspector-tabs button'))button.setAttribute('aria-pressed',String(button.dataset.panel===panel));
-    if(window.innerWidth<=980)get('inspector').scrollIntoView({behavior:'smooth',block:'start'});
+  let panelTrigger;
+  const panelTitles = {write: '编制进度', materials: '素材', issues: '待处理'};
+  const showPanel = (panel, trigger) => {
+    const inspector = get('inspector');
+    if (trigger) panelTrigger = trigger;
+    inspector.hidden = !panel;
+    inspector.dataset.panel = panel || '';
+    get('panel-title').textContent = panelTitles[panel] || '';
+    host.querySelectorAll('[data-open-panel]').forEach(button =>
+      button.setAttribute('aria-expanded', String(button.dataset.openPanel === panel)));
+    if (panel && window.innerWidth <= 980) inspector.scrollIntoView({block: 'nearest'});
   };
   let statusTimer = null;
   const status = message => {
@@ -235,13 +249,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   // 只在这一层出「编写计划」入口（一页 7 次确认，而不是每节一次）。
   const specInfo = { specs: {} };    // 编写规范（L0/L1）版本，右栏显示 + 就近打开
   const citationInfo = { rows: [] }; // 已接受的官方来源（本章 / 项目级）
-  let basisInfo = null;
   let planBrief = null;      // 本章计划摘要（待办数），用于章头按钮角标
 
   let materialLib = null;
   let materialEvidence = null;
   let pendingEvidenceNeed = null;
-  let sectionResults = {};
   let writingReadiness = null;
 
   /** 拉素材库数据（项目级素材 + 本章引用） */
@@ -355,13 +367,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>
         <div class="cs-plan-body">
           <input type="file" multiple hidden data-madmin-file accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" />
-          <div class="cs-madmin-diag" data-madmin-diag>
-            <div class="cs-madmin-diag-head">
-              <b>料源</b><span data-diag-text>正在诊断…</span>
-              <button type="button" class="cs-gate-act" data-auto-pick>智能备料（建议）</button>
-            </div>
-            <p class="cs-diag-suggest" data-diag-suggest hidden></p>
-          </div>
           <div class="cs-msrc-pick-preview" hidden data-pick-preview></div>
           <div class="cs-msrc-list">${srcHtml}</div>
         </div>
@@ -393,7 +398,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         }
       } catch (error) { /* ignore */ }
     };
-    void paintDiagnosis();
     dlg._csState = state;
     dlg._csRender = render;
     render();
@@ -636,9 +640,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (!rubric || !(rubric.items || []).length) return '';
     const met = rubric.met_count || 0;
     const total = rubric.total || 0;
-    return `<details class="cs-rubric" ${met < total ? 'open' : ''}>
+    return `<details class="cs-rubric">
       <summary><b>达标线 ${met}/${total}</b>
-        <span class="cs-dim">${esc(rubric.chapter_type === 'generic' ? '通用清单' : (rubric.chapter_type || '') + '类')} · 加权 ${rubric.ratio || 0}%</span></summary>
+        <span class="cs-dim">${met < total ? `未达 ${total - met} 项 · ` : ''}${esc(rubric.chapter_type === 'generic' ? '通用清单' : (rubric.chapter_type || '') + '类')} · 加权 ${rubric.ratio || 0}%</span></summary>
       ${rubric.items.map((item) => `<div class="cs-rubric-row ${item.met ? 'is-met' : 'is-miss'}">
         <span class="cs-rubric-mark">${item.met ? '✓' : '✗'}</span>
         <div><p><b>${esc(item.name)}</b> ${esc(item.need)}</p>
@@ -715,20 +719,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 拉本章评审（最近一次） */
   async function loadChapterReview() {
     if (!active) return;
+    const reviewBlock = active;
     try {
-      const resp = await fetch(`/api/blocks/${active.id}/studio/review`, { cache: 'no-store' });
+      const resp = await fetch(`/api/blocks/${reviewBlock.id}/studio/review`, { cache: 'no-store' });
       const data = resp.ok ? await resp.json() : null;
-      chapterReview = data?.reviewed ? data.review : null;
+      if (active?.id !== reviewBlock.id) return;
+      chapterReview = data?.review || null;
+      if (chapterReview) reviewStates[reviewBlock.id] = {freshness:chapterReview.freshness,satisfied:chapterReview.satisfied};
     } catch (error) { chapterReview = null; }
     try {
-      const resp = await fetch(`/api/blocks/${active.id}/studio/review/history?limit=10`, { cache: 'no-store' });
+      const resp = await fetch(`/api/blocks/${reviewBlock.id}/studio/review/history?limit=10`, { cache: 'no-store' });
       const data = resp.ok ? await resp.json() : null;
+      if (active?.id !== reviewBlock.id) return;
       reviewHistory = data?.items || [];
       reviewDelta = reviewHistory.length ? reviewHistory[0].delta : null;
     } catch (error) { reviewHistory = []; reviewDelta = null; }
     try {
-      const resp = await fetch(`/api/blocks/${active.id}/studio/review/issues`, { cache: 'no-store' });
+      const resp = await fetch(`/api/blocks/${reviewBlock.id}/studio/review/issues`, { cache: 'no-store' });
       const data = resp.ok ? await resp.json() : null;
+      if (active?.id !== reviewBlock.id) return;
+      reviewIssueRows = data?.items || [];
       reviewIssueStates = {};
       reviewIssueEvidence = {};
       (data?.items || []).forEach((item) => {
@@ -737,8 +747,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         if (item.evidence) reviewIssueEvidence[key] = item.evidence;
       });
     } catch (error) { reviewIssueStates = {}; }
+    try {
+      const resp = await fetch(`/api/blocks/${reviewBlock.id}/studio/review/scoring-points`, { cache: 'no-store' });
+      const data = resp.ok ? await resp.json() : null;
+      if (active?.id === reviewBlock.id) scoringPointReview = data;
+    } catch (error) { scoringPointReview = null; }
   }
 
+  let reviewIssueRows = [];
+  let scoringPointReview = null;
   let materialNeeds = { count: 0, items: [] };
 
   /** 拉"评审要求补充的材料"（issue → 素材联动） */
@@ -757,6 +774,23 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       .slice(0, 40);
   }
 
+  /** 评分点关键词核对：评审的主结果 */
+  function scoringPointHtml() {
+    const data = scoringPointReview;
+    if (!data || !(data.points || []).length) return '';
+    return `<details class="cs-sp" open>
+      <summary><b>评分点关键词核对 ${data.matched || 0}/${data.total || 0}</b>
+        <span>关键词是否在本章正文出现 · 覆盖 ${Math.round((data.coverage || 0) * 100)}%</span></summary>
+      ${data.points.map((point) => `<div class="cs-sp-point">
+        <div class="cs-sp-head"><b>${esc(point.factor || '')}${point.factor && point.item ? ' · ' : ''}${esc(point.item || '')}</b>
+          <em>${esc(String(point.points ?? ''))} 分</em>
+          <span class="cs-sp-status ${point.status === '已回应' ? 'is-ok' : point.status === '部分回应' ? 'is-warn' : 'is-bad'}">${esc(point.status || '未回应')}</span></div>
+        <p>${esc(String(point.criterion || '').slice(0, 160))}</p>
+        <div class="cs-sp-keywords">${(point.keywords || []).map((kw) => `<span class="cs-sp-kw ${kw.matched ? 'is-ok' : 'is-miss'}" title="${esc(kw.evidence || '正文未出现')}">${kw.matched ? '✓' : '✗'} ${esc(kw.keyword)}</span>`).join('')}</div>
+      </div>`).join('')}
+    </details>`;
+  }
+
   /** 编写页签：评审卡片（分数 + 评审按钮 + 意见列表） */
   function reviewBlockHtml() {
     const review = chapterReview;
@@ -769,27 +803,32 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       </div>`;
     }
     const issues = review.issues || [];
+    const preCounts = precheckResult?.counts || {};
+    const materialCount = (materialNeeds.items || []).length || (review.needs_material || []).length;
     return `<div class="cs-review">
+      <div class="cs-review-summary">
+        ${(scoringPointReview?.points || []).length
+          ? `<span class="cs-review-sum-item">评分点 ${scoringPointReview.matched || 0}/${scoringPointReview.total || 0}</span>
+             <span class="cs-review-sum-item ${preCounts.critical ? 'is-bad' : ''}">硬伤 ${preCounts.critical || 0}</span>`
+          : `<span class="cs-review-sum-item is-bad">硬伤 ${preCounts.critical || 0}</span>
+             <span class="cs-review-sum-item">评审问题 ${issues.length}</span>`}
+      </div>
+      ${scoringPointHtml()}
+      <div class="cs-review-head">
+        <div class="cs-review-score">
+          <b>${review.freshness === 'stale' ? '正文或依据有变 · 待复核' : review.freshness === 'unknown' ? '历史评审 · 待确认' : '当前版本评审 ' + review.score}</b>
+          <span>技术 ${review.tech_score} · 合规 ${review.comp_score}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}${review.tier === 'fast' ? ' · 本次=快评' : ''}</span>
+        </div>
+        <div class="cs-review-actions">
+          <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
+          <label class="cs-auto-review" title="应用补丁/重写完成后自动重评一次">
+            <input type="checkbox" data-auto-review ${globalThis.localStorage.getItem('cs_auto_review') === 'off' ? '' : 'checked'} />
+            自动复评
+          </label>
+        </div>
+      </div>
       ${precheckHtml()}
       ${rubricHtml()}
-      <div class="cs-review-head">
-        <b>评审 ${review.score}</b>
-        ${reviewDelta === null ? '' : `<span class="cs-review-delta ${reviewDelta >= 0 ? 'is-up' : 'is-down'}">${reviewDelta >= 0 ? '↑' : '↓'} ${Math.abs(reviewDelta)}</span>`}
-        <span class="cs-dim">技术 ${review.tech_score} · 合规 ${review.comp_score} · 问题 ${issues.length}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}${review.tier === 'fast' ? ' · 本次=快评（单角色）' : ''}</span>
-        <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
-        <label class="cs-auto-review" title="应用补丁/重写完成后自动重评一次">
-          <input type="checkbox" data-auto-review ${globalThis.localStorage.getItem('cs_auto_review') === 'off' ? '' : 'checked'} />
-          自动复评
-        </label>
-      </div>
-      ${(review.needs_material || []).length ? `<div class="cs-review-needs">
-        <p class="cs-review-need">需要补 ${(materialNeeds.items || []).length || (review.needs_material || []).length} 类材料（重写修不好）：</p>
-        ${(materialNeeds.items || []).slice(0, 4).map((item) => `<div class="cs-need-row">
-          <span class="cs-need-q">${esc(String(item.query || '').slice(0, 40))}</span>
-          <button type="button" class="cs-gate-act" data-need-upload>上传</button>
-          <button type="button" class="cs-gate-act" data-need-search="${esc(String(item.query || ''))}">联网找</button>
-        </div>`).join('')}
-      </div>` : ''}
       ${reviewHistory.length > 1 ? `<details class="cs-review-fold">
         <summary>评审历史（${reviewHistory.length} 轮，最近 ${esc(String(reviewHistory[0].created_at || '').slice(5, 16))}）</summary>
         ${reviewHistory.map((item) => `<div class="cs-review-hist">
@@ -799,7 +838,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <small>技术 ${item.tech_score} · 合规 ${item.comp_score} · 问题 ${item.issues_count}</small>
         </div>`).join('')}
       </details>` : ''}
-      ${issues.length ? `<details class="cs-review-fold" ${issues.length <= 3 ? 'open' : ''}>
+      ${issues.length && !(scoringPointReview?.points || []).length ? `<details class="cs-review-fold" ${issues.length <= 3 ? 'open' : ''}>
         <summary>问题清单（${issues.length}）</summary>
         ${issues.map((issue, index) => `<div class="cs-review-issue">
           <span class="cs-review-sev is-${esc(String(issue.severity || 'medium').toLowerCase())}">${sevLabel[String(issue.severity || '').toLowerCase()] || '中'}</span>
@@ -820,7 +859,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               return `<small class="cs-review-ev">依据：${esc(String(ev.quote || '').slice(0, 70))}${ev.criterion ? ` · 口径「${esc(String(ev.criterion).slice(0, 30))}」` : ''}</small>`;
             })()}
           </div>
-          ${issue.needs_material ? '' : `<button type="button" class="cs-todo-ignore" data-review-rewrite="${index}">按此重写</button>`}
+          <div class="cs-review-issue-actions">
+            ${(() => {
+              const row = reviewIssueRows.find((x) => normalizeIssuePoint(x.point) === normalizeIssuePoint(issue.point));
+              if (!row) return '';
+              return `<button type="button" class="cs-todo-ignore" data-issue-locate="${esc(row.fingerprint)}">定位</button>
+                ${row.status === 'verified' ? '' : `<button type="button" class="cs-todo-ignore" data-issue-verify="${esc(row.fingerprint)}">复核</button>`}`;
+            })()}
+            ${issue.needs_material ? '' : `<button type="button" class="cs-todo-ignore" data-review-rewrite="${index}">按此重写</button>`}
+          </div>
         </div>`).join('')}
       </details>` : '<p class="cs-todo-ok">✓ 评审没有发现问题</p>'}
       ${practiceCandidatesHtml()}
@@ -828,132 +875,26 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   function materialLibraryHtml() {
-    const lib = materialLib || { confirmed: [], pending: [], bound: [], files: [], citations: { points: [], missing: [], summary: {} } };
-    const citations = lib.citations || { points: [], missing: [], summary: {} };
-    const summary = citations.summary || {};
-    const board = materialEvidence || { sections: [], summary: { needs: 0, covered: 0, cards: 0, coverage: 1 } };
-    const ev = board.summary || {};
-    const hasCoverage = Number(ev.needs || 0) > 0;
-    const coverage = hasCoverage ? Math.round(Number(ev.coverage || 0) * 100) : null;
-    const evidenceSections = board.sections || [];
-
-    // 引用清单：按小节分组
-    const groups = new Map();
-    for (const point of (citations.points || [])) {
-      const key = point.section || '（正文）';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(point);
-    }
-    const kindLabel = { upload: '招标文件', web: '联网来源', doc: '法规/标准', unknown: '未匹配' };
-    const kindClass = { upload: 'is-upload', web: 'is-web', doc: 'is-doc', unknown: 'is-unknown' };
-    const pointsHtml = [...groups.entries()].map(([sectionName, points]) => `
-      <details class="cs-cite-group">
-        <summary class="cs-cite-sec"><span>${esc(sectionName)}</span>
-          <em>引用 ${points.length} 处</em></summary>
-        <div class="cs-cite-body-list">
-        ${points.map((point) => `<div class="cs-cite-row">
-          <span class="cs-cite-kind ${kindClass[point.kind] || 'is-unknown'}">${esc(kindLabel[point.kind] || '来源')}</span>
-          <div class="cs-cite-body">
-            <p class="cs-cite-label">${esc(point.source_label)}</p>
-            <p class="cs-cite-quote">${esc(String(point.quote || '').slice(0, 46))}</p>
-            <small>第 ${point.paragraph} 段${point.locator && point.locator !== point.source_label ? ` · ${esc(point.locator)}` : ''}</small>
-          </div>
-          ${point.chunk_id ? `<button type="button" class="cs-todo-ignore" data-cite-excerpt="${esc(point.kind === 'web' ? 'cite' : 'file')}|${point.chunk_id}">看原文</button>` : ''}
-          <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(sectionName)}|${esc(String(point.quote || ''))}">定位</button>
-        </div>`).join('')}
+    const lib = materialLib || { bound: [] };
+    const bound = lib.bound || [];
+    return `<div class="cs-material-simple">
+      <div class="cs-material-card">
+        <div class="cs-material-card-head"><b>用户上传</b><span>文件</span></div>
+        <p>上传文件后解析为片段；勾选需要的片段，应用到本章某一节。不做正确性判定。</p>
+        <div class="cs-material-actions">
+          <button type="button" class="cs-cp-primary" data-material-admin>上传 / 选片段</button>
         </div>
-      </details>`).join('');
-    const missingHtml = (citations.missing || []).length ? `
-      <details class="cs-cite-group is-missing-group">
-        <summary class="cs-cite-sec"><span>未标来源</span><em>${citations.missing.length} 处</em></summary>
-        <div class="cs-cite-body-list">
-        ${(citations.missing || []).slice(0, 6).map((item) => `<div class="cs-cite-row is-missing">
-          <span class="cs-cite-kind is-missing">缺来源</span>
-          <div class="cs-cite-body"><p class="cs-cite-quote">${esc(String(item.quote || '').slice(0, 50))}</p>
-            <small>${esc(item.section || '正文')} 第 ${item.paragraph} 段</small></div>
-          <button type="button" class="cs-todo-ignore" data-cite-fill="${esc(item.section || '')}|${esc(String(item.quote || ''))}">补来源</button>
-          <button type="button" class="cs-todo-ignore" data-cite-locate="${esc(item.section || '')}|${esc(String(item.quote || ''))}">定位</button>
-        </div>`).join('')}
-        </div>
-      </details>` : '';
-
-    const modeLabel = { cite: '引用出处', data: '数据依据', context: '仅上下文', paste: '粘贴原文' };
-    const cardHtml = (item, section) => {
-      const signed = item.signed_id ?? (item.chunk_kind === 'cite' ? -item.chunk_id : item.chunk_id);
-      return `<div class="cs-ev-card ${item.used ? 'is-used' : ''}">
-        <div class="cs-ev-card-head">
-          <span class="cs-cite-kind ${item.source_type === 'web' ? 'is-web' : 'is-upload'}">${esc(item.authority || '来源')}</span>
-          <b>${esc(String(item.source_title || '素材').slice(0, 32))}</b>
-          <em>${esc(item.confidence_label || '待确认')}</em>
-        </div>
-        <p>${esc(String(item.text || '').slice(0, 150))}${(item.text || '').length > 150 ? '…' : ''}</p>
-        <small>${esc(item.locator || '')}${item.requirement_id ? ` · 要求 ${esc(item.requirement_id)}` : ''}</small>
-        ${item.used
-          ? `<span class="cs-ev-bound">已绑定${item.mode ? ` · ${esc(modeLabel[item.mode] || item.mode)}` : ''}</span>`
-          : `<button type="button" class="cs-todo-ignore" data-evidence-bind="${signed}" data-evidence-kind="${esc(item.chunk_kind || 'file')}" data-evidence-section="${esc(section || '')}" data-evidence-need="${esc(item.requirement_id || '')}">采用到本节</button>`}
-      </div>`;
-    };
-    const sectionsHtml = evidenceSections.length ? evidenceSections.map((section) => {
-      const needs = section.needs || [];
-      const cards = section.cards || [];
-      const recs = section.recommend || [];
-      const missing = needs.filter((item) => !item.covered && !item.ignored).length;
-      return `<details class="cs-ev-section" ${missing ? 'open' : ''}>
-        <summary><b>${esc(section.section || (section.chapter_level ? '章节级（暂无大纲）' : '（未命名节）'))}</b>
-          <em>${needs.length ? `需求 ${needs.length} · 覆盖 ${needs.length - missing} · 证据 ${cards.length}` : `证据 ${cards.length}`}</em>
-          ${missing ? `<span class="cs-ev-miss">缺 ${missing}</span>` : ''}</summary>
-        <div class="cs-ev-body">
-          ${needs.length ? `<div class="cs-ev-needs">${needs.map((need) => `<div class="cs-ev-need ${need.covered ? 'is-covered' : ''} ${need.ignored ? 'is-ignored' : ''}">
-            <span class="cs-cp-req-kind">${need.kind === 'spec' ? '规范' : need.kind === 'review' ? '评审' : '要求'}</span>
-            <p>${esc(String(need.text || '').slice(0, 140))}</p>
-            <em>${need.ignored ? '已忽略' : need.covered ? '已覆盖' : '缺证据'}</em>
-            <div class="cs-ev-need-acts">
-              ${need.ignored
-                ? `<button type="button" class="cs-todo-ignore" data-evidence-restore="${esc(need.need_id || '')}" data-evidence-restore-section="${esc(section.section || '')}">恢复</button>`
-                : `<button type="button" class="cs-todo-ignore" data-evidence-need-upload="${esc(need.need_id || '')}" data-evidence-need-section="${esc(section.section || '')}">上传</button>
-                   <button type="button" class="cs-todo-ignore" data-evidence-need-library="${esc(need.need_id || '')}" data-evidence-need-section="${esc(section.section || '')}">选库</button>
-                   <button type="button" class="cs-todo-ignore" data-evidence-need-search="${esc(need.query || need.text || '')}" ${board.search_available === false ? 'disabled title="未配置联网检索"' : ''}>联网</button>
-                   <button type="button" class="cs-todo-ignore" data-evidence-ignore="${esc(need.need_id || '')}" data-evidence-ignore-section="${esc(section.section || '')}">忽略</button>`}
-            </div>
-          </div>`).join('')}</div>` : '<p class="cs-dim">本节没有强制证据需求</p>'}
-          <div class="cs-ev-cards">${cards.length ? cards.slice(0, 6).map((item) => cardHtml(item, section.section)).join('') : (recs.length ? recs.slice(0, 3).map((item) => cardHtml(item, section.section)).join('') : '<p class="cs-muted">还没有绑定证据。可从推荐或素材库采用。</p>')}</div>
-          ${recs.length && cards.length ? `<div class="cs-ev-sub">推荐证据</div><div class="cs-ev-cards">${recs.slice(0, 3).map((item) => cardHtml(item, section.section)).join('')}</div>` : ''}
-        </div>
-      </details>`;
-    }).join('') : `<p class="cs-ml-empty">还没有证据需求：先确认本章计划/大纲，或从素材库添加证据。</p>`;
-
-    const files = (lib.files || []).filter((item) => item.parse_status !== 'done' || item.parse_error);
-    const fileHtml = files.length ? files.map((item) => `<div class="cs-ev-file">
-      <b>${esc(item.filename || '素材')}</b>
-      <span class="cs-ev-file-state ${item.parse_error ? 'is-bad' : ''}">${esc(item.parse_status || 'pending')}${item.parse_error ? ` · ${esc(item.parse_error)}` : ''}</span>
-      ${item.chunks ? `<small>${item.chunks} 段 · 已确认 ${item.confirmed || 0}</small>` : ''}
-      ${item.can_retry ? `<button type="button" class="cs-todo-ignore" data-material-reparse="${item.id}">重试解析</button>` : ''}
-    </div>`).join('') : '';
-
-    return `<div class="cs-ml">
-      <div class="cs-ev-head">
-        <div><b>本章证据</b><small>需求 ${ev.needs || 0} · 已覆盖 ${ev.covered || 0} · 证据 ${ev.cards || 0}</small></div>
-        <button type="button" class="cs-gate-act" data-material-admin>素材库</button>
       </div>
-      <div class="cs-ev-bar"><i style="width:${coverage === null ? 0 : coverage}%"></i><span>${coverage === null ? '无强制证据需求' : `规范覆盖 ${coverage}%`}</span></div>
-      <div class="cs-ev-actions">
-        <button type="button" class="cs-gate-act" data-evidence-upload>上传文件</button>
-        <button type="button" class="cs-gate-act" data-material-admin>从素材库选</button>
-        <button type="button" class="cs-gate-act" data-evidence-need-search="" ${board.search_available === false ? 'disabled title="未配置联网检索"' : ''}>联网找</button>
+      <div class="cs-material-card">
+        <div class="cs-material-card-head"><b>联网搜索</b><span>公开来源</span></div>
+        <p>搜索公开来源并选择片段；应用逻辑与上传一致，不做缺口判断。</p>
+        <div class="cs-material-actions">
+          <button type="button" class="cs-cp-primary" data-cite-search>联网搜索</button>
+        </div>
       </div>
-      ${board.search_available === false ? '<p class="cs-ev-note">未配置联网检索：当前只能使用已有素材与上传文件。</p>' : ''}
-      <div class="cs-ev-sections">${sectionsHtml}</div>
-      ${fileHtml ? `<details class="cs-ml-fold"><summary>上传/解析状态（${files.length}）</summary><div class="cs-ev-files">${fileHtml}</div></details>` : ''}
-      ${(lib.bound || []).length ? `<details class="cs-ml-fold"><summary>本章已绑定素材（${lib.bound.length}）</summary>
-        <div class="cs-ml-list">${(lib.bound || []).map((item) => `<div class="cs-ml-item"><div class="cs-ml-body">
-          <b>${esc(item.filename || '素材')}</b><p>${esc(String(item.text || '').slice(0, 80))}…</p>
-          <small>${item.page ? `第 ${item.page} 页 · ` : ''}${esc(modeLabel[item.mode] || '引用出处')}${item.section ? ` · ${esc(item.section)}` : ''}</small></div>
-          <button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button></div>`).join('')}</div>
+      ${bound.length ? `<details class="cs-material-bound"><summary>已应用到本章（${bound.length}）</summary>
+        ${bound.map((item) => `<div class="cs-material-bound-row"><span>${esc(item.filename || '素材')}${item.section ? ` · ${esc(item.section)}` : ''}</span><button type="button" class="cs-todo-ignore" data-ml-unbind="${item.chunk_id}">移除</button></div>`).join('')}
       </details>` : ''}
-      <div class="cs-ml-head"><h4>本章引用 <small>${summary.citations || 0} 处 · 未标来源 ${summary.missing || 0} 处</small></h4></div>
-      ${pointsHtml || '<p class="cs-muted">正文里还没有【来源：…】标注</p>'}
-      ${missingHtml}
-      <input type="file" multiple hidden data-evidence-file accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg" />
     </div>`;
   }
 
@@ -1057,23 +998,19 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       });
       planBrief = planBrief || {};
       planBrief.practiceOverrides = { ...(planBrief.practiceOverrides || {}), [String(section.title)]: text };
-      status(`已保存「${section.title}」的写法；点「按写法批量编写」即按此执行`);
+      status(`已保存「${section.title}」的生成提示词；批量编写时按此执行`);
     } catch (error) { status(`保存失败：${error.message}`); }
   }
 
   /** 依据 ↔ 正文对应 + 本章计划摘要（待办数）。 */
   async function loadBasis(blockKey) {
-    if (!blockKey) { basisInfo = null; planBrief = null; return; }
+    if (!blockKey) { planBrief = null; return; }
     try {
-      const [basisResp, planResp, resultResp, readyResp] = await Promise.all([
-        fetch(`/api/projects/${projectId}/basis?threadId=${encodeURIComponent(threadId)}&blockId=${encodeURIComponent(blockKey)}`, {signal: AbortSignal.timeout(20000)}),
+      const [planResp, readyResp] = await Promise.all([
         fetch(`/api/projects/${projectId}/chapters/${encodeURIComponent(blockKey)}/plan?threadId=${encodeURIComponent(threadId)}&_=${Date.now()}`, {signal: AbortSignal.timeout(30000), cache: 'no-store'}),
-        fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/section-results`, {signal: AbortSignal.timeout(20000), cache:'no-store'}).catch(() => null),
         fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {signal: AbortSignal.timeout(20000), cache:'no-store'}).catch(() => null),
       ]);
-      sectionResults = resultResp?.ok ? ((await resultResp.json()).sections || {}) : {};
       writingReadiness = readyResp?.ok ? await readyResp.json() : null;
-      basisInfo = basisResp.ok ? await basisResp.json() : null;
       if (planResp.ok) {
         const plan = await planResp.json();
         planBrief = {
@@ -1088,7 +1025,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           deliverables: plan.deliverables || [],
         };
       } else { planBrief = null; }
-    } catch (e) { basisInfo = null; planBrief = null; }
+      if ((planBrief?.outline || []).length && writingReadiness?.status === 'no_outline') {
+        try {
+          const readyResp = await fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {cache:'no-store'});
+          if (readyResp.ok) { writingReadiness = await readyResp.json(); }
+        } catch (error) { /* ignore */ }
+      }
+    } catch (e) { planBrief = null; }
   }
 
   async function loadCitations() {
@@ -1283,6 +1226,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         payload.coverage = (coverage?.chapters || []).find((c) => String(c.block_id) === String(blockId)) || null;
         payload.context_stale = (rebuild?.stale || []).find((b) => String(b.block_id) === String(blockId)) || null;
       } catch (error) { /* 覆盖率/上下文版本失败不阻断计划 */ }
+      // chapter_plan 可能在此期间自动补建了大纲；重新取一次就绪度，避免章头仍显示“未生成大纲”。
+      if ((payload.outline || []).length && writingReadiness?.status === 'no_outline') {
+        try {
+          const readyResp = await fetch(`/api/blocks/${encodeURIComponent(active?.id || '')}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {cache:'no-store'});
+          if (readyResp.ok) { writingReadiness = await readyResp.json(); paintReadinessChip(); }
+        } catch (error) { /* ignore */ }
+      }
       return payload;
     };
     const openBindPicker = (requirement) => {
@@ -1361,23 +1311,43 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const normalRequirements = requirements.filter((r) => !(r.source === 'spec' || r.spec_requirement_id));
       const coveredCount = reqCoverage.filter((r) => r.responded).length;
       const staleContext = data.context_stale;
+      const hasOutline = (data.outline || []).length > 0;
+      const directoryLocked = !!context?.directory_locked;
+      const layoutId = (context?.profile || {}).layout || data.layout || 'solution';
+      const layoutGuide = LAYOUT_GUIDES[layoutId] || LAYOUT_GUIDES.solution;
+      const planLayout = String(data.layout || '');
+      const layoutStale = hasOutline && !!planLayout && planLayout !== layoutId;
+      const layoutPrompt = String((context?.profile || {}).layout_prompt || layoutGuide.prompt || '');
       const detected = deliverables.reduce((sum, item) => sum + (item.written_words || 0), 0);
       const wordTooltip = `全章已写 ${wordPlan.written || 0} 字；能按小节标题对应到交付物的是 ${detected} 字，逐项"已写"为估算值，以正文为准`;
       body.innerHTML = `
         <div class="cs-cp-head">
-          <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}${staleContext ? '<span class="cs-cp-tag cs-cp-tag-warn">上下文旧</span><button type="button" class="cs-cp-link" data-cp-rebuild-context>按新上下文重写</button>' : ''}</h4>
+          <h4>${esc(data.title || '')}${isCatalog ? '<span class="cs-cp-tag">目录节点</span>' : isParent ? '<span class="cs-cp-tag">父章 · 只写总述</span>' : ''}</h4>
           <div class="cs-cp-toprow">
             <p class="cs-cp-facts">${esc(headline)}${isCatalog ? '' : `<span class="cs-cp-info" title="${esc(wordTooltip)}">i</span>`}</p>
 
           </div>
           ${wordPlan.advice ? `<p class="cs-cp-warn-line">${esc(wordPlan.advice)}</p>` : ''}
         </div>
-
-
+        <details class="cs-cp-block" data-cp-sec="type" open>
+          <summary><b><span class="cs-cp-idx">1</span>章节类型与结构</b><em>${esc(layoutGuide.desc ? ((context?.layouts || {})[layoutId]?.label || layoutId) : layoutId)}</em></summary>
+          <div class="cs-cp-fold-body cs-cp-type">
+            <label class="cs-cp-kind-row">本章类型
+              <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === layoutId ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+            </label>
+            <p class="cs-cp-type-desc">生成提示词（本章大纲）</p>
+            <textarea class="cs-cp-type-prompt" data-cp-layout-prompt rows="5" placeholder="填写本章大纲的生成提示词">${esc(layoutPrompt)}</textarea>
+            <div class="cs-cp-type-actions">
+              <button type="button" class="cs-cp-ghost" data-cp-layout-prompt-reset>恢复默认</button>
+              <button type="button" class="cs-cp-primary" data-cp-layout-prompt-save>保存提示词</button>
+            </div>
+            <p class="cs-cp-type-state ${layoutStale ? 'is-warn' : ''}">${hasOutline ? (layoutStale ? '类型与大纲不一致：类型已变更，建议按新类型重建大纲。' : '类型与大纲：一致。') : '还没有大纲：先按当前类型生成章节大纲。'}</p>
+          </div>
+        </details>
 
         <details class="cs-cp-block" data-cp-sec="outline" open>
-          <summary><b><span class="cs-cp-idx">1</span>章节大纲</b><em>${(data.outline || []).length ? `${(data.outline || []).length} 节` : '未生成（0 节）'}</em>
-            <button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${(data.outline || []).length ? '重做大纲' : '生成大纲'}</button></summary>
+          <summary><b><span class="cs-cp-idx">2</span>章节大纲</b><em>${hasOutline ? `${data.outline.length} 节` : '未生成（0 节）'}</em>
+            ${(directoryLocked && hasOutline) ? '' : `<button type="button" class="cs-cp-link" data-cp-build-outline title="按评分点与交付物重新拆分章节（会覆盖现有大纲）">${hasOutline ? '重做大纲' : '生成大纲'}</button>`}</summary>
           <div class="cs-cp-fold-body">
             ${(data.outline || []).length ? `<div class="cs-ol-batch">
               <button type="button" class="cs-cp-primary" data-ol-batch-write>按写法批量编写本章</button>
@@ -1400,11 +1370,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 </summary>
                 <div class="cs-ol-detail">
                   <div class="cs-ol-how">
-                    <p class="cs-ol-how-title"><b>写法</b><span class="cs-dim">（这一节怎么写 = 该节的提示词，可改）</span></p>
+                    <p class="cs-ol-how-title"><b>生成提示词</b><span class="cs-dim">（用户填写的本节提示词，生成时优先执行）</span></p>
                     <textarea class="cs-ol-how-text" data-ol-how="${i}" rows="4">${esc(practiceOf(sec))}</textarea>
                     <div class="cs-ol-how-acts">
-                      <button type="button" class="cs-cp-ghost" data-ol-how-reset="${i}">恢复默认</button>
-                      <button type="button" class="cs-cp-primary" data-ol-how-save="${i}">保存写法</button>
+                      <button type="button" class="cs-cp-ghost" data-ol-how-save="${i}">保存</button>
+                      <button type="button" class="cs-cp-primary" data-ol-how-gen="${i}">重新编写该小节</button>
                     </div>
                   </div>
                   ${planMaterialHtml(i, sec.title)}
@@ -1420,37 +1390,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
 
 
-        <details class="cs-cp-block" data-cp-sec="requirements" open>
-          <summary><b><span class="cs-cp-idx">2</span>本章要求与技术规范</b>
-            <em>${requirements.length} 条${specRequirements.length ? ` · 规范 ${specRequirements.length}` : ''}${reqCoverage.length ? ` · 已回应 ${coveredCount}/${reqCoverage.length}` : ''}</em>
-            <button type="button" class="cs-cp-link" data-cp-edit-req title="编辑本章要求">编辑</button></summary>
-          <div class="cs-cp-fold-body cs-cp-req-wrap">
-            ${requirements.length ? `
-              ${specRequirements.length ? `<div class="cs-cp-req-group"><h5>技术规范条款 <small>${specRequirements.length}</small></h5>
-                ${specRequirements.map((req) => {
-                  const idx = requirements.indexOf(req);
-                  const responded = reqCoverage[idx]?.responded;
-                  return `<details class="cs-cp-req-item">
-                    <summary><span class="cs-cp-req-kind">${esc(req.spec_requirement_id || '规范')}</span>
-                      <b>${esc(String(req.text || '').replace(/^技术规范条款：/, '').slice(0, 46))}</b>
-                      <em class="${responded ? 'ok' : ''}">${responded ? '已回应' : '未回应'}</em></summary>
-                    <p>${esc(String(req.text || '').replace(/^技术规范条款：/, ''))}</p>
-                  </details>`;
-                }).join('')}</div>` : ''}
-              ${normalRequirements.length ? `<div class="cs-cp-req-group"><h5>编写与交付要求 <small>${normalRequirements.length}</small></h5>
-                ${normalRequirements.slice(0, 8).map((req) => {
-                  const idx = requirements.indexOf(req);
-                  const responded = reqCoverage[idx]?.responded;
-                  return `<div class="cs-cp-req-line"><span class="cs-cp-req-kind">${kindLabel[req.type] || '写作'}</span>
-                    <b>${esc(String(req.text || '').slice(0, 52))}</b><em class="${responded ? 'ok' : ''}">${responded ? '已回应' : '未回应'}</em></div>`;
-                }).join('')}${normalRequirements.length > 8 ? `<p class="cs-dim">还有 ${normalRequirements.length - 8} 条，点「编辑」查看全部</p>` : ''}</div>` : ''}
-            ` : '<p class="cs-cp-empty">还没有本章要求。点「编辑」添加，或重新生成计划。</p>'}
-          </div>
-        </details>
-
-
         ${(isParent || isCatalog) ? `<details class="cs-cp-block" data-cp-sec="children" open>
-          <summary><b><span class="cs-cp-idx">5</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
+          <summary><b><span class="cs-cp-idx">3</span>子节统筹</b><em>${children.length} 节 · 共 ${children.reduce((sum, c) => sum + (c.pages || 0), 0)} 页</em></summary>
           ${isParent ? '<p class="cs-cp-howto">本章只写总述（300–500 字）：先全貌 → 3 个关键结论 → 子节索引，细节见下列各节。</p>' : ''}
           ${children.map((child) => `<div class="cs-cp-kid" data-cp-kid="${esc(child.block_id)}" role="button" tabindex="0">
               <span class="cs-cp-kid-title">${esc(child.title)}</span>
@@ -1459,18 +1400,17 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <em class="${child.has_content ? 'ok' : ''}">${child.has_content ? '有正文' : '未开始'}</em>
             </div>`).join('')}
         </details>` : ''}
-        <details class="cs-cp-block" data-cp-sec="layout">
-          <summary><b><span class="cs-cp-idx">2</span>章节类型</b><em>影响生成</em></summary>
-          <div class="cs-cp-fold-body">
-            <label class="cs-cp-kind-row">本章类型
-              <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === ((context?.profile || {}).layout || '') ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
-              <span class="cs-dim">决定本章按哪类章节编制（影响提示词与结构）</span>
-            </label>
-          </div>
-        </details>
-
-        <div data-cp-req-edit hidden></div>`;
+        `;
       bindEvents();
+      // 计划弹窗内的批量/提示词按钮挂在 dialog 上，host.onclick 捕获不到。
+      if (!dialog.dataset.actionBound) {
+        dialog.dataset.actionBound = '1';
+        dialog.addEventListener('click', async (event) => {
+          if (event.target.closest('[data-ol-batch-write],[data-ol-how-save],[data-ol-how-gen],[data-ol-mat-apply],[data-ol-mat-clear]')) {
+            await host.onclick(event);
+          }
+        });
+      }
     };
     const runAction = (action) => {
       if (action === 'find') { dialog.close(); openCitationDialog(blockId); return; }
@@ -1595,7 +1535,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         try {
           const resp = await fetch(`/api/blocks/${active.id}/studio/outline`, {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({thread_id: threadId, regenerate: btn.textContent === '重新生成'}), signal: AbortSignal.timeout(180000),
+            body: JSON.stringify({thread_id: threadId, regenerate: (data.outline || []).length > 0}), signal: AbortSignal.timeout(180000),
           });
           const out = await resp.json().catch(() => ({}));
           if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
@@ -1604,13 +1544,60 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           await render();
         } catch (error) { status(error.message); btn.disabled = false; btn.textContent = label; }
       });
+      body.querySelector('[data-cp-layout-prompt-reset]')?.addEventListener('click', () => {
+        const guide = LAYOUT_GUIDES[(context?.profile || {}).layout] || LAYOUT_GUIDES.solution;
+        const area = body.querySelector('[data-cp-layout-prompt]');
+        if (area) area.value = guide.prompt || '';
+        status('已恢复当前类型的默认提示词（点「保存提示词」生效）');
+      });
+      body.querySelector('[data-cp-layout-prompt-save]')?.addEventListener('click', async () => {
+        const area = body.querySelector('[data-cp-layout-prompt]');
+        const prompt = String(area?.value || '').trim();
+        try {
+          const updated = await json(`/api/blocks/${active.id}/studio`, send('PUT', {
+            layout: (context?.profile || {}).layout,
+            layout_prompt: prompt,
+            writing_status: (context?.profile || {}).writing_status,
+          }));
+          context.profile = {...context.profile, ...updated};
+          status('已保存本章大纲生成提示词');
+        } catch (error) { status(`保存失败：${error.message}`); }
+      });
       body.querySelector('[data-cp-layout]')?.addEventListener('change', async (event) => {
         const previous = (context?.profile || {}).layout;
+        const target = event.target.value;
+        const oldPlanLayout = data.layout || previous;
+        const hasOutline = (data.outline || []).length > 0;
+        const targetPrompt = (LAYOUT_GUIDES[target] || LAYOUT_GUIDES.solution).prompt || '';
+        const promptArea = body.querySelector('[data-cp-layout-prompt]');
+        if (promptArea) promptArea.value = targetPrompt;
         try {
           const updated = await json(`/api/blocks/${active.id}/studio`,
-            send('PUT', {layout: event.target.value, writing_status: (context?.profile || {}).writing_status}));
+            send('PUT', {layout: target, layout_prompt: targetPrompt, writing_status: (context?.profile || {}).writing_status}));
           context.profile = {...context.profile, ...updated};
-          status(`本章类型已改为：${(context.layouts[event.target.value] || {}).label || event.target.value}`);
+          const changed = !!oldPlanLayout && oldPlanLayout !== target;
+          const rebuild = hasOutline && changed
+            ? globalThis.confirm(`本章类型将从「${(context.layouts[oldPlanLayout] || {}).label || oldPlanLayout}」改为「${(context.layouts[target] || {}).label || target}」。\n\n是否按新类型重建大纲？\n取消则保留现有大纲，并标记为“类型与大纲不一致”。`)
+            : false;
+          if (hasOutline && changed && !rebuild) {
+            // 保留旧大纲，仅改类型；render 会显示不一致状态。
+            data.layout = oldPlanLayout;
+            await render();
+            status('类型已切换；现有大纲未重建，建议后续按新类型重建');
+            return;
+          }
+          data.layout = target;
+          if (hasOutline && changed && rebuild) {
+            const resp = await fetch(`/api/blocks/${active.id}/studio/outline`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({thread_id: threadId, regenerate:true, allow_locked:true}), signal: AbortSignal.timeout(180000),
+            });
+            const out = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(out.detail || `HTTP ${resp.status}`);
+            data.outline = out.outline || [];
+          }
+          await render();
+          status(`本章类型已改为：${(context.layouts[target] || {}).label || target}${hasOutline && changed ? '；大纲已按新类型重建' : ''}`);
         } catch (error) { event.target.value = previous; status(error.message); }
       });
       body.querySelector('[data-cp-open-spec]')?.addEventListener('click', (event) => {
@@ -1622,13 +1609,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         event.stopPropagation();          // 在 summary 里，别把折叠面板一起关掉
         event.preventDefault();
         const edit = body.querySelector('[data-cp-req-edit]');
-        const rows = (data.requirements || []).map((requirement) => `<div class="cs-req-row" data-cp-req-row>
+        const allRequirements = data.requirements || [];
+        const editableRequirements = allRequirements.filter((requirement) => !(requirement.source === 'spec' || requirement.spec_requirement_id));
+        const readOnlySpecs = allRequirements.filter((requirement) => requirement.source === 'spec' || requirement.spec_requirement_id);
+        const rows = editableRequirements.map((requirement) => `<div class="cs-req-row" data-cp-req-row>
             <select data-cp-req-type>${['text','table','figure','material'].map((kind) => `<option value="${kind}" ${requirement.type === kind ? 'selected' : ''}>${kindLabel[kind]}</option>`).join('')}</select>
             <input type="text" data-cp-req-text value="${esc(requirement.text)}" />
             <button type="button" class="cs-req-del" data-cp-req-del>×</button>
           </div>`).join('');
         edit.hidden = false;
-        edit.innerHTML = `<h5 class="cs-cp-sub">编辑本章要求</h5>${rows || '<p class="cs-dim">还没有要求</p>'}
+        edit.innerHTML = `<h5 class="cs-cp-sub">编辑本章要求</h5>${readOnlySpecs.length ? '<p class="cs-dim">技术规范条款来自技术规范书，只读，不在此编辑。</p>' : ''}${rows || '<p class="cs-dim">还没有要求</p>'}
           <div class="cs-plan-actions"><button type="button" class="mw-btn" data-cp-req-add>＋ 添加要求</button>
             <button type="button" class="mw-btn primary" data-cp-req-save>保存要求</button></div>
           <p class="cs-dim" data-cp-req-msg></p>`;
@@ -1646,7 +1636,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           const requirementsNext = [...edit.querySelectorAll('[data-cp-req-row]')].map((row) => ({
             text: (row.querySelector('[data-cp-req-text]') || {}).value?.trim() || '',
             type: (row.querySelector('[data-cp-req-type]') || {}).value || 'text',
-          })).filter((item) => item.text);
+          })).filter((item) => item.text).concat(readOnlySpecs);
           if (!data.plan_id) { edit.querySelector('[data-cp-req-msg]').textContent = '本章还没有计划，无法保存要求'; return; }
           try {
             const resp = await fetch(`/api/projects/${projectId}/writing-plans/${encodeURIComponent(data.plan_id)}/requirements`, {
@@ -2811,7 +2801,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       ${st.isParent ? '<span class="cs-muted">父章节：预算与已写均为子树合计</span>' : ''}
     </div>`;
   }
-  const stateOf = b => !units.has(b.id) ? '目录' : profile[b.id]?.writing_status==='complete' ? '完成' : b.content?.trim() ? (profile[b.id]?.writing_status==='review'?'待核对':'草稿') : '未开始';
+  const stateOf = block => {
+    if (!units.has(block.id)) return '目录';
+    if (!block.content?.trim()) return '未开始';
+    const review = reviewStates[block.id];
+    if (!review) return '草稿';
+    if (review.freshness === 'unknown') return '待确认';
+    if (review.freshness === 'stale') return '待复核';
+    return review.satisfied === 'satisfied' ? '已通过' : '待处理';
+  };
   // 拿到篇幅后重画左树与章头（不阻塞首屏）
   loadPageBudget().then(() => { if (active) paintTree(); });
   void loadPlanUnits();          // 一级目录上挂「编写计划」入口
@@ -2851,9 +2849,21 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     new MutationObserver(moveKindRow).observe(asideHost, {childList: true, subtree: true});
     moveKindRow();
   }
+  const expandedChapters = new Set(blocks.map(block=>block.id));
+  const chapterParents = new Map();
+  const parentStack = [];
+  for (const block of blocks) {
+    while (parentStack.length && Number(parentStack.at(-1).level) >= Number(block.level)) parentStack.pop();
+    chapterParents.set(block.id, parentStack.map(parent => parent.id));
+    parentStack.push(block);
+  }
+  const branches = new Set([...chapterParents.values()].map(parents => parents.at(-1)));
   const paintTree = () => {
     const keyword = get('search').value.trim().toLowerCase();
-    get('tree').innerHTML = blocks.filter(b=>!keyword || b.title.toLowerCase().includes(keyword)).map(b=>{
+    const visible = blocks.filter(block => keyword
+      ? [block.title, ...(searchPoints[block.block_id] || [])].some(label => label.toLowerCase().includes(keyword))
+      : chapterParents.get(block.id).every(parent => expandedChapters.has(parent)));
+    get('tree').innerHTML = visible.map(b => {
       const st = stateOf(b), c = budgetOf(b);
       const target = c && Number(c.pages) ? Number(c.pages) : 0;
       const pg = target ? Math.min(100, Math.round(pagesOf(b) / target * 100)) : null;
@@ -2863,10 +2873,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const tips = [b.title, st,
         bs.target ? `预算 ${bs.target} 页 · 已写 ${bs.pages.toFixed(1)} 页 · ${bs.gapText}${bs.isParent ? '（子树合计）' : ''}` : '',
       ].filter(Boolean).join(' · ');
-      return `<button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
-        ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
-        style="padding-left:${8+Math.min(5,Math.max(0,(Number(b.level)||1)-1))*12}px" title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>`;
-    }).join('');
+      const depth = Math.min(5, Math.max(0, (Number(b.level) || 1) - 1));
+      const expanded = expandedChapters.has(b.id);
+      return `<div class="cs-tree-row" style="--depth:${depth}">
+        ${!keyword && branches.has(b.id) ? `<button type="button" class="cs-tree-toggle" data-tree-toggle="${b.id}" aria-expanded="${expanded}" aria-label="${expanded ? '折叠' : '展开'}${esc(b.title)}">${expanded ? '▾' : '▸'}</button>` : '<span class="cs-tree-spacer"></span>'}
+        <button class="cs-node ${active?.id===b.id?'on':''}" data-chapter="${b.id}" data-st="${esc(st)}"
+          ${active?.id===b.id ? 'aria-current="true"' : ''}
+          ${pg === null ? '' : `data-pg="1" style="--pg:${pg}%"`}
+          title="${esc(tips)}"><span>${esc(b.title)}</span><small>${esc(st)}</small></button>
+      </div>`;
+    }).join('') || '<p class="cs-tree-empty">没有匹配的章节或评分点</p>';
   };
   let autoSaveTimer = null, saveState = 'idle', savedAt = 0;
   const fmtClock = (ts) => { try { return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
@@ -2874,7 +2890,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   function readinessChipHtml() {
     const r = writingReadiness;
     if (!r) return '';
-    if (r.status === 'no_outline' || r.has_outline === false) return '<span class="cs-readiness is-bad">无大纲</span>';
+    if (r.status === 'no_outline' || r.has_outline === false) return '<button type="button" class="cs-readiness is-bad cs-readiness-action" data-readiness-plan>未生成大纲 · 先生成大纲</button>';
     const total = (r.sections || []).length;
     const ready = (r.sections || []).filter((x) => x.status === 'ready').length;
     return `<span class="cs-readiness ${ready === total ? 'is-ok' : 'is-warn'}">可写 ${ready}/${total}</span>`;
@@ -2888,12 +2904,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   function paintSaveState() {
     const el = get('chapter-head')?.querySelector('[data-save-state]');
     if (!el) return;
-    const completed = profile[active?.id]?.writing_status === 'complete';
+    const completed = reviewStates[active?.id]?.freshness === 'current' && reviewStates[active?.id]?.satisfied === 'satisfied';
     let html = '';
     if (saveState === 'saving') html = '<span class="cs-save-dot is-saving"></span>保存中…';
     else if (saveState === 'error') html = '<span class="cs-save-dot is-error"></span>保存失败 <button type="button" class="cs-save-act" data-action="save">重试</button>';
-    else if (completed) html = '<span class="cs-save-dot is-done"></span>已确认完成';
-    else if (dirty) html = '<span class="cs-save-dot is-dirty"></span>未保存 · 刚刚改动 <button type="button" class="cs-save-act" data-action="save">保存</button>';
+    else if (completed) html = '<span class="cs-save-dot is-done"></span>当前版本已通过';
+    else if (dirty) html = '<span class="cs-save-dot is-dirty"></span>未保存 · 刚刚改动';
     else if (savedAt) html = `<span class="cs-save-dot is-saved"></span>已保存 · ${fmtClock(savedAt)}`;
     el.innerHTML = html;
   }
@@ -2904,7 +2920,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     autoSaveTimer = globalThis.setTimeout(async () => {
       autoSaveTimer = null;
       if (!dirty || !active) return;
-      if (live.active && live.pending) return;          // AI 未结束不自动保存
+      if (writingBusy || (live.active && live.pending)) return;          // AI 未结束不自动保存
       await save({ auto: true });
     }, 2000);
   }
@@ -2922,11 +2938,15 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const server=latest.find(b=>b.id===block.id);
         if(!server||(server.content||'')!==(block.content||'')){status('服务器正文已发生变化，本地编制内容已保留，请核对版本后再保存。');return false;}
       }
-      await json(`/api/blocks/${block.id}`, send('PUT',{content:value}));
-      block.content = value;
+      const savedBlock = await json(`/api/blocks/${block.id}`, send('PUT',{content:value,expected_content:block.content || ''}));
+      block.content = savedBlock.content ?? value;
+      if (reviewStates[block.id]) reviewStates[block.id].freshness = 'stale';
       if (value.trim()) units.add(block.id);
       if (profile[block.id]?.writing_status==='complete') profile[block.id].writing_status='review';
-      if (active.id===block.id && editor.value===value) { dirty=false; sessionStorage.removeItem(draftKey(block)); }
+      if (active.id===block.id && editor.value===value) {
+        if(block.content!==value){live.reset();editor.value=block.content;paintView(previewVisible);}
+        dirty=false; sessionStorage.removeItem(draftKey(block));
+      }
       paintTree(); stats();
       saveState = 'saved'; savedAt = Date.now();
       const wasComplete = profile[block.id]?.writing_status === 'review' && stateOf(block) === '草稿';
@@ -2946,6 +2966,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     }
     saveState = 'idle'; paintSaveState();
     host.querySelector('[data-action="save"]').disabled=false;
+    paintAIAction();
     sessionStorage.setItem(draftKey(active),JSON.stringify({content:editor.value,base:active.content || ''}));
     status('');
     scheduleAutoSave();
@@ -2978,11 +2999,35 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 写一节（只影响这一节） */
     /** 把某节在正文里替换为新内容（只影响这一节） */
   function mergeSectionText(content, title, text) {
-    const esc = String(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // 匹配到"下一个 ## 标题"或"字符串结尾"；不要用 \s*$（会在一行末尾就断开，导致内容重复）
-    const re = new RegExp(`(^##[ \\t]+${esc}[ \\t]*\\n?)([\\s\\S]*?)(?=^##[ \\t]+|$(?![\\s\\S]))`, 'm');
-    if (re.test(content)) return content.replace(re, `## ${title}\n\n${text}\n\n`);
-    return `${content.replace(/\s*$/, '')}\n\n## ${title}\n\n${text}`;
+    const body = String(content || '');
+    const target = normalizeSectionTitle(title);
+    // 找所有标题行（## / **加粗**），按"归一化标题"匹配，替换到下一个标题之前
+    const headingRe = /^(##[ \t]+.+|\*\*.{1,60}?\*\*)[ \t]*$/gm;
+    const marks = [];
+    let match;
+    while ((match = headingRe.exec(body))) {
+      marks.push({ line: match[0].trim(), start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = 0; i < marks.length; i += 1) {
+      const name = normalizeSectionTitle(marks[i].line);
+      const hit = name === target || (target.length >= 4 && (name.includes(target) || target.includes(name)));
+      if (!hit) continue;
+      const stop = i + 1 < marks.length ? marks[i + 1].start : body.length;
+      const heading = marks[i].line.startsWith('#') ? `## ${marks[i].line.replace(/^#+[ \t]+/, '')}` : marks[i].line;
+      return `${body.slice(0, marks[i].start)}${heading}\n\n${text}\n\n${body.slice(stop)}`.replace(/\s+$/, '\n');
+    }
+    return `${body.replace(/\s*$/, '')}\n\n## ${title}\n\n${text}`;
+  }
+
+  /** 标题归一化：去加粗/编号前缀/尾部标点（与后端 normalize_title 同口径） */
+  function normalizeSectionTitle(raw) {
+    return String(raw || '')
+      .trim()
+      .replace(/^\*+|\*+$/g, '')
+      .replace(/^#+[ \t]+/, '')
+      .replace(/^\d+(?:\.\d+)*[.、]?\s*/, '')
+      .replace(/[\s:：。，,、.]+$/, '')
+      .trim();
   }
 
   /** 预览区里点亮正在编写的这一节（标题 + 其后内容） */
@@ -2993,29 +3038,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     heading.classList.add('cs-sec-writing');
     let node = heading.nextElementSibling;
     while (node && !/^H[1-6]$/.test(node.tagName)) { node.classList.add('cs-sec-writing'); node = node.nextElementSibling; }
-  }
-
-  /** 导出前的阻塞确认：列出阻塞待办，允许"带风险导出" */
-  function openRiskExportDialog(items) {
-    return new Promise((resolve) => {
-      const dlg = globalThis.document.createElement('dialog');
-      dlg.className = 'cs-plan-dialog';
-      dlg.innerHTML = `<header><h3>还有 ${items.length} 项阻塞交付</h3><button type="button" data-rx-close>×</button></header>
-        <div class="cs-plan-body">
-          <p class="cs-warning">导出的是已保存版本；下面这些阻塞项建议先处理，也可以带风险导出。</p>
-          <ul class="cs-rx-list">${items.slice(0, 8).map((x) => `<li>${esc(x.title)}<small>${esc(x.group_label || '')}${x.evidence ? ` · ${esc(String(x.evidence).slice(0, 50))}` : ''}</small></li>`).join('')}${items.length > 8 ? `<li>…还有 ${items.length - 8} 项</li>` : ''}</ul>
-        </div>
-        <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-rx-cancel>取消</button>
-          <button type="button" class="cs-cp-primary" data-rx-go>带风险导出</button></footer>`;
-      const done = (value) => { dlg.close(); resolve(value); };
-      dlg.addEventListener('click', (event) => {
-        if (event.target.closest('[data-rx-close]') || event.target.closest('[data-rx-cancel]')) { done(false); return; }
-        if (event.target.closest('[data-rx-go]')) done(true);
-      });
-      dlg.addEventListener('close', () => dlg.remove());
-      globalThis.document.body.appendChild(dlg);
-      dlg.showModal();
-    });
   }
 
   /** 重写本节前：输入优化方向（提示词） */
@@ -3504,139 +3526,140 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 章节级 SSE 作业：一条 EventSource 驱动 4 头像与正文流式（v3 M2）。 */
   async function runChapterWriteJob(slot, options = {}) {
-    if (!active) return { started: false };
-    const states = { chief: 'queued', text: 'queued', diagram: 'queued', table: 'queued' };
-    const models = {};
-    const paint = (running) => {
-      if (!slot) return;
-      slot.innerHTML = agentBarHtml(states, models) + agentActionsHtml(running !== false);
-    };
-    paint();
-    let jobId = '';
-    try {
-      const resp = await fetch(`/api/projects/${projectId}/studio/chapter-writes`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: threadId, block_id: String(active.block_id || ''), settings_override: {},
-                              force_rewrite: !!options.forceRewrite, generic: !!options.generic }),
-        signal: AbortSignal.timeout(30000),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${resp.status}`);
-      jobId = data.job_id;
-      currentJobId = jobId;
-      if (!jobId) throw new Error('作业创建失败');
-    } catch (error) {
-      if (slot) slot.innerHTML = '';
-      return { started: false, error };
+    if (!active) return {started: false};
+    const block = options.block || active;
+    const token = selecting;
+    if (active?.id !== block.id) return {started:true};
+    if (!options.jobId && !await save()) return {started:true};
+    if (active?.id !== block.id || token !== selecting) return {started:true};
+    const baseline = options.baseContent ?? block.content ?? '';
+    if(options.selection){
+      options.selection=rebaseSelection(options.selection,block.content || '');
+      if(!options.selection)throw new Error('保存后的正文格式有变，选区无法唯一定位，请重新选择');
     }
-    let lastIndex = 0;
-    const pending = new Map();
-    const flush = () => {
-      if (!pending.size) return;
-      const parts = [...pending.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]).join('');
-      const text = parts;
-      pending.clear();
-      if (text) editor.value = String(editor.value || '') + text;
-    };
-    return await new Promise((resolve) => {
+    let jobId = options.jobId;
+    if(!jobId){
+      writingBusy=true;
+      host.querySelector('[data-action="ai"]').disabled=true;
+      host.querySelector('[data-action="submit-review"]').disabled=true;
+      try {
+        const data = await json(`/api/projects/${projectId}/studio/chapter-writes`, send('POST', {
+          thread_id:threadId, block_id:block.block_id, expected_content:block.content || '',
+          force_rewrite:!!options.forceRewrite, clean_rewrite:!!options.cleanRewrite, generic:!!options.generic,
+          section_titles:options.sections || [], instruction:options.instruction || '', selection:options.selection || null,
+        }));
+        jobId=data.job_id;
+      } catch(error) {
+        if(active?.id===block.id && token===selecting){writingBusy=false;host.querySelector('[data-action="ai"]').disabled=false;host.querySelector('[data-action="submit-review"]').disabled=false;}
+        throw error;
+      }
+      if(active?.id!==block.id || token!==selecting)return {started:true,jobId,background:true};
+    }
+    currentJobId = jobId;
+    writingBusy = true;
+    host.querySelector('[data-action="ai"]').disabled = true;
+    host.querySelector('[data-action="submit-review"]').disabled = true;
+    paintAIAction();
+    const target = block.id;
+    const isCurrent = () => !disposed && active?.id === target && currentJobId === jobId && token === selecting;
+    const states = {chief: 'running', text: 'queued', diagram: 'queued', table: 'queued'};
+    const models = {};
+    return new Promise(resolve => {
       const source = new EventSource(`/api/projects/${projectId}/studio/chapter-writes/${jobId}/stream`);
       let finished = false;
-      const finish = (result) => {
+      const finish = result => {
         if (finished) return;
-        finished = true;
-        source.close();
+        finished = true; source.close(); jobStreams.delete(source);
+        if(isCurrent()){writingBusy=false;host.querySelector('[data-action="ai"]').disabled=false;host.querySelector('[data-action="submit-review"]').disabled=false;paintAIAction();}
         resolve(result);
       };
-      source.addEventListener('job', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        status(`编写中：${data.stage || ''}`);
+      jobStreams.set(source,()=>finish({started:true,jobId,background:true}));
+      source.addEventListener('snapshot', event => {
+        if (!isCurrent()) return;
+        const job = JSON.parse(event.data);
+        live.update(job); paintView(previewVisible);
+        if (previewVisible) get('preview').innerHTML = previewContent(editor.value);
+        const counts = job.blocks.reduce((result, item) => {
+          result[item.kind] = (result[item.kind] || 0) + (item.state === 'done' ? 1 : 0);
+          return result;
+        }, {});
+        status(`编制中 · 已完成正文块 ${counts.text || 0} · 表 ${counts.table || 0} · 图 ${counts.diagram || 0}`);
       });
-      source.addEventListener('plan', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        Object.assign(models, data.models || {});
-        states.chief = 'done';
-        paint(true);
-        status(`计划就绪：${(data.sections || []).length} 节`);
+      source.addEventListener('plan', event => {
+        if(!isCurrent())return;
+        const data=JSON.parse(event.data);Object.assign(models,data.models || {});models.chief='依据当前编写计划';states.chief='done';
+        if(slot)slot.innerHTML=agentBarHtml(states,models)+agentActionsHtml(true);
       });
-      source.addEventListener('role', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        if (data.role && data.state) states[data.role] = data.state === 'queued' ? 'queued' : data.state;
-        if (data.model) models[data.role] = data.model;
-        paint(true);
+      source.addEventListener('role', event => {
+        if (!isCurrent()) return;
+        const data = JSON.parse(event.data);
+        states[data.role] = ({working:'running',failed:'error',skipped:'skip'})[data.state] || data.state; models[data.role] = data.model;
+        if (slot) slot.innerHTML = agentBarHtml(states, models) + agentActionsHtml(true);
       });
-      source.addEventListener('delta', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        const index = Number(data.index || 0);
-        lastIndex = index;
-        pending.set(index, (pending.get(index) || '') + String(data.text || ''));
-        if (pending.size > 40) flush();
-      });
-      source.addEventListener('todo', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        const items = data.items || [];
-        if (items.length) status(`发现 ${items.length} 个待核对项：${items[0].title || ''}`);
-      });
-      source.addEventListener('chart', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        const kind = data.role === 'diagram' ? '图' : '表';
-        if (data.state === 'working') status(`正在生成${kind}「${data.title || ''}」…`);
-        else if (data.state === 'done') status(`${kind}「${data.title || ''}」已生成 ✓`);
-        else if (data.state === 'failed') status(`${kind}「${data.title || ''}」失败：${data.error || ''}`);
-      });
-      source.addEventListener('section', (event) => {
-        const data = JSON.parse(event.data || '{}');
-        flush();
-        const coverage = data.coverage || {};
-        const cover = coverage.total ? ` · 规范覆盖 ${coverage.covered || 0}/${coverage.total}` : '';
-        const missing = (coverage.missing || []).length ? `，缺：${coverage.missing.slice(0, 2).join('、')}` : '';
-        status(`已完成第 ${Number(data.index || 0) + 1} 节${data.words ? ` · ${data.words} 字` : ''}${cover}${missing}`);
-      });
-      source.addEventListener('done', async (event) => {
-        const data = JSON.parse(event.data || '{}');
-        flush();
-        states.chief = 'done'; states.text = 'done'; states.diagram = 'done'; states.table = 'done';
-        paint();
-        try {
-          if (data.content) editor.value = data.content;
-          const fresh = await json(`/api/blocks/${active.id}/studio`);
-          context = fresh;
-          if (fresh.block) editor.value = fresh.block.content || editor.value;
-          await loadBasis(active.block_id);
-          paintAside();
-        } catch (error) { /* ignore */ }
-        status(data.saved ? '整章已写入正文（记得核对）' : (data.reason || '已生成建议稿，未覆盖正文'));
-        if (!data.saved && data.content) {
-          const proposal = data.content;
-          const dlg = globalThis.document.createElement('dialog');
-          dlg.className = 'cs-plan-dialog';
-          dlg.innerHTML = `<header><h3>本次生成的是建议稿</h3><button type="button" data-pp-close>×</button></header>
-            <div class="cs-plan-body"><p class="cs-muted">${esc(data.reason || '正文在生成期间被修改，未自动覆盖')}。
-              可以打开预览后决定是否写入。</p></div>
-            <footer class="cs-ins-foot"><button type="button" class="cs-cp-ghost" data-pp-cancel>不写入</button>
-              <button type="button" class="cs-cp-primary" data-pp-apply>写入正文</button></footer>`;
-          dlg.addEventListener('click', async (event) => {
-            if (event.target.closest('[data-pp-close]') || event.target.closest('[data-pp-cancel]')) { dlg.close(); return; }
-            if (!event.target.closest('[data-pp-apply]')) return;
-            editor.value = proposal; changed(); await save(); dlg.close();
-            status('建议稿已写入正文（可从版本回滚）');
+      source.addEventListener('job', event => {
+        if (!isCurrent()) return;
+        const data = JSON.parse(event.data);
+        if (data.status === 'cancelled') {
+          status('已停止，已生成内容保留');
+          void json(`/api/projects/${projectId}/studio/chapter-writes/${jobId}`).then(job=>{
+            if(!isCurrent() || !job.snapshot?.editing)return;
+            pendingProposals.set(block.id,job.content || editor.value);live.reset();editor.value=block.content || '';dirty=false;paintView(false);
+            if(autoSaveTimer){clearTimeout(autoSaveTimer);autoSaveTimer=null;}
+            get('recovery').hidden=false;get('recovery').innerHTML='<span>修改已停止，原文已保留。</span><button type="button" data-compare-proposal>查看未完成结果</button>';
           });
-          dlg.addEventListener('close', () => dlg.remove());
-          globalThis.document.body.appendChild(dlg);
-          dlg.showModal();
-        }
-        if (Array.isArray(data.sections)) lastSections = data.sections;
-        currentJobId = '';
-        paintAside();
-        globalThis.setTimeout(() => { if (slot) slot.innerHTML = ''; }, 5000);
-        finish({ started: true, jobId, saved: !!data.saved });
+          finish({started:true,jobId});
+        } else status(data.stage || '编制中');
       });
-      source.addEventListener('error', (event) => {
-        if (finished) return;                        // done 之后服务端正常关闭也会触发 error，忽略
-        let message = '';
-        try { message = JSON.parse(event.data || '{}').message || ''; } catch (e) { /* ignore */ }
-        status(message ? `编写失败：${message}` : '作业流中断，可在「更多 → 重新连接」恢复');
-        if (slot) slot.innerHTML = '';
-        finish({ started: true, jobId, error: message || 'stream error' });
+      source.addEventListener('done', async event => {
+        if (finished) return;
+        const data = JSON.parse(event.data);
+        if (isCurrent()) {
+          if(Array.isArray(data.sections))lastSections=data.sections;
+          if(data.saved){const history={before:baseline,after:data.content};aiBaselines.set(block.id,history);sessionStorage.setItem(`ai-change:${threadId}:${block.id}`,JSON.stringify(history));}
+          if (data.saved) block.content = data.content;
+          if (live.active && live.isActiveFor(jobId)) {
+            if (data.saved && !live.hasEdits && !live.pending) {
+              live.reset(); editor.hidden = false; editor.value = data.content;
+              dirty = false; sessionStorage.removeItem(draftKey(block));
+            } else changed();
+          } else if (!dirty) {
+            editor.value = data.content || block.content || '';
+            if (!data.saved && editor.value !== block.content) changed();
+          }
+          const own = live.hasEdits;
+          status(own ? '编制已结束，人工修改已保留，请保存正文' : data.reason || '编制已完成');
+          if (!data.saved) {
+            pendingProposals.set(block.id, live.hasEdits ? editor.value : data.content);
+            if(options.selection || options.forceRewrite){live.reset();editor.value=block.content || '';dirty=false;sessionStorage.removeItem(draftKey(block));if(autoSaveTimer){clearTimeout(autoSaveTimer);autoSaveTimer=null;}}
+            get('recovery').hidden = false;
+            get('recovery').innerHTML = '<span>生成结果已保留，请核对当前版本。</span><button type="button" data-compare-proposal>查看变更</button>';
+          }
+          await loadBasis(block.block_id); if (isCurrent()) {paintAside(); paintView(previewVisible);}
+          if (slot) slot.innerHTML = agentBarHtml(states,models);
+        }
+        finish({started:true,jobId,saved:!!data.saved});
+      });
+      source.addEventListener('error', event => {
+        if (finished) return;
+        let data; try {data = JSON.parse(event.data);} catch {}
+        if (data?.scope === 'section' || data?.scope === 'chart') return;
+        if (isCurrent()) {
+          const partial = editor.value;
+          void json(`/api/projects/${projectId}/studio/chapter-writes/${jobId}`).then(job=>{
+            if(!isCurrent())return;
+            const snapshot=job.snapshot || {};
+            if(snapshot.editing){
+              pendingProposals.set(block.id,job.content || partial);
+              live.reset();editor.value=block.content || '';dirty=false;paintView(false);
+              sessionStorage.removeItem(draftKey(block));
+              if(autoSaveTimer){clearTimeout(autoSaveTimer);autoSaveTimer=null;}
+              get('recovery').hidden=false;
+              get('recovery').innerHTML='<span>修改未完成，原文已保留。</span><button type="button" data-compare-proposal>查看未完成结果</button>';
+            }
+            status(data?.message || '连接中断，结果已保留，可重试或核对变更');
+          }).catch(()=>status('连接中断，原文与任务进度已保留'));
+        }
+        finish({started:true,jobId,error:data?.message || '连接中断'});
       });
     });
   }
@@ -3647,7 +3670,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return `<div class="cs-agent-bar">${roles.map((role) => {
       const meta = AGENTS[role];
       const state = states?.[role] || 'idle';
-      const label = { idle: '等待', running: '工作中', done: '完成', skip: '跳过', error: '失败' }[state] || '等待';
+      const label = { idle: '等待', queued: '等待', running: '工作中', working: '工作中', done: '完成', skipped: '跳过', skip: '跳过', failed: '失败', error: '失败' }[state] || '等待';
       const model = (models && models[role]) || writingModels[role] || modelChoice.get(role) || '生效中';
       return `<div class="cs-agent${state === 'running' ? ' is-running' : ''}${state === 'done' ? ' is-done' : ''}${state === 'error' ? ' is-error' : ''}">
           <span class="cs-agent-icon" style="--agent:${meta.color}">${meta.icon}</span>
@@ -3680,24 +3703,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   let gateInfo = null;
   let pendingMaterialSection = '';      // 从待办「上传」进入时，记住要绑定到哪一节
-
-  /** 打开章节时：系统静默清理内部语法/术语（不需要用户点），有清理则刷新正文 */
-  async function autoCleanChapter() {
-    try {
-      const resp = await fetch(`/api/blocks/${active.id}/delivery-gate/auto`, { method: 'POST', signal: AbortSignal.timeout(30000) });
-      if (!resp.ok) { await refreshDeliveryGate(); return; }
-      const data = await resp.json();
-      if (data.changed) {
-        editor.value = data.content || editor.value;
-        context = await json(`/api/blocks/${active.id}/studio`);
-        status(`已自动清理 ${data.changes?.length || 0} 类内部写法（可回滚）`);
-      }
-      gateInfo = { summary: data.remaining, blocking: data.blocking || [] };
-      paintGateBar();
-    } catch (error) {
-      await refreshDeliveryGate();
-    }
-  }
 
   /** 拉章级交付门（内部语法/术语/占位符），在编辑区上方提示 */
   async function refreshDeliveryGate() {
@@ -3805,6 +3810,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   const MODEL_ROLES = [['chief', '主编'], ['text', '文字编写'], ['rewrite', '文字精修'], ['diagram', '图片生成'], ['table', '表格']];
   let writingModels = {};          // 服务端生效值：{role: used}
   let lastSections = [];            // 最近一次作业的节级留痕（模型/字数/耗时）
+  const jobStreams = new Map();
+  const pendingProposals = new Map();
+  const aiBaselines = new Map();
   let currentJobId = '';           // 当前章节级作业（停止/重试用）
   let lastSectionWrite = null;     // 最近一次节级写作：used_evidence / coverage
 
@@ -3977,7 +3985,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (type === 'locate') { locateTaskTarget(task); return; }
     if (type === 'condense_preview') { locateTaskTarget(task); status('精简预览将在「重写」面板里完成'); return; }
     if (type === 'gate_placeholder') {
-      showPanel('write');
+      showPanel('issues');
       status('在待办里逐条处理：占位符需要你补资料，或删掉这句断言');
       return;
     }
@@ -4017,7 +4025,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       status(`系统正在把「${section.title}」里需要举证的地方改成概括表述…`);
       try {
         await streamWriteSection(active.id, section, null,
-          '把本节中需要业绩/材料举证的地方改为概括表述（例如"我方具备同类项目实施经验"），不要留任何占位符，也不要编造具体项目名称与数字；保留其余内容。',
+          '把本节中需要业绩/材料举证的地方改为概括表述（例如"拟依据本项目规范组织实施"），不要留任何占位符，也不要编造具体项目名称与数字；保留其余内容。',
           'rewrite');
         await save();
         await loadBasis(active.block_id); paintAside();
@@ -4099,7 +4107,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           openFigureAdjustDialog({ id: 'new', kind: 'ai', section: section ? section.title : '',
                                    title: title || '新图示', type: 'layered', nodes: 0, raw: '' });
         } else {
-          status('表格生成：请在「插入 → AI 生成表格」里补一张'); showPanel('write');
+          status('表格生成：请在「添加内容 → AI 生成表格」里补一张'); showPanel('write');
         }
         return;
       }
@@ -4543,18 +4551,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         </div>`;
     };
     const next = need.slice().sort((a, b) => impactRank(a.impact) - impactRank(b.impact))[0];
-    const score = summary.readiness;
-    const scoreText = summary.readiness_text || '';
-    const scoreHtml = (typeof score === 'number')
-      ? `<div class="cs-readiness ${score >= 90 ? 'is-ok' : score >= 70 ? 'is-warn' : 'is-bad'}">
-           <b>${score}</b><span>交付就绪度 · ${esc(scoreText)}</span></div>`
-      : '';
-    const reviewHtml = reviewBlockHtml();
     const verdictHtml = deliveryVerdictHtml();
     if (!need.length) {
-      return `${verdictHtml}${scoreHtml}${reviewHtml}<h4>待办</h4><p class="cs-todo-ok">本章没有需要你处理的事</p>`;
+      return `<div class="cs-delivery-block"><h4>交付门槛</h4>${verdictHtml}<p class="cs-todo-ok">本章没有需要你处理的事</p></div>`;
     }
-    return `${verdictHtml}${scoreHtml}${reviewHtml}<h4>待办 <small>需要你 ${need.length} 件</small></h4>
+    return `<div class="cs-delivery-block"><h4>交付门槛 <small>需要你 ${need.length} 件</small></h4>${verdictHtml}
       ${next ? `<div class="cs-task-next">${cardHtml(next, { ignore: false })}</div>` : ''}
       ${need.length ? `<div class="cs-todo-group"><p class="cs-todo-glabel">需要你处理 ${need.length}</p>
         ${need.filter((x) => x.id !== (next && next.id)).map((x) => cardHtml(x, { ignore: true })).join('')}</div>` : ''}
@@ -4562,7 +4563,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         <div class="cs-todo-auto-body">${system.map((x) => cardHtml(x, {})).join('')}</div></details>` : ''}
       ${suggest.length ? `<details class="cs-todo-auto"><summary>建议优化 ${suggest.length}（不影响交付）</summary>
         <div class="cs-todo-auto-body">${suggest.map((x) => cardHtml(x, { ignore: true })).join('')}</div></details>` : ''}
-      ${(!need.length && !system.length && !suggest.length) ? '<p class="cs-todo-ok">✓ 距离交付没有待办项</p>' : ''}`;
+      ${(!need.length && !system.length && !suggest.length) ? '<p class="cs-todo-ok">✓ 距离交付没有待办项</p>' : ''}</div>`;
   }
 
   const impactRank = (impact) => ({ export_block: 0, completion_block: 1, quality: 2, suggestion: 3 }[impact] ?? 4);
@@ -4611,27 +4612,23 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 右栏「待办」页签标题上的计数徽标（口径与待办页签一致，排除素材类） */
   function paintTodoBadge() {
+    // 交付/补料任务不再放进「待处理」；这里只保留评审入口，不显示任务数。
     const el = host.querySelector('[data-todo-badge]');
     if (!el) return;
-    const tasks = planBrief?.deliveryTasks;
-    const items = (planBrief?.todoItems || []).filter((x) => !todoIgnored.has(x.id));
-    const count = tasks
-      ? (tasks.need_user || []).filter((x) => !todoIgnored.has(x.id)).length
-      : items.filter((x) => x.group !== 'auto').length;
-    el.textContent = count ? String(count) : ''; el.hidden = !count;
+    el.textContent = ''; el.hidden = true;
   }
 
   /** 右栏「待办」页签：按处理模块分组，每条 = 模块 + 带数字的问题 + 一个动作 */
   function todoPaneHtml() {
     if (planBrief?.deliveryTasks) {
-      return `<section data-pane="write">${deliveryTasksHtml(planBrief.deliveryTasks)}</section>`;
+      return `<section data-pane="issues">${deliveryTasksHtml(planBrief.deliveryTasks)}</section>`;
     }
     if ((planBrief?.todoItems || []).length) {
-      return `<section data-pane="write">${todoItemsHtml()}</section>`;
+      return `<section data-pane="issues">${todoItemsHtml()}</section>`;
     }
     const todos = (planBrief?.todo || []).filter((x) => (x.module || 'content') !== 'material');
     if (!todos.length) {
-      return `<section data-pane="write"><h4>待办</h4>
+      return `<section data-pane="issues"><h4>待办</h4>
         <p class="cs-todo-ok">✓ 本章没有待办，可以生成或交付</p></section>`;
     }
     const groups = TODO_GROUPS.map(([key, label]) => {
@@ -4654,7 +4651,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <button type="button" class="cs-todo-act" data-gap-abate="${esc(g.id)}">去核对</button>
             </div>`).join('')}</div>`
       : '';
-    return `<section data-pane="write"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
+    return `<section data-pane="issues"><h4>待办 <small>${todos.length + checks.length} 项 · 按优先级</small></h4>${groups}${checkGroup}</section>`;
   }
 
   /** 节级留痕：由哪个角色/模型生成、耗时（没有则空） */
@@ -4737,6 +4734,88 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     return figures;
   }
 
+  /** 按原文 4-Agent 流水线编写本章：主编 → 文字/表格/图表 → 双评审。 */
+  async function runTeamChapterJob(block) {
+    if (!block || writingBusy) return;
+    writingBusy = true;
+    showPanel('write');
+    const slot = get('agents');
+    if (slot) slot.innerHTML = '<div class="cs-team-run">已启动章节主编、文字、表格、图表与评审 Agent…</div>';
+    status('已启动 4-Agent 章节编制…');
+    try {
+      const started = await json(`/api/projects/${projectId}/studio/writing-jobs`,
+        send('POST', {thread_id: threadId, block_ids: [block.id]}));
+      const jobId = (started.jobs || [])[0];
+      if (!jobId) throw new Error('未能创建编制任务');
+      let lastStage = '';
+      for (;;) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1200));
+        const job = await json(`/api/projects/${projectId}/studio/writing-jobs/${jobId}`);
+        if (job.stage && job.stage !== lastStage) { lastStage = job.stage; status(job.stage); }
+        const rows = (job.blocks || []).map((item) => `<div class="cs-team-row"><span>${esc(item.title || '')}</span><em>${esc(item.state || '')}</em></div>`).join('');
+        if (slot) slot.innerHTML = `<div class="cs-team-run"><b>${esc(job.stage || '编制中')}</b>${rows}</div>`;
+        const liveText = (job.blocks || []).map((item) => item.content || '').filter(Boolean).join('\n\n');
+        if (liveText) {
+          get('editor').hidden = true;
+          get('preview').hidden = false;
+          get('preview').innerHTML = previewContent(liveText);
+        }
+        if (job.status === 'done') {
+          if (job.saved) { await select(block.id); status('4-Agent 编制完成，正文已保存'); }
+          else status('4-Agent 编制完成；正文已有内容，结果作为建议保留，请核对');
+          break;
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') throw new Error(job.error || '编制任务已停止');
+      }
+    } catch (error) {
+      status(`章节编制失败：${error.message}`);
+    } finally {
+      writingBusy = false;
+    }
+  }
+
+  /** 本节提示词：改完可保存，并可直接按提示词重新生成本节 */
+  async function openSectionPromptDialog(index) {
+    const section = (planBrief?.outline || [])[index];
+    if (!section || !active) return;
+    const practice = practiceOf(section);
+    const dialog = globalThis.document.createElement('dialog'); dialog.className = 'cs-plan-dialog cs-sec-prompt-dialog';
+    dialog.innerHTML = `<header><h3>本节提示词 · ${esc(section.title)}</h3></header><div class="cs-plan-body">
+      <label>生成提示词<textarea data-sec-prompt-text rows="7" placeholder="填写本节要写什么、按什么结构写、要避免什么">${esc(practice)}</textarea></label>
+      <p class="cs-dim">保存后，本节生成/重写都会使用这段提示词；重新生成只替换本节正文。</p></div>
+      <footer class="cs-sec-prompt-foot">
+        <button type="button" class="cs-cp-ghost" data-cancel>取消</button>
+        <button type="button" class="cs-cp-ghost" data-save>仅保存</button>
+        <button type="button" class="cs-cp-primary" data-save-gen>保存并重新生成本节</button>
+      </footer>`;
+    const save = async () => {
+      const text = String(dialog.querySelector('[data-sec-prompt-text]')?.value || '').trim();
+      await json(`/api/projects/${projectId}/chapters/${encodeURIComponent(active.block_id)}/plan/practice`,
+        send('PUT', {section: section.title, practice: text}));
+      if (!planBrief) planBrief = {};
+      planBrief.practiceOverrides = {...(planBrief.practiceOverrides || {}), [section.title]: text};
+      return text;
+    };
+    dialog.onclick = async event => {
+      if (event.target.closest('[data-cancel]')) { dialog.close(); return; }
+      if (event.target.closest('[data-save]')) {
+        try { await save(); status(`已保存「${section.title}」的提示词`); dialog.close(); } catch (error) { status(error.message); }
+        return;
+      }
+      const gen = event.target.closest('[data-save-gen]');
+      if (!gen) return;
+      gen.disabled = true;
+      try {
+        await save();
+        dialog.close();
+        await streamWriteSection(active.id, section, (chars) => status(`正在按提示词重写「${section.title}」… 已 ${chars} 字`), '', 'rewrite', false);
+        status(`「${section.title}」已按新提示词重新生成`);
+      } catch (error) { status(error.message); gen.disabled = false; }
+    };
+    dialog.addEventListener('close', () => dialog.remove());
+    globalThis.document.body.append(dialog); dialog.showModal();
+  }
+
   /** 右栏「进度」页签：章节编写进度（大纲进度 + 编写动作） */
   function progressPaneHtml() {
     const outline = planBrief?.outline || [];
@@ -4754,8 +4833,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     const rows = outline.map((sec, i) => {
       const written = done.has(sec.title);
       const words = written ? sectionWordCount(bodyText, sec.title) : 0;
-      const ready = (writingReadiness?.sections || []).find((x) => String(x.section) === String(sec.title));
-      const readyLabel = ready ? (ready.status === 'ready' ? '可写' : ready.status === 'no_evidence' ? '缺证据' : ready.status === 'partial' ? `缺 ${ready.missing}` : '无大纲') : '';
       const secFigs = figures.filter((f) => f.section === sec.title);
       const secPending = pendingFigures([sec]);
       const figBlock = (secFigs.length || secPending.length)
@@ -4779,28 +4856,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-todo-row">
             <span class="cs-todo-idx">${i + 1}</span>
             <span class="cs-todo-text" title="${esc(sectionTrace(sec.title))}"><b>${esc(sec.title)}</b>
-              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}${readyLabel ? ` · <button type="button" class="cs-sec-ready ${ready?.status === 'ready' ? 'is-ok' : 'is-warn'}" data-sec-readiness="${i}">${readyLabel}</button>` : ''}</small></span>
-            <button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button>
+              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}</small></span>
+            <span class="cs-sec-acts"><button type="button" class="cs-todo-act" data-sec-prompt="${i}">提示词</button><button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button></span>
           </div>
-          ${(() => {
-            const result = sectionResults?.[sec.title];
-            if (!result) return '';
-            const cov = result.coverage_after || {};
-            const ctx = (result.context_evidence || result.used_evidence || []).length;
-            const cited = (result.cited_evidence || []).length;
-            const labels = (result.context_evidence || []).slice(0, 3).map((e) => e.source_title || e.filename || '证据').filter(Boolean);
-            return `<div class="cs-sec-result">
-              <span class="${result.generic ? 'is-generic' : 'is-ok'}">${result.generic ? '未使用证据（概括写法）' : `上下文证据 ${ctx} 条`} · 引用 ${cited} 处${cov.total ? ` · 覆盖 ${cov.covered || 0}/${cov.total}` : ''}</span>
-              ${labels.length ? `<small>${labels.map((x) => esc(String(x).slice(0, 18))).join(' · ')}</small>` : ''}
-              <button type="button" class="cs-todo-act" data-material-admin>补证据</button>
-            </div>`;
-          })()}
           ${figBlock}
         </div>`;
     }).join('');
     return `<section data-pane="write"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
       <div class="cs-progress-actions">
-        <button type="button" class="cs-progress-btn" data-aside-write-all>${done.size ? '继续编写（补未写）' : '开始编写整章'}</button>
         <button type="button" class="cs-progress-btn" data-fig-review>审阅本章图片 ${figureCount}</button>
       </div>
       ${rows}</section>`;
@@ -5036,12 +5099,11 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       planRetryPending = true;
       void loadBasis(active.block_id).then(() => { planRetryPending = false; paintAside(); });
     }
-    const layout = context.layouts[context.profile.layout];
-    const basisKey = String(active.block_id);
-    const basisCovered = basisInfo?.block_id === basisKey ? basisInfo : null;
-    get('aside').innerHTML = `${todoPaneHtml()}
+    get('aside').innerHTML = `<section data-pane="issues">${reviewBlockHtml()}</section>
       ${progressPaneHtml()}
-      <section data-pane="materials">${materialRequestsHtml()}${materialLibraryHtml()}</section>
+      <section data-pane="materials">
+        ${materialLibraryHtml()}
+      </section>
       `;
     const asideLayout = get('layout');      // 右栏「编排建议」已移除（章节类型移入计划面板），这里可能为 null
     if (asideLayout) asideLayout.onchange = async event => {
@@ -5084,16 +5146,159 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   /** 工具栏「编写计划」：只在当前章属于某个一级目录时出现（动作与树无关，树只看结构）。 */
   function paintPlanAction(block) {
     const slot = host.querySelector('[data-plan-slot]');
-    if (!slot) return;
-    const unit = block ? unitOf.get(String(block.block_id)) : null;
-    const info = unit ? planUnits.get(unit) : null;
-    if (!info) { slot.innerHTML = ''; return; }
-    slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(unit)}" `
-      + `title="本章计划：要交什么 / 依据与写法 —— 点开查看">本章计划</button>`;
+    if (!slot || !block) return;
+    // 本章大纲/提示词入口常驻：不依赖目录是否确认，也不依赖当前章是否属于某个计划单元。
+    slot.innerHTML = `<button type="button" class="cs-plan-btn" data-plan="${esc(block.block_id)}" `
+      + `title="本章计划：章节类型、大纲、每节生成提示词">本章计划</button>`;
+  }
+
+  function paintAIAction() {
+    const button = host.querySelector('[data-action="ai"]');
+    const undo = host.querySelector('[data-action="undo-ai"]');
+    if (undo) undo.disabled = writingBusy || !active || !aiBaselines.get(active.id)?.after;
+    if (button && !writingBusy) {button.textContent = editor.value.trim() ? 'AI 修改' : 'AI 编制';button.title = editor.value.trim() ? '选择选区或当前章节正文修改，目录固定' : '按应答策划确认的当前章节编制正文与图表';}
+  }
+
+  function renderWorkspaceRole() {
+    const scope = context.scope || document.node_scopes?.[active.id] || {};
+    const structure = scope.role === 'structure' && !editor.value.trim();
+    host.querySelector('.cs-tree-label').textContent=context.directory_locked ? '已确认应答目录' : '应答目录';
+    get('overview').hidden = !structure;
+    host.querySelector('.cs-toolbar').hidden = structure;
+    editor.hidden = structure; get('preview').hidden = true;
+    if (structure) {
+      const children = blocks.filter(block => (scope.unit_ids || []).includes(block.id));
+      const pending = children.filter(block => (scope.pending_ids || []).includes(block.id));
+      get('overview').innerHTML = `<h3>下属章节 · ${children.length} 个编写单元</h3>
+        <p><button type="button" class="cs-plan-btn" data-plan="${esc(block.block_id)}">本章计划</button>
+        已写 ${children.length - pending.length} · 待写 ${pending.length}</p>
+        <button type="button" data-next-chapter="${pending[0]?.id || children[0]?.id || ''}" ${children.length ? '' : 'disabled'}>进入下一待写章节</button>
+        <button type="button" class="cs-primary" data-batch-write ${pending.length ? '' : 'disabled'}>编制未写子章</button>
+        ${children.map(block => `<div class="cs-overview-row"><button type="button" data-chapter="${block.id}">${esc(block.title)}</button><span>${block.content?.trim() ? '已有正文' : '待写'}</span></div>`).join('')}`;
+    }
+    const old = get('chapter-head').querySelector('[data-task-summary]'); old?.remove();
+    get('chapter-head').insertAdjacentHTML('beforeend', `<small data-task-summary>评分要求 ${(context.points || []).length} 项 · 规范条款 ${(context.requirements || []).length} 条${context.missing?.length ? ' · 须补证明' : ''}</small>`);
+    paintAIAction();
+  }
+
+  async function openBatchDialog() {
+    const root = active;
+    const payload = {thread_id: threadId, root_block_id: root.block_id, preview: true};
+    const result = await json(`/api/projects/${projectId}/studio/batch-write`, send('POST', payload));
+    const dialog = globalThis.document.createElement('dialog'); dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>编制未写子章</h3></header><div class="cs-plan-body"><p>范围：${esc(root.title)} · ${result.targets.length} 章，其中 ${result.targets.filter(item => item.auto_outline).length} 章将按已确认章节及关联要求编制。</p>
+      ${result.targets.map(item => `<p>${esc(item.title)} · ${item.auto_outline ? '按本章要求编制' : '按已有计划编制'}${item.evidence_required ? ' · 需核对证明' : ''}</p>`).join('')}<div data-batch-result></div></div>
+      <footer><button type="button" data-cancel>取消</button><button type="button" data-start>开始编制</button></footer>`;
+    dialog.onclick = async event => {
+      if (event.target.closest('[data-cancel]')) dialog.close();
+      const button = event.target.closest('[data-start]');
+      if (!button) return;
+      button.disabled = true;
+      try {
+        const started = await json(`/api/projects/${projectId}/studio/batch-write`, send('POST', {...payload, preview:false}));
+        dialog.querySelector('[data-batch-result]').innerHTML = `<p>已启动 ${started.created.length} 章；未启动 ${started.skipped.length} 章。任务继续在后台执行。</p>${started.skipped.map(item => `<p>${esc(item.title)} · ${esc(item.reason)}</p>`).join('')}`;
+      } catch (error) {dialog.querySelector('[data-batch-result]').textContent=error.message;button.disabled=false;}
+    };
+    dialog.addEventListener('close', () => dialog.remove()); globalThis.document.body.append(dialog); dialog.showModal();
+  }
+
+  async function openScopeDialog() {
+    const block = active;
+    const range = live.active ? live.selectionRange() : (!previewVisible ? selectedRange(editor.value,editor.selectionStart,editor.selectionEnd) : null);
+    const selection = range?.selection || '';
+    const original = editor.value;
+    if (!writingReadiness?.has_outline) {
+      status('请先制定本章大纲，再按大纲编写内容');
+      await openChapterPlan(block.block_id);
+      return;
+    }
+    let plan = {};
+    try { plan = await fetchChapterPlan(block.block_id) || {}; } catch (error) { status(`读取本章计划失败，按正文标题生成范围：${error.message}`); }
+    const sections = plan.outline || [];
+    if (active?.id !== block.id) return;
+    const dialog = globalThis.document.createElement('dialog'); dialog.className = 'cs-plan-dialog';
+    dialog.innerHTML = `<header><h3>AI 修改 · ${esc(block.title)}</h3></header><div class="cs-plan-body">
+      <label>修改范围<select data-scope>${selection ? '<option value="selection" selected>选中的文字</option>' : ''}${sections.map((section,index) => `<option value="${index}">小节 · ${esc(section.title)}</option>`).join('')}<option value="chapter" ${selection ? '' : 'selected'}>重写本章正文（目录固定）</option></select></label>
+      ${selection ? `<p>选区原文 · ${selection.length} 字</p><blockquote>${esc(selection.slice(0,160))}${selection.length>160?'…':''}</blockquote>` : ''}<label>修改要求<textarea data-instruction placeholder="例如补充实施步骤、压缩篇幅，或突出评分要求"></textarea></label><p>结果在正文中展示；重写本章会清空旧正文，版本历史可回滚。</p></div><footer><button type="button" data-cancel>取消</button><button type="button" data-start>开始修改</button></footer>`;
+    dialog.onclick = async event => {
+      if(event.target.closest('[data-cancel]'))dialog.close();
+      const button = event.target.closest('[data-start]'); if(!button)return;
+      const scope = dialog.querySelector('[data-scope]').value;
+      if(!scope)return;
+      const instruction = dialog.querySelector('[data-instruction]').value.trim() || '根据本节要求完善应答，保留有依据的事实';
+      if(scope === 'chapter' && !globalThis.confirm(`将清空并重写「${block.title}」的正文，目录标题、层级和顺序固定；旧正文不再拼接，版本历史仍保留可回滚。确认开始？`))return;
+      if(active?.id !== block.id){dialog.close();return;}
+      button.disabled=true;
+      try {
+        if(editor.value!==original){status('正文已变化，请重新选择修改范围');dialog.close();return;}
+        if(!await save())return;
+        dialog.close();
+        await runChapterWriteJob(get('agents'), {block, forceRewrite:scope !== 'append',
+          cleanRewrite: scope === 'chapter',
+          sections: /^\d+$/.test(scope) ? [sections[Number(scope)].title] : [], instruction,
+          selection:scope==='selection' ? range : null});
+      } catch(error){status(error.message);} finally {button.disabled=false;}
+    };
+    dialog.addEventListener('close',()=>dialog.remove());globalThis.document.body.append(dialog);dialog.showModal();
+  }
+
+  async function compareProposal() {
+    const block = active;
+    const proposal = pendingProposals.get(block.id);
+    const local = editor.value;
+    const restoring = proposal === aiBaselines.get(block.id)?.before;
+    if(proposal === undefined){status('没有待采用变更');return;}
+    const latest = await json(`/api/projects/${projectId}/blocks?threadId=${encodeURIComponent(threadId)}`);
+    const current = latest.find(item=>item.id===block.id);
+    if(!current || active?.id!==block.id)return;
+    const dialog = globalThis.document.createElement('dialog');dialog.className='cs-plan-dialog';
+    dialog.innerHTML='<header><h3>核对正文变更</h3></header><div class="cs-plan-body cs-compare"><label>当前服务器正文<textarea readonly data-before></textarea></label><label>本次生成结果<textarea readonly data-after></textarea></label></div><footer><button type="button" data-cancel>保留当前正文</button><button type="button" data-apply>采用本次结果</button></footer>';
+    dialog.querySelector('h3').textContent=restoring?'核对修改前的完整版本':'核对正文变更';
+    const beforeLabel=dialog.querySelector('[data-before]').parentElement;
+    beforeLabel.firstChild.textContent='当前编辑内容';
+    const afterLabel=dialog.querySelector('[data-after]').parentElement;
+    afterLabel.firstChild.textContent=restoring?'修改前完整正文（采用后替换全文）':'待采用结果（采用后替换全文）';
+    dialog.querySelector('[data-apply]').textContent=restoring?'恢复这份旧版本':'采用本次结果';
+    dialog.querySelector('[data-before]').value=local;dialog.querySelector('[data-after]').value=proposal;
+    dialog.onclick=async event=>{
+      if(event.target.closest('[data-cancel]'))dialog.close();
+      const button=event.target.closest('[data-apply]');if(!button)return;
+      if(active?.id!==block.id){dialog.close();return;}
+      if(editor.value!==local){status('核对期间正文又有变化，请重新打开变更核对');dialog.close();return;}
+      button.disabled=true;
+      try{
+        const updated=await json(`/api/blocks/${block.id}`,send('PUT',{content:proposal,expected_content:current.content||''}));
+        const history={before:current.content||'',after:updated.content};aiBaselines.set(block.id,history);sessionStorage.setItem(`ai-change:${threadId}:${block.id}`,JSON.stringify(history));
+        live.reset();block.content=updated.content;editor.value=updated.content;dirty=false;paintView(false);
+        pendingProposals.delete(block.id);get('recovery').hidden=true;paintTree();paintAIAction();dialog.close();
+      }catch(error){status(error.message);button.disabled=false;}
+    };
+    dialog.addEventListener('close',()=>dialog.remove());globalThis.document.body.append(dialog);dialog.showModal();
+  }
+
+  async function openProjectFacts() {
+    const data=await json(`/api/projects/${projectId}/studio/facts`);
+    const dialog=globalThis.document.createElement('dialog');dialog.className='cs-plan-dialog';
+    dialog.innerHTML='<header><h3>项目统一资料</h3></header><div class="cs-plan-body"><p>每行填写一项「名称=内容」，例如项目名称、系统名称、项目经理和计划日期。所有章节共同使用，修改后已评审章节需复核。</p><textarea data-facts rows="12"></textarea><p data-facts-result></p></div><footer><button type="button" data-cancel>关闭</button><button type="button" data-save>保存资料</button></footer>';
+    dialog.querySelector('[data-facts]').value=Object.entries(data.facts||{}).map(([key,value])=>key+'='+value).join('\n');
+    dialog.onclick=async event=>{
+      if(event.target.closest('[data-cancel]'))dialog.close();
+      const button=event.target.closest('[data-save]');if(!button)return;
+      const facts={};
+      for(const line of dialog.querySelector('[data-facts]').value.split('\n').filter(line=>line.trim())){
+        const index=line.indexOf('=');if(index<1){dialog.querySelector('[data-facts-result]').textContent='请按「名称=内容」填写每一行';return;}
+        facts[line.slice(0,index).trim()]=line.slice(index+1).trim();
+      }
+      button.disabled=true;
+      try{const result=await json(`/api/projects/${projectId}/studio/facts`,send('PUT',{facts}));dialog.querySelector('[data-facts-result]').innerHTML=`已保存，${result.affected.length} 个已有正文章节将使用新资料复核。<details><summary>查看受影响章节</summary>${result.affected.map(item=>`<span class="cs-fact-affected">${esc(item.title)}</span>`).join('')}</details>`;await loadChapterReview();paintAside();}
+      catch(error){dialog.querySelector('[data-facts-result]').textContent=error.message;}finally{button.disabled=false;}
+    };
+    dialog.addEventListener('close',()=>dialog.remove());globalThis.document.body.append(dialog);dialog.showModal();
   }
 
   async function select(id) {
-    if(live.active&&live.pending){live.reset();dirty=false;}
+    jobStreams.forEach(detach=>detach());
+    if(live.active&&live.pending){sessionStorage.setItem(draftKey(active),JSON.stringify({content:editor.value,base:active.content || ''}));live.reset();dirty=false;}
     if (!await save()) return;
     const block=blocks.find(b=>String(b.block_id)===String(id) || String(b.id)===String(id));
     if (!block) return;
@@ -5103,21 +5308,44 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       const data=await json(`/api/blocks/${block.id}/studio`);
       if(disposed || token!==selecting) return;
       get('completion').close();pendingCompletion=null;
-      live.reset();previewVisible=false;
+      live.reset();lastSections=[];get('agents').innerHTML='';currentJobId='';writingBusy=false;host.querySelector('[data-action="ai"]').disabled=false;host.querySelector('[data-action="submit-review"]').disabled=false;previewVisible=false;
+      if(data.block)Object.assign(block,data.block);
+      try{const history=JSON.parse(sessionStorage.getItem(`ai-change:${threadId}:${block.id}`));if(history)aiBaselines.set(block.id,history);}catch{}
       active=block;context=data;dirty=false;
+      chapterParents.get(block.id).forEach(parent => expandedChapters.add(parent));
       profile[block.id]=data.profile;
       await loadBasis(block.block_id);   // 依据 ↔ 正文对应（评分点/条款是否已回应）
+      if (disposed || token !== selecting) return;
       editor.value=block.content||''; editor.hidden=false;get('preview').hidden=true;paintView(false);
       const headState = stateOf(block);
       // 「目录」是结构节点标记，不是编写状态 —— 不在章头显示（用户反馈）
-      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3><span class="cs-chapter-state">${headState === '目录' ? '' : esc(headState)}</span><span class="cs-readiness-slot" data-readiness>${readinessChipHtml()}</span><span class="cs-save-state" data-save-state></span>${budgetLineHtml(block)}<span class="cs-plan-slot" data-plan-slot></span>`;
+      get('chapter-head').innerHTML=`<h3>${esc(block.title)}</h3>${headState && headState !== '目录' && headState !== '未开始' ? `<span class="cs-chapter-state">${esc(headState)}</span>` : ''}<span class="cs-save-state" data-save-state></span><button type="button" data-open-panel="materials" aria-controls="cs-chapter-inspector" aria-expanded="false">素材</button>${budgetLineHtml(block)}`;
+      showPanel();
       paintPlanAction(block);
+      renderWorkspaceRole();
       host.querySelector('[data-action="save"]').disabled=true;
       saveState='idle'; savedAt=0; if(autoSaveTimer){globalThis.clearTimeout(autoSaveTimer);autoSaveTimer=null;} paintSaveState();
       hydrateIgnored();
       void loadWritingModels().then(() => paintAside());
-      void autoCleanChapter();
-      void loadChapterReview().then(() => paintAside());
+      void refreshDeliveryGate();
+      void loadChapterReview().then(() => {if(active?.id===block.id)paintAside();});
+      void json(`/api/blocks/${block.id}/studio/writing-job`).then(job => {
+        if (active?.id !== block.id || !job || !['queued','running','failed','done'].includes(job.status)) return;
+        currentJobId = job.id;
+        lastSections=job.artifacts?.sections || [];
+        if(job.status==='done' && job.saved){
+          if(job.snapshot?.editing && job.content && block.content!==job.snapshot.base_content){aiBaselines.set(block.id,{before:job.snapshot.base_content,after:job.content});}
+          else if(block.content===job.snapshot?.base_content){aiBaselines.delete(block.id);sessionStorage.removeItem(`ai-change:${threadId}:${block.id}`);}
+          paintAIAction();return;
+        }
+        if(job.snapshot?.editing && (['failed','cancelled'].includes(job.status) || (job.status==='done' && !job.saved))){pendingProposals.set(block.id,job.content);get('recovery').hidden=false;get('recovery').innerHTML='<span>修改未完成，原文已保留。</span><button type="button" data-compare-proposal>查看未完成结果</button>';return;}
+        if(job.snapshot?.base_content !== (block.content || '') && !['queued','running'].includes(job.status)){
+          pendingProposals.set(block.id,job.content);get('recovery').hidden=false;get('recovery').innerHTML='<span>另有编制结果可核对。</span><button type="button" data-compare-proposal>查看变更</button>';return;
+        }
+        if(job.blocks?.length && (job.status !== 'done' || job.blocks.some(item=>item.state!=='done'))){live.update(job);paintView(false);}
+        if(['queued','running'].includes(job.status))void runChapterWriteJob(get('agents'),{jobId:job.id,baseContent:job.snapshot?.base_content});
+        else if(job.status !== 'done' || live.pending)status('上次编制未完成，进度已恢复，可重试未完成项');
+      }).catch(()=>{});
       void loadPrecheckAndVerdict().then(() => paintAside());
       void loadRubricAndPractices().then(() => paintAside());
       void loadMaterialNeeds().then(() => paintAside());
@@ -5155,8 +5383,48 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if (event.target.classList?.contains('cs-insert') && event.target.open) renderInsertMenu();
   }, true);
   host.onclick = async event => {
-    const panel=event.target.closest('.cs-inspector-tabs [data-panel]');
-    if(panel){showPanel(panel.dataset.panel);return;}
+    if(event.target.closest('[data-batch-write]')){await openBatchDialog();return;}
+    const next=event.target.closest('[data-next-chapter]');if(next){await select(next.dataset.nextChapter);return;}
+    if(event.target.closest('[data-project-facts]')){await openProjectFacts();return;}
+    if(event.target.closest('[data-compare-proposal]')){await compareProposal();return;}
+    const locate=event.target.closest('[data-issue-locate]');
+    if(locate){
+      const issue=reviewIssueRows.find(item=>item.fingerprint===locate.dataset.issueLocate);
+      const evidence=issue?.evidence||{};
+      const quote=evidence.quote || evidence.text || issue?.point || '';
+      live.hide();editor.hidden=false;get('preview').hidden=true;
+      const index=editor.value.indexOf(quote);
+      if(index>=0){editor.focus();editor.setSelectionRange(index,index+quote.length);status('已定位对应正文');}
+      else {status('未找到精确段落，请依据该问题核对本章：'+(issue?.point||''));}
+      return;
+    }
+    const verify=event.target.closest('[data-issue-verify]');
+    if(verify){
+      if(!await save())return;
+      const block=active;verify.disabled=true;
+      try{const result=await json(`/api/blocks/${block.id}/studio/review/verify-issue`,send('POST',{fingerprint:verify.dataset.issueVerify}));
+        if(active?.id===block.id){await loadChapterReview();paintAside();status((result.resolved?'该项已通过复核：':'该项仍需处理：')+result.reason);}}
+      catch(error){status(error.message);}finally{verify.disabled=false;}return;
+    }
+
+    const toggle = event.target.closest('[data-tree-toggle]');
+    if (toggle) {
+      const id = Number(toggle.dataset.treeToggle);
+      if (!expandedChapters.delete(id)) expandedChapters.add(id);
+      paintTree();
+      get('tree').querySelector(`[data-tree-toggle="${id}"]`)?.focus();
+      return;
+    }
+    const panel = event.target.closest('[data-open-panel]');
+    if (panel) {
+      showPanel(panel.getAttribute('aria-expanded') === 'true' ? null : panel.dataset.openPanel, panel);
+      return;
+    }
+    if (event.target.closest('[data-close-panel]')) {
+      showPanel();
+      panelTrigger?.focus();
+      return;
+    }
     const asidePlan=event.target.closest('[data-aside-open-plan]');
     if(asidePlan){await openChapterPlan(asidePlan.dataset.asideOpenPlan);return;}
     const segButton=event.target.closest('[data-cite-segments]');
@@ -5165,37 +5433,12 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(citeButton){openCitationDialog(citeButton.dataset.addCitation);return;}
     const specLink=event.target.closest('[data-spec]');
     if(specLink){globalThis.document.dispatchEvent(new CustomEvent('writing-specs:open',{detail:{layout:specLink.dataset.spec}}));return;}
+    const readinessPlan=event.target.closest('[data-readiness-plan]');
+    if(readinessPlan){await openChapterPlan(String(active?.block_id || ''));return;}
     const planButton=event.target.closest('[data-plan]');
     if(planButton){await openChapterPlan(String(active?.block_id || ''));return;}
     const chapter=event.target.closest('[data-chapter]');
     if(chapter) {await select(chapter.dataset.chapter);return;}
-    // 「进度」页签：开始/继续编写整章（同一引擎）
-    if(event.target.closest('[data-aside-write-all]') && active){
-      const btn=event.target.closest('[data-aside-write-all]');
-      const label=btn.textContent; btn.disabled=true;
-      try{
-        const plan=await fetchChapterPlan(active.block_id);
-        const outline=plan.outline||[];
-        const bodyNow=String(editor.value||'');
-        // 「已写」= 该节实义字数 ≥20（排除「（本节待写）」这类占位）
-        const doneSet=new Set(outline.map(s=>s.title).filter(title=>sectionWordCount(bodyNow,title)>=20));
-        const missing=outline.filter(s=>!doneSet.has(s.title));
-        if(!outline.length) throw new Error('还没有章节大纲：请先在「本章计划」生成大纲');
-        for(let i=0;i<missing.length;i+=1){
-          btn.textContent=`编写中 ${i+1}/${missing.length}`;
-          status(`正在编写「${missing[i].title}」…`);
-          await streamWriteSection(active.id, missing[i]);
-        }
-        const result={written:missing.length,total:outline.length};
-        status(result.written?`已补写 ${result.written} 节（共 ${result.total} 节）；请核对后保存`:'整章已按大纲写完');
-        changed && changed();
-        const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
-        if(fresh.block)editor.value=fresh.block.content||'';
-        paintAside();
-      }catch(error){status(error.message);}
-      btn.disabled=false; btn.textContent=label;
-      return;
-    }
     if(event.target.closest('[data-fig-review]')){openFigureReviewDialog();return;}
     const figAdjust=event.target.closest('[data-fig-adjust]');
     if(figAdjust && active){
@@ -5222,12 +5465,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(sec) openFigureAdjustDialog({id:'new',kind:'ai',section:sec.title,title:`${sec.title}图示`,type:'layered',nodes:0,raw:''});
       return;
     }
-    const readyBtn=event.target.closest('[data-sec-readiness]');
-    if(readyBtn){
-      showPanel('materials');
-      status('已打开本章证据：按节补证据后再写');
-      return;
-    }
+    const promptBtn=event.target.closest('[data-sec-prompt]');
+    if(promptBtn && active){ await openSectionPromptDialog(Number(promptBtn.dataset.secPrompt)); return; }
     const secBtn=event.target.closest('[data-aside-write-section]');
     if(secBtn && active){
       const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
@@ -5241,35 +5480,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           const fresh=await json(`/api/blocks/${active.id}/studio`); context=fresh;
           if(fresh.block)editor.value=fresh.block.content||'';
           await loadBasis(active.block_id);
-          const meta=lastSectionWrite||{};
-          const used=(meta.used_evidence||[]).length;
-          const cov=meta.coverage_after||{};
-          status(`已${label0.startsWith('重写')?'重写':'编写'}「${sec.title}」；使用证据 ${used} 条${cov.total?` · 覆盖 ${cov.covered||0}/${cov.total}`:''}${meta.generic?'（概括写法）':''}`);
+          status(`已${label0.startsWith('重写')?'重写':'编写'}「${sec.title}」`);
           paintAside();
         }catch(error){status(error.message);}
         secBtn.disabled=false; secBtn.textContent=label0;
       };
       if(secBtn.textContent.trim()==='重写'){ openRewriteDialog(sec, doWrite); }
-      else {
-        try {
-          const resp = await fetch(`/api/blocks/${active.id}/writing-readiness?threadId=${encodeURIComponent(threadId)}&section=${encodeURIComponent(sec.title)}`, {cache:'no-store'});
-          const ready = resp.ok ? await resp.json() : null;
-          if (ready?.status === 'no_outline') {
-            status('还没有章节大纲：请先在「本章计划」生成大纲');
-            await openChapterPlan(active.block_id);
-            return;
-          }
-          if (ready?.status === 'no_evidence') {
-            if (!globalThis.confirm('本节没有证据。仍按「概括写法」生成？\n\n建议先补证据，生成后也可补证据再重写。')) return;
-            await doWrite('', true);
-            return;
-          }
-          if (ready?.status === 'partial') {
-            status(`本节证据覆盖 ${ready.covered}/${ready.needs_total}，继续写会使用现有证据`);
-          }
-          await doWrite('');
-        } catch (error) { status(`写前检查失败：${error.message}`); }
-      }
+      else { await doWrite(''); }
       return;
     }
     if(event.target.closest('[data-job-stop]') && currentJobId){
@@ -5278,7 +5495,8 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     if(event.target.closest('[data-job-retry]') && currentJobId){
-      try{ await fetch(`/api/projects/${projectId}/studio/chapter-writes/${currentJobId}/retry`,{method:'POST'});
+      try{ await json(`/api/projects/${projectId}/studio/chapter-writes/${currentJobId}/retry`,{method:'POST'});
+        void runChapterWriteJob(get('agents'),{jobId:currentJobId});
         status('已重新排队，只补未写的节'); }catch(error){ status(error.message); }
       return;
     }
@@ -5354,6 +5572,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     if(event.target.closest('[data-material-admin]')){ pendingEvidenceNeed=null; await openMaterialAdminDialog(); return; }
+    if(event.target.closest('[data-cite-search]') && active){ openCitationDialog(active.block_id); return; }
     const fillBtn=event.target.closest('[data-cite-fill]');
     if(fillBtn){
       const [section, quote] = String(fillBtn.dataset.citeFill||'').split('|');
@@ -5536,11 +5755,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       return;
     }
     const olBatch=event.target.closest('[data-ol-batch-write]');
-    if(olBatch){
+    if(olBatch && active){
       host.querySelectorAll('dialog').forEach((d) => d.close());
-      const headBtn = globalThis.document.querySelector('[data-action="ai"]');
-      if(headBtn){ headBtn.click(); }
-      else { status('请用章头的「编写整章」按写法批量生成'); }
+      await runTeamChapterJob(active);
       return;
     }
     const matApply=event.target.closest('[data-ol-mat-apply]');
@@ -5751,40 +5968,50 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     host.querySelector('.cs-more').removeAttribute('open');
     try {
       if(action==='save') await save();
+      if(action==='undo-ai'){
+        if(writingBusy || live.pending){status('请先停止编制后撤销');return;}
+        const history=aiBaselines.get(active.id);
+        if(history?.after!==null && history?.after!==undefined){
+          const reverted=reverseAIChange(history.before,history.after,editor.value);
+          if(reverted.conflict){
+            pendingProposals.set(active.id,history.before);
+            status('AI 改动与后续编辑重叠，已保留当前正文；请查看变更后决定是否恢复整份旧版本');
+            get('recovery').hidden=false;get('recovery').innerHTML='<span>撤销存在重叠，请核对整份旧版本。</span><button type="button" data-compare-proposal>查看变更</button>';return;
+          }
+          live.reset();editor.hidden=false;editor.value=reverted.content;aiBaselines.delete(active.id);sessionStorage.removeItem(`ai-change:${threadId}:${active.id}`);changed();paintAIAction();status('已撤销本次 AI 改动，范围外的后续编辑已保留');
+        }return;
+      }
+      if(action==='delivery' && await save()) {
+        globalThis.document.querySelector('.sr-rail-item[data-stage="5"]')?.click();
+      }
       if(action==='quality'){openQualityDialog();return;}
       if(action==='diagram'){openDiagramDialog();return;}
+      if(action==='submit-review'){if(writingBusy){status('编制结束后可提交评审');return;}if(await save()){showPanel('issues');host.querySelector('[data-review-run]')?.click();}return;}
       if(action==='ai'){
-        // 与「进度」页签的「继续编写（补未写）」同一套逻辑：逐节流式写入并高亮
-        showPanel('write');
+        if (editor.value.trim() && !button.dataset.append) {await openScopeDialog();return;}
         const slot = get('agents');
+        const chapterId = active.id;
+        let generic = false;
         // 代价预估：先算待写节数，让用户知道要花多少
         try {
           const plan = await fetchChapterPlan(active.block_id);
-          const outline = plan.outline || [];
+          const outline = plan.outline?.length ? plan.outline : [{title:active.title,deliverables:plan.tasks || []}];
           const bodyNow = String(editor.value || '');
           const pending = outline.filter((sec) => sectionWordCount(bodyNow, sec.title) < 20);
           if (!outline.length) { status('还没有章节大纲：先打开「本章计划」生成大纲'); await openChapterPlan(active.block_id); return; }
-          if (!pending.length) { status('整章已按大纲写完；要改某节请用「进度 → 重写」'); return; }
-          let generic = false;
-          try {
-            const r = await fetch(`/api/blocks/${active.id}/writing-readiness?threadId=${encodeURIComponent(threadId)}`, {cache:'no-store'});
-            const ready = r.ok ? await r.json() : null;
-            if (ready?.status === 'no_evidence') {
-              if (!globalThis.confirm('本章没有证据覆盖。仍按「概括写法」生成？\n\n建议先在素材页补证据。')) return;
-              generic = true;
-            } else if (ready?.status === 'partial') {
-              status(`本章证据覆盖 ${ready.covered}/${ready.needs_total}，将使用现有证据继续写`);
-            }
-          } catch (error) { /* readiness 失败不阻断旧路径 */ }
+          if (!pending.length) { status('整章已按大纲写完；要改某节请用「编制进度 → 重写」'); return; }
+          if (active?.id !== chapterId) return;
           const charts = pending.reduce((sum, sec) => sum + (sec.deliverables || []).filter((d) => d.kind !== 'text').length, 0);
           const calls = pending.length + charts;
-          const ok = await confirmChapterWriteCost(pending.length, charts, calls);
-          if (!ok) return;
+          if (active?.id !== chapterId) return;
+          if (bodyNow.trim() && !await confirmChapterWriteCost(pending.length, charts, calls)) return;
+          status(`准备编写 ${pending.length} 节 · 预计 ${charts} 项图表`);
         } catch (error) {
           status(`无法预估编写量：${error.message}`);
           return;
         }
-        const headBtnEarly = globalThis.document.querySelector('[data-action="ai"]');
+        if (active?.id !== chapterId) return;
+        const headBtnEarly = host.querySelector('[data-action="ai"]');
         const headLabelEarly = headBtnEarly ? headBtnEarly.textContent : '';
         const engine = await runChapterWriteJob(slot, {generic});
         if (engine.started) {
@@ -5805,7 +6032,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           if (!outline.length) { if (slot) slot.innerHTML = ''; throw new Error('还没有章节大纲：请先在「本章计划」生成大纲'); }
           const bodyNow = String(editor.value || '');
           const missing = outline.filter((sec) => sectionWordCount(bodyNow, sec.title) < 20);
-          if (!missing.length) { status('整章已按大纲写完；要改某节请用「进度 → 重写」'); return; }
+          if (!missing.length) { status('整章已按大纲写完；要改某节请用「编制进度 → 重写」'); return; }
           for (let i = 0; i < missing.length; i += 1) {
             if (headBtn) headBtn.textContent = `编写中 ${i + 1}/${missing.length}`;
             status(`正在编写「${missing[i].title}」…（${i + 1}/${missing.length}）`);
@@ -5940,29 +6167,6 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       if(action==='completion-confirm'&&pendingCompletion){
         button.disabled=true;try{await confirmComplete(pendingCompletion);}finally{button.disabled=false;}
       }
-      if(action==='export-chapter'||action==='export-group') {
-        if(!await save())return;
-        await refreshDeliveryGate();
-        const gateState = (gateInfo || {}).summary || {};
-        if ((gateState.blocking || 0) > 0) {
-          // 交付门未清零 → 用待办同一套阻塞确认（可以带风险导出）
-          const blocking = (planBrief?.deliveryTasks?.need_user || []).filter((x) => x.impact === 'export_block');
-          const ok = await openRiskExportDialog(
-            blocking.length ? blocking
-                            : [{ title: `${gateState.blocking} 处不能交付的内容`, group_label: '交付门', evidence: '占位符/内部语法/内部术语' }],
-          );
-          if (!ok) return;
-        }
-        const blocking=(planBrief?.todoItems||[]).filter(x=>x.severity==='block');
-        if(blocking.length){
-          const ok=await openRiskExportDialog(blocking);
-          if(!ok)return;
-        }
-        const scope=action==='export-chapter'?'chapter':'group';
-        const selected=exportScope(blocks,active.id,scope);
-        status(`正在提交 ${selected.length} 个目录节点的已保存版本…`);
-        await exportDocument({projectId,threadId,template:document.template,scope,blockId:active.id,slot:get('export-status')});
-      }
     } catch(error){status(error.name==='TimeoutError'?'请求超时，原正文保留，请重试。':error.message);}
   };
   const onKeydown = event => {
@@ -5974,7 +6178,14 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   globalThis.document.addEventListener('keydown', onKeydown);
   const beforeUnload = event => {if(dirty){event.preventDefault();event.returnValue='';}};
   window.addEventListener('beforeunload',beforeUnload);
-  const controller={host,select,dispose(){disposed=true;team.dispose();window.removeEventListener('beforeunload',beforeUnload);},save};
+  host.addEventListener('chapter-chart-retry', async event => {
+    const {jobId,index,title,role}=event.detail;const block=active;
+    status(`正在重试「${title}」…`);
+    try{const job=await json(`/api/projects/${projectId}/studio/chapter-writes/${jobId}/retry-chart`,send('POST',{index,title,role}));
+      if(active?.id===block.id){live.update(job);paintView(previewVisible);status('图表重试结束，请核对后保存');}}
+    catch(error){status(error.message);}
+  });
+  const controller={host,select,dispose(){disposed=true;jobStreams.forEach(detach=>detach());team.dispose();window.removeEventListener('beforeunload',beforeUnload);},save};
   const team={refresh(){},show(){},dispose(){}};   // 「本章编制进度」区块已移除（用户要求）
   currentStudio=controller;
   paintTree();stats();

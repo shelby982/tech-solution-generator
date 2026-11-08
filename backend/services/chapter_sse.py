@@ -34,10 +34,42 @@ def unsubscribe(job_id: str, queue: asyncio.Queue) -> None:
     _BUS.get(job_id, set()).discard(queue)
 
 
+_PROGRESS = {}
+_LAST_PROGRESS = {}
+
+
 async def emit(job_id: str, event: str, payload: dict) -> None:
+    state = _PROGRESS.get(job_id)
+    if state is not None:
+        sections = state['sections']
+        index = int(payload.get('index') or 0)
+        if index < len(sections):
+            section = sections[index]
+            if event == 'delta':
+                section['text'] = section.get('text', '') + str(payload.get('text') or '')
+                section['state'] = 'running'
+            elif event == 'section':
+                section['state'] = payload.get('state') or 'done'
+            elif event == 'chart':
+                chart = next((item for item in section['charts'] if item['title'] == payload.get('title') and item['role'] == payload.get('role')), None)
+                if chart is not None:
+                    chart.update(payload)
+        if event in ('delta', 'chart', 'section') and (event != 'delta' or time.monotonic() - _LAST_PROGRESS.get(job_id, 0) > 0.15):
+            _LAST_PROGRESS[job_id] = time.monotonic()
+            row = await _job_row(job_id)
+            artifacts = json.loads(row['artifacts'] or '{}') if row else {}
+            artifacts['live'] = state
+            await _set_job(job_id, artifacts=json.dumps(artifacts, ensure_ascii=False), **({'content': state['before'] + state['sections'][0].get('text', '') + state['after']} if state.get('scope') == 'revision' else {}))
+            from services.chapter_progress import progress_blocks
+            snapshot = json.loads(row['snapshot'] or '{}') if row else {}
+            await _broadcast(job_id, 'snapshot', {'id': job_id, 'status': 'running', 'blocks': progress_blocks(state, snapshot.get('base_content') or '')})
+    await _broadcast(job_id, event, payload)
+
+
+async def _broadcast(job_id, event, payload):
     for queue in list(_BUS.get(job_id, ())):
         try:
-            queue.put_nowait({"event": event, "data": payload})
+            queue.put_nowait({'event': event, 'data': payload})
         except asyncio.QueueFull:
             pass
 
@@ -52,12 +84,15 @@ def section_text(content: str, title: str) -> str:
 
 
 def replace_section_text(content: str, title: str, text: str) -> str:
-    """把某节内容替换成 text；节不存在则追加。"""
-    pattern = _section_pattern(title)
-    body = str(content or "")
-    if pattern.search(body):
-        return pattern.sub(lambda _m: f"## {title}\n\n{text}\n\n", body, count=1)
-    return f"{body.rstrip()}\n\n## {title}\n\n{text}\n"
+    """把某节内容替换成 text；节不存在则追加。
+
+    统一走 services.section_outline.replace_section：它支持 `## 标题`、`**标题**`、`3. 标题`
+    三种写法并做标题归一化 —— 只认 `## ` 会让加粗标题的真实正文章节"替换不到→追加"，产生重复。
+    """
+    from services.section_outline import replace_section
+
+    merged, _replaced = replace_section(content, title, text)
+    return merged
 
 
 async def _job_row(job_id: str):
@@ -75,27 +110,52 @@ async def _set_job(job_id: str, **fields) -> None:
 
 
 async def create_job(project_id: int, thread_id: str, block_pk: int, settings_override: dict | None = None,
-                     force_rewrite: bool = False, generic: bool = False) -> str:
+                     force_rewrite: bool = False, generic: bool = False, section_titles: list[str] | None = None,
+                     expected_content: str | None = None, instruction: str = "", selection: dict | None = None,
+                     clean_rewrite: bool = False) -> str:
     """建作业（同 block 只允许一个 queued/running；已存在则复用）。"""
     async with get_db() as db:
+        await db.execute("BEGIN IMMEDIATE")
         block = await get_block(db, block_pk)
         if not block:
             raise ValueError("章节不存在")
+        if block.get("run_thread_id") != thread_id:
+            raise ValueError("章节不属于当前应答运行")
+        if expected_content is not None and expected_content != (block.get("content") or ""):
+            raise ValueError("正文版本已变化，请刷新后再编制")
+        if selection is not None and (not selection.get('selection') or ''.join(selection.get(key, '') for key in ('before', 'selection', 'after')) != (block.get('content') or '')):
+            raise ValueError('选区与当前正文不一致，请重新选择')
+        from services.block_store import list_blocks
+        from services.writing_workspace import node_scopes
+        scopes = node_scopes(await list_blocks(db, project_id, thread_id, fallback_all=False))
+        if scopes.get(block_pk, {}).get('role') == 'structure':
+            raise ValueError('结构节点请使用编制未写子章')
         if int(block.get("project_id") or 0) != int(project_id):
             raise ValueError("章节不属于该项目")
-        await db.execute("BEGIN IMMEDIATE")
         existing = await (await db.execute(
-            "SELECT id FROM chapter_writing_jobs WHERE block_id=? AND status IN ('queued','running')",
+            "SELECT id,snapshot FROM chapter_writing_jobs WHERE block_id=? AND status IN ('queued','running')",
             (block_pk,))).fetchone()
         if existing:
+            running = json.loads(existing['snapshot'] or '{}')
+            if any((running.get(key) or default) != value for key, default, value in (
+                ('selection', None, selection), ('instruction', '', instruction),
+                ('section_titles', [], section_titles or []), ('force_rewrite', False, bool(force_rewrite)),
+                ('clean_rewrite', False, bool(clean_rewrite)))):
+                raise ValueError('本章已有不同范围的修改任务，请等待完成或先停止')
             await db.commit()
             return existing[0]
         job_id = uuid.uuid4().hex
+        from services.writing_workspace import evidence_hash
         snapshot = {
             "mode": "chapter_sse",
+            "evidence_version": await evidence_hash(db, block),
+            "section_titles": section_titles or [], "instruction": instruction,
+            "selection": selection,
+            "editing": bool(selection or force_rewrite),
             "base_content": block.get("content") or "",
             "settings_override": settings_override or {},
             "force_rewrite": bool(force_rewrite),
+            "clean_rewrite": bool(clean_rewrite),
             "generic": bool(generic),
             "created_at": time.time(),
         }
@@ -114,10 +174,31 @@ def start_runner(job_id: str) -> None:
     _RUNNERS[job_id] = asyncio.create_task(run_job(job_id))
 
 
+_WRITE_LIMIT = asyncio.Semaphore(2)
+
+
 async def run_job(job_id: str) -> None:
+    async with _WRITE_LIMIT:
+        try:
+            await _execute_job(job_id)
+        finally:
+            state = _PROGRESS.get(job_id)
+            if state and state.get('scope') == 'revision':
+                row = await _job_row(job_id)
+                if row and row['status'] in ('failed', 'cancelled'):
+                    state['sections'][0]['state'] = 'failed' if row['status'] == 'failed' else 'stopped'
+                    artifacts = json.loads(row['artifacts'] or '{}')
+                    artifacts['live'] = state
+                    await _set_job(job_id, artifacts=json.dumps(artifacts, ensure_ascii=False),
+                        content=state['before'] + state['sections'][0].get('text', '') + state['after'])
+            _PROGRESS.pop(job_id, None)
+            _LAST_PROGRESS.pop(job_id, None)
+
+
+async def _execute_job(job_id: str) -> None:
     """执行作业：正文逐节流式生成 + 一次性落库。"""
     row = await _job_row(job_id)
-    if not row:
+    if not row or row["status"] == "cancelled":
         return
     snapshot = json.loads(row["snapshot"] or "{}")
     project_id, thread_id, block_pk = int(row["project_id"]), row["thread_id"], int(row["block_id"])
@@ -127,6 +208,16 @@ async def run_job(job_id: str) -> None:
 
         async with get_db() as db:
             block = await get_block(db, block_pk)
+            if not block or (block.get('content') or '') != snapshot.get('base_content', ''):
+                raise ValueError('排队期间正文发生变化，任务已停止，请重新选择范围')
+            if snapshot.get('selection') or (snapshot.get('force_rewrite') and not snapshot.get('section_titles')):
+                revision_block = block
+            else:
+                revision_block = None
+        if revision_block is not None:
+            await _run_revision(job_id, snapshot, revision_block)
+            return
+        async with get_db() as db:
             from services.writing_plans import plan_of_block
             found = await plan_of_block(db, project_id, thread_id, str(block.get("block_id")))
             from services.writing_settings import resolve_model
@@ -137,11 +228,9 @@ async def run_job(job_id: str) -> None:
                         outline = item.get("outline") or []
                         break
             if not outline:
-                await emit(job_id, "error", {"scope": "job", "message": "还没有章节大纲：请先在「本章计划」生成大纲",
-                                             "recoverable": True})
-                await _set_job(job_id, status="failed", stage="无大纲", error="无大纲")
-                await emit(job_id, "job", {"job_id": job_id, "status": "failed", "stage": "无大纲", "progress": 0})
-                return
+                raise ValueError('请先在「本章计划」制定并确认大纲，再按大纲生成内容')
+            from services.confirmed_directory import is_locked
+            locked = await is_locked(db, block)
             models = {}
             for role in ("chief", "text", "diagram", "table"):
                 models[role] = (await resolve_model(db, project_id, block_pk, role)).get("used", "")
@@ -152,6 +241,13 @@ async def run_job(job_id: str) -> None:
                           "deliverables": s.get("deliverables") or []} for i, s in enumerate(outline)],
         })
 
+        if snapshot.get('section_titles'):
+            wanted = set(snapshot['section_titles'])
+            for title in wanted - {str(section.get('title')) for section in outline}:
+                if not section_text(block.get('content') or '', title):
+                    raise ValueError('指定小节不在当前正文中')
+                outline.append({'title': title, 'points': [], 'deliverables': []})
+            outline = [section for section in outline if section.get('title') in wanted]
         # 找出未写的节（实义字数 < 20 视为未写）
         base = str(block.get("content") or "")
         draft = base
@@ -161,6 +257,11 @@ async def run_job(job_id: str) -> None:
         generic = bool(snapshot.get("generic"))
         pending = list(outline) if force_rewrite else [
             s for s in outline if len(re.sub(r"\s+", "", section_text(base, str(s.get("title"))))) < 20]
+        _PROGRESS[job_id] = {'directory_locked': locked, 'sections': [dict(title=section['title'], text='', state='queued', charts=[
+            {'title': item.get('title') or '', 'role': 'diagram' if item.get('kind') == 'figure' else 'table', 'state': 'queued'}
+            for item in (section.get('deliverables') or []) if item.get('kind') in ('figure', 'table')][:2]) for section in pending]}
+        if pending:
+            await emit(job_id, 'section', {'index': 0, 'state': 'queued'})
         total = max(1, len(pending))
         for index, section in enumerate(pending):
             row_now = await _job_row(job_id)
@@ -171,12 +272,17 @@ async def run_job(job_id: str) -> None:
             title = str(section.get("title"))
             section = dict(section)
             section["generic"] = generic
+            section["instruction"] = snapshot.get("instruction") or ""
+            if force_rewrite:
+                section['rewrite_original'] = section_text(base, title)
+                if not section['rewrite_original']:
+                    raise ValueError('小节标题与正文不一致，请重新选择当前正文中的小节')
             await _set_job(job_id, stage=f"正在写：{title}")
             await emit(job_id, "job", {"job_id": job_id, "status": "running", "stage": f"正在写：{title}",
                                        "progress": round(index / total * 100)})
             await emit(job_id, "role", {"role": "text", "state": "working", "model": models.get("text", ""),
                                         "section_index": index})
-            chart_deliverables = [d for d in (section.get("deliverables") or [])
+            chart_deliverables = [] if force_rewrite else [d for d in (section.get("deliverables") or [])
                                   if d.get("kind") in ("figure", "table")][:2]
             chart_tasks = []
             for role in ("diagram", "table"):
@@ -195,7 +301,13 @@ async def run_job(job_id: str) -> None:
                 async for chunk in _stream_section(block, section, thread_id, models.get("text", "")):
                     text += chunk
                     await emit(job_id, "delta", {"index": index, "text": chunk})
+            if force_rewrite:
+                from services.revision_contract import validate_revision
+                validate_revision(section['rewrite_original'], text, section['instruction'])
             charts = [await task for task in chart_tasks] if chart_tasks else []
+            for chart in charts:
+                if not chart.get('ok'):
+                    await emit(job_id, 'chart', {**chart, 'state': 'failed'})
             section_checks: list[dict] = []
             if charts:
                 text, chart_missing = merge_charts(text, charts)
@@ -266,11 +378,25 @@ async def run_job(job_id: str) -> None:
                     await emit(job_id, "role", {"role": role, "state": "skipped", "model": models.get(role, ""),
                                                 "section_index": index, "detail": "本节无图表交付物"})
 
+        if locked:
+            from services.confirmed_directory import body_only
+            draft = body_only(draft, block['title'])
         # 落库：base 未被改动才写
         saved, reason = False, ""
         async with get_db() as db:
+            await db.execute('BEGIN IMMEDIATE')
+            latest_job = await (await db.execute('SELECT status FROM chapter_writing_jobs WHERE id=?', (job_id,))).fetchone()
+            if latest_job and latest_job['status'] == 'cancelled':
+                return
             current = await get_block(db, block_pk)
-            if draft == base:
+            from services.writing_workspace import evidence_hash
+            evidence_changed = snapshot.get('evidence_version') != await evidence_hash(db, current)
+            charts_failed = any(chart.get('state') != 'done' for section in (_PROGRESS.get(job_id) or {}).get('sections', []) for chart in section['charts'])
+            if charts_failed:
+                reason = '图表尚未完成，已保留正文与占位，请重试或移除未完成项后保存'
+            elif evidence_changed:
+                reason = '采用材料或招标依据已变化，生成结果已保留待核对'
+            elif draft == base:
                 reason = "内容与现有正文一致，未产生变更"
             elif (current.get("content") or "") != base:
                 reason = "正文在生成期间被修改，已保留建议稿，不覆盖"
@@ -281,8 +407,6 @@ async def run_job(job_id: str) -> None:
                 draft = normalize_table_rows(draft)
                 draft, _captions_added = add_table_captions(draft)
                 # 正文净化：不留任何"待补充"字眼（用户要求：可以浅，但必须完整）
-                from services.placeholder_purge import purge as purge_placeholders
-                draft, purged_items = purge_placeholders(draft)
                 # 系统自动补齐：政策文号 / 等级保护标准号（确定性信息，不需要用户点）
                 from services.citation_enrich import enrich as enrich_citations
                 draft, cite_changes = enrich_citations(draft)
@@ -291,8 +415,9 @@ async def run_job(job_id: str) -> None:
                 draft, _gate_changed, _ = gate_auto_fix(draft)
                 model_note = " ".join(f"{role}={model}" for role, model in (models or {}).items() if model)
                 await add_revision(db, block_pk, base,
-                                   summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai")
-                await update_block_content(db, block_pk, draft)
+                                   summary=f"按大纲编写整章（chapter_sse）· {model_note}"[:200], source="ai", manage_transaction=False)
+                await update_block_content(db, block_pk, draft, commit=False)
+                await db.commit()
                 from services.section_context import SECTION_CONTEXT_VERSION
                 # 只有全章重写/新章才把整章标为当前版本；只补未写节时旧节仍是旧上下文
                 if force_rewrite or not base.strip():
@@ -303,7 +428,9 @@ async def run_job(job_id: str) -> None:
                 reason = "已写入正文"
         await _set_job(job_id, status="done", stage="已完成", content=draft, saved=1 if saved else 0,
                        artifacts=json.dumps({"sections": section_records, "checks": all_checks,
-                                             "models": models}, ensure_ascii=False))
+                                             "models": models, "live": _PROGRESS.get(job_id)}, ensure_ascii=False))
+        _PROGRESS.pop(job_id, None)
+        _LAST_PROGRESS.pop(job_id, None)
         await emit(job_id, "done", {"content": draft, "saved": saved, "reason": reason,
                                     "models": models, "checks": all_checks,
                                     "sections": section_records})
@@ -344,6 +471,8 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
         context = await build_section_context(block, section, thread_id)
         context_text = render_context(context)
     except Exception:  # noqa: BLE001
+        if 'rewrite_original' in section:
+            raise ValueError('无法读取当前章节依据，原文已保留')
         context = {"chapter_requirements": [], "spec_clauses": [], "materials": [],
                    "manual_materials": "", "section_text": ""}
         context_text = ""
@@ -372,21 +501,106 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
         f"目标字数：约 {payload.get('words') or 900} 字\n"
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
+        + (f"用户修改要求：{section.get('instruction')}\n" if section.get("instruction") else "")
         + _placeholder_hint(section)
         + (f"【用户选择】本节按概括写法生成：没有可用证据，不要编造具体项目事实；在结论处说明依据待补。\n" if section.get("generic") else "")
         + "硬性要求：如果【本章技术规范条款】存在，正文必须逐条回应；每条都要有\n"
         "「要求是什么 → 我们怎么做 → 证据/引用」的落点，不能只用「以招标文件为准」代替响应。\n"
         + "请直接输出这一节的正文 Markdown，不要标题、不要 JSON。"
     )
+    async with get_db() as db:
+        from services.confirmed_directory import is_locked
+        locked = await is_locked(db, block)
+    if locked:
+        user_prompt += '\n目录已在应答策划中确认。本次仅编写指定章节正文，禁止生成或修改章节标题、编号、层级和顺序。需要分项时用加粗段首、普通段落、列表、图或表表达。\n'
+    editing = 'rewrite_original' in section
+    system = SECTION_SYSTEM
+    if editing:
+        system = (
+            '你是应标文档精修编辑。严格只修改用户指定范围，直接输出修改后的完整 Markdown。'
+            '以原文为基础落实用户要求，不套用固定段落数和字数。保留原文的标题层级、'
+            '引用、图表、数字和承诺，除非用户明确要求修改相应内容。'
+            '事实与数字的修改必须有输入依据，不得编造证明材料。'
+        )
+        user_prompt = (
+            f"修改要求：{section.get('instruction') or '完善表达，保留有依据的事实和原结构'}\n"
+            f"关联依据（仅作核对，不要求把全部依据写入当前选区）：\n{context_text}\n"
+            f"以下是本次修改范围的完整原文，输出仅替换这个范围：\n{section['rewrite_original']}"
+        )
+    if locked:
+        system += '\n应答目录已确认且不可修改。只返回当前章节正文，不输出任何 Markdown 标题或新章节编号。段内小标题使用加粗文字。'
     configs = config_store.get_all() or []
     config = next((c for c in configs if model and str(c.model) == model), None) or (configs[0] if configs else None)
     if not config:
         return
     stream = stream_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else stream_claude
     options = {"thinking": False} if getattr(config, "provider", "") == "deepseek" else {}
-    async for chunk in stream(config, RULES + "\n" + SECTION_SYSTEM, user_prompt,
+    async for chunk in stream(config, RULES + "\n" + system, user_prompt,
                               call_site="chapter_sse_text", **options):
         yield chunk
+
+
+async def _run_revision(job_id: str, snapshot: dict, block: dict) -> None:
+    from services.writing_workspace import evidence_hash
+    from services.writing_settings import resolve_model
+    selected = snapshot.get('selection')
+    clean = bool(snapshot.get('clean_rewrite'))
+    before = '' if clean else (selected['before'] if selected else '')
+    after = '' if clean else (selected['after'] if selected else '')
+    original = '' if clean else (selected['selection'] if selected else snapshot['base_content'])
+    async with get_db() as db:
+        model = (await resolve_model(db, block['project_id'], block['id'], 'text')).get('used', '')
+    section = ({'title': block['title'], 'instruction': snapshot.get('instruction') or ''}
+               if clean else
+               {'title': block['title'], 'rewrite_original': original, 'instruction': snapshot.get('instruction') or ''})
+    async with get_db() as db:
+        from services.confirmed_directory import is_locked
+        locked = await is_locked(db, block)
+    state = {'scope': 'revision', 'directory_locked': locked, 'before': before, 'after': after,
+             'sections': [{'title': block['title'], 'text': '', 'state': 'running', 'charts': []}]}
+    _PROGRESS[job_id] = state
+    await emit(job_id, 'section', {'index': 0, 'state': 'running'})
+    await emit(job_id, 'role', {'role': 'text', 'state': 'working', 'model': model})
+    text = ''
+    async for delta in _stream_section(block, section, block.get('run_thread_id') or '', model):
+        current_job = await _job_row(job_id)
+        if not current_job or current_job['status'] == 'cancelled':
+            return
+        text += delta
+        await emit(job_id, 'delta', {'index': 0, 'text': delta})
+    from services.revision_contract import validate_revision
+    if not clean:
+        validate_revision(original, text, section['instruction'])
+    proposal = text if clean else before + text + after
+    async with get_db() as db:
+        from services.confirmed_directory import is_locked, body_only
+        if await is_locked(db, block):
+            proposal = body_only(proposal, block['title'])
+    if len(proposal) > _CONTENT_LIMIT:
+        raise ValueError('修改结果超出正文长度限制，原文已保留')
+    await emit(job_id, 'section', {'index': 0, 'state': 'done'})
+    saved = False
+    reason = '正文或依据已变化，修改结果已保留待核对'
+    async with get_db() as db:
+        await db.execute('BEGIN IMMEDIATE')
+        current = await get_block(db, block['id'])
+        job = await (await db.execute('SELECT status FROM chapter_writing_jobs WHERE id=?', (job_id,))).fetchone()
+        if not job or job['status'] == 'cancelled':
+            return
+        if current and (current.get('content') or '') == snapshot['base_content'] and await evidence_hash(db, current) == snapshot['evidence_version']:
+            await add_revision(db, block['id'], snapshot['base_content'], 'AI 修改前正文', 'ai', manage_transaction=False)
+            await update_block_content(db, block['id'], proposal, status='draft', commit=False)
+            if snapshot.get('force_rewrite') and not snapshot.get('section_titles'):
+                from services.section_context import SECTION_CONTEXT_VERSION
+                await db.execute('UPDATE blocks SET context_version=? WHERE id=?',
+                                 (SECTION_CONTEXT_VERSION, block['id']))
+            saved = True
+            reason = ('旧正文已清理并写入新正文，可继续编辑或撤销本次修改' if clean
+                      else '修改已写入正文，可继续编辑或撤销本次修改')
+        await db.execute('UPDATE chapter_writing_jobs SET status=?,stage=?,content=?,saved=?,artifacts=? WHERE id=?',
+                         ('done', '修改完成', proposal, int(saved), json.dumps({'live': state, 'models': {'text': model}}, ensure_ascii=False), job_id))
+        await db.commit()
+    await emit(job_id, 'done', {'content': proposal, 'saved': saved, 'reason': reason, 'editing': True})
 
 
 async def retry_job(job_id: str) -> bool:
@@ -525,18 +739,9 @@ async def _generate_chart(job_id: str, index: int, section: dict, deliverable: d
         return {"ok": False, "role": role, "index": index, "title": title, "error": str(exc)[:200]}
 
 
-_CHART_FALLBACK = {
-    "FIGURE": ("如上所述，相关维度与取值以招标文件及批复要求为准。"),
-    "TABLE": ("如上表所示，具体要求与指标以招标文件及批复要求为准。"),
-}
-
 
 def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
-    """把图表替换进占位符；返回 (正文, 说明)。
-
-    **产品原则：正文不留任何占位。** 图表没生成出来时，把占位替换成一句
-    完整的文字表述（该节仍可交付），而不是留下 `[[FIGURE:x]]` 让用户补。
-    """
+    """按原位替换成功图表；失败项保留可见的待处理标记。"""
     missing: list[str] = []
     used: set[str] = set()
     for chart in charts:
@@ -546,11 +751,11 @@ def merge_charts(text: str, charts: list[dict]) -> tuple[str, list[str]]:
         if pattern.search(text):
             text = pattern.sub(lambda _m: "\n\n" + chart["markdown"] + "\n\n", text, count=1)
             used.add(str(chart.get("title")))
-    # 没生成出来的占位 → 替换成完整文字（不留空位，也不进待办）
+    # 失败图表保留缺口，待重试或人工处理。
     for match in _PLACEHOLDER_RE.finditer(text):
         kind = match.group(1)
-        missing.append(f"{'图' if kind == 'FIGURE' else '表'}「{match.group(2)}」未能生成，已降级为文字表述")
-        text = text.replace(match.group(0), _CHART_FALLBACK.get(kind, "具体内容以招标文件要求为准。"))
+        missing.append(f"{'图' if kind == 'FIGURE' else '表'}「{match.group(2)}」未能生成，请重试或核对后移除")
+        text = text.replace(match.group(0), f"【待补充：{'图' if kind == 'FIGURE' else '表'}「{match.group(2)}」生成失败】")
     text = _PLACEHOLDER_RE.sub("", text)
     for chart in charts:
         if chart.get("ok") and str(chart.get("title")) not in used:

@@ -36,6 +36,9 @@ def build_delivery_verdict(*, rule_score: int, review: dict | None, precheck: di
     score（趋势参考）：L0(0/1)×20 + 规则分×40 + 评审分×40；无评审时归一到 100
     """
     review = review or {}
+    freshness = review.get('freshness')
+    if freshness in ('stale', 'unknown'):
+        review = {}
     precheck = precheck or {}
     fatal_risks = fatal_risks or []
     need_user = need_user or []
@@ -80,6 +83,7 @@ def build_delivery_verdict(*, rule_score: int, review: dict | None, precheck: di
         "explain": {
             "rule": int(rule_score),
             "review": int(review.get("score") or 0) if has_review else None,
+            "review_freshness": freshness,
             "review_tier": str(review.get("tier") or ""),
             "precheck": pre_counts,
             "fatal": len(fatal_risks),

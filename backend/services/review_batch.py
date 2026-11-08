@@ -51,9 +51,13 @@ async def _targets(db, project_id: int, thread_id: str, only_unreviewed: bool, l
         (project_id, thread_id or "", thread_id or ""))).fetchall()
     blocks = [dict(r) for r in rows]
     if only_unreviewed:
-        reviewed = {int(r[0]) for r in await (await db.execute(
-            "SELECT block_id FROM chapter_reviews")).fetchall()}
-        blocks = [b for b in blocks if int(b["id"]) not in reviewed]
+        from services.chapter_review import load_review
+        pending = []
+        for block in blocks:
+            review = await load_review(int(block['id']))
+            if not review or review['freshness'] != 'current':
+                pending.append(block)
+        blocks = pending
     if limit:
         blocks = blocks[:limit]
     return blocks

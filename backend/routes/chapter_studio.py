@@ -105,13 +105,26 @@ async def get_studio(block_id: int):
             profile['writing_status'] = 'review'
         requirements, points = await chapter_context(db, block)
         materials = await material_rows(db, block)
-        return {'profile': profile, 'layouts': LAYOUTS, 'requirements': requirements, 'points': points,
+        from services.writing_workspace import node_scopes
+        siblings = await list_blocks(db, block['project_id'], block.get('run_thread_id'), fallback_all=False)
+        scope = node_scopes(siblings).get(block_id, {'role': 'content', 'unit_ids': [], 'pending_ids': []})
+        response_labels = {}
+        root_title = ''
+        for item in siblings:
+            if int(item.get('level') or 1) == 1:
+                root_title = item['title']
+            response_labels[item['id']] = '点对点应答' if '点对点' in root_title else '重点要求应答' if '重点' in root_title else '评分方案应答'
+        related = [dict(id=item['id'], block_id=item['block_id'], title=item['title'], response_label=response_labels[item['id']]) for item in siblings
+                   if item['id'] != block_id and set(ids(item.get('spec_requirement_ids'))) & set(ids(block.get('spec_requirement_ids')))]
+        from services.confirmed_directory import is_locked
+        return {'directory_locked': await is_locked(db, block), 'block': block, 'related_responses': related, 'scope': scope, 'content_version': content_hash(block.get('content')), 'profile': profile, 'layouts': LAYOUTS, 'requirements': requirements, 'points': points,
                 'source': source, 'materials': materials,
                 'missing': ['请补充或核对本章要求的真实证明材料'] if block.get('evidence_required') and not any(m['confirmed'] for m in materials) else []}
 
 
 class ProfileBody(BaseModel):
     layout: Literal['solution', 'understanding', 'implementation', 'evidence', 'point_to_point']
+    layout_prompt: str | None = None
     writing_status: Literal['draft', 'review', 'complete'] = 'draft'
     acknowledge_open_items: bool = False
     expected_content_hash: str | None = None
@@ -149,10 +162,14 @@ async def save_studio(block_id: int, body: ProfileBody):
                 raise HTTPException(409,'正文已变化，请重新核对后确认')
             if (check['gaps'] or check['issues']) and not body.acknowledge_open_items:
                 raise HTTPException(409,'存在待补充内容或检查意见，请查看摘要并明确确认')
-        await db.execute('''INSERT INTO chapter_studio(block_id, layout, writing_status, confirmed_hash) VALUES(?,?,?,?)
-            ON CONFLICT(block_id) DO UPDATE SET layout=excluded.layout, writing_status=excluded.writing_status,
-            confirmed_hash=excluded.confirmed_hash''',
-            (block_id, body.layout, body.writing_status, content_hash(block.get('content'))))
+        existing = await (await db.execute(
+            "SELECT layout_prompt FROM chapter_studio WHERE block_id=?", (block_id,))).fetchone()
+        layout_prompt = (body.layout_prompt if body.layout_prompt is not None
+                         else str(existing["layout_prompt"] or "") if existing else "")
+        await db.execute('''INSERT INTO chapter_studio(block_id, layout, layout_prompt, writing_status, confirmed_hash) VALUES(?,?,?,?,?)
+            ON CONFLICT(block_id) DO UPDATE SET layout=excluded.layout, layout_prompt=excluded.layout_prompt,
+            writing_status=excluded.writing_status, confirmed_hash=excluded.confirmed_hash''',
+            (block_id, body.layout, layout_prompt, body.writing_status, content_hash(block.get('content'))))
         await db.commit()
     return body.model_dump()
 
@@ -295,8 +312,9 @@ def _normalize_markdown_table(raw: str, max_rows: int = 12, max_cols: int = 6) -
 
 
 class OutlineBody(BaseModel):
-    thread_id: str = Field(min_length=8)
+    thread_id: str = Field(min_length=1)
     regenerate: bool = Field(default=False)
+    allow_locked: bool = Field(default=False)
 
 
 class SectionBody(BaseModel):
@@ -307,9 +325,10 @@ class SectionBody(BaseModel):
 
 
 @router.get('/blocks/{block_id}/writing-readiness')
-async def writing_readiness(block_id: int, thread_id: str = "", section: str = ""):
+async def writing_readiness(block_id: int, thread_id: str = "", threadId: str = "", section: str = ""):
     """写作前置：大纲/证据覆盖/是否允许概括写法。"""
     from services.writing_readiness import chapter_readiness, section_readiness
+    thread_id = thread_id or threadId
     async with get_db() as db:
         block = await require_block(db, block_id)
     block = dict(block)
@@ -322,6 +341,18 @@ async def writing_readiness(block_id: int, thread_id: str = "", section: str = "
                        if str(item.get("title")) == section), {"title": section})
         return await section_readiness(block, target, thread_id)
     return await chapter_readiness(block, thread_id)
+
+
+@router.post('/blocks/{block_id}/studio/outline/self-heal')
+async def self_heal_outline(block_id: int):
+    """数据修复：已确认目录但本章缺大纲时，确定性补齐，不改变目录结构。"""
+    from services.outline_self_heal import heal_block_outline
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        sections = await heal_block_outline(db, dict(block))
+    if not sections:
+        raise HTTPException(404, '这一章没有可补齐的计划条目')
+    return {"outline": sections, "healed": True, "count": len(sections)}
 
 
 @router.get('/blocks/{block_id}/studio/outline')
@@ -353,9 +384,24 @@ async def build_outline(block_id: int, body: OutlineBody):
         block = await require_block(db, block_id)
         found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
     if not found:
+        # 目录已确认但缺计划/大纲：先按一级目录补建计划，再走正常生成。
+        try:
+            from services.writing_plans import build_plan
+            async with get_db() as build_db:
+                await build_plan(build_db, block['project_id'], body.thread_id, str(block['block_id']).split('.')[0])
+        except Exception:
+            pass
+        async with get_db() as fresh_db:
+            found = await plan_of_block(fresh_db, block['project_id'], body.thread_id, str(block['block_id']))
+    if not found:
         raise HTTPException(404, '这一章还没有编写计划')
     plan_id, plan = found
     chapter = next((item for item in plan.get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
+    # 目录已确认时仍允许“补缺失大纲”（数据修复）；只禁止重做已有大纲。
+    async with get_db() as db:
+        from services.confirmed_directory import is_locked
+        if chapter.get('outline') and await is_locked(db, block) and not body.allow_locked:
+            raise HTTPException(409, '目录已确认，请在应答策划中调整并重新确认；编写页仅编辑正文')
     if chapter.get('outline') and not body.regenerate:
         return {'outline': chapter['outline'], 'cached': True}
 
@@ -368,10 +414,19 @@ async def build_outline(block_id: int, body: OutlineBody):
                 continue
             rid = str(requirement.get('spec_requirement_id') or requirement.get('id') or f'r{index + 1}')
             req_rows.append({'id': rid, 'text': str(requirement.get('text') or '')[:500]})
+        from services.chapter_studio import LAYOUTS
+        async with get_db() as layout_db:
+            layout_row = await (await layout_db.execute(
+                "SELECT layout, layout_prompt FROM chapter_studio WHERE block_id=?", (block['id'],))).fetchone()
+        layout = str((layout_row['layout'] if layout_row else '') or chapter.get('layout') or 'solution')
+        layout_prompt = str((layout_row['layout_prompt'] if layout_row else '') or '')
         payload = {
             'chapter': chapter.get('title') or block.get('title') or '',
             'objective': chapter.get('objective') or '',
             'pages': chapter.get('pages') or 0,
+            'chapter_type': LAYOUTS.get(layout, {}).get('label') or layout,
+            'chapter_type_structure': LAYOUTS.get(layout, {}).get('blocks') or [],
+            'chapter_type_prompt': layout_prompt[:2000],
             'requirements': req_rows[:10],
             'tasks': [t.get('title') for t in (chapter.get('tasks') or [])],
         }
@@ -449,7 +504,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     from services.section_outline import (SECTION_REWRITE_SYSTEM, SECTION_SYSTEM,
                                           build_section_payload, replace_section)
     from services.section_context import build_section_context, render_context
-    from services.material_cards import bound_cards, public_dto
+    from services.material_cards import bound_cards, public_dto, usable_card
     from services.coverage_review import review_coverage
     from services.section_results import cited_sources, save_result
     from services.block_store import add_revision, update_block_content
@@ -470,16 +525,13 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     # 带上该节的三问（依据/写法/交付物）
     planned = next((x for x in (chapter.get('outline') or []) if str(x.get('title')) == title.strip()), {})
     section.update({'basis': planned.get('basis') or [], 'how': planned.get('how') or {},
-                    'deliverables': planned.get('deliverables') or [], 'generic': bool(generic)})
+                    'deliverables': planned.get('deliverables') or [],
+                    'requirement_ids': planned.get('requirement_ids') or [], 'generic': bool(generic)})
     from services.writing_readiness import section_readiness
     _ready = await section_readiness(block, section, thread_id)
     if _ready.get("status") == "no_outline":
         async def _blocked():
             yield format_sse_event('error', {'message': '还没有章节大纲：请先在「本章计划」生成大纲', 'code': 'no_outline'})
-        return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
-    if _ready.get("status") == "no_evidence" and not generic:
-        async def _blocked():
-            yield format_sse_event('error', {'message': '本节没有证据：请先补证据，或选择「按概括写法」生成', 'code': 'no_evidence'})
         return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
     _coverage_before = {"total": _ready.get("needs_total", 0), "covered": _ready.get("covered", 0),
                         "missing": _ready.get("missing", 0)}
@@ -491,13 +543,14 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         _context_text = ""
     try:
         async with get_db() as _db:
-            _used_cards = [public_dto(item) for item in await bound_cards(_db, block_id, title)]
+            _used_cards = [public_dto(item) for item in await bound_cards(_db, block_id, section["title"])
+                           if usable_card(item)]
         for _item in (_context.get("materials") or []):
             _used_cards.append({"chunk_id": _item.get("material_id"), "chunk_kind": "file",
                                 "source_title": _item.get("filename") or "素材",
                                 "locator": (f"第 {_item.get('page')} 页" if _item.get("page") else ""),
                                 "text": _item.get("content") or "", "authority": "自动检索",
-                                "confidence_label": "中", "used": True, "section": title})
+                                "confidence_label": "中", "used": False, "section": title})
     except Exception:  # noqa: BLE001
         _used_cards = []
     payload = build_section_payload(chapter, section,
@@ -572,17 +625,20 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         from services.body_tables import normalize_table_rows as _normalize_tables
         text = _normalize_tables(text)
         text, _captions = ensure_table_captions(text)
-        # 正文净化：不留"待补充"字眼（可以浅，但必须完整）
-        from services.placeholder_purge import purge as purge_placeholders
-        text, _purged = purge_placeholders(text)
         if len(text) < 120:
             yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
             return
         before = str(block.get('content') or '')
         after, replaced = replace_section(before, section['title'], text)
         async with get_db() as db:
-            await add_revision(db, block_id, before, summary=f'分节生成：{section["title"]}', source='manual')
-            await update_block_content(db, block_id, after, status=block.get('status') or 'draft')
+            await db.execute('BEGIN IMMEDIATE')
+            current = await require_block(db, block_id)
+            if (current.get('content') or '') != before:
+                yield format_sse_event('error', {'message': '正文在生成期间被修改，本次结果保留供核对', 'proposal': after})
+                return
+            await add_revision(db, block_id, before, summary=f'分节生成：{section["title"]}', source='manual', manage_transaction=False)
+            await update_block_content(db, block_id, after, status=block.get('status') or 'draft', commit=False)
+            await db.commit()
         quality = {}
         if is_rewrite and original_text:
             import re as _re3
@@ -634,7 +690,8 @@ async def align_body_to_outline(block_id: int, body: AlignBody):
 
     async with get_db() as db:
         block = await require_block(db, block_id)
-        found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
+        async with get_db() as fresh_db:
+            found = await plan_of_block(fresh_db, block['project_id'], body.thread_id, str(block['block_id']))
     if not found:
         raise HTTPException(404, '这一章还没有编写计划')
     chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
@@ -815,9 +872,11 @@ class ContentPreviewBody(BaseModel):
 async def preview_content(block_id: int, body: ContentPreviewBody):
     from infra.docx.document_model import parse_markdown, model_html, image_urls
     try:
-        model=parse_markdown(body.content)
         async with get_db() as db:
             block=await require_block(db,block_id)
+            from services.confirmed_directory import is_locked, body_only
+            content = body_only(body.content, block['title']) if await is_locked(db, block) else body.content
+            model=parse_markdown(content)
             for url in image_urls(model):
                 await studio_image_bytes(db,url,block['project_id'])
         return {'html':model_html(model), 'notice':'内容预览不模拟 Word 分页，请在导出后查看排版 PDF'}
@@ -896,8 +955,18 @@ async def get_document(project_id: int, threadId: str):
              WHERE project_id=? AND thread_id=? ORDER BY created_at DESC, rowid DESC LIMIT 5''', (project_id, threadId))).fetchall()]
         from infra.docx.template_store import load_template
         templates = {key: {**value, 'version': load_template(key)[1]} for key,value in TEMPLATES.items()}
-        return {'template': row[0] if row else 'standard', 'templates': templates, 'profiles': profiles,
-                'unit_ids': [b['id'] for b in units], 'jobs': jobs}
+        from services.writing_workspace import node_scopes, review_freshness
+        review_rows = {row['block_id']: dict(row) for row in await (await db.execute(
+            'SELECT r.* FROM chapter_reviews r JOIN blocks b ON b.id=r.block_id WHERE b.project_id=? AND b.run_thread_id=?',
+            (project_id, threadId))).fetchall()}
+        review_states = {}
+        for block in blocks:
+            review = review_rows.get(block['id'])
+            if review:
+                review_states[block['id']] = {'freshness': await review_freshness(db, block, review), 'satisfied': review['satisfied']}
+        return {'review_states': review_states, 'template': row[0] if row else 'standard', 'templates': templates, 'profiles': profiles,
+                'unit_ids': [b['id'] for b in units], 'jobs': jobs,
+                'node_scopes': node_scopes(blocks)}
 
 
 @router.put('/projects/{project_id}/studio/document')
@@ -993,6 +1062,9 @@ async def create_export(project_id: int, body: ExportBody):
         try:
             for section in sections:
                 content = re.sub(r'\[/?[GME]\]', '', section['content'])
+                if answer.get('confirmed'):
+                    from services.confirmed_directory import body_only
+                    content = body_only(content, section['title'])
                 first = re.match(r'^\s*#{1,6}\s+([^\n]+)\n?', content)
                 if first and first.group(1).strip() == section['title'].strip(): content = content[first.end():]
                 section['document_blocks'] = parse_markdown(content)
@@ -1158,7 +1230,7 @@ async def get_chapter_review(block_id: int):
     from services.chapter_review import load_review
 
     data = await load_review(block_id)
-    return {"reviewed": bool(data), "review": data}
+    return {"reviewed": bool(data and data.get("freshness") == "current"), "review": data}
 
 
 class ReviewPatchBody(BaseModel):
@@ -1255,7 +1327,8 @@ async def delivery_verdict(block_id: int):
 
     plan = None
     try:
-        plan = await chapter_plan(project_id, thread_id, block_id)
+        async with get_db() as db:
+            plan = await chapter_plan(db, project_id, thread_id, str(block.get('block_id') or ''))
     except Exception:
         plan = None
     summary = (plan or {}).get("summary") or {}
@@ -1276,6 +1349,24 @@ async def delivery_verdict(block_id: int):
 
     return build_delivery_verdict(rule_score=rule_score, review=review, precheck=pre,
                                   fatal_risks=fatal, need_user=need_user)
+
+
+@router.get('/blocks/{block_id}/studio/review/scoring-points')
+async def scoring_point_review(block_id: int):
+    """按本章评分点逐条核对关键词是否在正文出现；只做确定性检查。"""
+    from services.scoring_point_review import review_block_points
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        ids = json.loads(block.get("review_point_ids") or "[]")
+        tid = str(block.get("run_thread_id") or "")
+        from services.point_store import list_review_points
+        points = await list_review_points(db, run_thread_id=tid)
+    wanted = {str(x) for x in ids}
+    picked = [p for p in points if str(p.get("point_id") or "") in wanted]
+    result = review_block_points(dict(block), picked)
+    result["block_id"] = str(block.get("block_id") or "")
+    result["title"] = str(block.get("title") or "")
+    return result
 
 
 @router.get('/blocks/{block_id}/studio/review/rubric')
@@ -1327,3 +1418,68 @@ async def practice_candidate_apply(block_id: int, body: PracticeApplyBody):
                                          section=body.section, text=body.text)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+
+class VerifyIssueBody(BaseModel):
+    fingerprint: str = Field(min_length=1, max_length=100)
+
+
+@router.post('/blocks/{block_id}/studio/review/verify-issue')
+async def verify_review_issue(block_id: int, body: VerifyIssueBody):
+    from agents.chapter_team import call_role
+    from services.writing_workspace import versions
+    async with get_db() as db:
+        block = await require_block(db, block_id)
+        issue = await (await db.execute('SELECT point,severity FROM review_issue_states WHERE block_id=? AND fingerprint=?',
+            (block_id, body.fingerprint))).fetchone()
+        if not issue:
+            raise HTTPException(404, '问题不存在')
+        baseline = await versions(db, block)
+        from services.material_cards import bound_cards, usable_card
+        evidence = [item for item in await bound_cards(db, block_id) if usable_card(item)]
+        requirements, points = await chapter_context(db, block)
+    raw, _ = await call_role('bao_zheng',
+        '针对指定问题复核当前正文与证明。仅当正文及所需证据明确解决问题才通过。公开资料不能证明投标人的业绩、资质、人员、承诺。'
+        '返回 JSON {"resolved":true或false,"reason":"具体依据","quote":"当前正文对应原文"}。',
+        {'issue': issue['point'], 'content': block.get('content') or '', 'evidence': evidence,
+         'requirements': requirements, 'points': points}, {})
+    result = extract_json_object(raw)
+    if not isinstance(result, dict):
+        raise HTTPException(502, '复核未返回有效结果')
+    quote = str(result.get('quote') or '')
+    resolved = result.get('resolved') is True and bool(quote.strip()) and quote in (block.get('content') or '')
+    async with get_db() as db:
+        await db.execute('BEGIN IMMEDIATE')
+        current = await require_block(db, block_id)
+        if await versions(db, current) != baseline:
+            raise HTTPException(409, '复核期间正文或依据发生变化，请重新复核')
+        await db.execute("UPDATE review_issue_states SET status=?,verified_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,"
+            "verified_content_version=?,verified_evidence_version=? WHERE block_id=? AND fingerprint=?",
+            ('verified' if resolved else 'open', resolved, baseline['content_version'], baseline['evidence_version'], block_id, body.fingerprint))
+        await db.commit()
+    return {'resolved': resolved, 'reason': str(result.get('reason') or ''), 'quote': quote}
+
+
+class ProjectFactsBody(BaseModel):
+    facts: dict[str, str] = Field(default_factory=dict, max_length=30)
+
+
+@router.get('/projects/{project_id}/studio/facts')
+async def get_project_facts(project_id: int):
+    async with get_db() as db:
+        row = await (await db.execute('SELECT facts FROM project_writing_facts WHERE project_id=?', (project_id,))).fetchone()
+    return {'facts': json.loads(row['facts']) if row else {}}
+
+
+@router.put('/projects/{project_id}/studio/facts')
+async def put_project_facts(project_id: int, body: ProjectFactsBody):
+    if any(not key.strip() or len(key) > 80 or len(value) > 2000 for key, value in body.facts.items()):
+        raise HTTPException(422, '资料名称限 80 字，内容限 2000 字')
+    async with get_db() as db:
+        project = await (await db.execute('SELECT id FROM projects WHERE id=?', (project_id,))).fetchone()
+        if not project:
+            raise HTTPException(404, '项目不存在')
+        await db.execute('INSERT INTO project_writing_facts(project_id,facts) VALUES(?,?) ON CONFLICT(project_id) DO UPDATE SET facts=excluded.facts',
+            (project_id, json.dumps(body.facts, ensure_ascii=False)))
+        await db.commit()
+        blocks = await (await db.execute("SELECT id,title FROM blocks WHERE project_id=? AND length(trim(COALESCE(content,'')))>0", (project_id,))).fetchall()
+    return {'facts': body.facts, 'affected': [dict(block) for block in blocks]}

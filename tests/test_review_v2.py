@@ -64,7 +64,7 @@ def test_issue_state_machine():
 
         # 第 2 轮：data 消失、other 仍在
         counts = await sync_issues(db, 1, missing_other)
-        assert counts["verified"] == 1, counts        # 消失的 → verified
+        assert counts["fixed"] == 1 and counts["verified"] == 0, counts  # 遗漏问题仍待复核
         assert counts["open"] == 1, counts            # 仍在的 → open
 
         # 第 3 轮：verified 的那条复发 → 回 open

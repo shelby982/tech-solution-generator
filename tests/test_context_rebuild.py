@@ -70,3 +70,24 @@ async def test_stale_list_and_force_rebuild(monkeypatch):
     assert "新正文" in saved["content"]
     assert int(saved["context_version"] or 0) == SECTION_CONTEXT_VERSION
     assert job_row["status"] == "done"
+
+
+async def test_clean_rewrite_replaces_old_body(monkeypatch):
+    block = await _seed()
+
+    async def fake_stream(block, section, thread_id, model):
+        yield "## 新章节\n\n这是全新正文。" + "建设内容" * 20
+
+    async def fake_resolve(db, project_id, block_id, role):
+        return {"used": "test", "source": "test"}
+
+    monkeypatch.setattr(chapter_sse, "_stream_section", fake_stream)
+    monkeypatch.setattr(writing_settings, "resolve_model", fake_resolve)
+    async with get_db() as db:
+        job = await chapter_sse.create_job(block["project_id"], "rebuild-thread", block["id"],
+                                           force_rewrite=True, clean_rewrite=True)
+    await chapter_sse.run_job(job)
+    async with get_db() as db:
+        saved = dict(await (await db.execute("SELECT * FROM blocks WHERE id=?", (block["id"],))).fetchone())
+    assert "旧正文" not in saved["content"]
+    assert "这是全新正文" in saved["content"]

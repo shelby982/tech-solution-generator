@@ -93,6 +93,19 @@ async def bound_cards(db, block_id: int, section: str = "") -> list[dict]:
     return out
 
 
+def usable_card(item: dict) -> bool:
+    return item["status"] in {"selected", "confirmed"} and bool(item["text"].strip())
+
+
+def supports_need(item: dict, text: str) -> bool:
+    if not usable_card(item) or item["mode"] not in {"cite", "data"}:
+        return False
+    bidder_evidence = re.search(r"业绩|资质|证书|合同|人员|团队|承诺|我方|投标人.*证明", text)
+    return not bidder_evidence or (
+        item["source_type"] == "upload" and item["authority"] == "我方材料"
+    )
+
+
 def confidence_label(value: float) -> str:
     if value >= 0.9:
         return "高"

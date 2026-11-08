@@ -451,14 +451,20 @@ async def update_block_content(
     block_id_int: int,
     content: str,
     status: str = "done",
+    *, commit: bool = True,
 ) -> dict | None:
+    from services.confirmed_directory import is_locked, body_only
+    block = await get_block(db, block_id_int)
+    if block and await is_locked(db, block):
+        content = body_only(content, block.get('title') or '')
     await db.execute(
         """UPDATE blocks
            SET content = ?, status = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""",
         (content, status, block_id_int),
     )
-    await db.commit()
+    if commit:
+        await db.commit()
     return await get_block(db, block_id_int)
 
 
@@ -901,8 +907,10 @@ async def add_revision(
     content: str,
     summary: str,
     source: str,
+    *, manage_transaction: bool = True,
 ) -> dict:
-    await db.execute("BEGIN IMMEDIATE")
+    if manage_transaction:
+        await db.execute("BEGIN IMMEDIATE")
     try:
         cursor = await db.execute(
             "SELECT COALESCE(MAX(revision_no), 0) FROM block_revisions WHERE block_id = ?",
@@ -915,9 +923,11 @@ async def add_revision(
             (block_id_int, next_no, content, summary, source),
         )
         new_id = cursor.lastrowid
-        await db.commit()
+        if manage_transaction:
+            await db.commit()
     except Exception:
-        await db.rollback()
+        if manage_transaction:
+            await db.rollback()
         raise
     row_cursor = await db.execute(
         "SELECT * FROM block_revisions WHERE id = ?", (new_id,)

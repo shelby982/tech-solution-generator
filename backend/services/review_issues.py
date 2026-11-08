@@ -3,10 +3,8 @@
 问题：应用补丁/重写后只能看分数变化。分数 58→61 但同一条问题仍在 = 假修复；
 反之问题修好但总分被别的章拉低 = 被误判。所以必须按 **issue 级**追踪。
 
-状态流转：
-    open ──应用补丁──> fixed ──复评确认消失──> verified
-      ^                    │                      │
-      └──复评仍出现────────┴──────────────────────┘（reopened）
+状态流转：open → fixed（已修改待复核）→ verified（明确复核通过）。
+评审遗漏的问题继续保留。正文或采用依据变化后，旧的通过结论退回待复核。
 
 指纹（fingerprint）用于跨轮识别"同一条问题"：
     sha1(severity + "|" + normalize(point))
@@ -49,7 +47,7 @@ async def sync_issues(db, block_pk: int, issues: list[dict]) -> dict:
 
     规则（spec C3）：
       · 本轮出现的 issue → open（若此前 verified 也回 open，视为复发）
-      · 上一轮 open 且本轮未出现 → verified
+      · 本轮未出现的问题保留原状态，等待单项明确复核
       · 上一轮 fixed 且本轮仍出现 → 回到 open（假修复）
     """
     now = _now()
@@ -86,15 +84,7 @@ async def sync_issues(db, block_pk: int, issues: list[dict]) -> dict:
                 "WHERE block_id=? AND fingerprint=?",
                 (now, item["point"], item["severity"], block_pk, print_))
 
-    # 本轮消失的 open 问题 → verified
-    for print_, prev in previous.items():
-        if print_ in current:
-            continue
-        if prev["status"] in ("open", "fixed"):
-            await db.execute(
-                "UPDATE review_issue_states SET status='verified', verified_at=COALESCE(verified_at, ?), "
-                "last_seen_at=? WHERE block_id=? AND fingerprint=?",
-                (now, now, block_pk, print_))
+    # Missing findings remain pending until an explicit, targeted verification.
     await db.commit()
     return await counts(db, block_pk)
 
@@ -141,7 +131,7 @@ async def counts(db, block_pk: int) -> dict:
 async def list_issues(db, block_pk: int) -> dict:
     """本章 issue 列表（含状态），按 open > fixed > verified、severity 排序。"""
     rows = await (await db.execute(
-        "SELECT fingerprint, status, severity, point, first_seen_at, last_seen_at, fixed_at, verified_at "
+        "SELECT fingerprint, status, severity, point, first_seen_at, last_seen_at, fixed_at, verified_at, verified_content_version, verified_evidence_version "
         "FROM review_issue_states WHERE block_id=?", (block_pk,))).fetchall()
     rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
     order = {"open": 0, "fixed": 1, "verified": 2}
@@ -150,20 +140,28 @@ async def list_issues(db, block_pk: int) -> dict:
         "first_seen_at": r[4] or "", "last_seen_at": r[5] or "",
         "fixed_at": r[6] or "", "verified_at": r[7] or "",
     } for r in rows]
+    from services.writing_workspace import versions
+    block = await (await db.execute('SELECT * FROM blocks WHERE id=?', (block_pk,))).fetchone()
+    current = await versions(db, dict(block)) if block and any(item["status"] == "verified" for item in items) else {}
+    for item, row in zip(items, rows):
+        if item['status'] == 'verified' and (row[8] != current.get('content_version') or row[9] != current.get('evidence_version')):
+            item['status'] = 'fixed'
     items.sort(key=lambda item: (order.get(item["status"], 9), -rank.get(item["severity"], 0)))
-    return {"items": items, "counts": await counts(db, block_pk)}
+    effective_counts = {status: sum(item['status'] == status for item in items) for status in ('open', 'fixed', 'verified')}
+    effective_counts['total'] = len(items)
+    return {"items": items, "counts": effective_counts}
 
 
 async def project_summary(db, project_id: int) -> dict:
     """项目级 issue 状态汇总（供评审页/看板）。"""
     rows = await (await db.execute(
-        "SELECT s.status, COUNT(*) FROM review_issue_states s "
-        "JOIN blocks b ON b.id = s.block_id WHERE b.project_id=? GROUP BY s.status",
+        'SELECT DISTINCT b.id FROM blocks b JOIN review_issue_states s ON s.block_id=b.id WHERE b.project_id=?',
         (project_id,))).fetchall()
-    summary = {"open": 0, "fixed": 0, "verified": 0}
-    for status, count in rows:
-        if status in summary:
-            summary[status] = int(count)
+    summary = {'open': 0, 'fixed': 0, 'verified': 0}
+    for row in rows:
+        result = await list_issues(db, row[0])
+        for status in summary:
+            summary[status] += result['counts'][status]
     summary["total"] = sum(summary.values())
     summary["verified_ratio"] = (round(summary["verified"] / summary["total"] * 100)
                                  if summary["total"] else 0)
