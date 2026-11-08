@@ -302,6 +302,17 @@ CREATE TABLE IF NOT EXISTS review_jobs (
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS block_purged_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    block_id    INTEGER NOT NULL,
+    placeholder TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'drop',    -- search | upload | drop
+    reason      TEXT NOT NULL DEFAULT '',
+    section     TEXT NOT NULL DEFAULT '',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_purged_block ON block_purged_items(block_id);
+
 CREATE TABLE IF NOT EXISTS review_issue_states (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     block_id      INTEGER NOT NULL,

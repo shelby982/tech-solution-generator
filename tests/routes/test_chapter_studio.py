@@ -84,7 +84,8 @@ async def test_complete_requires_explicit_acknowledgement_and_unchanged_content(
     # 缺证据标记保留在编辑正文，提交前明确核对。
     response = await c.put(f'/api/blocks/{bid}',json={'content':'实施方案。\n【待补充：测试报告】'})
     assert response.status_code == 200
-    assert '待补充' in response.json()['content']
+    # 产品红线：正文里不再出现占位符；但缺项要留痕（提交前需要确认）
+    assert '待补充' not in response.json()['content']
     check=(await c.get(f'/api/blocks/{bid}/studio/completion-check')).json()
     assert not check['running'] and len(check['gaps'])==1
     request={'layout':'solution','writing_status':'complete','expected_content_hash':check['content_hash']}

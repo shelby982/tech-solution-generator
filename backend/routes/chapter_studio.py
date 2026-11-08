@@ -139,8 +139,32 @@ async def completion_check(db,block):
     issues=[{'reviewer':role,**issue} for role,result in reviews.items() for issue in result.get('finding',{}).get('issues',[])]
     return {'content_hash':content_hash(content),'empty':not content.strip(),
             'running':bool(job and job['status'] in ('queued','running')),
-            'gaps':re.findall(r'【待补充[^】]*】',content),'issues':issues,
+            'gaps': await _completion_gaps(db, block, content),'issues':issues,
             'notice':'AI 意见基于生成时的版本，仅供核对，不等同于人工验收。'}
+
+
+async def _completion_gaps(db, block, content: str) -> list[str]:
+    """提交前的"缺项"：正文里不该再有占位符（已被净化），但净化记录要让人确认。
+
+    返回：被净化掉的占位说明（去重、最多 12 条）+ 万一还有残留的占位。
+    """
+    import re as _re
+
+    gaps: list[str] = []
+    residual = _re.findall(r'【待[^】]{0,40}】', content or '')
+    if residual:
+        gaps.extend(residual[:6])
+    try:
+        rows = await (await db.execute(
+            "SELECT DISTINCT placeholder, reason FROM block_purged_items WHERE block_id=? "
+            "ORDER BY id DESC LIMIT 12", (int(block['id']),))).fetchall()
+        for placeholder, reason in rows:
+            text = (str(placeholder or "").strip() or str(reason or "").strip())
+            if text and text not in gaps:
+                gaps.append(text[:80])
+    except Exception:
+        pass
+    return gaps
 
 
 @router.get('/blocks/{block_id}/studio/completion-check')
@@ -629,6 +653,11 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
             yield format_sse_event('error', {'message': '这一节没有生成出可用内容，请重试'})
             return
         before = str(block.get('content') or '')
+        try:
+            from services.placeholder_purge import purge
+            text, _purged = purge(text)
+        except Exception:
+            _purged = []
         after, replaced = replace_section(before, section['title'], text)
         async with get_db() as db:
             await db.execute('BEGIN IMMEDIATE')
@@ -738,6 +767,11 @@ async def write_section(block_id: int, body: SectionBody):
     if len(text) < 120:
         raise HTTPException(422, '这一节没有生成出可用内容，请重试或补充要点')
     before = str(block.get('content') or '')
+    try:
+        from services.placeholder_purge import purge
+        text, _purged = purge(text)
+    except Exception:
+        _purged = []
     after, replaced = replace_section(before, body.title, text)
     async with get_db() as db:
         await add_revision(db, block_id, before, summary=f'分节生成：{body.title}', source='manual')

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import re
 
-_PLACEHOLDER = re.compile(r"【(待补充|待补事实|待确认|待核实|待核对)[:：]?([^】]{0,80})】")
+_PLACEHOLDER = re.compile(
+    r"【\s*(待补充|待填写|待补全|待补齐|待补事实|待提供|待确认|待核实|待核对|待明确|待定|缺失)\s*[:：]?\s*([^】]{0,120})】")
 # 【来源：xx（具体条款号待补充）】这类：把括号里的"待补充"整段去掉，保留来源名
 _SOURCE_INLINE = re.compile(r"（[^）]{0,40}待(?:补充|明确|确认)[^）]{0,40}）")
 _SENTENCE_SPLIT = re.compile(r"(?<=[。；！？])")
@@ -147,6 +148,29 @@ def purge(content: str) -> tuple[str, list[dict]]:
             dangling = ("为", "是", "如下", "包括", "如", "见", "以", "由", "需", "应", "的", "和", "及", "等", "于", "按")
             if any(tail.endswith(word) for word in dangling):
                 continue
+            # 占位删掉后是否出现"断裂"（如"以为依据"）→ 只删断裂的**分句**，保留其余实质内容
+            broken = ("以为", "以为准", "以为依据", "以为基础", "按照为", "以、", "、以",
+                      "如下", "详见", "参见", "标注为", "为。", "是。")
+            if any(token in cleaned for token in broken):
+                clauses = re.split(r"([，,])", cleaned)
+                kept_clauses, drop_count = [], 0
+                for clause in clauses:
+                    if not clause.strip():
+                        continue
+                    if clause in ("，", ","):
+                        kept_clauses.append(clause)
+                    elif any(token in clause for token in broken):
+                        drop_count += 1
+                        continue
+                    else:
+                        kept_clauses.append(clause)
+                repaired = "".join(kept_clauses).strip("，, ")
+                if repaired:
+                    repaired = repaired.rstrip("，, ")
+                    if not repaired.endswith(("。", "；", "！", "？")):
+                        repaired += "。"
+                    kept_sentences.append(repaired)
+                continue            # 断裂句已处理（要么修复后保留，要么丢弃）
             if len(skeleton) >= 8:
                 cleaned = re.sub(r"[，、；]{2,}", "，", cleaned)
                 cleaned = re.sub(r"（\s*）|\(\s*\)", "", cleaned)
@@ -158,7 +182,42 @@ def purge(content: str) -> tuple[str, list[dict]]:
     result = "\n".join(out)
     result = re.sub(r"\n{3,}", "\n\n", result)
     result = re.sub(r"[ \t]+\n", "\n", result)
-    return result.strip(), removed
+    had_leading_blank = text.startswith("\n")
+    result = re.sub(r"[，、；]{2,}", "，", result)
+    result = re.sub(r"[，。]{2,}", "。", result)
+    result = re.sub(r"[。]{2,}", "。", result)
+    result = result.rstrip()
+    if had_leading_blank and result and not result.startswith("\n"):
+        result = "\n" + result
+    return result, removed
+
+
+_ANY_HEADING = re.compile(r"(?m)^(?:(#{2,6})\s+(.+?)\s*|\*\*(.{1,60}?)\*\*\s*)$")
+
+
+def _drop_empty_sections(text: str) -> str:
+    """删掉"只有标题、没有正文"的小节（占位被清掉后常出现）。
+
+    判定：该标题下的内容去掉空白/标点/表格分隔后为空（或只有空表格），
+    则整段删除 —— 用户要求"没有的内容就不要体现"。
+    """
+    body = str(text or "")
+    marks = list(_ANY_HEADING.finditer(body))
+    if not marks:
+        return body
+    keep: list[str] = []
+    cursor = 0
+    for index, mark in enumerate(marks):
+        start = mark.start()
+        end = marks[index + 1].start() if index + 1 < len(marks) else len(body)
+        keep.append(body[cursor:start])
+        section_body = body[mark.end():end]
+        stripped = re.sub(r"[\s|\-:。；，、（）()]", "", section_body)
+        if len(stripped) >= 1:
+            keep.append(body[start:end])
+        cursor = end
+    keep.append(body[cursor:])
+    return "".join(keep)
 
 
 def classify(removed: list[dict]) -> dict:

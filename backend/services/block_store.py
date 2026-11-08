@@ -454,15 +454,40 @@ async def update_block_content(
     *, commit: bool = True,
 ) -> dict | None:
     from services.confirmed_directory import is_locked, body_only
+
     block = await get_block(db, block_id_int)
     if block and await is_locked(db, block):
         content = body_only(content, block.get('title') or '')
+    # 正文净化（产品红线）：任何写库路径都不得留"待补充/待填写"等占位符
+    purged_items: list[dict] = []
+    try:
+        from services.placeholder_purge import purge
+        content, purged_items = purge(content)
+    except Exception:      # 净化失败不能阻断保存
+        purged_items = []
     await db.execute(
         """UPDATE blocks
            SET content = ?, status = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""",
         (content, status, block_id_int),
     )
+    # 被净化掉的占位符留痕：供"提交前确认缺项"和待办使用（正文里不再出现，但信息不丢）
+    try:
+        # 先清掉上一版留痕：缺项应反映"当前正文"的状态，而不是历史累积
+        await db.execute("DELETE FROM block_purged_items WHERE block_id=?", (block_id_int,))
+    except Exception:
+        pass
+    if purged_items:
+        try:
+            for item in purged_items[:20]:
+                await db.execute(
+                    "INSERT INTO block_purged_items (block_id, placeholder, kind, reason, section) "
+                    "VALUES (?,?,?,?,?)",
+                    (block_id_int, str(item.get("placeholder") or "")[:200],
+                     str(item.get("kind") or "drop"), str(item.get("reason") or "")[:200],
+                     str(item.get("section") or "")[:80]))
+        except Exception:
+            pass
     if commit:
         await db.commit()
     return await get_block(db, block_id_int)
