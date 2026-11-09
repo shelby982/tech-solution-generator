@@ -35,3 +35,24 @@ temp/
 # Docker 自身
 Dockerfile
 .dockerignore
+
+# 运行期本地数据（含客户上传与 SQLite，绝不入镜像）
+backend/data/
+*.db
+*.db.bak*
+backend/.tmp_uploads/
+
+# 文档 / 归档 / 本地工具目录（镜像不需要）
+docs/
+skill/
+ge-solution/
+.planning/
+.superpowers/
+.claude/
+.gstack/
+.pytest_cache/
+.bench-cache/
+.dsh-verify/
+packages/
+plugins/
+marketing/

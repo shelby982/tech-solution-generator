@@ -298,3 +298,13 @@ async def test_uploaded_spec_book_enters_requirement_loader(tmp_path, monkeypatc
     assert any("技术招标文件" in n for n in names), f"要求加载器没取到技术规范书：{names}"
     # 我方素材不得混进要求链路
     assert all("产品规格书" not in n for n in names), f"素材混进了要求链路：{names}"
+
+
+@pytest.mark.asyncio
+async def test_oversized_upload_rejected(upload_env, monkeypatch):
+    """上传大小上限回归：上限必须由**活跃**入口校验（旧校验随死模块删除后曾丢失）。"""
+    client, upload_root, project_id = upload_env
+    monkeypatch.setattr(materials_routes, "MAX_FILE_SIZE", 8)
+    resp = await _upload(client, project_id, "big.pdf", data=b"%PDF-1.4 " + b"x" * 100)
+    assert resp.status_code == 413
+    assert "上限" in resp.json()["detail"]

@@ -13,27 +13,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from db import get_db
-from services.block_store import (
-    replace_materials_by_role,
-    create_material,
-    list_materials,
-    get_project,
-    create_block,
-    delete_blocks_by_project,
-    update_material_parsed,
-    update_material_parse_status,
-    create_chunk,
-    delete_material,
-    list_chunks_by_materials,
-    list_blocks,
-    current_run_thread_id,
-)
+from services.block_store import replace_materials_by_role, create_material, list_materials, get_project, update_material_parse_status, create_chunk, delete_material, list_blocks, current_run_thread_id
 from infra.parser import parse_document
-from infra.retrieval import keyword_search as retrieve_chunks, build_bm25_index, assign_chunks_to_sections
-from utils.sse import format_sse_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["materials"])
@@ -48,6 +32,9 @@ ALLOWED_SUFFIXES = {".pdf", ".docx", ".doc"}
 # 两者混用会让技术规范书漏出要求链路（实测踩到），口径与前端 material-roles.mjs 一致。
 ALLOWED_ROLES = {"spec", "main_rfp", "requirement", "scoring", "evaluation", "source"}
 UPLOAD_ROOT = Path(__file__).parent.parent / "data" / "uploads"
+
+# 上传大小上限：旧 upload.py 的 50MB 校验随管线一起死了，活跃入口必须补回。
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 def _abs_upload_path(rel_path: str) -> Path:
@@ -483,9 +470,22 @@ async def upload_material(
                 detail=f"未知的材料角色：{material_role}（可选：{'、'.join(sorted(ALLOWED_ROLES))}）",
             )
 
+        # 先看 UploadFile.size（能提前拒绝大请求），读完后再按实际字节兜底。
+        # 不用 Request.headers：本函数也被 chapter_studio 当普通函数直接调用。
+        declared = getattr(file, "size", None)
+        if declared is not None and int(declared) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件超过 {MAX_FILE_SIZE // 1024 // 1024} MB 上限",
+            )
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="文件内容为空")
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件超过 {MAX_FILE_SIZE // 1024 // 1024} MB 上限",
+            )
 
         # 同角色替换：要求类主文件只保留最新一份（与 DELETE /materials/{id} 同一套语义：真删）
         if replace and role in ("main_rfp", "spec"):
@@ -671,59 +671,6 @@ async def update_chunk_route(material_id: int, chunk_index: int, body: dict):
     return JSONResponse(content=updated)
 
 
-@router.post("/projects/{project_id}/outline")
-async def generate_outline(project_id: int, model: str | None = None):
-    """[DEPRECATED] 老 demo 路径，已被 LangGraph workflow 取代。
-
-    保留路由占位，所有调用直接返回 410 Gone，避免再写入 `outline-N` 命名的 blocks
-    与新 `s1`/`s1.1` 命名共存导致前端展示异常。新流程：POST /api/workflow/start。
-    """
-    raise HTTPException(
-        status_code=410,
-        detail="该接口已废弃，请改用 /api/workflow/start 启动 LangGraph 工作流",
-    )
-
-
-@router.post("/projects/{project_id}/map-sources")
-async def map_sources(project_id: int):
-    """为每个 block 匹配 Top-3 相关素材片段，写入 blocks.source"""
-    async with get_db() as db:
-        project = await get_project(db, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-
-        tid = await current_run_thread_id(db, project_id)
-        blocks = await list_blocks(db, project_id, tid, fallback_all=True)
-        chunks = await list_chunks_by_project(db, project_id)
-
-        if not chunks:
-            return JSONResponse(content={"mapped": 0, "message": "暂无素材片段"})
-
-        # 构建一次 BM25 索引
-        bm25_idx, _ = build_bm25_index(chunks)
-
-        mapped = 0
-        for block in blocks:
-            query = f"{block.get('title', '')} {block.get('requirement', '')} {block.get('key_points', '')}"
-            top3 = retrieve_chunks(chunks, query=query, top_k=3, bm25_index=bm25_idx)
-            refs = [
-                {"material_id": c["material_id"], "chunk_index": c["chunk_index"],
-                 "snippet": c["content"][:120]}
-                for c in top3
-            ]
-            await db.execute(
-                "UPDATE blocks SET source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (_json.dumps(refs, ensure_ascii=False), block["id"]),
-            )
-            mapped += 1
-        await db.commit()
-
-    return JSONResponse(content={"mapped": mapped})
-
-
-# ── 标包分析 ──────────────────────────────────────────────────────────────────
-# 用户口径：「从招标文件里面去找到标的对应的标包或标段……以招标文件的事实为准，
-# 模型不能去做额外的衍生或者提炼」+「一个文件可能会属于多个标包」。
 @router.get("/projects/{project_id}/package-analysis")
 async def get_package_analysis(project_id: int, refresh: int = 0, use_llm: int = 0):
     """标包清单（含**原文出处**）+ 文件↔标包的多对多关联。

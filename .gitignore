@@ -18,3 +18,9 @@ backend/data/cache/
 
 # local Playwright browser cache
 .playwright-browsers/
+
+# ── 误入/本地缓存 ─────────────────────────────
+.claude/worktrees/
+.pytest_cache/
+.bench-cache/
+.dsh-verify/

@@ -28,10 +28,10 @@ from agents.wang_anshi import WangAnshiAgent
 from agents.zhang_heng import ZhangHengAgent
 from agents.zhuge_liang import ZhugeLiangAgent
 from domain.proposal import BlockOutput
-from domain.review import Finding, GlobalReport
+from domain.review import GlobalReport
 from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
-from infra.retrieval import Match
+from domain.material.models import Match
 from orchestrator import events
 from orchestrator.events import EventEmitter
 from orchestrator.state import WorkflowState
@@ -156,9 +156,9 @@ async def zhang_heng_parse_node(
     spec_loader: SpecLoader,
     emitter: EmitterArg = None,
 ) -> WorkflowState:
-    """张衡 parse：读「应标要求」全部文件 → 解析 toc + doc_summary。
+    """张衡 parse：读「应标要求」全部文件 → 解析 toc。
 
-    state 写入：``stage="parsing"``，``spec.{doc_id, doc_title, doc_summary, toc}``。
+    state 写入：``stage="parsing"``，``spec.{doc_id, doc_title, toc}``。
     """
     import asyncio
 
@@ -238,8 +238,6 @@ async def zhang_heng_parse_node(
         "spec": {
             "doc_id": parsed.doc_id,
             "doc_title": parsed.doc_title,
-            "doc_summary": parsed.doc_summary,
-            "doc_summary_error": parsed.doc_summary_error,
             # source_toc：正则解析出的规范书原始目录，只读、供 outline_draft 做 grounding。
             # toc 会在 outline_draft 节点被模型派生的应答目录整体替换。
             "source_toc": toc_dicts,
@@ -304,7 +302,6 @@ async def zhang_heng_outline_draft_node(
     result = await agent.draft_outline(
         source_toc,
         instruction=str(config.get("outline_instruction") or ""),
-        doc_summary=str(spec.get("doc_summary") or ""),
         previous_toc=previous_toc,
         project_id=project_id,
         thread_id=str(state.get("thread_id") or ""),
@@ -555,17 +552,9 @@ async def zhang_heng_extract_node(
 # 沈括 match 节点
 # ─────────────────────────────────────────────
 
-# 匹配模式：
-#   assign = **素材 → 章节 归属**（默认）。规则（片段首行标题 ↔ 章节标题）+ 语义（BM25 反向分配），
-#            **零模型调用**，产出带素材原文/出处的依据（见 domain/material/models.py 的 MaterialEvidence）。
-#   rerank = 旧的逐章 BM25 top-k + LLM 重排（调用数 = O(章节数)，且只留评语不留原文）。
-#            保留用于回滚/对照，默认不用。
-MATCH_MODE = "assign"
-
 async def shen_kuo_match_node(
     state: WorkflowState,
     *,
-    agent: ShenKuoAgent,
     emitter: EmitterArg = None,
 ) -> WorkflowState:
     """沈括：素材匹配，逐 block 推 match_start / match_progress 事件。
@@ -617,6 +606,25 @@ async def shen_kuo_match_node(
 
     matches_dict: dict[str, list[dict]] = {}
 
+    # block_id 是位置派生的字符串（s1 / s1.1），而 blocks.source 按自增主键写。
+    # 匹配前先建一次映射，避免每个 section 都回表查一遍。
+    block_row_ids: dict[str, int] = {}
+    if project_id is not None:
+        try:
+            from db import get_db
+            from services.block_store import list_blocks
+
+            async with get_db() as db:
+                all_blocks = await list_blocks(
+                    db, int(project_id), state.get("thread_id"), fallback_all=True)
+            block_row_ids = {
+                str(b.get("block_id") or b.get("id")): int(b["id"])
+                for b in all_blocks
+                if b.get("id") is not None
+            }
+        except Exception as e:
+            logger.warning(f"match_node：取 blocks 主键映射失败（{e}），来源只写 state")
+
     async def _on_section_start(section: DomainSection) -> None:
         await _emit_frame(emitter, events.match_start(
             block_id=section.id, title=section.title or section.id,
@@ -630,64 +638,22 @@ async def shen_kuo_match_node(
             block_id=section.id, matches=serialized,
         ))
         # 落库 source 字段（用于刷新页面恢复显示）
-        if project_id is not None:
+        row_id = block_row_ids.get(str(section.id))
+        if row_id is not None:
             try:
                 from db import get_db
                 from services.block_store import update_block_source
 
                 async with get_db() as db:
-                    await update_block_source(
-                        db,
-                        project_id=int(project_id),
-                        block_id=section.id,
-                        sources=serialized,
-                    )
+                    await update_block_source(db, row_id, serialized)
             except Exception as e:
                 logger.warning(f"match_node：source 落库失败（{section.id} / {e}），仅缓存到 state")
 
-    if MATCH_MODE == "assign":
-        return await _match_by_assignment(
-            state, toc=toc, outline_matrix=outline_matrix, chunks=chunks,
-            matches_dict=matches_dict, emitter=emitter,
-            on_section=_on_section, on_section_start=_on_section_start,
-        )
-
-    # ── 旧路径：逐章 BM25 + LLM 重排（MATCH_MODE="rerank" 时启用）──
-    if not chunks:
-        for section in toc:
-            await _on_section_start(section)
-            await _on_section(section, [])
-
-    # 测试 stub 可能不接受新 callback 参数 —— 用签名探测降级
-    import inspect as _inspect
-    try:
-        sig = _inspect.signature(agent.match)
-        supports_callbacks = "on_section" in sig.parameters
-    except (TypeError, ValueError):
-        supports_callbacks = False
-
-    async def _bridge(section, mlist):
-        await _on_section(section, [_match_to_dict(m) for m in mlist])
-
-    if supports_callbacks:
-        matches = await agent.match(
-            toc, outline_matrix, chunks,
-            on_section=_bridge, on_section_start=_on_section_start,
-        )
-    else:
-        matches = await agent.match(toc, outline_matrix, chunks)
-
-    # 兜底：极端情况回调没触发，确保 state 完整
-    for block_id, mlist in matches.items():
-        if block_id not in matches_dict:
-            serialized = [_match_to_dict(m) for m in mlist]
-            await _on_section(
-                next((s for s in toc if s.id == block_id), DomainSection(
-                    id=block_id, level=1, title=block_id, raw_content="", special_marks=[])),
-                serialized,
-            )
-
-    return {"materials": {"matches": matches_dict, "chunks": chunks}}
+    return await _match_by_assignment(
+        state, toc=toc, outline_matrix=outline_matrix, chunks=chunks,
+        matches_dict=matches_dict, emitter=emitter,
+        on_section=_on_section, on_section_start=_on_section_start,
+    )
 
 
 async def _match_by_assignment(

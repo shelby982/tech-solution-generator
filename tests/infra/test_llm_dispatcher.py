@@ -275,7 +275,6 @@ async def test_dispatch_outline_draft_json_under_mock(monkeypatch):
 
     obj = await dispatch_outline_draft_json([cfg], 0, {
         "instruction": "按评分项逐条拆章",
-        "doc_summary": "摘要",
         "spec_digest": "【技术方案】\n正文",
     })
 
@@ -731,3 +730,10 @@ def test_digest_non_key_material_still_budgeted():
 
     assert len(digest) <= 8000 + 200, f"digest 超预算：{len(digest)}"
     assert "普通章节" in digest
+
+
+def test_package_merge_json_exported_from_infra_llm_package():
+    """`routes/materials.py` 从包级导入该名字；漏转出会被 try/except 吞成静默降级。"""
+    from infra.llm import dispatch_package_merge_json
+
+    assert callable(dispatch_package_merge_json)

@@ -134,26 +134,6 @@ async def list_materials(
     return [dict(row) for row in rows]
 
 
-async def list_materials_by_ids(
-    db: aiosqlite.Connection,
-    material_ids: list[int],
-) -> list[dict]:
-    """按 id 取材料。
-
-    给"按 run 绑定的文件集"用：``spec.material_ids`` 记着那次运行用了哪几份文件，
-    需要时能精确定位到它们，而不是"项目当前的全部材料"。
-    """
-    ids = [int(i) for i in (material_ids or [])]
-    if not ids:
-        return []
-    placeholders = ",".join("?" * len(ids))
-    cursor = await db.execute(
-        f"SELECT * FROM materials WHERE id IN ({placeholders}) ORDER BY id",
-        tuple(ids),
-    )
-    return [dict(r) for r in await cursor.fetchall()]
-
-
 async def replace_materials_by_role(
     db: aiosqlite.Connection, project_id: int, role: str,
 ) -> list[str]:
@@ -510,27 +490,6 @@ async def delete_blocks_by_project(
     project_id: int,
 ) -> None:
     await db.execute("DELETE FROM blocks WHERE project_id = ?", (project_id,))
-    await db.commit()
-
-
-async def update_block_source(
-    db: aiosqlite.Connection,
-    project_id: int,
-    block_id: str,
-    sources: list,
-) -> None:
-    """按 (project_id, block_id) 更新 block.source（JSON 字符串）。
-
-    用于沈括匹配阶段把 matches 落库；不存在时静默返回（占位 block 应已被 parse 节点 upsert）。
-    """
-    import json as _json
-    payload = _json.dumps(sources, ensure_ascii=False)
-    await db.execute(
-        """UPDATE blocks
-           SET source = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE project_id = ? AND block_id = ?""",
-        (payload, project_id, block_id),
-    )
     await db.commit()
 
 
