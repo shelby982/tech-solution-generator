@@ -96,6 +96,7 @@ async def get_model_defaults():
         {
             "id": pid,
             "name": meta["name"],
+            "chip_label": meta.get("chip_label") or meta["name"],
             "default_base_url": meta["base_url"],
             "default_model": meta["model"],
             "placeholder": meta.get("placeholder", ""),

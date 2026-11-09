@@ -43,6 +43,7 @@ async def test_model_defaults_is_single_source(app):
         assert providers[pid]["default_base_url"] == meta["base_url"]
         assert providers[pid]["default_model"] == meta["model"]
         assert providers[pid]["name"] == meta["name"]
+        assert providers[pid]["chip_label"] == meta["chip_label"]
 
     # 兼容映射由 catalog 派生，不允许单独漂移
     assert DEFAULT_MODELS == {pid: meta["model"] for pid, meta in PROVIDER_CATALOG.items()}

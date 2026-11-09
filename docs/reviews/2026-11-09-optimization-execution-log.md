@@ -278,3 +278,17 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - **行为变化**：新建配置弹窗的预填值现在跟随后端保守默认值——
   claude `claude-3-5-sonnet-20241022`、deepseek `deepseek-chat`、kimi `moonshot-v1-32k`、
   minimax `MiniMax-M2.7`。若产品要更新这些默认值，只改后端 `PROVIDER_CATALOG` 一处即可。
+
+---
+
+## 12. 第六轮：provider 按钮也改为接口驱动
+
+- `PROVIDER_CATALOG` 每个 provider 增加 `chip_label`（Anthropic/OpenAI/DeepSeek/Kimi/MiniMax/豆包），
+  `GET /api/model-defaults` 一并下发。
+- 前端 `model-config.mjs` 缓存保留有序 `providerList`，并新增 `renderProviderChips(container, list, active)`；
+  标签与 id 做 HTML 转义。
+- `three-mode.html` / `projects.html` 删除静态 provider 按钮，只留 `<div id="provider-chips">` 容器；
+  两页在加载默认值后按后端列表渲染，选中态仍由现有容器点击委托维护。
+- 测试：后端断言 `chip_label` 与 catalog 一致；前端新增渲染/转义用例（总 164 个前端测试）。
+- 端点总数仍为 207；后端 1113 passed / 前端 164 passed。
+- 以后增删 provider 只需改 `PROVIDER_CATALOG` + 对应 provider 的 `ui`/`chip_label`，前端按钮自动跟随。

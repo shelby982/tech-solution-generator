@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 
 import {
   loadModelDefaults,
+  renderProviderChips,
   resetModelDefaultsCache,
   EMPTY_MODEL_DEFAULTS,
 } from '../../frontend/assets/model-config.mjs';
@@ -26,6 +27,7 @@ test('loadModelDefaults 读取并映射后端默认值', async () => {
         {
           id: 'claude',
           name: 'Anthropic Claude',
+          chip_label: 'Anthropic',
           default_base_url: 'https://api.anthropic.com',
           default_model: 'claude-3-5-sonnet-20241022',
           placeholder: 'sk-ant-…',
@@ -45,6 +47,13 @@ test('loadModelDefaults 读取并映射后端默认值', async () => {
       placeholder: 'sk-ant-…',
     });
     assert.deepEqual(data.modelOptions, [{ model: 'claude-opus-4-8', label: 'Opus 4.8' }]);
+    assert.deepEqual(data.providerList, [{
+      id: 'claude',
+      label: 'Anthropic',
+      url: 'https://api.anthropic.com',
+      model: 'claude-3-5-sonnet-20241022',
+      placeholder: 'sk-ant-…',
+    }]);
 
     // 第二次调用命中缓存，不再请求
     await loadModelDefaults();
@@ -66,4 +75,17 @@ test('读取失败时抛出，由页面降级为空目录', async () => {
     globalThis.fetch = realFetch;
     resetModelDefaultsCache();
   }
+});
+
+test('renderProviderChips 按后端列表渲染并转义标签', () => {
+  const container = { innerHTML: '' };
+  renderProviderChips(container, [
+    { id: 'claude', label: 'Anthropic' },
+    { id: 'x', label: '<script>' },
+  ], 'claude');
+
+  assert.match(container.innerHTML, /data-provider="claude"/);
+  assert.match(container.innerHTML, /class="provider-chip active"[^>]*data-provider="claude"/);
+  assert.match(container.innerHTML, /&lt;script&gt;/);
+  assert.doesNotMatch(container.innerHTML, /<script>/);
 });

@@ -4,7 +4,7 @@
    本文件在抽取时**未改任何逻辑**。 */
 import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v503';
 import { api } from './api.js?v=20261016-v503';
-import { loadModelDefaults, EMPTY_MODEL_DEFAULTS } from './model-config.mjs?v=20261016-v503';
+import { loadModelDefaults, renderProviderChips, EMPTY_MODEL_DEFAULTS } from './model-config.mjs?v=20261016-v503';
 import { specContentHtml } from './spec-content.mjs?v=20261016-v503';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
@@ -592,6 +592,7 @@ const apiSave       = document.getElementById('btn-api-save');
 const btnTestConn   = document.getElementById('btn-test-conn');
 const testStatus    = document.getElementById('test-status');
 const providerChips = document.getElementById('provider-chips');
+renderProviderChips(providerChips, MODEL_DEFAULTS.providerList, DEFAULT_PROVIDER);
 const apiBaseUrl    = document.getElementById('api-base-url');
 const apiKeyInput   = document.getElementById('api-key');
 const apiModelInput = document.getElementById('api-model');

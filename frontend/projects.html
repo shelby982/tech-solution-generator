@@ -636,14 +636,7 @@
           <!-- 提供商 -->
           <div>
             <div class="api-field-label">API 提供商</div>
-            <div class="provider-chips" id="provider-chips">
-              <button class="provider-chip active" data-provider="claude">Anthropic</button>
-              <button class="provider-chip" data-provider="openai">OpenAI</button>
-              <button class="provider-chip" data-provider="deepseek">DeepSeek</button>
-              <button class="provider-chip" data-provider="kimi">Kimi</button>
-              <button class="provider-chip" data-provider="minimax">MiniMax</button>
-              <button class="provider-chip" data-provider="doubao">豆包</button>
-            </div>
+            <div class="provider-chips" id="provider-chips"></div>
           </div>
           <!-- Base URL -->
           <div>
@@ -689,7 +682,7 @@
 
     <script type="module">
       import { api } from './assets/api.js?v=20261016-v503';
-      import { loadModelDefaults, EMPTY_MODEL_DEFAULTS } from './assets/model-config.mjs?v=20261016-v503';
+      import { loadModelDefaults, renderProviderChips, EMPTY_MODEL_DEFAULTS } from './assets/model-config.mjs?v=20261016-v503';
 
       // 默认值唯一来源：后端 GET /api/model-defaults（失败则留空，配置弹窗可手填）。
       const MODEL_DEFAULTS = await loadModelDefaults().catch((err) => {
@@ -964,6 +957,7 @@
       const btnTestConn  = document.getElementById('btn-test-conn');
       const testStatus   = document.getElementById('test-status');
       const providerChips= document.getElementById('provider-chips');
+      renderProviderChips(providerChips, MODEL_DEFAULTS.providerList, DEFAULT_PROVIDER);
       const apiBaseUrl   = document.getElementById('api-base-url');
       const apiKeyInput  = document.getElementById('api-key');
       const apiModelInput= document.getElementById('api-model');
