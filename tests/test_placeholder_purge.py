@@ -47,3 +47,17 @@ def test_purge_table_cells_and_bad_tokens():
     out, removed = purge(text)
     assert "待填写" not in out and removed
     assert out.startswith("| 指标 | 值 |")
+
+
+def test_conflict_check_tolerates_system_normalization():
+    """保存冲突判定：只有"系统自动规范化"差异时不报 409（否则用户会凭空丢编辑）。"""
+    from routes.blocks import _normalized_for_compare
+
+    # 客户端持有的是"带占位符/未规整表格"的旧版本；库里的已被规范化
+    client_view = "## 一\n本节依据【待补充：立项批复】编制。\n"
+    stored = _normalized_for_compare(client_view)
+    assert "待补充" not in stored
+    # 归一后应一致 → 不触发冲突
+    assert _normalized_for_compare(client_view) == _normalized_for_compare(stored)
+    # 真正的内容差异仍然要能识别
+    assert _normalized_for_compare("完全不同的正文内容。") != _normalized_for_compare(stored)

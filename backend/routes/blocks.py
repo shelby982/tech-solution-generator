@@ -161,6 +161,32 @@ class GenerateRequest(BaseModel):
         return v
 
 
+def _normalized_for_compare(text: str) -> str:
+    """按"保存时会被系统自动规范化"的同一套规则归一，用于冲突判定。
+
+    系统会在保存路径自动做：交付门自清理 → 表格规整 → 补表名 → 占位符净化。
+    两次保存之间如果只差这些，说明正文没被别人改，应该放行而不是 409。
+    """
+    body = str(text or "")
+    try:
+        from services.delivery_gate import auto_fix as _gate
+        body, _changed, _ = _gate(body)
+    except Exception:
+        pass
+    try:
+        from services.body_tables import ensure_table_captions, normalize_table_rows
+        body = normalize_table_rows(body)
+        body, _added = ensure_table_captions(body)
+    except Exception:
+        pass
+    try:
+        from services.placeholder_purge import purge
+        body, _removed = purge(body)
+    except Exception:
+        pass
+    return body
+
+
 @router.put("/blocks/{block_id}")
 async def update_block(block_id: int, body: BlockUpdateRequest):
     async with get_db() as db:
@@ -169,7 +195,10 @@ async def update_block(block_id: int, body: BlockUpdateRequest):
         if existing is None:
             raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
         if body.expected_content is not None and body.expected_content != (existing.get('content') or ''):
-            raise HTTPException(409, '正文已被其他操作更新，本地修改已保留，请核对版本')
+            # 兼容"只是被系统规范化过"的情况（占位符净化/语法自清理/表格规整/补表名）：
+            # 这类差异不是别人改了正文，不该让用户丢编辑、只能重载。
+            if _normalized_for_compare(body.expected_content) != _normalized_for_compare(existing.get('content') or ''):
+                raise HTTPException(409, '正文已被其他操作更新，本地修改已保留，请核对版本')
         updated = existing
         if body.content is not None and body.content != existing.get("content"):
             if existing.get("content") and not await list_revisions(db, block_id):
