@@ -247,6 +247,10 @@ body[data-view="outline"] #mat-section-src { display: none; }
   gap:10px; padding:10px 14px 0;
 }
 .mat-cards:empty{display:none}
+/* 「收起台面」必须真的收起：display:grid 会覆盖 hidden 属性，这里补 !important */
+.mat-cards[hidden]{display:none !important}
+.desk-foot[hidden]{display:none !important}
+.mat-rows[hidden]{display:none !important}
 .mcard{
   display:flex; flex-direction:column; gap:7px; min-height:132px;
   background:#fff; border:1px solid var(--line); border-radius:12px; padding:9px 11px 8px;
