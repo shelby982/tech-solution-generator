@@ -315,5 +315,6 @@ if updated:
 - UI 当前结果显示「终评 / 编写评审」，历史可展开且每条带 stage。
 - `reset-analysis` 清理 chapter_reviews/review_history/review_issue_states。
 - 旧 reviews-only 轮次在启动时回填为 final（版本留空，随后重评一次）。
+- 旧 `chapter_reviews` 无版本行同样重评一次；成功后写版本，之后复用（用户已确认）。
 
 详见执行记录第 15 节。

@@ -440,3 +440,18 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - 确定性全局一致性 pass。
 
 复核后：后端 **1124 passed** / 前端 **164 passed**。
+
+---
+
+## 17. 旧无版本章评审：确认「重评一次」
+
+已确认选择：旧 `chapter_reviews` 里没有 `content_version/evidence_version` 的行（当前库 14/20）
+**不做时间回填、不直接复用**，由下一次终评重评一次；评完写入版本，之后正常复用。
+
+- 终评选择逻辑：版本为空 → 视为 stale/unknown → 进入本轮；重评成功后
+  `upsert_chapter_review` 写入 content/evidence version，下一轮即命中复用。
+- 重评前，`scoring_risk` / `scoring_verdict` 也会把 unknown 当未验证，不会拿旧结论当 current。
+- 如果重评调用失败，该章没有新版本，下一次终评会再次尝试（不是严格"只一次"，而是
+  "成功后只一次"；失败重试是刻意的）。
+- 新增回归测试 `test_legacy_chapter_review_without_versions_is_reviewed_once`：
+  无版本 → 进入重评；写入版本 → 第二轮不再调用模型。

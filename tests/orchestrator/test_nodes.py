@@ -1545,3 +1545,56 @@ async def test_run_review_clears_scope_when_all_chapters_are_reused():
     )
     assert agent.scopes == []
     assert patch["review"]["reviewed_blocks"] == []
+
+
+async def test_legacy_chapter_review_without_versions_is_reviewed_once():
+    """旧章评审没有版本号：确认会被重评一次；评完写入版本后不再重复。"""
+    from db import get_db
+    from services.review_store import upsert_chapter_review
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-s1', 'tid-legacy', 'generating')")
+        row = await (await db.execute(
+            "SELECT * FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+        # 模拟迁移前的旧章评审：有分数但没有 content/evidence version
+        await upsert_chapter_review(
+            db, block_pk=int(row["id"]), project_id=1, thread_id="tid-legacy",
+            stage="writing", versions={}, tier="writing",
+            data={"tech_score": 80, "comp_score": 80, "score": 80,
+                  "satisfied": "partial", "criterion_text": "", "covered_points": [],
+                  "missing_points": [], "issues": [], "needs_material": []},
+        )
+
+    agent = _RecordingReviewer()
+    state = {
+        "project_id": 1, "thread_id": "tid-legacy",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "spec": {"outline_matrix": {}},
+    }
+    patch = await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+    assert agent.scopes == [["s1"]]          # 没有版本 → 必须重评
+    state.update(patch)
+    await nodes.aggregate_review_node(state)
+
+    agent2 = _RecordingReviewer()
+    state2 = {
+        "project_id": 1, "thread_id": "tid-legacy",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {"reviewed_blocks": ["s1"]},
+    }
+    await nodes._run_review(
+        state2, agent=agent2, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+    assert agent2.scopes == []               # 已带版本 → 复用，不再重评
+    async with get_db() as db:
+        cr = await (await db.execute(
+            "SELECT content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
+            (row["id"],))).fetchone()
+    assert cr["content_version"] and cr["evidence_version"]
