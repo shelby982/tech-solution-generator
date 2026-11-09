@@ -1,6 +1,6 @@
 import {workspace, subscribe, refreshWorkspace, workspaceUrl, confirmChapterAction, openDialog, showHistory, statusLabels, esc} from './workspace.js?v=20261016-v503';
 // 章节状态/依据徽标与「素材库」共用一份投影（同一棵目录树，四个环节都一样）
-import {chapterBadges, parseEvidence} from './workspace-model.mjs?v=20261016-v503';
+import {parseEvidence} from './workspace-model.mjs?v=20261016-v503';
 // 左栏章节树：**三个模式共用一份**行标记（2026-10-13 归一）。
 // 此前编辑器侧自己拼 `.doc-outline-item`、大纲侧拼 `.ot-row`，是两套实现；
 // 数据投影本就共用（workspace-model），这里把标记也收敛掉。

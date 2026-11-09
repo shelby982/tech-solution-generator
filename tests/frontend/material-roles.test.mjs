@@ -69,7 +69,7 @@ test('技术规范书被归为素材时给出纠错提示', () => {
 test('提示文案本身不含 HTML（文件名由页面另行转义后拼接）', () => {
   // 提示框在页面上用 innerHTML 渲染，文件名可能带尖括号。
   // 本模块的职责是**只产出纯文本提示**（不回显文件名），
-  // 文件名由 project-init.html 的 escapeHtmlForRole 转义后拼接。
+  // 文件名由 mode-outline.js 的 escapeHtmlForRole 转义后拼接。
   const warn = roleMismatchWarning('source', '<img>.技术规范书.docx');
   assert.ok(warn, '应给出提示');
   assert.ok(!warn.includes('<img>'), '模块不应把文件名回显进提示');

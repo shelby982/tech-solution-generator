@@ -132,37 +132,6 @@ export const api = {
       const qs = p.toString();
       return fetch(`/api/projects/${projectId}/material-chunks${qs ? `?${qs}` : ''}`).then(parseJsonResponse);
     },
-    // outline 后端为 POST + SSE，使用 fetch + ReadableStream
-    outline: async (projectId, { onBlock, onDone, onError } = {}) => {
-      const resp = await fetch(`/api/projects/${projectId}/outline`, { method: 'POST' });
-      if (!resp.ok || !resp.body) {
-        onError?.(new Error(`outline 请求失败: ${resp.status}`));
-        return;
-      }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop(); // 保留未完成行
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-          try {
-            const data = JSON.parse(raw);
-            if (data.block_id) onBlock?.(data);
-            if ('block_count' in data) onDone?.(data);
-          } catch {}
-        }
-      }
-      if (buf) onDone?.({});
-    },
-    mapSources: (projectId) =>
-      fetch(`/api/projects/${projectId}/map-sources`, { method: 'POST' }).then(parseJsonResponse),
   },
 
   blocks: {

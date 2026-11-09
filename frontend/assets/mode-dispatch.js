@@ -45,10 +45,6 @@ export function setMode(mode, { push = false } = {}) {
   return next;
 }
 
-export function currentMode() {
-  return document.body.dataset.view || readMode();
-}
-
 /** 导航的渲染权在 workspace.js（它还负责状态条）：合并页里它会输出 data-mode 链接，
  *  本模块只绑定点击、维护 body[data-view]。包一层是为了调用处更好读。 */
 function renderNav() {
@@ -95,12 +91,6 @@ function init() {
   document.dispatchEvent(new CustomEvent('workspace:mode', { detail: { mode, initial: true } }));
   renderActiveTree(mode);
 
-  document.getElementById('workspace-nav')?.addEventListener('click', (e) => {
-    const a = e.target.closest('a[data-mode]');
-    if (!a) return;
-    e.preventDefault();
-    setMode(a.dataset.mode, { push: true });
-  });
 
   // 浏览器前进/后退：回到对应模式，不重刷
   window.addEventListener('popstate', () => setMode(readMode()));

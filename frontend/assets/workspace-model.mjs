@@ -3,7 +3,6 @@
 // 从 material-roles.mjs 再导出，页面统一经本模块取，避免多处各写一套文案。
 export {
   REQUIREMENT_ROLES, SOURCE_ROLES, ALL_MATERIAL_ROLES,
-  ROLE_LABEL as materialRoleLabels, ROLE_HINT as materialRoleHints,
   isRequirementRole, inferRoleFromFilename, roleMismatchWarning,
 } from './material-roles.mjs?v=20261016-v503';
 
@@ -538,7 +537,7 @@ export function instructionDirty(current, applied) {
 //   素材 → 供哪些章 / 哪些条目；  章节条目 → 有哪些依据。
 // 这些投影是纯函数（不碰 DOM），方便单测；页面只负责渲染。
 export const EVIDENCE_KIND_LABELS = { fact: '事实', solution: '方案', background: '背景' };
-export const EVIDENCE_SOURCE_LABELS = { ours: '我方素材', tender: '招标文件' };
+const EVIDENCE_SOURCE_LABELS = { ours: '我方素材', tender: '招标文件' };
 export const EVIDENCE_BY_LABELS = {
   rule: '规则命中', semantic: '语义命中', model: 'AI 归属', human: '人工挂接',
 };
@@ -846,7 +845,6 @@ export function matchEntryDecision({ stage, totalBlocks = 0, doneBlocks = 0, run
 //   extracted 已提炼（8 字段有了）
 //   matched   已匹配（本章有 n 条依据；没有依据是正常态，不等于没匹配过）
 //   written   已撰写（有正文）
-export const CHAPTER_STAGES = ['no_source', 'pending', 'extracted', 'matched', 'written'];
 
 export const CHAPTER_STAGE_LABELS = {
   no_source: '无需提炼', pending: '待提炼', extracted: '已提炼',

@@ -23,7 +23,6 @@ export const MODE_LABEL = {
 };
 
 /** 质量检查是独立页面（评审结果展示与 diff），不属于本页三模式。 */
-export const REVIEW_PATH = '/review';
 
 /** 各模式的"栏目职责"，用于切换时决定中/右两栏挂什么。 */
 export const MODE_PANEL = {

@@ -101,63 +101,17 @@
 .header-tools a:hover, .header-tools button:hover { color: var(--text); }
 
 /* 状态行右侧的工具链接（已挪走，保留选择器以防残留引用） */
-.status-bar-tools { display: flex; align-items: center; gap: 10px; padding-left: 10px;
-  border-left: 1px solid var(--line); font-size: 12px; }
-.status-bar-tools a, .status-bar-tools button {
-  color: var(--muted); background: none; border: none; font: inherit; cursor: pointer; padding: 0;
-}
-.status-bar-tools a:hover, .status-bar-tools button:hover { color: var(--text); }
-.materials-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--line);
-}
-.app-logo-sm {
-  width: 32px; height: 32px;
-  background: var(--text);
-  border-radius: 8px;
-  display: grid; place-items: center;
-  color: #fff; font-size: 13px; font-weight: 700;
-  flex: none;
-}
-.app-title { font-size: 13px; font-weight: 700; }
-.project-name-sm { font-size: 11.5px; color: var(--muted); }
+
 .package-context{font-size:12px;color:#2949b6;background:#eef2ff;border:1px solid #d7ddff;
   border-radius:999px;padding:4px 10px;text-decoration:none;white-space:nowrap}
-.materials-project-name {
-  padding: 12px 14px 8px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  border-bottom: 1px solid var(--line);
-}
-.materials-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
 .mat-section {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px 14px 10px;
 }
-.mat-section-top {
-  padding: 0 0 10px;
-}
-.mat-section-header {
-  display: flex; align-items: center; gap: 6px;
-  margin-bottom: 3px;
-}
-.mat-index { font-size: 10px; color: var(--muted-2); font-weight: 700; }
-.mat-count {
-  margin-left: auto;
-  font-size: 11px; color: var(--muted);
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 1px 9px;
-}
-.mat-sub { font-size: 11px; color: var(--muted); margin: 0; }
-.mat-divider { display: none; }
+
 .mat-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .mat-row {
   display: flex; align-items: center; gap: 8px;
@@ -178,19 +132,7 @@
 .mat-size { font-size: 11.5px; color: var(--muted); flex: none; }
 .mat-del { background: none; border: none; cursor: pointer; color: var(--muted); padding: 0 2px; font-size: 15px; line-height: 1; }
 .mat-del:hover { color: var(--text); }
-.mat-add-row { padding: 0; display: flex; gap: 8px; align-items: stretch; }
-.mat-role-badge {
-  font-size: 10.5px;
-  padding: 2px 7px;
-  border-radius: 10px;
-  flex: none;
-  font-weight: 600;
-}
-.mat-role-badge.role-main_rfp,
-.mat-role-badge.role-requirement { background: #dbeafe; color: #1e40af; }
-.mat-role-badge.role-spec        { background: #ccfbf1; color: #115e59; }
-.mat-role-badge.role-scoring     { background: #fef3c7; color: #92400e; }
-.mat-role-badge.role-evaluation  { background: #ede9fe; color: #5b21b6; }
+
 /* 已上传文件 role 下拉：与 mat-role-badge 同款配色，可点击修改 */
 .mat-role-select {
   font-size: 11px;
@@ -289,7 +231,6 @@ body[data-view="matching"] #mat-section-req { display: none; }
 /* 解析大纲视图：隐藏原始素材模块（仅在素材匹配视图才需要看到素材） */
 body[data-view="outline"] #mat-section-src { display: none; }
 /* 拆分要求只作用于「解析大纲」阶段（闸门 1 的整版重出） */
-body[data-view="matching"] #mat-section-instruction { display: none; }
 
 /* 底部操作区 */
 .materials-footer {
@@ -428,7 +369,7 @@ body[data-view="matching"] #mat-section-instruction { display: none; }
 .btn-add-config:hover { background: var(--bg-2); }
 .btn-add-config-left { display: flex; align-items: center; gap: 6px; }
 .btn-add-config-plus { font-size: 16px; line-height: 1; }
-.btn-add-config-api { font-size: 11.5px; color: var(--muted); }
+
 /* API 配置弹窗 */
 .api-modal-backdrop {
   display: none; position: fixed; inset: 0;
@@ -893,8 +834,7 @@ body[data-view="matching"] .match-detail { display: block; }
 .mw-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .mw-meta { margin-top: 4px; font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
 .mw-body { padding: 4px 16px 24px; }
-.mw-sect { margin-top: 14px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.mw-acts { display: inline-flex; gap: 4px; }
+
 .be-item-acts { flex: 0 0 auto; }
 /* 依据行内的动作按钮（解绑/改挂载）：默认淡，hover 才显眼，避免卡片被按钮淹没 */
 .be-acts { flex: 0 0 auto; display: inline-flex; gap: 4px; }
@@ -932,18 +872,7 @@ body[data-view="matching"] .match-detail { display: block; }
 .mw-chunk.mounted { opacity: .55; }
 
 /* 右侧边栏 */
-.init-sidebar {
-  width: 80px; flex: 0 0 80px;
-  border-left: 1px solid var(--line);
-  background: var(--panel);
-  display: flex; flex-direction: column;
-  transition: width 0.2s; overflow: hidden;
-}
-.sidebar-progress {
-  display: flex; align-items: center; gap: 10px;
-  padding: 16px 14px 12px;
-  border-bottom: 1px solid var(--line);
-}
+
 .ring-bg { stroke: var(--line); }
 .ring-fill { stroke: var(--text); transition: stroke-dashoffset 0.4s; }
 .sidebar-progress-text { font-size: 12px; color: var(--muted); }
@@ -1071,7 +1000,7 @@ body[data-view="matching"] .match-detail { display: block; }
   outline-offset: 2px;
   background: #eff6ff;
 }
-    
+
 
 /* ── 编辑器模式（原 workbench.html 内联样式，三模式合并时并入）── */
 
@@ -1108,25 +1037,11 @@ body[data-view="matching"] .match-detail { display: block; }
 
       /* heading 行 */
 
-      .doc-outline-heading {
-        display: flex; align-items: center; gap: 4px;
-        width: 100%; min-height: 36px;
-        padding: 6px 14px 6px 8px;
-        border: 0; border-left: 2px solid transparent;
-        background: transparent; color: var(--ink); font: inherit;
-        font-size: 14px; font-weight: 700;
-        line-height: 1.3; text-align: left; cursor: pointer;
-        transition: background 0.1s;
-      }
 
-      .doc-outline-heading:hover { background: var(--bg-2); }
 
-      .outline-chevron {
-        flex: 0 0 16px; height: 16px;
-        display: inline-flex; align-items: center; justify-content: center;
-        color: var(--ink-4); font-size: 11px;
-        transition: transform 0.15s;
-      }
+
+
+
 
       /* content 行 */
 
@@ -1154,11 +1069,7 @@ body[data-view="matching"] .match-detail { display: block; }
         color: var(--ink); font-weight: 600;
       }
 
-      .outline-item-bullet {
-        flex: 0 0 5px; height: 5px; width: 5px;
-        border-radius: 50%; background: #9ca3af;
-        margin-right: 9px; flex-shrink: 0;
-      }
+
 
       .outline-item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1305,7 +1216,6 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .outline-batch-cancel:hover { color: var(--ink); border-color: var(--ink-3); }
 
-
       /* Editor pane */
 
       .editor-pane {
@@ -1336,24 +1246,11 @@ body[data-view="matching"] .match-detail { display: block; }
         gap: 16px;
       }
 
-      .section-header-actions { display: flex; gap: 8px; flex: none; }
 
-      .btn-mark-done {
-        all: unset;
-        cursor: pointer;
-        padding: 6px 12px;
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        font-size: 12.5px;
-        color: var(--ink-2);
-        background: var(--surface);
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        transition: background 0.1s;
-      }
 
-      .btn-mark-done:hover { background: var(--bg-2); }
+
+
+
 
       /* 栏头 / chips / 搜索 / 目录行：共用样式在 assets/styles.css（.chap-*） */
 
@@ -1379,7 +1276,7 @@ body[data-view="matching"] .match-detail { display: block; }
         padding: 10px 20px 0;
       }
 
-      .et-restore { font-size: 14px; line-height: 1; padding: 2px 8px; }
+
 
       .et-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 
@@ -1484,36 +1381,13 @@ body[data-view="matching"] .match-detail { display: block; }
 
       /* ── 准备参考折叠区 ── */
 
-      .ref-section {
-        flex: 0 0 auto;
-        padding: 10px 20px;
-        background: var(--surface-2);
-        border-bottom: 1px solid var(--line);
-      }
 
-      .ref-section-label {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
-        font-size: 10.5px;
-        font-weight: 700;
-        color: var(--ink-4);
-        font-family: "SF Mono", ui-monospace, monospace;
-        letter-spacing: 0.8px;
-      }
 
-      .ref-section-label .ref-divider {
-        flex: 1;
-        height: 1px;
-        background: var(--line);
-      }
 
-      .ref-cards-row {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 8px;
-      }
+
+
+
+
 
       .ref-cards-col {
         display: flex;
@@ -1610,25 +1484,11 @@ body[data-view="matching"] .match-detail { display: block; }
         border-radius: 6px; padding: 3px 6px;
       }
 
-      .ref-bullet-list {
-        margin: 0; padding: 0; list-style: none;
-        display: flex; flex-direction: column; gap: 6px;
-      }
 
-      .ref-bullet-list li {
-        display: flex; gap: 7px;
-        font-size: 12px; color: var(--ink-2); line-height: 1.55;
-      }
 
-      .ref-bullet-num {
-        flex: none;
-        font-family: "SF Mono", ui-monospace, monospace;
-        font-size: 10px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-        min-width: 16px;
-        padding-top: 2px;
-      }
+
+
+
 
       /* ── 原有 editor-toolbar 保留，重命名为 batch-toolbar ── */
 
@@ -1691,78 +1551,23 @@ body[data-view="matching"] .match-detail { display: block; }
 
       /* Block detail panel */
 
-      .block-detail-panel {
-        flex: 1;
-        overflow-y: auto;
-        padding: 24px 28px;
-      }
 
-      .block-detail-empty {
-        color: var(--ink-4);
-        font-size: 13px;
-        padding: 20px 0;
-      }
 
-      .block-detail-title {
-        font-size: 17px;
-        font-weight: 700;
-        color: var(--ink);
-        margin: 0 0 20px;
-        line-height: 1.4;
-      }
 
-      .block-detail-section {
-        margin-bottom: 20px;
-      }
 
-      .block-detail-label {
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--ink-4);
-        margin: 0 0 8px;
-      }
 
-      .block-detail-req-box {
-        font-size: 13px;
-        color: var(--ink-2);
-        line-height: 1.7;
-        padding: 12px 14px;
-        background: var(--bg-2);
-        border-radius: 8px;
-        white-space: pre-wrap;
-      }
 
-      .block-detail-points {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
 
-      .block-detail-points li {
-        font-size: 13px;
-        color: var(--ink-2);
-        line-height: 1.6;
-        padding: 8px 12px 8px 34px;
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        position: relative;
-      }
 
-      .block-detail-points li::before {
-        content: '·';
-        position: absolute;
-        left: 14px;
-        color: var(--accent);
-        font-weight: 700;
-        font-size: 16px;
-        line-height: 1.4;
-      }
+
+
+
+
+
+
+
+
+
 
       .block-detail-points.reject li {
         background: #fff8f7;
@@ -1802,27 +1607,11 @@ body[data-view="matching"] .match-detail { display: block; }
       }
       /* Numbered module headers */
 
-      .block-detail-module-header {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        margin-bottom: 10px;
-      }
 
-      .block-detail-num {
-        font-size: 22px;
-        font-weight: 700;
-        color: var(--ink-4);
-        font-family: "SF Mono", ui-monospace, monospace;
-        flex: 0 0 auto;
-        line-height: 1;
-      }
 
-      .block-detail-module-title {
-        font-size: 15px;
-        font-weight: 700;
-        color: var(--ink);
-      }
+
+
+
 
       .gen-status-title {
         font-size: 12px;
@@ -1874,17 +1663,9 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .gen-status-cancel:hover { color: var(--ink); border-color: var(--ink-3); }
 
-      .tiptap-shell {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        padding: 28px 0 80px;
-      }
 
-      .tiptap-inner {
-        width: min(860px, calc(100% - 48px));
-        margin: 0 auto;
-      }
+
+
 
       /* ── 正文编辑器卡 ── */
 
@@ -1899,35 +1680,11 @@ body[data-view="matching"] .match-detail { display: block; }
         min-height: 400px;
       }
 
-      .ced-header {
-        flex: 0 0 auto;
-        padding: 10px 16px;
-        border-bottom: 1px solid var(--line-2);
-        background: linear-gradient(180deg, #fafaf7, #ffffff);
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
 
-      .ced-step-badge {
-        display: inline-grid;
-        place-items: center;
-        width: 22px; height: 22px;
-        border-radius: 6px;
-        background: var(--ink);
-        color: #fff;
-        font-size: 10.5px;
-        font-weight: 700;
-        font-family: "SF Mono", ui-monospace, monospace;
-        flex: none;
-      }
 
-      .ced-title {
-        margin: 0;
-        font-size: 13.5px;
-        font-weight: 700;
-        color: var(--ink);
-      }
+
+
+
 
       .ced-page-hint {
         font-size: 11.5px;
@@ -1939,14 +1696,7 @@ body[data-view="matching"] .match-detail { display: block; }
         border: 1px solid oklch(0.88 0.05 250);
       }
 
-      .ced-auto-badge {
-        font-size: 11px;
-        color: var(--ink-3);
-        padding: 1px 8px;
-        border-radius: 999px;
-        background: var(--surface-2);
-        border: 1px solid var(--line);
-      }
+
 
       .ced-save-time {
         font-size: 11px;
@@ -2250,24 +2000,11 @@ body[data-view="matching"] .match-detail { display: block; }
         box-shadow: 0 10px 20px -14px rgba(20,40,90,0.18);
       }
 
-      .ced-ai-hint-title {
-        display: flex; align-items: center; gap: 6px;
-        font-size: 12.5px; font-weight: 700;
-        color: oklch(0.38 0.13 256);
-      }
 
-      .ced-ai-hint-desc {
-        font-size: 11px; color: var(--ink-3); line-height: 1.6;
-      }
 
-      .ced-ai-hint-btn {
-        all: unset;
-        cursor: pointer;
-        padding: 5px 10px; border-radius: 6px;
-        background: var(--accent); color: #fff;
-        font-size: 11.5px; font-weight: 600;
-        display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-      }
+
+
+
       /* 底栏 */
 
       .ced-footer {
@@ -2317,170 +2054,51 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .ced-tool-btn:hover { color: var(--ink); border-color: var(--ink-3); }
 
-      .context-section {
-        padding: 12px 14px;
-        border-bottom: 1px solid var(--line);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
 
-      .context-section:last-child { border-bottom: 0; }
 
-      .context-label {
-        font-size: 10.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--ink-4);
-        font-family: "SF Mono", ui-monospace, monospace;
-        margin: 0;
-      }
 
-      .context-content {
-        font-size: 12.5px;
-        color: var(--ink-2);
-        line-height: 1.55;
-      }
 
-      .context-req-block {
-        padding: 8px 10px;
-        background: var(--accent-soft);
-        border: 1px solid var(--accent-soft-border);
-        border-radius: 7px;
-        font-size: 12px;
-        color: var(--accent-ink);
-        line-height: 1.6;
-      }
 
-      .context-sources-list {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
 
-      .context-source-item {
-        padding: 7px 10px;
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        font-size: 11.5px;
-        color: var(--ink-2);
-        line-height: 1.5;
-      }
 
-      .context-source-name {
-        font-weight: 600;
-        color: var(--ink);
-        margin-bottom: 2px;
-      }
+
+
+
+
+
+
+
+
 
       /* AI action section */
 
-      .ai-section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
 
-      .ai-section-header h4 {
-        margin: 0;
-        font-size: 10.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--ink-4);
-        font-family: "SF Mono", ui-monospace, monospace;
-      }
 
-      .ai-toggle {
-        position: relative;
-        width: 28px;
-        height: 16px;
-        border: 0;
-        border-radius: 999px;
-        background: #0f9f6e;
-        cursor: pointer;
-        padding: 0;
-        flex: none;
-      }
 
-      .ai-toggle i {
-        position: absolute;
-        top: 2px;
-        left: 14px;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(0,0,0,.2);
-      }
 
-      .ai-action-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 5px;
-      }
 
-      .ai-action-btn {
-        all: unset;
-        cursor: pointer;
-        padding: 7px 10px;
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--ink-2);
-        background: var(--surface);
-        text-align: center;
-        transition: background 0.1s;
-      }
 
-      .ai-action-btn:hover { background: var(--bg-2); }
+
+
+
+
+
+
+
 
       /* AI suggestion */
 
-      .ai-suggestion {
-        padding: 10px 12px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--surface);
-      }
 
-      .ai-suggestion-title {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--ink);
-        margin: 0 0 5px;
-      }
 
-      .ai-suggestion-text {
-        font-size: 12px;
-        line-height: 1.55;
-        color: var(--ink-2);
-        margin: 0 0 8px;
-      }
 
-      .suggestion-actions {
-        display: flex;
-        gap: 5px;
-      }
 
-      .suggestion-btn {
-        all: unset;
-        cursor: pointer;
-        padding: 5px 10px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--ink-2);
-        background: var(--surface);
-        transition: background 0.1s;
-      }
 
-      .suggestion-btn:hover { background: var(--bg-2); }
+
+
+
+
+
+
 
       .suggestion-btn.accept {
         background: var(--accent);
@@ -2492,56 +2110,19 @@ body[data-view="matching"] .match-detail { display: block; }
 
       /* History */
 
-      .history-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: var(--surface);
-        font-size: 11.5px;
-        color: var(--ink-3);
-        cursor: pointer;
-        transition: background 0.1s;
-      }
 
-      .history-item:hover { background: var(--bg-2); color: var(--ink-2); }
 
-      .history-dot {
-        width: 6px; height: 6px;
-        border-radius: 50%;
-        background: var(--line);
-        flex: none;
-      }
+
+
+
 
       /* ── 匹配素材面板 Tab ── */
 
-      .mat-pane-tabs {
-        display: flex;
-        border-bottom: 1px solid var(--line);
-        background: var(--surface);
-        flex: 0 0 auto;
-      }
 
-      .mat-tab {
-        all: unset;
-        flex: 1;
-        cursor: pointer;
-        padding: 11px 8px;
-        text-align: center;
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--ink-3);
-        border-bottom: 2px solid transparent;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        transition: color 0.12s, border-color 0.12s;
-      }
 
-      .mat-tab:hover { color: var(--ink-2); }
+
+
+
 
       .mat-tab.active {
         color: var(--ink);
@@ -2565,29 +2146,13 @@ body[data-view="matching"] .match-detail { display: block; }
         background: var(--bg-2);
       }
 
-      .mat-tab-panel {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        overflow: hidden;
-      }
 
-      .mat-tab-panel[hidden] { display: none; }
 
-      .mat-panel-hint {
-        padding: 7px 12px;
-        font-size: 11px;
-        color: var(--ink-4);
-        background: var(--surface-2);
-        border-bottom: 1px solid var(--line-2);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex: 0 0 auto;
-      }
 
-      .mat-panel-hint > span:first-child { flex: 1; }
+
+
+
+
 
       .mat-refresh-btn {
         all: unset;
@@ -2974,141 +2539,6 @@ body[data-view="matching"] .match-detail { display: block; }
 
       .edit-modal-btn.save:disabled { opacity: 0.5; cursor: not-allowed; }
 
-      /* ── 顶部准备进度条 ── */
-
-      .extract-action-bar {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 7px 18px;
-        background: var(--surface-2, #f8fafc);
-        border-bottom: 1px solid var(--line);
-        font-size: 12.5px;
-      }
-
-      .extract-action-bar.hidden { display: none; }
-
-      .extract-action-label { color: var(--ink-3); font-weight: 600; }
-
-      .extract-action-btn {
-        padding: 4px 14px;
-        border: 1px solid var(--accent, #2563eb);
-        border-radius: 6px;
-        background: var(--accent, #2563eb);
-        color: #fff;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .extract-action-btn:hover { opacity: 0.88; }
-
-      .extract-progress-bar {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
-        background: linear-gradient(90deg, oklch(0.97 0.02 256), oklch(0.98 0.01 256));
-        border-bottom: 1px solid oklch(0.88 0.05 256);
-        font-size: 12px;
-        color: oklch(0.38 0.13 256);
-      }
-
-      .extract-progress-bar.hidden { display: none; }
-
-      .extract-progress-spinner {
-        width: 12px; height: 12px;
-        border: 2px solid oklch(0.88 0.05 256);
-        border-top-color: var(--accent, #2563eb);
-        border-radius: 50%;
-        animation: spin 0.85s linear infinite;
-        flex: none;
-      }
-
-      .extract-progress-label {
-        font-weight: 600;
-        flex: none;
-      }
-
-      .extract-progress-track {
-        flex: 1;
-        min-width: 80px;
-        height: 4px;
-        background: oklch(0.88 0.05 256);
-        border-radius: 999px;
-        overflow: hidden;
-      }
-
-      .extract-progress-fill {
-        height: 100%;
-        background: var(--accent, #2563eb);
-        border-radius: 999px;
-        width: 0%;
-        transition: width 0.3s;
-      }
-
-      .extract-progress-pct {
-        flex: none;
-        font-variant-numeric: tabular-nums;
-        color: oklch(0.45 0.1 256);
-      }
-
-      .extract-progress-stage {
-        flex: none;
-        color: oklch(0.45 0.1 256);
-        font-variant-numeric: tabular-nums;
-      }
-        font-family: 'SF Mono', ui-monospace, monospace;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-        flex: none;
-      }
-
-      .extract-cancel-btn {
-        all: unset;
-        cursor: pointer;
-        padding: 4px 12px;
-        border-radius: 6px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--ink-2);
-        border: 1px solid var(--line);
-        background: var(--surface);
-        flex: none;
-        transition: background 0.1s;
-      }
-
-      .extract-cancel-btn:hover { background: var(--bg-2); color: var(--ink); }
-
-      .extract-cancel-btn.hidden { display: none; }
-
-      .extract-retry-btn {
-        all: unset;
-        cursor: pointer;
-        padding: 4px 12px;
-        border-radius: 6px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: #fff;
-        background: var(--accent, #2563eb);
-        flex: none;
-        transition: opacity 0.1s;
-      }
-
-      .extract-retry-btn:hover { opacity: 0.88; }
-
-      .extract-retry-btn.hidden { display: none; }
-
-      .extract-progress-bar.error {
-        background: #fff8f7;
-        border-bottom-color: #ffd5d0;
-        color: #7a2020;
-      }
-
-      .extract-progress-bar.cancelled .extract-progress-spinner { display: none; }
-
       /* 模型选择器 */
 
       .model-selector-wrap { position: relative; }
@@ -3319,19 +2749,15 @@ body[data-view="matching"] .match-detail { display: block; }
       .btn-go-review-top:hover { background: #15803d; }
 
       .btn-go-review-top:disabled { opacity: 0.4; cursor: not-allowed; }
-    
+
   /* ── 三模式可见性（2026-10-13 合并）──────────────────────────────
      同一页面承载三个模式，靠 body[data-view] 决定露出哪一块。
      编辑器的 chrome（头部动作条 / 编辑器区 / 素材抽屉）只在 editor 模式可见。 */
   #generation-done-banner,
-  #extract-action-bar,
-  #extract-progress-bar,
   .ws-editor-layout,
   .mat-drawer-wb { display: none; }
 
-  body[data-view="editor"] #generation-done-banner:not([hidden]),
-  body[data-view="editor"] #extract-action-bar:not(.hidden),
-  body[data-view="editor"] #extract-progress-bar:not(.hidden) { display: flex; }
+  body[data-view="editor"] #generation-done-banner:not([hidden]) { display: flex; }
   /* 行内 style="display:flex" 会压过类规则，所以非 editor 模式必须加 !important */
   body:not([data-view="editor"]) .ws-editor-layout { display: none !important; }
   body[data-view="editor"] .ws-editor-layout { display: flex; }
@@ -3406,24 +2832,6 @@ body[data-view="matching"] .match-detail { display: block; }
           <button class="btn-go-review" type="button">进入评审 →</button>
         </div>
 
-        <!-- 准备操作栏（有材料但无/少 blocks 时显示） -->
-        <div class="extract-action-bar hidden" id="extract-action-bar">
-          <span class="extract-action-label">大纲准备</span>
-          <button type="button" class="extract-action-btn" id="btn-start-extract">准备</button>
-        </div>
-
-        <!-- 准备进度条（autoExtract 模式显示） -->
-        <div class="extract-progress-bar hidden" id="extract-progress-bar">
-          <span class="extract-progress-spinner" id="extract-spinner"></span>
-          <span class="extract-progress-label">准备大纲</span>
-          <div class="extract-progress-track">
-            <div class="extract-progress-fill" id="extract-progress-fill"></div>
-          </div>
-          <span class="extract-progress-pct" id="extract-progress-pct">0%</span>
-          <span class="extract-progress-stage" id="extract-progress-stage">0/0</span>
-          <button type="button" class="extract-cancel-btn" id="extract-cancel-btn">取消</button>
-        </div>
-
 
   <!-- 材料条（原左侧整列搬到顶部，释放宽度给内容） -->
   <section class="init-materials-panel" id="materials-panel">
@@ -3454,7 +2862,7 @@ body[data-view="matching"] .match-detail { display: block; }
     <div class="desk-foot" id="desk-foot">
       <b>解析标包</b> = 读取已上传文件的正文，检索「标的 / 标包 / 标段」，只按原文事实列出，找不到就说找不到
     </div>
-    <!-- 明细表格：入口已按用户要求移除（改类型/删除改到卡片上）。节点保留但隐藏 —— 
+    <!-- 明细表格：入口已按用户要求移除（改类型/删除改到卡片上）。节点保留但隐藏 ——
          renderMats 等既有代码仍会写入它，删节点会造成空引用。 -->
     <div class="mrow2 collapsed" id="mat-rows" hidden>
       <div class="mat-section" id="mat-section-req">

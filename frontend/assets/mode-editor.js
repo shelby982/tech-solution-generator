@@ -5,7 +5,6 @@
 import { GenerateSession } from './generate-session.js?v=20261016-v503';
 // 左栏章节树：与「要求与大纲 / 素材库」共用一份行标记（2026-10-13 左栏归一）
 import { chapterNode, renderChapterTree } from './chapter-tree.mjs?v=20261016-v503';
-import { initContextPanel } from './context-panel.js?v=20261016-v503';
 import { api } from './api.js?v=20261016-v503';
 import { request as workspaceRequest, refreshWorkspace, workspace, confirmChapterAction ,
          uiAlert, uiConfirm} from './workspace.js?v=20261016-v503';
@@ -19,10 +18,7 @@ let responseItemsByBlock = {};
 // 准备字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
 // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
 // "每行显示 #undefined"）。
-import { CONSTRAINT_LEVELS, constraintLevelLabel,
-         evidenceKindBadgeHtml, evidenceSourceLineHtml, evidenceSnippet,
-         chapterStage, CHAPTER_STAGE_LABELS } from './workspace-model.mjs?v=20261016-v503';
-initContextPanel();
+import { CONSTRAINT_LEVELS, evidenceKindBadgeHtml } from './workspace-model.mjs?v=20261016-v503';
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
 // 引用动作在抽屉里完成，编辑区底部保留「已引用 n 条」。
@@ -2266,33 +2262,6 @@ matModalClose?.addEventListener('click', () => matModalBackdrop.classList.remove
 matModalBackdrop?.addEventListener('click', e => { if (e.target === matModalBackdrop) matModalBackdrop.classList.remove('open'); });
 btnMatModalUpload?.addEventListener('click', () => srcFileInput.click());
 
-// ── autoExtract: 边准备边在 workbench 渲染 ──
-const autoExtract = params.get('autoExtract') === '1';
-if (autoExtract) {
-  startWorkbenchExtraction();
-}
-
-// ── 准备按钮逻辑 ──
-const extractActionBar = document.getElementById('extract-action-bar');
-const btnStartExtract = document.getElementById('btn-start-extract');
-if (!autoExtract) {
-  fetch(`/api/projects/${projectId}/materials`).then(r => r.json()).then(mats => {
-    const hasReq = Array.isArray(mats) && mats.some(m => m.role === 'requirement');
-    if (hasReq && extractActionBar) {
-      extractActionBar.classList.remove('hidden');
-      const outline = document.querySelector('.doc-outline');
-      const hasBlocks = outline && outline.children.length > 0;
-      btnStartExtract.textContent = hasBlocks ? '重新拆分评分点' : '准备';
-    }
-  });
-}
-if (btnStartExtract) {
-  btnStartExtract.addEventListener('click', () => {
-    extractActionBar.classList.add('hidden');
-    startWorkbenchExtraction();
-  });
-}
-
 // ── 批量生成正文按钮 ──
 const btnBatchGen = document.getElementById('btn-batch-generate');
 const batchStatus = document.getElementById('outline-batch-status');
@@ -2548,82 +2517,6 @@ async function executeBatchGenerate() {
   if (typeof window.__loadBlocks === 'function') window.__loadBlocks();
 }
 
-function inferOutlineLevel(s) {
-  // 优先用后端解析的真实 level
-  if (typeof s === 'object' && s && Number.isFinite(s.level)) {
-    return Math.max(1, Math.min(4, s.level));
-  }
-  const title = typeof s === 'string' ? s : (s?.title || '');
-  if (/^[一二三四五六七八九十百]+[、．\.]/.test(title)) return 1;
-  if (/^第[一二三四五六七八九十百\d]+[章节篇]/.test(title)) return 1;
-  if (/^\d+\.\d+/.test(title)) return 3;
-  return 2;
-}
-
-function escapeHtml(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// 用 SSE 数据增量构建左侧大纲
-function renderExtractOutline(sections) {
-  // 共享宿主：归一后左栏只有一棵树（#blocks-list 由 mode-dispatch 搬进编辑器左栏）
-  const outlineNav = document.getElementById('blocks-list') || document.querySelector('.doc-outline');
-  const progressBadge = document.getElementById('outline-progress-badge');
-  const progressText = document.getElementById('outline-progress-text');
-  const progressBar = document.getElementById('outline-progress-bar');
-  if (!outlineNav) return;
-  outlineNav.innerHTML = '';
-
-  // 隐藏空状态、显示工作区
-  document.getElementById('editor-empty-hint').style.display = 'none';
-  document.getElementById('editor-workspace').style.display = 'flex';
-
-  // 规整化 level：找到全局最小值，平移成 1（处理"文档没有标题1，从标题2/3 起步"的情况）
-  const rawLevels = sections.map(s => inferOutlineLevel(s));
-  const minLevel = rawLevels.length ? Math.min(...rawLevels) : 1;
-  const normalize = (raw) => Math.max(1, Math.min(4, raw - minLevel + 1));
-
-  // 归一后的建树：交给共享组件（嵌套 .ot-node），不再本模块手拼
-  // `.outline-group` / `.outline-heading` / `.doc-outline-item` 三套标记。
-  const nodes = sections.map((sec, idx) => {
-    const blockIdStr = `outline-${idx}`;
-    return {
-      block_id: blockIdStr,
-      level: normalize(inferOutlineLevel(sec)),
-      title: sec.title || '（无标题）',
-      _idx: idx,
-    };
-  });
-  window.__extractBlockMap = new Map(nodes.map(n => [n.block_id, {
-    id: 0, block_id: n.block_id, title: n.title, kind: 'content', level: 1,
-    requirement: '', key_points: '', veto_items: '', bonus_items: '',
-    source: '[]', content: '', _pending: true,
-  }]));
-
-  renderChapterTree(outlineNav, nodes, {
-    makeNode: (n) => chapterNode(n, {
-      showEdit: false, showSub: false,
-      selectedClass: 'active', rowSelectedClass: 'active',
-      rowClasses: ['doc-outline-item', `level-${n.level}`],
-      rowData: { idx: n._idx },
-      titleClass: 'outline-item-label',
-      appendHtml: '<span class="outline-item-bullet"></span><span class="outline-item-dot"></span>',
-    }).node,
-  });
-
-  // 点击行 = 选中章节（回调与原实现一致）
-  outlineNav.querySelectorAll('.doc-outline-item').forEach((item) => {
-    item.addEventListener('click', () => {
-      const block = window.__extractBlockMap.get(item.dataset.blockIdStr);
-      if (!block) return;
-      outlineNav.querySelectorAll('.doc-outline-item').forEach(el => el.classList.remove('active'));
-      item.classList.add('active');
-      if (typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
-    });
-  });
-
-}
-
 function markOutlineDone(blockIdStr, blockData) {
   const item = document.querySelector(`.doc-outline-item[data-block-id-str="${blockIdStr}"]`);
   if (item) {
@@ -2665,180 +2558,6 @@ function markOutlineDone(blockIdStr, blockData) {
     if (block && typeof window.__onBlockSelected === 'function') window.__onBlockSelected(block);
   }
 }
-
-async function startWorkbenchExtraction() {
-  const bar = document.getElementById('extract-progress-bar');
-  const stage = document.getElementById('extract-progress-stage');
-  const fill = document.getElementById('extract-progress-fill');
-  const pct = document.getElementById('extract-progress-pct');
-  const cancelBtn = document.getElementById('extract-cancel-btn');
-  const spinner = document.getElementById('extract-spinner');
-  bar.classList.remove('hidden', 'error', 'cancelled');
-  cancelBtn.classList.remove('hidden');
-  if (spinner) spinner.style.display = '';
-
-  let totalSec = 0;
-  let doneSec = 0;
-  let extractReader = null;
-  let cancelled = false;
-  const genAbort = new AbortController();
-  let genDoneCount = 0;
-
-  const updateProgress = (done, total) => {
-    const p = total ? Math.round(done / total * 100) : 0;
-    if (stage) stage.textContent = `${done}/${total}`;
-    if (fill) fill.style.width = p + '%';
-    if (pct) pct.textContent = p + '%';
-  };
-
-  // 并行生成单个 block（fire-and-forget）
-  function generateBlockInBackground(dbId, blockIdStr) {
-    fetch(`/api/blocks/${dbId}/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tone: 'official', target_words: 800, model: window.__generateModel || null }),
-      signal: genAbort.signal,
-    }).then(async resp => {
-      if (!resp.ok || !resp.body) return;
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      let content = '';
-      while (true) {
-        const { done: rdDone, value } = await reader.read();
-        if (rdDone) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-          let ev;
-          try { ev = JSON.parse(raw); } catch { continue; }
-          if (ev.text) {
-            content += ev.text;
-            // 更新 block 缓存
-            if (window.__extractBlockMap) {
-              const cached = window.__extractBlockMap.get(blockIdStr);
-              if (cached) {
-                cached.content = content;
-                window.__extractBlockMap.set(blockIdStr, cached);
-              }
-            }
-            // 如果当前选中的就是这个 block，实时更新编辑区
-            if (currentBlock && currentBlock.block_id === blockIdStr) {
-              const editable = document.getElementById('ced-editable');
-              if (editable) editable.textContent = content;
-            }
-          }
-          if (ev.block_id && ev.content) {
-            content = ev.content;
-          }
-        }
-      }
-      // 生成完成，更新撰写进度
-      genDoneCount++;
-      const progressBadge = document.getElementById('outline-progress-badge');
-      const progressText = document.getElementById('outline-progress-text');
-      const progressBar = document.getElementById('outline-progress-bar');
-      const totalSections = window.__extractTotalSections || 1;
-      if (progressText) progressText.textContent = `${genDoneCount} / ${totalSections}`;
-      if (progressBar) progressBar.style.width = totalSections ? `${Math.round(genDoneCount/totalSections*100)}%` : '0%';
-    }).catch(() => {});
-  }
-
-  // 取消按钮
-  cancelBtn.onclick = () => {
-    cancelled = true;
-    genAbort.abort();
-    if (extractReader) extractReader.cancel();
-    bar.classList.add('cancelled');
-    cancelBtn.classList.add('hidden');
-    if (spinner) spinner.style.display = 'none';
-    if (stage) stage.textContent = `已取消（已完成 ${doneSec}/${totalSec}）`;
-    if (typeof window.__loadBlocks === 'function') window.__loadBlocks();
-  };
-
-  try {
-    const extractModelParam = window.__selectedModel || '';
-    const outlineUrl = `/api/projects/${projectId}/outline` + (extractModelParam ? `?model=${encodeURIComponent(extractModelParam)}` : '');
-    const resp = await fetch(outlineUrl, { method: 'POST' });
-    if (!resp.ok || !resp.body) throw new Error('准备请求失败');
-    extractReader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let firstSelected = false;
-
-    while (true) {
-      const { done, value } = await extractReader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trim();
-        if (!raw) continue;
-        let ev;
-        try { ev = JSON.parse(raw); } catch { continue; }
-
-        if (ev.sections) {
-          totalSec = ev.total || ev.sections.length;
-          renderExtractOutline(ev.sections);
-          updateProgress(0, totalSec);
-        }
-
-        if (ev.block_id && ev.title) {
-          markOutlineDone(ev.block_id, ev);
-          doneSec++;
-          updateProgress(doneSec, totalSec);
-
-          // 暂停"边准备边生成"：编写准备完成后由用户手动点"批量生成"
-          // if (ev.id) {
-          //   generateBlockInBackground(ev.id, ev.block_id);
-          // }
-
-          if (!firstSelected) {
-            const item = document.querySelector(`.doc-outline-item[data-block-id-str="${ev.block_id}"]`);
-            if (item) { item.click(); firstSelected = true; }
-          }
-        }
-
-        if ('block_count' in ev) {
-          updateProgress(doneSec, totalSec);
-          if (fill) fill.style.width = '100%';
-          if (pct) pct.textContent = '100%';
-          cancelBtn.classList.add('hidden');
-          setTimeout(() => bar.classList.add('hidden'), 800);
-          if (typeof window.__loadBlocks === 'function') {
-            await window.__loadBlocks();
-          }
-          // 准备成功完成 → 清除 URL 上 autoExtract，防止刷新重跑
-          const url = new URL(location.href);
-          url.searchParams.delete('autoExtract');
-          history.replaceState({}, '', url);
-        }
-
-        if (ev.message && !ev.title) {
-          bar.classList.add('error');
-          cancelBtn.classList.add('hidden');
-          if (spinner) spinner.style.display = 'none';
-          if (stage) stage.textContent = '准备失败：' + ev.message;
-        }
-      }
-    }
-  } catch (err) {
-    if (cancelled) return;
-    console.error('[autoExtract]', err);
-    bar.classList.add('error');
-    cancelBtn.classList.add('hidden');
-    retryBtn.classList.remove('hidden');
-    if (spinner) spinner.style.display = 'none';
-    if (stage) stage.textContent = '准备失败：' + (err.message || '网络错误');
-  }
-}
-    
 
 // 模式切换：进入编辑器模式时刷新一次工作区，避免用的是切走之前的旧数据。
 document.addEventListener('workspace:mode', (e) => {

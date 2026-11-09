@@ -92,7 +92,6 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--r-2);
 }
-.ui-card--flat { box-shadow: none; }
 
 /* ── Table：一种表格 ──────────────────────────────────────── */
 .ui-table, .sr-table, .v-chapters, .quality-table {

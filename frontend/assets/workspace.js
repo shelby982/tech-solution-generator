@@ -44,17 +44,12 @@ export function workspaceUrl(view, blockId) {
   if (view === 'review') path = '/review';
   return path + '?' + q;
 }
-function currentView() {
-  if (location.pathname.includes('review')) return 'review';
-  if (location.pathname.includes('workbench')) return 'editor';   // 旧地址直接访问时仍识别
-  return document.body.dataset.view || params.get('view') || 'outline';
-}
 export function renderWorkspaceChrome() { renderChrome(); }
 
 // checkpoint 停在闸门态（outline_review / paused）时它区分不了三种子态：一节没准备 /
 // 编写准备到一半 / 全准备完了 —— extract 收尾时图直接 END，没有节点再改 stage。
 // 这里用 blocks 计数补齐，**不依赖具体页面**：project-init / review / workbench /
-// diff-review 都挂这条顶栏，只在某个页面里做覆盖是不够的（实测 review 页就还显示
+// review 页挂这条顶栏，只在某个页面里做覆盖是不够的（实测 review 页就还显示
 // 「待确认目录」）。
 function outlinePhaseLabel(stage) {
   if (stage !== 'outline_review' && stage !== 'paused') return '';
@@ -80,7 +75,6 @@ function renderChrome() {
   // 合并页（一个页面承载三个模式，body[data-modes] 里有 editor）：导航必须**原地切换**，
   // 不能再跳到 /project-init、/workbench —— 那样就又回到"整页跳转 + 丢选中章节"的老样子。
   // 判定放在这里而不是各页面，因为导航的渲染权本来就属于本模块（它还渲染状态条）。
-  const inPlace = (document.body.dataset.modes || '').includes('editor');
   // ── 四模式导航**整块移除**（用户要求）──
   // 「要求与大纲 / 素材库 / 方案编辑 / 质量检查」这块导航的逻辑需要重新梳理，
   // 暂时先不梳理，先把导航整块删掉，只保留当前工作区。
@@ -333,7 +327,7 @@ const SPEC_SECTIONS = [
  * 左 = 规范库（L0 全局 + L1 模块配方，带版本与影响面）；右 = 结构化编辑。
  * 为什么结构化：规范本身就是"骨架/必表/必图/失分点"四类内容，一整块裸文本既改不动也校验不了。
  */
-export async function openWritingSpecs(layoutKey) {
+async function openWritingSpecs(layoutKey) {
   const dialog = openDialog('编写规范', '<p class="ws-dim">加载中…</p>');
   dialog.classList.add('ws-specs-dialog');
   const body = dialog.querySelector('.ws-dialog-body');
@@ -464,7 +458,7 @@ export async function openWritingSpecs(layoutKey) {
 
 /** 素材中心：一个入口、两个分区 —— 我方材料（证据）/ 外部依据（官方来源）。
  *  为什么分区：混排会把"外部依据"当成"我方证明材料"，投标审计是硬错误。 */
-export async function openMaterialsHub() {
+async function openMaterialsHub() {
   const dialog = openDialog('素材', '<p class="ws-dim">加载中…</p>');
   const body = dialog.querySelector('.ws-dialog-body');
   let materials = [];

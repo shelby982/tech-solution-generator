@@ -143,9 +143,3 @@ export function renderChapterTree(host, chapters, {
 }
 
 /** 就地切换选中行（不重渲染整棵树）。 */
-export function setSelectedRow(index, blockId, selectedClass = 'mw-selected') {
-  const target = String(blockId ?? '');
-  for (const [id, node] of index) {
-    node.classList.toggle(selectedClass, id === target);
-  }
-}

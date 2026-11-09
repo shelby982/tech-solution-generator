@@ -4,6 +4,7 @@
    本文件在抽取时**未改任何逻辑**。 */
 import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v503';
 import { api } from './api.js?v=20261016-v503';
+import { PROVIDER_DEFAULTS, DEFAULT_MODEL_OPTIONS } from './model-config.mjs?v=20261016-v503';
 import { specContentHtml } from './spec-content.mjs?v=20261016-v503';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
@@ -21,15 +22,15 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          removeManyOutlineSubtrees,
          pushHistory,
          removeOutlineSubtree, insertSiblingAfter, insertChildOf,
-         CONSTRAINT_LEVELS, constraintLevelLabel,
+         CONSTRAINT_LEVELS,
          isExtractDone as isDoneBlock, extractBadgeState as badgeStatusOf,
          // 素材依据的双向视图（匹配阶段 §4.D）：纯投影与 HTML 都在模型层（有 node --test
          // 覆盖），页面只把本页缓存的应答条目喂进去 —— 素材→章 与 条目→依据 同一份数据。
          evidenceBySource, usageFor, matchEntryDecision, MATCH_ENTRY,
          renderEvidenceSection as renderEvidenceSectionPure,
-         groupEvidenceByItem, itemCode, parseEvidence,
+         parseEvidence,
          // 章节状态投影：素材库 / 方案编辑 / 覆盖矩阵共用同一份判定（不再各算各的）
-         chapterStage, chapterBadges, filterChapters, chapterFilterCounts,
+         chapterStage, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
        } from './workspace-model.mjs?v=20261016-v503';
 
@@ -197,7 +198,6 @@ let doneBlocks  = 0;
 let blocksReady = Promise.resolve();
 let matchedCount = 0; // 已匹配章节数（仅匹配阶段使用）
 const matchedIds = new Set();
-let currentReader = null;
 let selectedModel = 'claude-sonnet-4-6';
 let selectedModelLabel = 'Sonnet 4.6';
 
@@ -539,11 +539,7 @@ async function loadModels() {
 }
 
 function renderDefaultModels() {
-  const defaults = [
-    { model: 'claude-opus-4-8', label: 'Opus 4.8' },
-    { model: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-    { model: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-  ];
+  const defaults = DEFAULT_MODEL_OPTIONS;
   modelListEl.innerHTML = defaults.map(d => `
     <div class="model-option${d.model === selectedModel ? ' selected' : ''}" data-model="${d.model}" data-label="${d.label}">
       <span>${d.label}</span>
@@ -591,14 +587,6 @@ const apiKeyInput   = document.getElementById('api-key');
 const apiModelInput = document.getElementById('api-model');
 const keyToggle     = document.getElementById('key-toggle');
 
-const PROVIDER_DEFAULTS = {
-  claude:   { url: 'https://api.anthropic.com',              model: 'claude-sonnet-4-6', placeholder: 'sk-ant-…' },
-  openai:   { url: 'https://api.openai.com/v1',              model: 'gpt-4o',            placeholder: 'sk-…' },
-  deepseek: { url: 'https://api.deepseek.com',               model: 'deepseek-v4-pro',   placeholder: 'sk-…' },
-  kimi:     { url: 'https://api.moonshot.cn/v1',             model: 'moonshot-v1-8k',    placeholder: 'sk-…' },
-  minimax:  { url: 'https://api.minimax.chat/v1',            model: 'abab6.5s-chat',     placeholder: '' },
-  doubao:   { url: 'https://ark.cn-beijing.volces.com/api/v3', model: '',                placeholder: '' },
-};
 let currentProvider = 'claude';
 let verifiedOk = false;
 
@@ -2150,7 +2138,6 @@ const STRUCTURE_SAVED_MS = 1500;
 
 let editingBlockId = null;
 let structureSaveChain = Promise.resolve();
-let pendingRenameId = null;
 
 // 「已准备」以 status 字段为权威：upsert 时写 'outline_done' 才算完成。
 // 不能用 key_points/requirement 是否为空兜底 —— 部分章节（纯目录、分组节点）
@@ -2830,13 +2817,6 @@ let confirmEditOpen = {};
 // 未确认时面板不出阶段内容（避免把上一个标包/默认范围的内容误当成这个标包的）。
 let confirmedPkg = null;      // {target, package_no} | null
 const pkgKeyOf = (x) => (x ? `${x.target || ''}|${x.package_no || ''}` : '');
-function readConfirmedPkg() {
-  let raw = params.get('pkg') || '';
-  if (!raw) { try { raw = localStorage.getItem(`ge:pkg:${projectId}`) || ''; } catch { /* 隐私模式 */ } }
-  if (!raw) return null;
-  const [target, package_no] = String(raw).split('|');
-  return (target || package_no) ? { target: target || '', package_no: package_no || '' } : null;
-}
 function rememberConfirmedPkg(x) {
   confirmedPkg = x;
   const raw = pkgKeyOf(x);
@@ -2978,52 +2958,7 @@ async function loadPackageAnalysis({ refresh = false, useLlm = false } = {}) {
 }
 
 /** 标包卡片：**每张卡都带原文出处**（用户口径：一切以招标文件为准，不衍生）。 */
-function renderPackageCards() {
-  const d = pkgAnalysis;
-  if (!d) return '<div class="sr-dim">正在读取标包分析…</div>';
-  const pkgs = d.packages || [];
-  if (!pkgs.length) {
-    return `<div class="sr-note">${escapeHtml(d.note || '还没有识别到标包。')}
-      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:8px">重新分析</button></div>`;
-  }
-  const cards = pkgs.map((p) => {
-    const label = p.package_name || `${p.target ? `标的${p.target} · ` : ''}标包${p.package_no || '—'}`;
-    const conf = { high: '高', medium: '中', low: '低' }[p.confidence] || p.confidence;
-    const ev = (p.evidence || [])[0];
-    return `<div class="sr-pkg-card">
-      <div class="sr-pkg-head"><b>${escapeHtml(label)}</b>
-        <span class="ui-pill ${p.confidence === 'low' ? 'is-warn' : 'is-ok'}">置信度 ${escapeHtml(conf)}</span>
-        <button class="sr-mini" data-act="pick-package" data-target="${escapeHtml(p.target)}"
-          data-pkg="${escapeHtml(p.package_no)}">用它拆分</button></div>
-      <div class="sr-dim">来源文件：${escapeHtml((p.source_material_ids || []).length ? `${(p.source_material_ids || []).length} 个` : '未记录')}
-        ｜原文提到 ${p.mentions} 次</div>
-      ${ev ? `<div class="sr-pkg-ev">「${escapeHtml(String(ev.quote || ''))}」
-        <span class="sr-dim">— ${escapeHtml(ev.filename || '')}${ev.page ? ` 第 ${ev.page} 页` : ''}</span></div>` : ''}
-    </div>`;
-  }).join('');
-  return `<div class="sr-pkg-cards">${cards}</div>
-    <div class="sr-dim">标包只按招标文件原文列出；名字需要你确认（系统不编造）。
-      <button class="sr-mini" data-act="reanalyze-packages" style="margin-left:6px">重新分析</button>
-      <button class="sr-mini" data-act="merge-packages" style="margin-left:4px"
-        title="让模型把同一标包的多种写法合并、并从原文里取名；编造的内容会被丢弃">用模型整理</button>
-      ${pkgMergeNote ? `<span style="margin-left:8px;color:var(--success)">${escapeHtml(pkgMergeNote)}</span>` : ''}</div>`;
-}
-
 /** 评分点对齐行：**解析事实 vs 已落库**（差异可见 + 一键对齐，不花模型）。 */
-function renderPointsAlignment(alignment) {
-  const a = (alignment || null);
-  if (!a || a.expected == null) return '';
-  const cats = Object.entries(a.by_category || {})
-    .map(([c, v]) => `${CAT_NAME[c] || c} ${v.expected}`).join(' · ');
-  if (a.aligned) {
-    return `<div class="sr-align ok">✅ 评分点已落库 <b>${a.persisted}</b> 条（${escapeHtml(cats)}），与解析事实一致</div>`;
-  }
-  const miss = (a.missing || []).length;
-  return `<div class="sr-align warn">⚠ 解析到 <b>${a.expected}</b> 条（${escapeHtml(cats)}），
-    已落库 <b>${a.persisted}</b> 条${miss ? `，缺 ${miss} 条` : ''}
-    <button class="sr-mini" data-act="sync-points" style="margin-left:8px">一键对齐（不花模型）</button></div>`;
-}
-
 /** ② 目录确认与调整 的说明行（结构完整 = 每个评分点都有承载章节） */
 function structureBlockNote() {
   return '<div class="sr-dim" style="margin-top:6px">结构完整 = 每个评分点都有承载章节；'
@@ -5853,12 +5788,6 @@ function resetWorkflowUi() {
 }
 
 // 运行失败原因：runner 把异常写进 checkpoint 的 errors（operator.add 追加，取最后一条）
-function lastRunErrorMessage(state) {
-  const errs = Array.isArray(state?.errors) ? state.errors : [];
-  const last = errs[errs.length - 1];
-  return (last && (last.message || last.error)) || '';
-}
-
 // ── 等待帧期间的兜底轮询（SSE 无回放的自救）──
 // SSE 是实时队列：浏览器连晚了、后端重启过、或任务在本页订阅之前就跑完了，都会导致
 // **一帧都收不到**，页面永远停在「正在梳理应答目录…」。实测踩过：运行早已停在闸门 1，

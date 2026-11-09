@@ -12,7 +12,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -108,12 +108,13 @@ test('本次事故的那个导出确实存在且可用', () => {
 // 结论：所有模块导入/脚本引用共用一个版本号；改代码时只 bump 这一个 token。
 test('模块引用共用同一个版本号（避免缓存里新旧混用）', () => {
   const frontend = join(here, '..', '..', 'frontend');
+  // 动态枚举，避免硬编码白名单漏掉新页面/新模块（历史事故：project-intake.html
+  // 与 chapter-studio.mjs 等 5 个文件长期不在名单里，版本守卫有盲区）。
   const files = [
-    ...[ 'three-mode.html', 'projects.html', 'project-init.html', 'workbench.html',
-         'review.html', 'diff-review.html' ].map(f => join(frontend, f)),
-    ...[ 'mode-outline.js', 'mode-editor.js', 'mode-dispatch.js', 'workspace.js',
-         'workbench.js', 'context-panel.js', 'review.js', 'generate-session.js' ]
-        .map(f => join(frontend, 'assets', f)),
+    ...readdirSync(frontend).filter(f => f.endsWith('.html')).map(f => join(frontend, f)),
+    ...readdirSync(join(frontend, 'assets'))
+      .filter(f => f.endsWith('.js') || f.endsWith('.mjs'))
+      .map(f => join(frontend, 'assets', f)),
   ];
   const versions = new Map();
   for (const file of files) {
@@ -139,11 +140,10 @@ test('模块引用共用同一个版本号（避免缓存里新旧混用）', ()
 test('每个相对导入都带 ?v=（裸路径会命中缓存里的旧模块）', () => {
   const frontend = join(here, '..', '..', 'frontend');
   const files = [
-    ...[ 'three-mode.html', 'projects.html', 'project-init.html', 'workbench.html',
-         'review.html', 'diff-review.html' ].map(f => join(frontend, f)),
-    ...[ 'mode-outline.js', 'mode-editor.js', 'mode-dispatch.js', 'workspace.js',
-         'workbench.js', 'context-panel.js', 'review.js', 'generate-session.js',
-         'api.js' ].map(f => join(frontend, 'assets', f)),
+    ...readdirSync(frontend).filter(f => f.endsWith('.html')).map(f => join(frontend, f)),
+    ...readdirSync(join(frontend, 'assets'))
+      .filter(f => f.endsWith('.js') || f.endsWith('.mjs'))
+      .map(f => join(frontend, 'assets', f)),
   ];
   const bad = [];
   for (const file of files) {
