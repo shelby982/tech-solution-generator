@@ -120,11 +120,20 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
     draft_threads = {t["thread_id"] for t in types}
     interrupted = [r for r in runs if r.get("interrupted_at") and r["thread_id"] in draft_threads]
     findings_row = await (await db.execute(
-        "SELECT COUNT(*) AS n FROM reviews WHERE thread_id IN ("
+        "SELECT COUNT(*) AS n FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id "
+        "WHERE b.project_id=? AND b.run_thread_id IN ("
         "SELECT thread_id FROM workflow_runs WHERE project_id=? AND package_id=?)",
-        (project_id, package_id or -1),
+        (project_id, project_id, package_id or -1),
     )).fetchone()
     findings = int(findings_row["n"] if hasattr(findings_row, "keys") else findings_row[0])
+    if not findings:
+        # 迁移前/老项目回退
+        legacy = await (await db.execute(
+            "SELECT COUNT(*) AS n FROM reviews WHERE thread_id IN ("
+            "SELECT thread_id FROM workflow_runs WHERE project_id=? AND package_id=?)",
+            (project_id, package_id or -1),
+        )).fetchone()
+        findings = int(legacy["n"] if hasattr(legacy, "keys") else legacy[0])
     stages = _stages(types, runs, findings)
     current = next((s for s in stages if s["state"] == "active"), None) or next(
         (s for s in stages if s["state"] != "done"), None) or stages[-1]

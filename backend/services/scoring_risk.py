@@ -56,27 +56,44 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
     from services.block_store import list_blocks
 
     blocks = [b for b in await list_blocks(db, project_id, thread_id) if b.get("block_id")]
+    from services.writing_workspace import review_freshness
+
+    # 统一模型：章级当前态（chapter_reviews）优先。老库/老测试没有章评审时，
+    # 回退到 reviews 明细，避免迁移前功能不可用。
+    latest: dict[str, dict] = {}
+    freshness: dict[str, str] = {}
     if thread_id:
         cur = await db.execute(
-            "SELECT * FROM reviews WHERE thread_id = ? ORDER BY id", (thread_id,))
+            """SELECT cr.*, b.block_id AS block_code, b.content AS _content,
+                      b.context_version AS _context_version
+               FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
+               WHERE b.project_id=? AND b.run_thread_id=?""",
+            (project_id, thread_id))
     else:
-        cur = await db.execute("SELECT * FROM reviews ORDER BY id")
-    reviews = [dict(r) for r in await cur.fetchall()]
-
-    # 每个 block 取"最后一条"审查（同章可能被多轮 / 多 agent 评过）
-    latest: dict[str, dict] = {}
-    for r in reviews:
-        latest[str(r.get("block_id") or "")] = r
-
-    from services.writing_workspace import review_freshness
-    freshness = {}
-    for block in blocks:
-        row = await (await db.execute('SELECT * FROM chapter_reviews WHERE block_id=?', (block['id'],))).fetchone()
-        if row:
-            state = await review_freshness(db, block, dict(row))
-            freshness[str(block['block_id'])] = state
-            if state != 'current':
-                latest.pop(str(block['block_id']), None)
+        cur = await db.execute(
+            """SELECT cr.*, b.block_id AS block_code, b.content AS _content,
+                      b.context_version AS _context_version
+               FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
+               WHERE b.project_id=?""", (project_id,))
+    chapter_rows = [dict(r) for r in await cur.fetchall()]
+    if chapter_rows:
+        for row in chapter_rows:
+            code = str(row.get("block_code") or "")
+            block = next((b for b in blocks if str(b.get("block_id")) == code), None)
+            if not block:
+                continue
+            state = await review_freshness(db, block, row)
+            freshness[code] = state
+            if state == 'current':
+                latest[code] = row
+    else:
+        if thread_id:
+            cur = await db.execute(
+                "SELECT * FROM reviews WHERE thread_id = ? ORDER BY id", (thread_id,))
+        else:
+            cur = await db.execute("SELECT * FROM reviews ORDER BY id")
+        for r in [dict(r) for r in await cur.fetchall()]:
+            latest[str(r.get("block_id") or "")] = r
 
     cur = await db.execute(
         "SELECT * FROM review_points WHERE project_id = ? AND (run_thread_id = ? OR ? IS NULL) "

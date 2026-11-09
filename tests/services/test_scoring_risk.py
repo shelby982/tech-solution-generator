@@ -171,3 +171,29 @@ async def test_scoring_risk_lists_unlinked_chapters(db):
     data = await summarize_scoring_risk(db, 7, "tid-1")
     assert data["summary"]["chapters_without_point"] == 1
     assert data["unlinked_chapters"][0]["block_id"] == "s9"
+
+
+@pytest.mark.asyncio
+async def test_scoring_risk_reads_chapter_reviews_primary(db):
+    """统一模型后优先读 chapter_reviews（带版本 freshness），不再依赖 reviews 明细。"""
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    await _seed(db, chapters=(("s1", ["rp-a"], None),))
+    row = await (await db.execute(
+        "SELECT * FROM blocks WHERE project_id=7 AND block_id='s1'")).fetchone()
+    vs = await versions(db, dict(row))
+    await upsert_chapter_review(
+        db, block_pk=int(row["id"]), project_id=7, thread_id="tid-1", stage="final",
+        versions=vs, tier="final",
+        data={"tech_score": 40, "comp_score": 40, "score": 40, "satisfied": "unsatisfied",
+              "criterion_text": "口径", "covered_points": [],
+              "missing_points": ["未提供 PMP 证书"], "issues": [], "needs_material": []},
+    )
+
+    from services.scoring_risk import summarize_scoring_risk
+    data = await summarize_scoring_risk(db, 7, "tid-1")
+    pt = data["points"][0]
+    assert pt["risk"] == "high"
+    assert pt["chapters_reviewed"] == 1
+    assert "未提供 PMP 证书" in pt["missing_points"]

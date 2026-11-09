@@ -365,3 +365,54 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 处理期间检测到工作区有**其他方并发修改**（`backend/routes/events.py`、`backend/db.py`、
 `backend/main.py`、`frontend/landing.html` 及 `tests/routes/test_events.py` 等）。
 本轮只提交属于本次清理的文件，上述并发改动保持原样未动。
+
+---
+
+## 15. 第九轮：终评与逐章评审合并（统一当前态 + 历史）
+
+### 15.1 已确认口径
+
+- 终评范围：**已评审且版本对齐的章复用 + 未评审/内容或证据已改的章重评 + 全局一致性 pass**
+- 冲突：**终评权威**；编写时评审保留在历史，不平均、不回滚
+- UI：**只显示当前结果 + 可展开历史**
+
+### 15.2 落库模型
+
+- `chapter_reviews`：一章一条当前态，新增 `stage`（writing/final）+ `thread_id`。
+- `review_history`：每轮一条，新增 `stage/thread_id/tier`；编写评审与终评都在同一时间线。
+- `reviews`：保留为 per-agent 明细/审计，新增 `stage/tier/content_version/evidence_version/project_id`。
+- 新增 `services/review_store.py`：合并 findings、upsert 当前态、追加历史、per-agent 明细、把 writing 提升为 final。
+- 新增 `services/review_migration.py`：启动时把只有 `reviews`、没有章评审的旧轮次补成 `stage=final`（幂等；版本留空，后续会重评）。
+- 新增 `services/review_consistency.py`：确定性全局一致性 pass（重复问题、满足度/分数冲突、critical 未收口），进入 `GlobalReport.consistency`。
+
+### 15.3 终评流程
+
+- `_run_review` 不再只取 `updated_blocks`：先按 `chapter_reviews` + `writing_workspace.versions` 过滤，
+  已评审且版本对齐的章跳过；未评审/已改章节进入本轮。
+- 显式 `regen_blocks` 的 `regenerate_targets/updated_blocks` 强制重评，避免"内容没变但用户要求重跑"被跳过。
+- `aggregate_review_node`：
+  - 本轮新 findings → `stage=final` 当前态 + 历史 + per-agent 明细；
+  - 复用且版本对齐的 writing 评审 → 直接提升为 `final`（不改分数）；
+  - 报告覆盖所有 final 章，并把复用的章补进 state（评审页/编写页能看到全部）。
+- 全局一致性 pass 写入报告，前端全局报告新增「全局一致性」一栏。
+
+### 15.4 消费者/UI
+
+- `scoring_risk`：优先读 `chapter_reviews`（带版本 freshness），旧库回退 `reviews`。
+- `scoring_verdict`：优先读 `chapter_reviews` issues，过滤 stale；旧库回退 `reviews`。
+- `project_progress`：按章评审计数，旧库回退。
+- `chapter_review.load_review/load_history` 返回 `stage`；编写页显示「终评/编写评审」，历史每条带 stage。
+- `reset-analysis` 同步清理 `chapter_reviews/review_history/review_issue_states`。
+
+### 15.5 验证
+
+- 新增测试：终评复用未改章、writing→final 提升、旧 reviews 回填幂等、章节评审优先读取、全局一致性。
+- 后端 **1119 passed** / 前端 **164 passed**（截至本轮）。
+- 迁移在真实库副本验证：20 条旧章评审保留 writing；1 个只有 reviews 的轮次回填 final；
+  另 1 个测试 thread 无对应 block，跳过（不产生孤儿）。
+
+### 15.6 已知边界
+
+- 旧 `chapter_reviews` 没有版本号（14 条）→ 视为 unknown，终评会重评一次，之后写入版本。
+- `reviews` 明细与 `chapter_reviews` 仍是双层（当前态+审计），但所有"当前结论"只读 `chapter_reviews`。
+- 全局一致性目前是确定性检查，不调模型；跨章语义矛盾可后续加 LLM pass。

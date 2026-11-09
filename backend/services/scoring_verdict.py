@@ -154,13 +154,45 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
     recent_issues: list[dict] = []
     try:
         latest_rows = {}
+        chapter_rows: list[dict] = []
         if thread_id:
-            rows = await (await db.execute(
-                "SELECT block_id, issues FROM reviews WHERE thread_id=? ORDER BY id", (thread_id,))).fetchall()
+            chapter_rows = [dict(r) for r in await (await db.execute(
+                """SELECT b.block_id AS block_id, cr.issues AS issues,
+                          cr.content_version AS content_version,
+                          cr.evidence_version AS evidence_version
+                   FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
+                   WHERE b.project_id=? AND b.run_thread_id=?""",
+                (project_id, thread_id))).fetchall()]
         else:
-            rows = await (await db.execute("SELECT block_id, issues FROM reviews ORDER BY id")).fetchall()
-        for block_id, raw in rows:
-            latest_rows[str(block_id)] = raw          # 每章取最后一条
+            chapter_rows = [dict(r) for r in await (await db.execute(
+                """SELECT b.block_id AS block_id, cr.issues AS issues,
+                          cr.content_version AS content_version,
+                          cr.evidence_version AS evidence_version
+                   FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
+                   WHERE b.project_id=?""", (project_id,))).fetchall()]
+        if chapter_rows:
+            from services.writing_workspace import review_freshness
+            for row in chapter_rows:
+                if thread_id:
+                    block = await (await db.execute(
+                        "SELECT * FROM blocks WHERE project_id=? AND block_id=? AND run_thread_id=?",
+                        (project_id, row["block_id"], thread_id))).fetchone()
+                else:
+                    block = await (await db.execute(
+                        "SELECT * FROM blocks WHERE project_id=? AND block_id=?",
+                        (project_id, row["block_id"]))).fetchone()
+                if not block or await review_freshness(db, dict(block), row) != "current":
+                    continue
+                latest_rows[str(row["block_id"])] = row["issues"]
+        else:
+            # 迁移前/老测试回退：仍从 reviews 明细取
+            if thread_id:
+                rows = await (await db.execute(
+                    "SELECT block_id, issues FROM reviews WHERE thread_id=? ORDER BY id", (thread_id,))).fetchall()
+            else:
+                rows = await (await db.execute("SELECT block_id, issues FROM reviews ORDER BY id")).fetchall()
+            for row in rows:
+                latest_rows[str(row[0])] = row[1]          # 每章取最后一条
         for block_id, raw in latest_rows.items():
             try:
                 items = json.loads(raw or "[]") or []

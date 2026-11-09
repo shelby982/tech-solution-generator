@@ -39,7 +39,9 @@ function renderSummary() {
   const s = summarize(workspace.chapters);
   $('quality-summary').innerHTML = [['已写正文',`${s.written} / ${s.total}`],['已通过',s.counts.passed || 0],['待补料',s.counts.material || 0],['待处理章节',s.needsAction]].map(([label,value])=>`<div class="quality-metric"><span>${label}</span><strong>${value}</strong></div>`).join('');
   const report = workspace.state.review?.report;
-  $('quality-report-body').innerHTML = report ? [['主要风险',report.top_risks],['缺失证明',report.missing_evidence],['缺失加分项',report.missing_bonus]].map(([title,items])=>`<section><h3>${title}</h3><ul>${(items || []).map(i=>`<li>${esc(typeof i==='string'?i:JSON.stringify(i))}</li>`).join('') || '<li>本次报告未列出</li>'}</ul></section>`).join('') : '<p>尚无全局评审报告。</p>';
+  const consistency = report?.consistency;
+  const consistencyBlock = consistency ? `<section><h3>全局一致性</h3><ul>${(consistency.findings || []).map(i=>`<li>${esc(i.detail || '')}</li>`).join('') || '<li>未发现跨章一致性问题</li>'}</ul></section>` : '';
+  $('quality-report-body').innerHTML = report ? [['主要风险',report.top_risks],['缺失证明',report.missing_evidence],['缺失加分项',report.missing_bonus]].map(([title,items])=>`<section><h3>${title}</h3><ul>${(items || []).map(i=>`<li>${esc(typeof i==='string'?i:JSON.stringify(i))}</li>`).join('') || '<li>本次报告未列出</li>'}</ul></section>`).join('') + consistencyBlock : '<p>尚无全局评审报告。</p>';
   const c = workspace.state.review?.convergence;
   $('convergence-bar').hidden = !c;
   if (c) {
@@ -72,7 +74,7 @@ function renderDetail() {
       ? `<p class="ws-muted">${b.previous===b.content?'正文与该评审快照一致。':'正文已发生修改，旧评审意见不能直接代表当前正文质量。'}</p>${diffHtml(b.previous,b.content)}`
       : '<p>该历史评审未记录正文快照，无法可靠对比。执行一次复审后会建立对应关系；也可查看已保存的章节版本。</p>';
   } else $('quality-document-body').innerHTML = b.content.trim() ? `<pre>${esc(b.content)}</pre>` : `<p>本章尚无正文。</p><a href="${esc(workspaceUrl('editor',b.block_id))}">前往撰写本章 →</a>`;
-  $('quality-findings').innerHTML = `<h2>评审意见</h2><div class="quality-scores"><span>技术 ${b.tech?.score ?? '—'}</span><span>合规 ${b.comp?.score ?? '—'}</span></div>
+  $('quality-findings').innerHTML = `<h2>评审意见${b.tech?.stage ? `（${b.tech.stage === 'final' ? '终评' : '编写评审'}）` : ''}</h2><div class="quality-scores"><span>技术 ${b.tech?.score ?? '—'}</span><span>合规 ${b.comp?.score ?? '—'}</span></div>
     ${b.stale?'<p class="ws-error">正文已修改，以下为上次评审意见。请复审验证修改结果。</p>':!b.bound && (b.tech||b.comp)?'<p class="ws-muted">历史评审未绑定正文版本，需复审核对。</p>':''}
     ${b.tech?.error||b.comp?.error?`<p class="ws-error">${esc(b.tech?.error||b.comp?.error)}</p>`:''}
     <h3>对应应标要求</h3><details><summary>展开要求与评分依据</summary><pre>${esc(b.requirement || '暂无应标要求')}\n${esc(b.score_items || '')}\n${esc(b.evidence_required || '')}</pre></details>

@@ -741,8 +741,8 @@ def _block(block_id: str) -> dict:
     ).to_dict()
 
 
-async def test_run_review_narrows_scope_to_updated_blocks():
-    """有 updated_blocks 时只复审本轮重跑过的 block。"""
+async def test_run_review_reviews_all_when_no_current_review():
+    """没有任何章评审时，终评范围是全部章节（不再只看 updated_blocks）。"""
     agent = _RecordingReviewer()
     state = {
         "proposal": {
@@ -756,7 +756,7 @@ async def test_run_review_narrows_scope_to_updated_blocks():
         finding_field="tech_findings", agent_name="wang_anshi",
     )
 
-    assert agent.scopes == [["s2"]]
+    assert agent.scopes == [["s1", "s2"]]
 
 
 async def test_run_review_without_updated_blocks_reviews_all():
@@ -773,7 +773,7 @@ async def test_run_review_without_updated_blocks_reviews_all():
 
 
 async def test_run_review_merges_into_existing_findings():
-    """部分复审时必须并入已有 findings —— 整体替换会抹掉未复审 block 的历史分数。
+    """本轮评审结果必须并入已有 findings —— 整体替换会抹掉未评审 block 的历史分数。
 
     若被抹掉，check_convergence 会把缺失 block 的 score 读成 0 判为未达标，
     反复回炉且两个 block 交替被清空，收敛判定永远无法稳定。
@@ -798,8 +798,10 @@ async def test_run_review_merges_into_existing_findings():
     )
 
     findings = patch["review"]["tech_findings"]
-    assert findings["s1"]["score"] == 95     # 未复审，历史分数保留
-    assert findings["s2"]["score"] == 60     # 已复审，被本轮结果覆盖
+    # 没有章评审可复用 → 两章都进入本轮评审；结果覆盖旧分数，但不丢失 block
+    assert set(findings) == {"s1", "s2"}
+    assert findings["s1"]["score"] == 60
+    assert findings["s2"]["score"] == 60
 
 
 # ─────────────────────────────────────────────
@@ -1390,3 +1392,75 @@ async def test_outline_draft_passes_category_to_dispatcher(monkeypatch):
     )
 
     assert captured.get("category") == "tech"
+
+
+async def test_run_review_reuses_current_chapter_review():
+    """版本仍对齐的章节评审不重复调模型；只重评未评审章。"""
+    from db import get_db
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        for bid in ("s1", "s2"):
+            await db.execute(
+                "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+                "VALUES (1, ?, ?, 'tid-reuse', 'generating')",
+                (bid, f"正文-{bid}"),
+            )
+        row = await (await db.execute(
+            "SELECT * FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+        vs = await versions(db, dict(row))
+        await upsert_chapter_review(
+            db, block_pk=int(row["id"]), project_id=1, thread_id="tid-reuse",
+            stage="writing", versions=vs, tier="writing",
+            data={"tech_score": 95, "comp_score": 95, "score": 95,
+                  "satisfied": "satisfied", "criterion_text": "", "covered_points": [],
+                  "missing_points": [], "issues": [], "needs_material": []},
+        )
+
+    agent = _RecordingReviewer()
+    state = {
+        "project_id": 1, "thread_id": "tid-reuse",
+        "proposal": {"blocks": {"s1": _block("s1"), "s2": _block("s2")}},
+    }
+    await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+    assert agent.scopes == [["s2"]]
+
+
+async def test_aggregate_review_promotes_current_writing_review_to_final():
+    """终评复用编写时评审：不改分数，把当前态提升为 final，并进入报告。"""
+    from db import get_db
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-s1', 'tid-promote', 'generating')")
+        row = await (await db.execute(
+            "SELECT * FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+        vs = await versions(db, dict(row))
+        await upsert_chapter_review(
+            db, block_pk=int(row["id"]), project_id=1, thread_id="tid-promote",
+            stage="writing", versions=vs, tier="writing",
+            data={"tech_score": 88, "comp_score": 90, "score": 89,
+                  "satisfied": "satisfied", "criterion_text": "", "covered_points": [],
+                  "missing_points": [], "issues": [], "needs_material": []},
+        )
+
+    state = {
+        "project_id": 1, "thread_id": "tid-promote",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "spec": {"outline_matrix": {}},
+    }
+    patch = await nodes.aggregate_review_node(state)
+    assert patch["review"]["report"]["per_block"]["s1"]["tech_score"] == 88
+    async with get_db() as db:
+        cr = await (await db.execute(
+            "SELECT stage, score FROM chapter_reviews WHERE block_id=?", (row["id"],))).fetchone()
+    assert dict(cr) == {"stage": "final", "score": 89}

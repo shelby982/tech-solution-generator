@@ -13,6 +13,7 @@ import json
 from db import get_db
 from domain.proposal.models import BlockOutput
 from domain.spec.models import OutlineMatrixRow
+from services.review_store import append_history, combine_findings, upsert_chapter_review
 
 
 async def _chapter_inputs(db, block: dict) -> tuple[BlockOutput, OutlineMatrixRow, dict]:
@@ -66,42 +67,8 @@ def _issue_dicts(finding) -> list[dict]:
 
 
 def _combine(tech, comp) -> dict:
-    tech_score = int(getattr(tech, "score", 0) or 0)
-    comp_score = int(getattr(comp, "score", 0) or 0)
-    issues = []
-    for agent_name, finding in (("wang_anshi", tech), ("bao_zheng", comp)):
-        for issue in _issue_dicts(finding):
-            item = dict(issue)
-            item["agent"] = agent_name
-            issues.append(item)
-    # 严重度排序：critical > high > medium > low
-    rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-    issues.sort(key=lambda item: rank.get(str(item.get("severity") or "").lower(), 0), reverse=True)
-    needs_material = [item for item in issues if item.get("needs_material")]
-    fixable = [item for item in issues if not item.get("needs_material")]
-    errors = [getattr(tech, "error", ""), getattr(comp, "error", "")]
-    score = round((tech_score + comp_score) / 2)
-    satisfied = str(getattr(tech, "satisfied", "") or getattr(comp, "satisfied", "") or "")
-    if not satisfied:
-        # 评审没给满足度时按分数兜底（否则评分点聚合会把低分章节误判为"满足"）
-        satisfied = "satisfied" if score >= 85 else ("partial" if score >= 70 else "unsatisfied")
-    missing_points = list(getattr(tech, "missing_points", []) or []) + list(getattr(comp, "missing_points", []) or [])
-    if not missing_points and issues:
-        missing_points = [str(item.get("point") or "")[:80] for item in issues[:6] if item.get("point")]
-    return {
-        "tech_score": tech_score,
-        "comp_score": comp_score,
-        "score": score,
-        "satisfied": satisfied,
-        "criterion_text": str(getattr(tech, "criterion_text", "") or ""),
-        "covered_points": list(getattr(tech, "covered_points", []) or []),
-        "missing_points": missing_points,
-        "issues": issues,
-        "needs_material": needs_material,
-        "fixable": fixable,
-        "error": "；".join([e for e in errors if e][:2]),
-    }
-
+    """兼容旧调用：合并逻辑统一在 services.review_store。"""
+    return combine_findings(tech, comp)
 
 async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto") -> dict:
     """对一章跑双评审（并行），返回合并结果并落库。"""
@@ -136,23 +103,20 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
             "tier": "skip", "precheck": precheck_result,
         }
         async with get_db() as db:
-            await db.execute(
-                "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
-                "criterion_text, covered_points, missing_points, issues, needs_material, tier, content_version, evidence_version, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
-                "ON CONFLICT(block_id) DO UPDATE SET score=excluded.score, satisfied=excluded.satisfied, "
-                "issues=excluded.issues, missing_points=excluded.missing_points, tier=excluded.tier, "
-                "content_version=excluded.content_version, evidence_version=excluded.evidence_version, updated_at=CURRENT_TIMESTAMP",
-                (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
-                 skipped["criterion_text"], "[]", json.dumps(skipped["missing_points"], ensure_ascii=False),
-                 json.dumps(skipped["issues"], ensure_ascii=False), "[]", "skip", reviewed_versions["content_version"], reviewed_versions["evidence_version"]))
-            await db.commit()
-            await db.execute(
-                "INSERT INTO review_history (block_id, project_id, score, tech_score, comp_score, satisfied, "
-                "issues_count, needs_material_count) VALUES (?,?,?,?,?,?,?,?)",
-                (block_pk, int(block.get("project_id") or 0), 0, 0, 0, "unsatisfied",
-                 len(skipped["issues"]), 0))
-            await db.commit()
+            await upsert_chapter_review(
+                db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
+                thread_id=str(block.get("run_thread_id") or ""), stage="writing",
+                data={**skipped, "score": 0, "tech_score": 0, "comp_score": 0,
+                      "satisfied": "unsatisfied", "needs_material": []},
+                versions=reviewed_versions, tier="skip",
+            )
+            await append_history(
+                db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
+                thread_id=str(block.get("run_thread_id") or ""), stage="writing",
+                data={**skipped, "score": 0, "tech_score": 0, "comp_score": 0,
+                      "satisfied": "unsatisfied", "needs_material": []},
+                tier="skip",
+            )
         return await load_review(block_pk)
 
     blocks = {output.block_id: output}
@@ -194,40 +158,28 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         _logging.getLogger(__name__).warning(f"issue 状态机同步失败（不影响评审）：{e}")
 
     # ── 写历史（每轮一条，用于对比"改完有没有变好"）──
+    thread_id = str(block.get("run_thread_id") or "")
     async with get_db() as db:
-        await db.execute(
-            "INSERT INTO review_history (block_id, project_id, score, tech_score, comp_score, satisfied, "
-            "issues_count, needs_material_count) VALUES (?,?,?,?,?,?,?,?)",
-            (block_pk, int(block.get("project_id") or 0), combined["score"], combined["tech_score"],
-             combined["comp_score"], combined["satisfied"], len(combined.get("issues") or []),
-             len(combined.get("needs_material") or [])))
-        await db.commit()
+        await append_history(
+            db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
+            thread_id=thread_id, stage="writing", data=combined, tier=resolved_tier,
+        )
 
     # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
     async with get_db() as db:
         latest = await (await db.execute('SELECT * FROM blocks WHERE id=?', (block_pk,))).fetchone()
         still_current = bool(latest and await versions(db, dict(latest)) == reviewed_versions)
     if still_current:
-        await _write_back_reviews(block, tech, comp, combined)
+        await _write_back_reviews(block, tech, comp, combined, stage="writing",
+                                  thread_id=thread_id, versions=reviewed_versions,
+                                  tier=resolved_tier)
 
     async with get_db() as db:
-        await db.execute(
-            "INSERT INTO chapter_reviews (block_id, project_id, tech_score, comp_score, score, satisfied, "
-            "criterion_text, covered_points, missing_points, issues, needs_material, tier, content_version, evidence_version, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
-            "ON CONFLICT(block_id) DO UPDATE SET tech_score=excluded.tech_score, comp_score=excluded.comp_score, "
-            "score=excluded.score, satisfied=excluded.satisfied, criterion_text=excluded.criterion_text, "
-            "covered_points=excluded.covered_points, missing_points=excluded.missing_points, "
-            "issues=excluded.issues, needs_material=excluded.needs_material, "
-            "tier=excluded.tier, content_version=excluded.content_version, evidence_version=excluded.evidence_version, updated_at=CURRENT_TIMESTAMP",
-            (block_pk, int(block.get("project_id") or 0), combined["tech_score"], combined["comp_score"],
-             combined["score"], combined["satisfied"], combined["criterion_text"],
-             json.dumps(combined["covered_points"], ensure_ascii=False),
-             json.dumps(combined["missing_points"], ensure_ascii=False),
-             json.dumps(combined["issues"], ensure_ascii=False),
-             json.dumps(combined["needs_material"], ensure_ascii=False),
-             resolved_tier, reviewed_versions["content_version"], reviewed_versions["evidence_version"]))
-        await db.commit()
+        await upsert_chapter_review(
+            db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
+            thread_id=thread_id, stage="writing", data=combined,
+            versions=reviewed_versions, tier=resolved_tier,
+        )
     return await load_review(block_pk)
 
 
@@ -265,6 +217,8 @@ async def load_review(block_pk: int) -> dict | None:
         "needs_material": _loads(data.get("needs_material")),
         "fixable": [item for item in issues if not item.get("needs_material")],
         "tier": data.get("tier") or "",
+        "stage": data.get("stage") or "writing",
+        "thread_id": data.get("thread_id") or "",
         "updated_at": data.get("updated_at") or "",
     }
 
@@ -280,7 +234,9 @@ def _worst_satisfied(*values: str) -> str:
     return min(cleaned, key=lambda item: _WORSE.get(item, 9))
 
 
-async def _write_back_reviews(block: dict, tech, comp, combined: dict) -> None:
+async def _write_back_reviews(block: dict, tech, comp, combined: dict, *,
+                              stage: str = "writing", thread_id: str = "",
+                              versions: dict | None = None, tier: str = "") -> None:
     """把章节双评审写进 reviews 表（每 agent 一行，覆盖上一轮），供评分点聚合使用。
 
     reviews 是评分点聚合（summarize_scoring_risk）的唯一数据源；章节评审不写这里，
@@ -316,11 +272,15 @@ async def _write_back_reviews(block: dict, tech, comp, combined: dict) -> None:
         for row in rows:
             await db.execute(
                 "INSERT INTO reviews (thread_id, block_id, agent, score, issues, strengths, error, "
-                "criterion_text, satisfied, covered_points, missing_points) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "criterion_text, satisfied, covered_points, missing_points, stage, tier, "
+                "content_version, evidence_version, project_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (thread_id, block_code, row["agent"], row["score"], row["issues"], row["strengths"],
                  row["error"], row["criterion_text"], row["satisfied"], row["covered_points"],
-                 row["missing_points"]))
+                 row["missing_points"], stage, tier,
+                 str((versions or {}).get("content_version") or ""),
+                 str((versions or {}).get("evidence_version") or ""),
+                 int(block.get("project_id") or 0)))
         await db.commit()
 
 
@@ -328,7 +288,8 @@ async def load_history(block_pk: int, limit: int = 10) -> list[dict]:
     """本章评审历史（新的在前），带与上一轮的分差。"""
     async with get_db() as db:
         rows = await (await db.execute(
-            "SELECT score, tech_score, comp_score, satisfied, issues_count, needs_material_count, created_at "
+            "SELECT score, tech_score, comp_score, satisfied, issues_count, needs_material_count, "
+            "stage, thread_id, tier, created_at "
             "FROM review_history WHERE block_id=? ORDER BY id DESC LIMIT ?", (block_pk, max(2, limit)))).fetchall()
     items = [dict(row) for row in rows]
     for index, item in enumerate(items):

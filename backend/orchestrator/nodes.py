@@ -928,13 +928,44 @@ async def _run_review(
     blocks: dict[str, BlockOutput] = {
         bid: _dict_to_block_output(d) for bid, d in blocks_state.items()
     }
-    # 只复审本轮真正重跑过的 block：不只是省 token —— 同一段未改动的正文
-    # 重复评审会因 LLM 采样随机性给出不同分数，低分会被误判为未达标并触发
-    # 无意义的回炉，甚至在两轮之间振荡。老 checkpoint 无该字段时复审全部。
-    updated = proposal.get("updated_blocks")
-    if updated:
-        updated_set = set(updated)
-        blocks = {bid: blk for bid, blk in blocks.items() if bid in updated_set}
+    # 终评范围（2026-11-09）：不再只评 updated_blocks。
+    # 已评审且内容/证据版本仍对齐的章直接复用（终评权威采用它的结论）；
+    # 只重评"未评审 / 内容或证据已改"的章 —— 既覆盖整篇，又避免未改章节
+    # 重复调用 LLM 导致分数随机振荡。
+    try:
+        from db import get_db
+        from services.block_store import list_blocks as _list_blocks
+        from services.writing_workspace import versions as _versions
+
+        async with get_db() as db:
+            db_rows = {
+                str(b.get("block_id")): b
+                for b in await _list_blocks(
+                    db, int(state.get("project_id") or 0), state.get("thread_id") or None)
+            }
+            force = set()
+            if str(state.get("user_choice") or "") == "regen_blocks":
+                force = {str(x) for x in (proposal.get("regenerate_targets") or [])}
+                force |= {str(x) for x in (proposal.get("updated_blocks") or [])}
+            for bid in list(blocks):
+                if str(bid) in force:
+                    continue
+                row = db_rows.get(str(bid))
+                if not row:
+                    continue
+                cr = await (await db.execute(
+                    "SELECT content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
+                    (row.get("id"),))).fetchone()
+                if not cr:
+                    continue
+                current = await _versions(db, dict(row))
+                if (str(cr["content_version"] or "") == str(current.get("content_version") or "")
+                        and str(cr["evidence_version"] or "") == str(current.get("evidence_version") or "")):
+                    blocks.pop(bid, None)
+    except Exception as e:
+        logger.warning(f"_run_review：读取已评审章失败（{e}），本轮按全量评审")
+    if not blocks:
+        return {}
     outline_matrix = {
         bid: _dict_to_row(d)
         for bid, d in (spec.get("outline_matrix") or {}).items()
@@ -1005,19 +1036,6 @@ async def _run_review(
         # review_finding 已在 _review_bridge 内逐 block emit，这里仅累计 state patch
         findings_dict[block_id] = finding.to_dict()
 
-    # 持久化到 reviews 表：刷新 review 页面 / 跨进程恢复时仍能读到完整评审数据
-    thread_id = state.get("thread_id")
-    if thread_id and findings:
-        try:
-            from db import get_db
-            from domain.review import ReviewRepository
-
-            async with get_db() as db:
-                repo = ReviewRepository(db)
-                for finding in findings.values():
-                    await repo.add_finding(thread_id, finding)
-        except Exception as e:
-            logger.warning(f"_run_review：finding 落库失败（{agent_name} / {e}），仅缓存 state")
 
     # 必须并入已有 findings，不能整体替换：review 的 reducer 是浅 merge，
     # 返回 {"tech_findings": findings_dict} 会把未复审 block 的历史 finding 一并
@@ -1045,62 +1063,128 @@ async def aggregate_review_node(
     *,
     emitter: EmitterArg = None,
 ) -> WorkflowState:
-    """聚合王安石 + 包拯的 findings 为 GlobalReport（spec §5）。
+    """聚合当前全部章节评审（复用未改章节 + 本轮新 findings），产出 GlobalReport。
 
-    state 写入：``review.report``。
+    2026-11-09 起终评不再只汇总 updated_blocks：新 findings 落 chapter_reviews(stage=final)；
+    上一轮/编写时的章评审版本仍对齐则直接复用并提升为 final；报告覆盖所有有评审的章。
     """
     _check_cancel(state)
 
     review = state.get("review") or {}
     tech = review.get("tech_findings") or {}
     comp = review.get("compliance_findings") or {}
+    proposal = state.get("proposal") or {}
+    proposal_blocks = proposal.get("blocks") or {}
+    thread_id = str(state.get("thread_id") or "")
+    project_id = int(state.get("project_id") or 0)
 
-    # per_block：tech_score / comp_score / severity_counts（合并两侧 issues）
+    from db import get_db
+    from services.block_store import list_blocks as _list_blocks
+    from services.review_store import (
+        append_history, combine_findings, finding_from_chapter_row,
+        load_current_for_thread, promote_to_final, save_agent_finding, upsert_chapter_review,
+    )
+    from services.writing_workspace import versions as _versions
+
+    new_codes = sorted(set(tech.keys()) | set(comp.keys()))
     per_block: dict[str, dict] = {}
-    all_block_ids = set(tech.keys()) | set(comp.keys())
-    for bid in sorted(all_block_ids):
-        t = tech.get(bid) or {}
-        c = comp.get(bid) or {}
-        sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for issue in (t.get("issues") or []) + (c.get("issues") or []):
-            sev = (issue.get("severity") or "medium").lower()
-            if sev in sev_counts:
-                sev_counts[sev] += 1
-        per_block[bid] = {
-            "tech_score": int(t.get("score") or 0),
-            "comp_score": int(c.get("score") or 0),
-            "severity_counts": sev_counts,
+    rows: list[dict] = []
+
+    async with get_db() as db:
+        db_rows = {
+            str(b.get("block_id")): b
+            for b in await _list_blocks(db, project_id, thread_id or None)
         }
 
-    # 总分：所有 (tech + comp) / 2 的算术平均（block 数为 0 时为 0）
+        # 1) 本轮真正评过的章：写当前态（final）+ 历史 + per-agent 明细
+        for bid in new_codes:
+            t = tech.get(bid) or {}
+            c = comp.get(bid) or {}
+            combined = combine_findings(t, c)
+            row = db_rows.get(str(bid))
+            if row:
+                vs = await _versions(db, dict(row))
+                await upsert_chapter_review(
+                    db, block_pk=int(row["id"]), project_id=project_id,
+                    thread_id=thread_id, stage="final", data=combined,
+                    versions=vs, tier="final",
+                )
+                await append_history(
+                    db, block_pk=int(row["id"]), project_id=project_id,
+                    thread_id=thread_id, stage="final", data=combined, tier="final",
+                )
+                for agent, finding in (("wang_anshi", t), ("bao_zheng", c)):
+                    await save_agent_finding(
+                        db, thread_id=thread_id, project_id=project_id,
+                        block_code=str(bid), agent=agent, finding=finding,
+                        stage="final", versions=vs, tier="final",
+                    )
+            per_block[str(bid)] = {
+                "tech_score": int(combined.get("tech_score") or 0),
+                "comp_score": int(combined.get("comp_score") or 0),
+                "severity_counts": _severity_counts(combined.get("issues") or []),
+            }
+
+        # 2) 复用的章：版本仍对齐的 writing 评审提升为 final（终评权威采用其结论）
+        rows = await load_current_for_thread(db, project_id, thread_id)
+        for row in rows:
+            if str(row.get("stage") or "") == "final":
+                continue
+            block = db_rows.get(str(row.get("block_code") or ""))
+            if not block:
+                continue
+            vs = await _versions(db, dict(block))
+            if (str(row.get("content_version") or "") == str(vs.get("content_version") or "")
+                    and str(row.get("evidence_version") or "") == str(vs.get("evidence_version") or "")):
+                await promote_to_final(db, block_pk=int(row["block_id"]), thread_id=thread_id)
+        rows = await load_current_for_thread(db, project_id, thread_id)
+
+    # 3) 报告覆盖所有 final 章（含复用），不再只看本轮 findings
+    valid_codes = set(str(k) for k in proposal_blocks.keys())
+    row_by_code: dict[str, dict] = {}
+    for row in rows:
+        code = str(row.get("block_code") or "")
+        if not code or (valid_codes and code not in valid_codes):
+            continue
+        if str(row.get("stage") or "") != "final":
+            continue
+        row_by_code[code] = row
+        if code not in per_block:
+            per_block[code] = {
+                "tech_score": int(row.get("tech_score") or 0),
+                "comp_score": int(row.get("comp_score") or 0),
+                "severity_counts": _severity_counts(_loads(row.get("issues"))),
+            }
+
     if per_block:
-        total = sum(
-            (b["tech_score"] + b["comp_score"]) / 2.0 for b in per_block.values()
-        ) / len(per_block)
+        total = sum((b["tech_score"] + b["comp_score"]) / 2.0 for b in per_block.values()) / len(per_block)
     else:
         total = 0.0
 
-    # top_risks：按 (severity_rank, block_id) 取前 5 条 critical/high issue.point
     risks: list[tuple[int, str, str]] = []
-    for bid in sorted(all_block_ids):
+    # 本轮新 findings（可能尚未落库，测试/失败路径也要进报告）
+    for bid in new_codes:
         for finding in (tech.get(bid), comp.get(bid)):
-            if not finding:
-                continue
-            for issue in (finding.get("issues") or []):
-                rank = _SEVERITY_RANK.get(
-                    (issue.get("severity") or "medium").lower(), 0,
-                )
+            for issue in (finding or {}).get("issues") or []:
+                if not isinstance(issue, dict):
+                    continue
+                rank = _SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0)
                 if rank >= _SEVERITY_RANK["high"]:
-                    risks.append((rank, bid, issue.get("point") or ""))
+                    risks.append((rank, str(bid), str(issue.get("point") or "")))
+    # 复用的章
+    for bid, row in row_by_code.items():
+        for issue in _loads(row.get("issues")):
+            if not isinstance(issue, dict):
+                continue
+            rank = _SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0)
+            if rank >= _SEVERITY_RANK["high"]:
+                risks.append((rank, bid, str(issue.get("point") or "")))
     risks.sort(key=lambda x: (-x[0], x[1]))
     top_risks = [f"[{bid}] {point}" for _, bid, point in risks[:5] if point]
 
-    # missing_evidence / missing_bonus：从 spec.outline_matrix 与 proposal.blocks 对比
     missing_evidence: list[str] = []
     missing_bonus: list[str] = []
-    spec = state.get("spec") or {}
-    matrix = spec.get("outline_matrix") or {}
-    proposal_blocks = (state.get("proposal") or {}).get("blocks") or {}
+    matrix = (state.get("spec") or {}).get("outline_matrix") or {}
     for bid, row in matrix.items():
         body = (proposal_blocks.get(bid) or {}).get("content") or ""
         if (row.get("evidence_required") or "").strip() and not body.strip():
@@ -1108,21 +1192,61 @@ async def aggregate_review_node(
         if (row.get("bonus_items") or "").strip() and not body.strip():
             missing_bonus.append(f"{bid}：{row.get('title', '')}")
 
+    from services.review_consistency import check_consistency
+    consistency_rows = [
+        {**row, "block_code": code, "title": str((matrix.get(code) or {}).get("title") or code)}
+        for code, row in row_by_code.items()
+    ]
     report = GlobalReport(
         per_block=per_block,
         total_score=round(float(total), 2),
         top_risks=top_risks,
         missing_evidence=missing_evidence,
         missing_bonus=missing_bonus,
+        consistency=check_consistency(consistency_rows),
     )
     report_dict = report.to_dict()
-
     await _emit_frame(emitter, events.report_ready(report_dict))
 
+    # 4) 把复用的章也补进 state，编写/评审页才能显示"当前所有章评审"
+    tech_findings = dict(tech)
+    comp_findings = dict(comp)
+    tech_findings.update({code: finding_from_chapter_row(row, "wang_anshi") for code, row in row_by_code.items()})
+    comp_findings.update({code: finding_from_chapter_row(row, "bao_zheng") for code, row in row_by_code.items()})
+    contents = {
+        code: str((proposal_blocks.get(code) or {}).get("content") or "")
+        for code in set(tech_findings) | set(comp_findings)
+    }
     return {
         "stage": "report_review",
-        "review": {"report": report_dict},
+        "review": {
+            "report": report_dict,
+            "tech_findings": tech_findings,
+            "compliance_findings": comp_findings,
+            "tech_contents": contents,
+            "compliance_contents": dict(contents),
+        },
     }
+
+
+def _loads(raw):
+    import json
+    try:
+        value = json.loads(raw or "[]")
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _severity_counts(issues: list) -> dict:
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for issue in issues or []:
+        if not isinstance(issue, dict):
+            continue
+        sev = str(issue.get("severity") or "medium").lower()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
 
 
 # ─────────────────────────────────────────────

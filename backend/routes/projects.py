@@ -70,6 +70,12 @@ async def reset_analysis(
                 ("block_revisions", f"DELETE FROM block_revisions WHERE block_id IN "
                  f"(SELECT id FROM blocks WHERE run_thread_id IN ({placeholders}))", thread_params),
                 ("reviews", f"DELETE FROM reviews WHERE thread_id IN ({placeholders})", thread_params),
+                ("chapter_reviews", f"DELETE FROM chapter_reviews WHERE block_id IN "
+                 f"(SELECT id FROM blocks WHERE run_thread_id IN ({placeholders}))", thread_params),
+                ("review_history", f"DELETE FROM review_history WHERE block_id IN "
+                 f"(SELECT id FROM blocks WHERE run_thread_id IN ({placeholders}))", thread_params),
+                ("review_issue_states", f"DELETE FROM review_issue_states WHERE block_id IN "
+                 f"(SELECT id FROM blocks WHERE run_thread_id IN ({placeholders}))", thread_params),
                 ("split_answers", f"DELETE FROM split_answers WHERE thread_id IN ({placeholders})", thread_params),
                 ("review_points", f"DELETE FROM review_points WHERE run_thread_id IN ({placeholders})", thread_params),
                 ("spec_requirements", f"DELETE FROM spec_requirements WHERE run_thread_id IN ({placeholders})", thread_params),
@@ -85,6 +91,12 @@ async def reset_analysis(
         else:
             # 老项目可能没有 workflow_runs/run_thread_id，只在兼容路径清理这些无归属数据。
             statements.extend([
+                ("chapter_reviews", "DELETE FROM chapter_reviews WHERE block_id IN "
+                 "(SELECT id FROM blocks WHERE project_id = ?)", (project_id,)),
+                ("review_history", "DELETE FROM review_history WHERE block_id IN "
+                 "(SELECT id FROM blocks WHERE project_id = ?)", (project_id,)),
+                ("review_issue_states", "DELETE FROM review_issue_states WHERE block_id IN "
+                 "(SELECT id FROM blocks WHERE project_id = ?)", (project_id,)),
                 ("blocks", "DELETE FROM blocks WHERE project_id = ?", (project_id,)),
                 ("split_answers", "DELETE FROM split_answers WHERE project_id = ?", (project_id,)),
                 ("review_points", "DELETE FROM review_points WHERE project_id = ?", (project_id,)),

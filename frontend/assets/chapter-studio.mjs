@@ -817,7 +817,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       <div class="cs-review-head">
         <div class="cs-review-score">
           <b>${review.freshness === 'stale' ? '正文或依据有变 · 待复核' : review.freshness === 'unknown' ? '历史评审 · 待确认' : '当前版本评审 ' + review.score}</b>
-          <span>技术 ${review.tech_score} · 合规 ${review.comp_score}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}${review.tier === 'fast' ? ' · 本次=快评' : ''}</span>
+          <span>${review.stage === 'final' ? '终评' : '编写评审'} · 技术 ${review.tech_score} · 合规 ${review.comp_score}${reviewHistory.length > 1 ? ` · 第 ${reviewHistory.length} 轮` : ''}${review.tier === 'fast' ? ' · 本次=快评' : ''}</span>
         </div>
         <div class="cs-review-actions">
           <button type="button" class="cs-gate-act" data-review-run>重新评审</button>
@@ -835,7 +835,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <span>${esc(String(item.created_at || '').slice(5, 16))}</span>
           <b>${item.score}</b>
           <em>${item.delta === null ? '首轮' : (item.delta >= 0 ? `↑${item.delta}` : `↓${Math.abs(item.delta)}`)}</em>
-          <small>技术 ${item.tech_score} · 合规 ${item.comp_score} · 问题 ${item.issues_count}</small>
+          <small>${item.stage === 'final' ? '终评' : '编写评审'} · 技术 ${item.tech_score} · 合规 ${item.comp_score} · 问题 ${item.issues_count}</small>
         </div>`).join('')}
       </details>` : ''}
       ${issues.length && !(scoringPointReview?.points || []).length ? `<details class="cs-review-fold" ${issues.length <= 3 ? 'open' : ''}>

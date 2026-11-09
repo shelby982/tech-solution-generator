@@ -101,6 +101,7 @@ class GlobalReport:
     top_risks: list[str] = field(default_factory=list)
     missing_evidence: list[str] = field(default_factory=list)
     missing_bonus: list[str] = field(default_factory=list)
+    consistency: dict = field(default_factory=dict)   # 全局一致性检查结果
 
     def to_dict(self) -> dict:
         return {
@@ -109,6 +110,7 @@ class GlobalReport:
             "top_risks": list(self.top_risks),
             "missing_evidence": list(self.missing_evidence),
             "missing_bonus": list(self.missing_bonus),
+            "consistency": dict(self.consistency),
         }
 
     @classmethod
@@ -119,4 +121,5 @@ class GlobalReport:
             top_risks=list(d.get("top_risks", [])),
             missing_evidence=list(d.get("missing_evidence", [])),
             missing_bonus=list(d.get("missing_bonus", [])),
+            consistency=dict(d.get("consistency", {})),
         )

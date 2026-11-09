@@ -300,3 +300,20 @@ if updated:
 1. 终评是否采用"已评审章节复用 + 未评审/已改章节重评 + 全局一致性 pass"（推荐），还是每次全量重评？
 2. 冲突时终评权威（推荐），还是取 worst？
 3. 章节页是否要同时展示"编写时评审"和"终评"两栏，还是只显示当前 + 可展开历史？
+
+
+---
+
+## 9. 落地状态（2026-11-09 第九轮）
+
+已按第 8 节口径实现：
+
+- `chapter_reviews` 新增 `stage/thread_id`，作为**唯一当前态**；`review_history` 增加 stage/thread/tier。
+- `reviews` 保留为 per-agent 明细/审计，不再作为当前结论来源。
+- 终评只重评未评审/版本已变章节；已评审且版本对齐的章直接复用并提升为 final。
+- 终评权威：复用的 writing 评审不改分数，只提升 stage；新终评覆盖当前态，历史保留。
+- UI 当前结果显示「终评 / 编写评审」，历史可展开且每条带 stage。
+- `reset-analysis` 清理 chapter_reviews/review_history/review_issue_states。
+- 旧 reviews-only 轮次在启动时回填为 final（版本留空，随后重评一次）。
+
+详见执行记录第 15 节。

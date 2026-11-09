@@ -338,6 +338,9 @@ CREATE TABLE IF NOT EXISTS review_history (
     satisfied      TEXT DEFAULT '',
     issues_count   INTEGER DEFAULT 0,
     needs_material_count INTEGER DEFAULT 0,
+    stage          TEXT DEFAULT 'writing',   -- writing | final
+    thread_id      TEXT DEFAULT '',
+    tier           TEXT DEFAULT '',
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -354,6 +357,8 @@ CREATE TABLE IF NOT EXISTS chapter_reviews (
     issues         TEXT DEFAULT '[]',
     needs_material TEXT DEFAULT '[]',
     tier           TEXT DEFAULT '',
+    stage          TEXT DEFAULT 'writing',   -- writing | final（终评权威）
+    thread_id      TEXT DEFAULT '',
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -619,6 +624,11 @@ CREATE TABLE IF NOT EXISTS reviews (
     issues          TEXT,
     strengths       TEXT,
     error           TEXT DEFAULT '',
+    stage           TEXT DEFAULT 'writing',   -- writing | final（明细审计）
+    tier            TEXT DEFAULT '',
+    content_version TEXT DEFAULT '',
+    evidence_version TEXT DEFAULT '',
+    project_id      INTEGER DEFAULT 0,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -668,9 +678,23 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         if column not in issue_cols:
             await conn.execute(f"ALTER TABLE review_issue_states ADD COLUMN {column} TEXT DEFAULT ''")
     review_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(chapter_reviews)")).fetchall()}
-    for column in ('content_version', 'evidence_version'):
+    for column in ('content_version', 'evidence_version', 'stage', 'thread_id'):
         if column not in review_cols:
-            await conn.execute(f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT ''")
+            # stage 默认 writing：老数据都来自编写时评审；终评会逐章覆盖为 final
+            await conn.execute(f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT 'writing'" if column == 'stage'
+                               else f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT ''")
+    history_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(review_history)")).fetchall()}
+    for column in ('stage', 'thread_id', 'tier'):
+        if column not in history_cols:
+            await conn.execute(f"ALTER TABLE review_history ADD COLUMN {column} TEXT DEFAULT 'writing'" if column == 'stage'
+                               else f"ALTER TABLE review_history ADD COLUMN {column} TEXT DEFAULT ''")
+    reviews_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(reviews)")).fetchall()}
+    for column in ('stage', 'tier', 'content_version', 'evidence_version'):
+        if column not in reviews_cols:
+            await conn.execute(f"ALTER TABLE reviews ADD COLUMN {column} TEXT DEFAULT 'writing'" if column == 'stage'
+                               else f"ALTER TABLE reviews ADD COLUMN {column} TEXT DEFAULT ''")
+    if 'project_id' not in reviews_cols:
+        await conn.execute("ALTER TABLE reviews ADD COLUMN project_id INTEGER DEFAULT 0")
     await conn.commit()
     await conn.executescript(_LEADS_DDL)
     await conn.executescript('''
@@ -693,6 +717,12 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         END;
     ''')
     await conn.commit()
+    # 旧 reviews 明细 → 章级当前态（仅补完全没有章评审的行；幂等）
+    try:
+        from services.review_migration import backfill_review_tables
+        await backfill_review_tables(conn)
+    except Exception:
+        pass
     # 迁移已有数据库：添加新列（如果不存在）
     export_columns = {r[1] for r in await (await conn.execute('PRAGMA table_info(document_export_jobs)')).fetchall()}
     for name, kind in [('preview_pdf', 'BLOB'), ('preview_status', "TEXT DEFAULT 'pending'"),
