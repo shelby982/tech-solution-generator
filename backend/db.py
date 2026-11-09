@@ -341,6 +341,8 @@ CREATE TABLE IF NOT EXISTS review_history (
     stage          TEXT DEFAULT 'writing',   -- writing | final
     thread_id      TEXT DEFAULT '',
     tier           TEXT DEFAULT '',
+    content_version TEXT DEFAULT '',
+    evidence_version TEXT DEFAULT '',
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -684,7 +686,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
             await conn.execute(f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT 'writing'" if column == 'stage'
                                else f"ALTER TABLE chapter_reviews ADD COLUMN {column} TEXT DEFAULT ''")
     history_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(review_history)")).fetchall()}
-    for column in ('stage', 'thread_id', 'tier'):
+    for column in ('stage', 'thread_id', 'tier', 'content_version', 'evidence_version'):
         if column not in history_cols:
             await conn.execute(f"ALTER TABLE review_history ADD COLUMN {column} TEXT DEFAULT 'writing'" if column == 'stage'
                                else f"ALTER TABLE review_history ADD COLUMN {column} TEXT DEFAULT ''")

@@ -123,18 +123,22 @@ async def append_history(
     stage: str,
     data: dict,
     tier: str,
+    versions: dict | None = None,
 ) -> None:
     await db.execute(
         """INSERT INTO review_history
            (block_id, project_id, score, tech_score, comp_score, satisfied,
-            issues_count, needs_material_count, stage, thread_id, tier)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            issues_count, needs_material_count, stage, thread_id, tier,
+            content_version, evidence_version)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             block_pk, int(project_id or 0), int(data.get("score") or 0),
             int(data.get("tech_score") or 0), int(data.get("comp_score") or 0),
             str(data.get("satisfied") or ""),
             len(data.get("issues") or []), len(data.get("needs_material") or []),
             str(stage or "writing"), str(thread_id or ""), str(tier or ""),
+            str((versions or {}).get("content_version") or ""),
+            str((versions or {}).get("evidence_version") or ""),
         ),
     )
     await db.commit()

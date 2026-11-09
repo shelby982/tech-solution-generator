@@ -1627,3 +1627,28 @@ async def test_aggregate_syncs_issue_states_for_final_review():
         rows = await (await db.execute("SELECT point, status FROM review_issue_states")).fetchall()
     row = rows[0] if rows else None
     assert row and "缺证书" in row["point"] and row["status"] == "open"
+
+
+async def test_aggregate_old_checkpoint_does_not_persist_findings():
+    """老 checkpoint 没有 reviewed_blocks：只用于报告，不写 chapter_reviews。"""
+    from db import get_db
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-s1', 'tid-old', 'generating')")
+        await db.commit()
+
+    state = {
+        "project_id": 1, "thread_id": "tid-old",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {"tech_findings": {"s1": _finding(60)},
+                   "compliance_findings": {"s1": _finding(60)}},
+        "spec": {"outline_matrix": {}},
+    }
+    patch = await nodes.aggregate_review_node(state)
+    assert patch["review"]["report"]["per_block"]["s1"]["tech_score"] == 60
+    async with get_db() as db:
+        row = await (await db.execute("SELECT COUNT(*) AS n FROM chapter_reviews")).fetchone()
+    assert row["n"] == 0

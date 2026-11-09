@@ -173,4 +173,5 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
         "ok": sum(1 for p in out_points if p["risk"] == "ok"),
         "chapters_without_point": len(unlinked),
     }
-    return {"points": out_points, "unlinked_chapters": unlinked, "summary": summary}
+    return {"points": out_points, "unlinked_chapters": unlinked, "summary": summary,
+            "chapter_freshness": freshness}

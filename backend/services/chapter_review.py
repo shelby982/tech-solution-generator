@@ -126,7 +126,7 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
                 thread_id=str(block.get("run_thread_id") or ""), stage=stage,
                 data={**skipped, "score": 0, "tech_score": 0, "comp_score": 0,
                       "satisfied": "unsatisfied", "needs_material": []},
-                tier="skip",
+                tier="skip", versions=reviewed_versions,
             )
         return await load_review(block_pk)
 
@@ -174,6 +174,7 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         await append_history(
             db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
             thread_id=thread_id, stage=stage, data=combined, tier=resolved_tier,
+            versions=reviewed_versions,
         )
 
     # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
@@ -300,7 +301,7 @@ async def load_history(block_pk: int, limit: int = 10) -> list[dict]:
     async with get_db() as db:
         rows = await (await db.execute(
             "SELECT score, tech_score, comp_score, satisfied, issues_count, needs_material_count, "
-            "stage, thread_id, tier, created_at "
+            "stage, thread_id, tier, content_version, evidence_version, created_at "
             "FROM review_history WHERE block_id=? ORDER BY id DESC LIMIT ?", (block_pk, max(2, limit)))).fetchall()
     items = [dict(row) for row in rows]
     for index, item in enumerate(items):

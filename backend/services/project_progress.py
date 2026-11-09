@@ -119,14 +119,33 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
     # 只统计"有目录草案的线程"的中断。
     draft_threads = {t["thread_id"] for t in types}
     interrupted = [r for r in runs if r.get("interrupted_at") and r["thread_id"] in draft_threads]
-    findings_row = await (await db.execute(
-        "SELECT COUNT(*) AS n FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id "
-        "WHERE b.project_id=? AND b.run_thread_id IN ("
-        "SELECT thread_id FROM workflow_runs WHERE project_id=? AND package_id=?)",
+    # 只把"当前版本仍被评审"的章算作已评审；正文/依据改过但未复评的章不能
+    # 让阶段 4 显示 done（与风险页/交付页的 freshness 口径一致）。
+    chapter_rows = await (await db.execute(
+        """SELECT cr.content_version, cr.evidence_version,
+                  b.id AS block_pk, b.block_id, b.content, b.project_id, b.run_thread_id,
+                  b.requirement, b.review_point_ids, b.spec_requirement_ids, b.evidence_required
+           FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
+           WHERE b.project_id=? AND b.run_thread_id IN (
+               SELECT thread_id FROM workflow_runs WHERE project_id=? AND package_id=?)""",
         (project_id, project_id, package_id or -1),
-    )).fetchone()
-    findings = int(findings_row["n"] if hasattr(findings_row, "keys") else findings_row[0])
-    if not findings:
+    )).fetchall()
+    if chapter_rows:
+        from services.writing_workspace import review_freshness
+        findings = 0
+        for row in chapter_rows:
+            block = {
+                "id": row["block_pk"], "block_id": row["block_id"],
+                "content": row["content"], "project_id": row["project_id"],
+                "run_thread_id": row["run_thread_id"],
+                "requirement": row["requirement"],
+                "review_point_ids": row["review_point_ids"],
+                "spec_requirement_ids": row["spec_requirement_ids"],
+                "evidence_required": row["evidence_required"],
+            }
+            if await review_freshness(db, block, dict(row)) == "current":
+                findings += 1
+    else:
         # 迁移前/老项目回退
         legacy = await (await db.execute(
             "SELECT COUNT(*) AS n FROM reviews WHERE thread_id IN ("

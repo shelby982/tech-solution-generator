@@ -1095,10 +1095,12 @@ async def aggregate_review_node(
     from services.writing_workspace import versions as _versions
 
     reviewed_blocks = review.get("reviewed_blocks")
+    legacy_scope = reviewed_blocks is None
     if reviewed_blocks is not None:
         new_codes = sorted({str(b) for b in reviewed_blocks})
     else:
-        # 老 checkpoint 没记录本轮范围：按全部 findings 处理（兼容旧行为）
+        # 老 checkpoint 没记录本轮范围：只在报告里展示 findings，不落库。
+        # 否则升级时正在中途的 run 会把历史 findings 当成"本轮复审"覆盖新数据。
         new_codes = sorted(set(tech.keys()) | set(comp.keys()))
     per_block: dict[str, dict] = {}
     rows: list[dict] = []
@@ -1115,7 +1117,7 @@ async def aggregate_review_node(
             c = comp.get(bid) or {}
             combined = combine_findings(t, c)
             row = db_rows.get(str(bid))
-            if row:
+            if row and not legacy_scope:
                 vs = await _versions(db, dict(row))
                 await upsert_chapter_review(
                     db, block_pk=int(row["id"]), project_id=project_id,
@@ -1125,6 +1127,7 @@ async def aggregate_review_node(
                 await append_history(
                     db, block_pk=int(row["id"]), project_id=project_id,
                     thread_id=thread_id, stage="final", data=combined, tier="final",
+                    versions=vs,
                 )
                 for agent, finding in (("wang_anshi", t), ("bao_zheng", c)):
                     await save_agent_finding(

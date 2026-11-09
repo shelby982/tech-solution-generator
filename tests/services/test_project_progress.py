@@ -96,3 +96,20 @@ async def test_todos_include_material_gaps_from_latest_job(db):
     material = [t for t in data["todos"] if t["kind"] == "material"]
     assert material and material[0]["title"] == "素材缺口 2 项"
     assert "业绩" in material[0]["detail"]
+
+
+async def test_stale_chapter_review_does_not_mark_review_stage_done(db):
+    """正文改过但未复评的章，不应让「评审与交付」阶段显示 done。"""
+    block = await (await db.execute(
+        "SELECT * FROM blocks WHERE project_id=1 AND run_thread_id='tech' AND block_id='s1.1'")).fetchone()
+    await db.execute(
+        """INSERT INTO chapter_reviews
+           (block_id, project_id, tech_score, comp_score, score, satisfied,
+            issues, tier, stage, content_version, evidence_version)
+           VALUES (?, 1, 80, 80, 80, 'satisfied', '[]', 'final', 'final', 'old', 'old')""",
+        (block["id"],))
+    await db.commit()
+
+    data = await project_progress(db, 1, 1)
+    review_stage = next(s for s in data["stages"] if s["id"] == "4")
+    assert review_stage["state"] != "done"

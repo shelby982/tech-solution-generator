@@ -171,19 +171,14 @@ async def build_scoring_verdict(db, project_id: int, thread_id: str | None) -> d
                    FROM chapter_reviews cr JOIN blocks b ON b.id=cr.block_id
                    WHERE b.project_id=?""", (project_id,))).fetchall()]
         if chapter_rows:
-            from services.writing_workspace import review_freshness
+            # 复用 scoring_risk 已经算好的 freshness，避免每章再查一次 block
+            # 和一次 evidence_hash（100+ 章时是明显的 N+1）。
+            freshness = base.get("chapter_freshness") or {}
             for row in chapter_rows:
-                if thread_id:
-                    block = await (await db.execute(
-                        "SELECT * FROM blocks WHERE project_id=? AND block_id=? AND run_thread_id=?",
-                        (project_id, row["block_id"], thread_id))).fetchone()
-                else:
-                    block = await (await db.execute(
-                        "SELECT * FROM blocks WHERE project_id=? AND block_id=?",
-                        (project_id, row["block_id"]))).fetchone()
-                if not block or await review_freshness(db, dict(block), row) != "current":
+                code = str(row["block_id"])
+                if freshness.get(code) != "current":
                     continue
-                latest_rows[str(row["block_id"])] = row["issues"]
+                latest_rows[code] = row["issues"]
         else:
             # 迁移前/老测试回退：仍从 reviews 明细取
             if thread_id:

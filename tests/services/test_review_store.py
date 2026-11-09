@@ -65,15 +65,17 @@ async def test_upsert_history_and_promote(db):
         data=_data(), versions={"content_version": "c1", "evidence_version": "e1"}, tier="fast")
     await append_history(
         db, block_pk=block["id"], project_id=1, thread_id="t1", stage="writing",
-        data=_data(), tier="fast")
+        data=_data(), tier="fast", versions={"content_version": "c1", "evidence_version": "e1"})
 
     row = await (await db.execute(
         "SELECT * FROM chapter_reviews WHERE block_id=?", (block["id"],))).fetchone()
     assert row["stage"] == "writing" and row["tier"] == "fast"
     assert json.loads(row["issues"])[0]["agent"] == "wang_anshi"
     hist = await (await db.execute(
-        "SELECT stage, thread_id FROM review_history WHERE block_id=?", (block["id"],))).fetchone()
+        "SELECT stage, thread_id, content_version, evidence_version FROM review_history WHERE block_id=?",
+        (block["id"],))).fetchone()
     assert (hist["stage"], hist["thread_id"]) == ("writing", "t1")
+    assert (hist["content_version"], hist["evidence_version"]) == ("c1", "e1")
 
     await promote_to_final(db, block_pk=block["id"], thread_id="t1")
     row = await (await db.execute(

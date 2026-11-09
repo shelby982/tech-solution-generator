@@ -457,3 +457,39 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
   "成功后只一次"；失败重试是刻意的）。
 - 新增回归测试 `test_legacy_chapter_review_without_versions_is_reviewed_once`：
   无版本 → 进入重评；写入版本 → 第二轮不再调用模型。
+
+---
+
+## 18. 第十轮：按建议处理四项遗留
+
+### 18.1 旧 checkpoint 兼容
+
+老 checkpoint 没有 `review.reviewed_blocks`。`aggregate` 现在把这种状态标为 **legacy**：
+- 只把 findings 用于本次 `GlobalReport` 展示；
+- **不写** `chapter_reviews`/`review_history`/`reviews` 明细；
+- 避免升级时正在中途的 run 用历史 findings 覆盖更新的编写时评审。
+
+### 18.2 进度只统计「当前版本」评审
+
+`project_progress` 不再按 `chapter_reviews` 行数直接算已评审，而是逐行用
+`review_freshness` 判定；正文/依据已改的章不算 done，与风险页/交付页同口径。
+旧库仍保留 `reviews` 回退。
+
+### 18.3 `scoring_verdict` 去掉重复 freshness N+1
+
+`summarize_scoring_risk` 返回 `chapter_freshness`（它本来就算过每章 freshness）；
+`build_scoring_verdict` 直接复用，不再对每章二次查 block + evidence_hash。
+这样 100+ 章时避免了两套 N+1 叠加。
+
+### 18.4 `review_history` 记录版本
+
+`review_history` 增加 `content_version/evidence_version`；`append_history` 接收
+`versions`，编写评审与终评都写入。历史现在能回答「这一轮评的是哪版正文/依据」。
+
+### 18.5 验证
+
+- 新增回归：老 checkpoint 不落库、stale 评审不算 done、history 版本字段。
+- 后端 **1128 passed** / 前端 **164 passed**。
+
+仍保留的取舍：`reviews` 仍作为 per-agent 明细层；全局一致性仍是确定性检查；
+终评复用 writing 时只提升当前态、不追加"终评采纳"历史行。
