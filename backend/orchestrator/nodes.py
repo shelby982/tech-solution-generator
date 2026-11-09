@@ -1132,6 +1132,13 @@ async def aggregate_review_node(
                         block_code=str(bid), agent=agent, finding=finding,
                         stage="final", versions=vs, tier="final",
                     )
+                # 终评也要同步问题状态机；否则编写页的"问题清单/定点复核"仍停留在
+                # 上一次章节评审的状态。
+                try:
+                    from services.review_issues import sync_issues
+                    await sync_issues(db, int(row["id"]), combined.get("issues") or [])
+                except Exception as exc:
+                    logger.warning(f"aggregate_review：issue 状态同步失败（{bid} / {exc}）")
             per_block[str(bid)] = {
                 "tech_score": int(combined.get("tech_score") or 0),
                 "comp_score": int(combined.get("comp_score") or 0),

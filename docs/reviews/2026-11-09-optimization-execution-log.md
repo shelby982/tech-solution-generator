@@ -421,7 +421,7 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 
 ## 16. 复核修正（统一评审落地后）
 
-复核时发现并修掉 3 个真实问题：
+复核时发现并修掉 4 个真实问题：
 
 1. **历史 findings 覆盖新章评审**：`aggregate` 原先把 `state.review.tech_findings` 里所有历史
    findings 都当作"本轮复审"，会把未复审章的旧结果重新落库、甚至冲掉更新的编写时评审。
@@ -432,6 +432,8 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
    内容已变才回到 writing，等下一次终评裁决。
 3. **报告 top_risks 重复**：新 findings 与复用章各收集一次，同一 issue 会出现两条；
    已按 `(severity, block, point)` 去重。
+4. **终评不同步 issue 状态机**：终评新 issues 只落 chapter_reviews，编写页的
+   `review_issue_states` 仍停在上一轮；现在 aggregate 对每章调用 `sync_issues`。
 
 同时补了回归测试：
 - 全部复用 → `reviewed_blocks=[]`；
@@ -439,7 +441,7 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - chapter_reviews 优先的 scoring risk / scoring verdict；
 - 确定性全局一致性 pass。
 
-复核后：后端 **1124 passed** / 前端 **164 passed**。
+复核后：后端 **1126 passed** / 前端 **164 passed**。
 
 ---
 

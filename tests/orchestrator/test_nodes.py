@@ -1598,3 +1598,32 @@ async def test_legacy_chapter_review_without_versions_is_reviewed_once():
             "SELECT content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
             (row["id"],))).fetchone()
     assert cr["content_version"] and cr["evidence_version"]
+
+
+async def test_aggregate_syncs_issue_states_for_final_review():
+    """终评新 issues 也要进 review_issue_states，编写页的问题状态不能停在旧一轮。"""
+    from db import get_db
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-s1', 'tid-issues', 'generating')")
+        await db.commit()
+
+    state = {
+        "project_id": 1, "thread_id": "tid-issues",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {
+            "tech_findings": {"s1": {"score": 40, "issues": [
+                {"severity": "high", "point": "未响应：缺证书"}]}},
+            "compliance_findings": {"s1": {"score": 40, "issues": []}},
+            "reviewed_blocks": ["s1"],
+        },
+        "spec": {"outline_matrix": {}},
+    }
+    await nodes.aggregate_review_node(state)
+    async with get_db() as db:
+        rows = await (await db.execute("SELECT point, status FROM review_issue_states")).fetchall()
+    row = rows[0] if rows else None
+    assert row and "缺证书" in row["point"] and row["status"] == "open"
