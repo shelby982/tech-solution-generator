@@ -315,6 +315,47 @@ async def plan_units(db, project_id: int, thread_id: str) -> dict:
     }
 
 
+def _outline_index(chapters: list[dict]) -> dict[str, list]:
+    """{block_id: outline}：从已有计划里取出各章大纲。"""
+    index: dict[str, list] = {}
+    for chapter in chapters or []:
+        if not isinstance(chapter, dict):
+            continue
+        outline = chapter.get("outline")
+        if not isinstance(outline, list) or not outline:
+            continue
+        key = str(chapter.get("block_id") or "")
+        if key:
+            index[key] = outline
+    return index
+
+
+async def _preserve_outlines(db, project_id: int, thread_id: str, root_block_id: str,
+                             chapters: list[dict]) -> list[dict]:
+    """重建计划时把已有大纲带回来（按 block_id 对齐）。"""
+    try:
+        row = await (await db.execute(
+            "SELECT plan FROM writing_plans WHERE project_id=? AND thread_id=? AND root_block_id=? "
+            "ORDER BY created_at DESC LIMIT 1", (project_id, thread_id, root_block_id))).fetchone()
+    except Exception:
+        return chapters
+    if not row or not row["plan"]:
+        return chapters
+    try:
+        existing = json.loads(row["plan"]).get("chapters") or []
+    except Exception:
+        return chapters
+    index = _outline_index(existing)
+    if not index:
+        return chapters
+    for chapter in chapters:
+        key = str(chapter.get("block_id") or "")
+        carried = index.get(key)
+        if carried and not chapter.get("outline"):
+            chapter["outline"] = carried
+    return chapters
+
+
 async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) -> dict:
     """生成某一级目录的编写计划（确定性、不调模型），落库为 draft 供用户确认。"""
     blocks = [dict(b) for b in await list_blocks(db, project_id, thread_id)]
@@ -478,6 +519,9 @@ async def build_plan(db, project_id: int, thread_id: str, root_block_id: str) ->
                 "text": f"本章只写总述，概述下列 {children_count} 节要点，不重复各节细节",
                 "type": "text", "source": "system", "source_label": "父章总述",
             })
+    # 重建计划时保留已生成的大纲（否则每次自动修复/重建都会把大纲抹掉，
+    # 用户会看到"生成过一次，之后又显示还没有大纲"）
+    chapters = await _preserve_outlines(db, project_id, thread_id, str(root["block_id"]), chapters)
     plan_row = {
         "id": uuid.uuid4().hex,
         "project_id": project_id,

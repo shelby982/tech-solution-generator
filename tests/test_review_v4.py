@@ -122,3 +122,17 @@ def test_chapter_requirement_field_roundtrip_shape():
     assert payload["chapter_requirement"].count("；") == 2
     clipped = payload["chapter_requirement"][:2000]
     assert len(clipped) <= 2000
+
+
+def test_preserve_outlines_index_shape():
+    """重建计划时按 block_id 回收已有大纲（否则用户"生成一次后又没了"）。"""
+    from services.writing_plans import _outline_index
+
+    chapters = [
+        {"block_id": "s1.2.1.1", "title": "项目背景", "outline": [{"title": "政策"}, {"title": "目标"}]},
+        {"block_id": "s1.2.1.2", "title": "建设范围", "outline": []},
+        {"block_id": "s1.2.1.3", "title": "建设内容"},
+    ]
+    index = _outline_index(chapters)
+    assert list(index) == ["s1.2.1.1"]
+    assert len(index["s1.2.1.1"]) == 2
