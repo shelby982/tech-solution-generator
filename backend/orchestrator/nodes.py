@@ -1151,6 +1151,8 @@ async def aggregate_review_node(
         # 2) 复用的章：版本仍对齐的 writing 评审提升为 final（终评权威采用其结论）
         rows = await load_current_for_thread(db, project_id, thread_id)
         for row in rows:
+            if legacy_scope:
+                continue
             if str(row.get("stage") or "") == "final":
                 continue
             block = db_rows.get(str(row.get("block_code") or ""))

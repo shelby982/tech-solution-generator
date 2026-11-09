@@ -1456,6 +1456,7 @@ async def test_aggregate_review_promotes_current_writing_review_to_final():
     state = {
         "project_id": 1, "thread_id": "tid-promote",
         "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {"reviewed_blocks": []},
         "spec": {"outline_matrix": {}},
     }
     patch = await nodes.aggregate_review_node(state)
