@@ -117,7 +117,7 @@ async def get_studio(block_id: int):
         related = [dict(id=item['id'], block_id=item['block_id'], title=item['title'], response_label=response_labels[item['id']]) for item in siblings
                    if item['id'] != block_id and set(ids(item.get('spec_requirement_ids'))) & set(ids(block.get('spec_requirement_ids')))]
         from services.confirmed_directory import is_locked
-        return {'directory_locked': await is_locked(db, block), 'block': block, 'related_responses': related, 'scope': scope, 'content_version': content_hash(block.get('content')), 'profile': profile, 'layouts': LAYOUTS, 'requirements': requirements, 'points': points,
+        return {'directory_locked': await is_locked(db, block), 'block': block, 'related_responses': related, 'scope': scope, 'content_version': content_hash(block.get('content')), 'profile': profile, 'chapter_requirement': str(profile.get('chapter_requirement') or ''), 'layouts': LAYOUTS, 'requirements': requirements, 'points': points,
                 'source': source, 'materials': materials,
                 'missing': ['请补充或核对本章要求的真实证明材料'] if block.get('evidence_required') and not any(m['confirmed'] for m in materials) else []}
 
@@ -125,6 +125,7 @@ async def get_studio(block_id: int):
 class ProfileBody(BaseModel):
     layout: Literal['solution', 'understanding', 'implementation', 'evidence', 'point_to_point']
     layout_prompt: str | None = None
+    chapter_requirement: str | None = None
     writing_status: Literal['draft', 'review', 'complete'] = 'draft'
     acknowledge_open_items: bool = False
     expected_content_hash: str | None = None
@@ -187,13 +188,17 @@ async def save_studio(block_id: int, body: ProfileBody):
             if (check['gaps'] or check['issues']) and not body.acknowledge_open_items:
                 raise HTTPException(409,'存在待补充内容或检查意见，请查看摘要并明确确认')
         existing = await (await db.execute(
-            "SELECT layout_prompt FROM chapter_studio WHERE block_id=?", (block_id,))).fetchone()
+            "SELECT layout_prompt, chapter_requirement FROM chapter_studio WHERE block_id=?", (block_id,))).fetchone()
         layout_prompt = (body.layout_prompt if body.layout_prompt is not None
                          else str(existing["layout_prompt"] or "") if existing else "")
-        await db.execute('''INSERT INTO chapter_studio(block_id, layout, layout_prompt, writing_status, confirmed_hash) VALUES(?,?,?,?,?)
+        chapter_requirement = (body.chapter_requirement if body.chapter_requirement is not None
+                               else str(existing["chapter_requirement"] or "") if existing else "")
+        await db.execute('''INSERT INTO chapter_studio(block_id, layout, layout_prompt, chapter_requirement, writing_status, confirmed_hash) VALUES(?,?,?,?,?,?)
             ON CONFLICT(block_id) DO UPDATE SET layout=excluded.layout, layout_prompt=excluded.layout_prompt,
+            chapter_requirement=excluded.chapter_requirement,
             writing_status=excluded.writing_status, confirmed_hash=excluded.confirmed_hash''',
-            (block_id, body.layout, layout_prompt, body.writing_status, content_hash(block.get('content'))))
+            (block_id, body.layout, layout_prompt, chapter_requirement, body.writing_status,
+             content_hash(block.get('content'))))
         await db.commit()
     return body.model_dump()
 
@@ -404,9 +409,11 @@ async def build_outline(block_id: int, body: OutlineBody):
         from services.chapter_studio import LAYOUTS
         async with get_db() as layout_db:
             layout_row = await (await layout_db.execute(
-                "SELECT layout, layout_prompt FROM chapter_studio WHERE block_id=?", (block['id'],))).fetchone()
+                "SELECT layout, layout_prompt, chapter_requirement FROM chapter_studio WHERE block_id=?",
+                (block['id'],))).fetchone()
         layout = str((layout_row['layout'] if layout_row else '') or chapter.get('layout') or 'solution')
         layout_prompt = str((layout_row['layout_prompt'] if layout_row else '') or '')
+        chapter_requirement = str((layout_row['chapter_requirement'] if layout_row else '') or '')
         payload = {
             'chapter': chapter.get('title') or block.get('title') or '',
             'objective': chapter.get('objective') or '',
@@ -414,6 +421,7 @@ async def build_outline(block_id: int, body: OutlineBody):
             'chapter_type': LAYOUTS.get(layout, {}).get('label') or layout,
             'chapter_type_structure': LAYOUTS.get(layout, {}).get('blocks') or [],
             'chapter_type_prompt': layout_prompt[:2000],
+            'chapter_requirement': chapter_requirement[:2000],
             'requirements': req_rows[:10],
             'tasks': [t.get('title') for t in (chapter.get('tasks') or [])],
         }
@@ -524,12 +532,20 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     from services.section_contract import contract_for as _contract_for
     _contract = _contract_for(title)
     _practice = ''
-    if not extra_request:
-        try:
-            from services.section_practice import practice_of as _practice_of
-            _practice = await _practice_of(block['project_id'], block['block_id'], title)
-        except Exception:
-            _practice = ''
+    try:
+        from services.section_practice import practice_of as _practice_of
+        _practice = await _practice_of(block['project_id'], block['block_id'], title)
+    except Exception:
+        _practice = ''
+    # 本章统一要求（每节都必须遵守）：chapter_studio.chapter_requirement
+    _chapter_requirement = ''
+    try:
+        async with get_db() as _rc_db:
+            _rc_row = await (await _rc_db.execute(
+                "SELECT chapter_requirement FROM chapter_studio WHERE block_id=?", (block_id,))).fetchone()
+        _chapter_requirement = str((_rc_row['chapter_requirement'] if _rc_row else '') or '').strip()
+    except Exception:
+        _chapter_requirement = ''
     user_prompt = (
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
@@ -540,6 +556,7 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
         f"本节依据：{'；'.join(str((b or {}).get('ref') or '') for b in (payload.get('basis') or [])) or '（继承本章依据）'}\n"
         f"本节写法：{json.dumps(payload.get('how') or {}, ensure_ascii=False)}\n"
         f"本节交付物：{json.dumps(payload.get('deliverables') or [], ensure_ascii=False)}\n"
+        + (f"【本章统一要求（每节都必须遵守，优先级高于本节写法）】{_chapter_requirement}\n" if _chapter_requirement else "")
         + (f"【本节写法（按计划执行）】{_practice}\n" if _practice else "")
         + (f"【本节硬性要求】{_contract}\n" if _contract else "")
         + ("【用户选择】本节按概括写法生成：没有可用证据，不要编造具体项目事实；在结论处说明依据待补。\n" if generic else

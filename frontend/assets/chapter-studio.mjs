@@ -1299,6 +1299,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
               <button type="button" class="cs-cp-ghost" data-cp-layout-prompt-reset>恢复默认</button>
               <button type="button" class="cs-cp-primary" data-cp-layout-prompt-save>保存提示词</button>
             </div>
+            <p class="cs-cp-type-desc" style="margin-top:12px">本章统一要求（每一节都要遵守）</p>
+            <textarea class="cs-cp-type-prompt" data-cp-chapter-req rows="4"
+              placeholder="例：全章口径统一；每节先结论后依据；禁止出现待补充/待填写；不得编造未提供的数字与业绩。">${esc(context?.chapter_requirement || '')}</textarea>
+            <div class="cs-cp-type-actions">
+              <button type="button" class="cs-cp-ghost" data-cp-chapter-req-clear>清空</button>
+              <button type="button" class="cs-cp-primary" data-cp-chapter-req-save>保存统一要求</button>
+            </div>
             <p class="cs-cp-type-state ${layoutStale ? 'is-warn' : ''}">${hasOutline ? (layoutStale ? '类型与大纲不一致：类型已变更，建议按新类型重建大纲。' : '类型与大纲：一致。') : '还没有大纲：先按当前类型生成章节大纲。'}</p>
           </div>
         </details>
@@ -1328,7 +1335,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                 </summary>
                 <div class="cs-ol-detail">
                   <div class="cs-ol-how">
-                    <p class="cs-ol-how-title"><b>生成提示词</b><span class="cs-dim">（用户填写的本节提示词，生成时优先执行）</span></p>
+                    <p class="cs-ol-how-title"><b>本节写法</b><span class="cs-dim">（只影响这一节；章级统一要求在上面 ① 会自动叠加）</span></p>
                     <textarea class="cs-ol-how-text" data-ol-how="${i}" rows="4">${esc(practiceOf(sec))}</textarea>
                     <div class="cs-ol-how-acts">
                       <button type="button" class="cs-cp-ghost" data-ol-how-save="${i}">保存</button>
@@ -1507,6 +1514,37 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const area = body.querySelector('[data-cp-layout-prompt]');
         if (area) area.value = guide.prompt || '';
         status('已恢复当前类型的默认提示词（点「保存提示词」生效）');
+      });
+      body.querySelector('[data-cp-chapter-req-save]')?.addEventListener('click', async (event) => {
+        const area = body.querySelector('[data-cp-chapter-req]');
+        const value = String(area?.value || '').trim();
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        try {
+          const updated = await json(`/api/blocks/${active.id}/studio`, send('PUT', {
+            layout: (context?.profile || {}).layout,
+            chapter_requirement: value,
+            writing_status: (context?.profile || {}).writing_status,
+          }));
+          context.profile = {...context.profile, ...updated};
+          if (context) context.chapter_requirement = value;
+          status(value ? `已保存本章统一要求（${value.length} 字，每节写作都会遵守）` : '已清空本章统一要求');
+        } catch (error) { status(`保存失败：${error.message}`); }
+        finally { btn.disabled = false; }
+      });
+      body.querySelector('[data-cp-chapter-req-clear]')?.addEventListener('click', async () => {
+        const area = body.querySelector('[data-cp-chapter-req]');
+        if (area) area.value = '';
+        try {
+          const updated = await json(`/api/blocks/${active.id}/studio`, send('PUT', {
+            layout: (context?.profile || {}).layout,
+            chapter_requirement: '',
+            writing_status: (context?.profile || {}).writing_status,
+          }));
+          context.profile = {...context.profile, ...updated};
+          if (context) context.chapter_requirement = '';
+          status('已清空本章统一要求');
+        } catch (error) { status(`清空失败：${error.message}`); }
       });
       body.querySelector('[data-cp-layout-prompt-save]')?.addEventListener('click', async () => {
         const area = body.querySelector('[data-cp-layout-prompt]');

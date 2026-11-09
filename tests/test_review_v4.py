@@ -114,3 +114,11 @@ def test_should_skip_llm_for_empty_chapter():
     assert should_skip_llm(precheck("## 一\n太短。")) is True
     long_text = precheck("## 一\n" + "现有服务器 12 台，用户 3000 人，数据量 2TB，2026 年完成改造。" * 12)
     assert should_skip_llm(long_text) is False
+
+
+def test_chapter_requirement_field_roundtrip_shape():
+    """章级统一要求：字段名/长度裁剪口径（避免写出超长提示词）。"""
+    payload = {"chapter_requirement": "全章口径统一；每节先结论后依据；禁止待补充"}
+    assert payload["chapter_requirement"].count("；") == 2
+    clipped = payload["chapter_requirement"][:2000]
+    assert len(clipped) <= 2000

@@ -773,6 +773,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if material_cols and 'mode' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN mode TEXT DEFAULT 'cite'")
     cs_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_studio)')).fetchall()}
+    if cs_cols and 'chapter_requirement' not in cs_cols:
+        await conn.execute("ALTER TABLE chapter_studio ADD COLUMN chapter_requirement TEXT DEFAULT ''")
     if cs_cols and 'layout_prompt' not in cs_cols:
         await conn.execute("ALTER TABLE chapter_studio ADD COLUMN layout_prompt TEXT DEFAULT ''")
     cmc_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_material_chunks)')).fetchall()}

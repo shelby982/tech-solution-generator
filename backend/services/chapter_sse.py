@@ -488,6 +488,15 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
     )
     from services.section_contract import contract_for
     contract = contract_for(section.get("title") or "")
+    chapter_requirement = ""
+    try:
+        async with get_db() as _rc_db:
+            row = await (await _rc_db.execute(
+                "SELECT chapter_requirement FROM chapter_studio WHERE block_id=?",
+                (int(block.get("id") or 0),))).fetchone()
+        chapter_requirement = str((row["chapter_requirement"] if row else "") or "").strip()
+    except Exception:
+        chapter_requirement = ""
     from services.section_practice import practice_of
     practice = await practice_of(int(block.get("project_id") or 0), str(block.get("block_id") or ""),
                                  str(section.get("title") or ""))
@@ -495,6 +504,7 @@ async def _stream_section(block: dict, section: dict, thread_id: str, model: str
         f"所属章节：{payload.get('chapter') or '本章'}\n"
         f"本次只写这一节：{payload.get('section')}\n"
         + (f"{context_text}\n\n" if context_text else "")
+        + (f"【本章统一要求（每节都必须遵守，优先级高于本节写法）】{chapter_requirement}\n" if chapter_requirement else "")
         + (f"【本节写法（按计划执行）】{practice}\n" if practice else "")
         + (f"【本节硬性要求】{contract}\n" if contract else "")
         + f"本节要点：{'；'.join(payload.get('points') or []) or '（按节标题展开）'}\n"
