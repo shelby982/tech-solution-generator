@@ -256,7 +256,8 @@ async def _write_back_reviews(block: dict, tech, comp, combined: dict, *,
     """
     thread_id = str(block.get("run_thread_id") or "")
     block_code = str(block.get("block_id") or "")
-    if not block_code:
+    if not block_code or not thread_id:
+        # reviews.thread_id 有 FK；没有 run 的老块只保留 chapter_reviews 当前态。
         return
     merged_missing = list(combined.get("missing_points") or [])
     worst = _worst_satisfied(getattr(tech, "satisfied", ""), getattr(comp, "satisfied", ""))

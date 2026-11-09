@@ -1,12 +1,10 @@
 """
-backend/routes/export.py — diff 计算、Word 导出
+backend/routes/export.py — Word 导出
 
 端点：
-  GET  /api/projects/{id}/diff    — base_snapshot vs current 差异
   GET  /api/projects/{id}/export  — 导出 Word 文档
 """
 
-import json
 import logging
 from urllib.parse import quote
 
@@ -18,7 +16,6 @@ from services.block_store import (
     get_project,
     list_blocks,
     current_run_thread_id,
-    get_snapshot,
 )
 from infra.docx import sections_to_docx
 
@@ -30,82 +27,6 @@ def _content_disposition(filename: str) -> str:
     encoded = quote(filename, safe="")
     ascii_fb = filename.encode("ascii", errors="replace").decode("ascii")
     return f'attachment; filename="{ascii_fb}"; filename*=UTF-8\'\'{encoded}'
-
-
-def _compute_diff(base_blocks: list[dict], current_blocks: list[dict]) -> dict:
-    """计算 base_snapshot 与 current_blocks 的三路差异"""
-    base_map    = {b["block_id"]: b for b in base_blocks}
-    current_map = {b["block_id"]: b for b in current_blocks}
-
-    domain_map: dict[str, list] = {}
-    for b in current_blocks:
-        domain_map.setdefault(b.get("domain", ""), []).append(b)
-
-    added, removed, changed = [], [], []
-
-    for bid, blk in current_map.items():
-        if bid not in base_map:
-            added.append({"block_id": bid, "title": blk.get("title"), "content": blk.get("content")})
-
-    for bid, blk in base_map.items():
-        if bid not in current_map:
-            removed.append({"block_id": bid, "title": blk.get("title")})
-
-    for bid, base_blk in base_map.items():
-        if bid not in current_map:
-            continue
-        cur_blk = current_map[bid]
-        if base_blk.get("content") != cur_blk.get("content"):
-            affected = [
-                {"block_id": b["block_id"], "title": b.get("title")}
-                for b in domain_map.get(cur_blk.get("domain", ""), [])
-                if b["block_id"] != bid
-            ]
-            changed.append({
-                "block_id":        bid,
-                "old_content":     base_blk.get("content"),
-                "new_content":     cur_blk.get("content"),
-                "affected_blocks": affected,
-            })
-
-    return {"added": added, "removed": removed, "changed": changed}
-
-
-@router.get("/projects/{project_id}/diff", deprecated=True)
-async def get_diff(
-    project_id: int,
-    package_id: int | None = Query(default=None, alias="packageId"),
-):
-    async with get_db() as db:
-        project = await get_project(db, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-
-        package = None
-        if package_id is not None:
-            from services.package_scope import package_run_thread, require_package
-            package = await require_package(db, project_id, package_id)
-            tid = await package_run_thread(db, project_id, package_id)
-            current_blocks = await list_blocks(db, project_id, tid, fallback_all=False) if tid else []
-            snapshot_row = await (await db.execute(
-                """SELECT * FROM project_snapshots
-                   WHERE project_id = ? AND package_id = ? ORDER BY id DESC LIMIT 1""",
-                (project_id, package_id),
-            )).fetchone()
-            snapshot = dict(snapshot_row) if snapshot_row else None
-        else:
-            tid = await current_run_thread_id(db, project_id)
-            current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
-            snapshot = await get_snapshot(db, project["base_snapshot_id"]) if project.get("base_snapshot_id") else None
-
-        if snapshot is None:
-            added = [{"block_id": b["block_id"], "title": b.get("title"), "content": b.get("content")}
-                     for b in current_blocks]
-            return JSONResponse(content={"added": added, "removed": [], "changed": []})
-
-    base_blocks: list[dict] = json.loads(snapshot["snapshot"])
-    result = _compute_diff(base_blocks, current_blocks)
-    return JSONResponse(content=result)
 
 
 @router.get("/projects/{project_id}/export")

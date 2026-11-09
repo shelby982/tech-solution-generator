@@ -153,3 +153,17 @@ AST + 调用扫描确认（排除路由 handler）：
 - 3.2 外键：已加 `APP_ENFORCE_FK` 开关；默认仍关闭，因为历史库有孤儿行，需先清理。
 - 4 死符号：已删；两个测试端点已标 `deprecated=True`。
 - 1.2 XSS：仅做了标题注入抽查，未做全量 `innerHTML` 自动检查，仍是待办。
+
+
+---
+
+## 9. 第十二轮处理结果
+
+- 1.1 安全边界：已处理（CORS 移除、127.0.0.1、可选 token、start.sh）。
+- 1.2 XSS：已加 `innerhtml-escape.test.mjs` 针对性检查；全量 sanitizer 仍未做。
+- 2.2/2.3 N+1：cards/materials 已批量化，specs/points/facts 有请求级 cache；仍有极端项目压测空间。
+- 3.1 schema：已加 `schema_migrations`/`user_version=2`。
+- 3.2 外键：已清理 8 条孤儿行，默认开启，实库 `foreign_key_check` 为空。
+- 3.3 `funnel_events`：已 DROP。
+- 4 死代码/端点：死符号已删；`/api/review`、`/api/projects/{id}/diff` 已删，端点 195。
+- 5 测试：后端 1130 / 前端 165。

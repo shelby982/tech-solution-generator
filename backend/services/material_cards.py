@@ -29,14 +29,7 @@ def _web_authority(domain: str) -> tuple[str, float]:
     return ("公开来源", 0.6)
 
 
-async def file_card(db, chunk_id: int, *, block_id: int = 0, section: str = "",
-                    requirement_id: str = "", mode: str = "cite") -> dict | None:
-    row = await (await db.execute(
-        "SELECT mc.id, mc.content, mc.page, mc.status, m.id, m.filename, m.role "
-        "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
-        "WHERE mc.id=? AND m.deleted_at IS NULL", (int(chunk_id),))).fetchone()
-    if not row:
-        return None
+def _file_card_from_row(row, *, block_id=0, section="", requirement_id="", mode="cite") -> dict:
     authority, confidence = _authority(row[6], "file")
     return {
         "chunk_id": int(row[0]), "signed_id": int(row[0]), "chunk_kind": "file",
@@ -45,18 +38,12 @@ async def file_card(db, chunk_id: int, *, block_id: int = 0, section: str = "",
         "locator": f"{row[5] or '素材'}" + (f" 第 {row[2]} 页" if row[2] else ""),
         "authority": authority, "confidence": confidence,
         "status": str(row[3] or "confirmed"), "block_id": int(block_id or 0),
-        "section": section, "requirement_id": requirement_id, "mode": mode, "used": bool(block_id),
+        "section": section, "requirement_id": requirement_id, "mode": mode,
+        "used": bool(block_id),
     }
 
 
-async def web_card(db, citation_chunk_id: int, *, block_id: int = 0, section: str = "",
-                   requirement_id: str = "", mode: str = "cite") -> dict | None:
-    row = await (await db.execute(
-        "SELECT cc.id, cc.content, cc.heading, cc.status, c.id, c.title, c.url, c.domain "
-        "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id WHERE cc.id=?",
-        (int(citation_chunk_id),))).fetchone()
-    if not row:
-        return None
+def _web_card_from_row(row, *, block_id=0, section="", requirement_id="", mode="cite") -> dict:
     authority, confidence = _web_authority(row[7])
     return {
         "chunk_id": int(row[0]), "signed_id": -int(row[0]), "chunk_kind": "cite",
@@ -65,10 +52,28 @@ async def web_card(db, citation_chunk_id: int, *, block_id: int = 0, section: st
         "locator": row[2] or row[5] or row[7] or "公开来源",
         "authority": authority, "confidence": confidence,
         "status": str(row[3] or "confirmed"), "block_id": int(block_id or 0),
-        "section": section, "requirement_id": requirement_id, "mode": mode, "used": bool(block_id),
-        "url": row[6] or "", "domain": row[7] or "",
+        "section": section, "requirement_id": requirement_id, "mode": mode,
+        "used": bool(block_id), "url": row[6] or "", "domain": row[7] or "",
     }
 
+
+async def file_card(db, chunk_id: int, *, block_id: int = 0, section: str = "",
+                    requirement_id: str = "", mode: str = "cite") -> dict | None:
+    row = await (await db.execute(
+        "SELECT mc.id, mc.content, mc.page, mc.status, m.id, m.filename, m.role "
+        "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
+        "WHERE mc.id=? AND m.deleted_at IS NULL", (int(chunk_id),))).fetchone()
+    return _file_card_from_row(row, block_id=block_id, section=section,
+                               requirement_id=requirement_id, mode=mode) if row else None
+
+async def web_card(db, citation_chunk_id: int, *, block_id: int = 0, section: str = "",
+                   requirement_id: str = "", mode: str = "cite") -> dict | None:
+    row = await (await db.execute(
+        "SELECT cc.id, cc.content, cc.heading, cc.status, c.id, c.title, c.url, c.domain "
+        "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id WHERE cc.id=?",
+        (int(citation_chunk_id),))).fetchone()
+    return _web_card_from_row(row, block_id=block_id, section=section,
+                              requirement_id=requirement_id, mode=mode) if row else None
 
 async def card(db, chunk_id: int, kind: str = "file", **kwargs) -> dict | None:
     if str(kind) == "cite" or int(chunk_id) < 0:
@@ -118,4 +123,65 @@ def public_dto(item: dict) -> dict:
     """去掉内部字段，补前端展示字段。"""
     out = dict(item or {})
     out["confidence_label"] = confidence_label(float(out.get("confidence") or 0))
+    return out
+
+
+async def bound_cards_many(db, block_ids: list[int], section: str = "") -> dict[int, list[dict]]:
+    """批量取多章绑定的 cards；避免每章/每 chunk 单独查库（evidence_hash 批量路径）。"""
+    ids = [int(x) for x in block_ids]
+    out: dict[int, list[dict]] = {bid: [] for bid in ids}
+    if not ids:
+        return out
+    meta: dict[int, list[tuple]] = {}
+    for start in range(0, len(ids), 500):
+        part = ids[start:start + 500]
+        marks = ",".join("?" for _ in part)
+        sql = ("SELECT block_id, chunk_id, COALESCE(chunk_kind,'file'), section, mode, "
+               "COALESCE(requirement_id,'') FROM chapter_material_chunks "
+               f"WHERE block_id IN ({marks})")
+        args = list(part)
+        if section:
+            sql += " AND section=?"
+            args.append(str(section))
+        for row in await (await db.execute(sql, args)).fetchall():
+            meta.setdefault(int(row[0]), []).append(tuple(row))
+    file_ids = sorted({int(row[1]) for rows in meta.values() for row in rows
+                       if str(row[2]) != "cite" and int(row[1]) >= 0})
+    web_ids = sorted({abs(int(row[1])) for rows in meta.values() for row in rows
+                      if str(row[2]) == "cite" or int(row[1]) < 0})
+    file_map = {}
+    for start in range(0, len(file_ids), 500):
+        part = file_ids[start:start + 500]
+        marks = ",".join("?" for _ in part)
+        for row in await (await db.execute(
+                "SELECT mc.id, mc.content, mc.page, mc.status, m.id, m.filename, m.role "
+                "FROM material_chunks mc JOIN materials m ON m.id=mc.material_id "
+                f"WHERE mc.id IN ({marks}) AND m.deleted_at IS NULL", part)).fetchall():
+            file_map[int(row[0])] = row
+    web_map = {}
+    for start in range(0, len(web_ids), 500):
+        part = web_ids[start:start + 500]
+        marks = ",".join("?" for _ in part)
+        for row in await (await db.execute(
+                "SELECT cc.id, cc.content, cc.heading, cc.status, c.id, c.title, c.url, c.domain "
+                "FROM citation_chunks cc JOIN citations c ON c.id=cc.citation_id "
+                f"WHERE cc.id IN ({marks})", part)).fetchall():
+            web_map[int(row[0])] = row
+    for bid, rows in meta.items():
+        cards = []
+        for _block_id, chunk_id, kind, sec, mode, requirement_id in rows:
+            cid = int(chunk_id)
+            if str(kind) == "cite" or cid < 0:
+                row = web_map.get(abs(cid))
+                item = _web_card_from_row(row, block_id=bid, section=sec or "",
+                                          requirement_id=requirement_id or "",
+                                          mode=mode or "cite") if row else None
+            else:
+                row = file_map.get(cid)
+                item = _file_card_from_row(row, block_id=bid, section=sec or "",
+                                           requirement_id=requirement_id or "",
+                                           mode=mode or "cite") if row else None
+            if item:
+                cards.append(item)
+        out[bid] = cards
     return out

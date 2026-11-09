@@ -537,3 +537,49 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 ### 19.6 验证
 
 - 后端 **1129 passed** / 前端 **164 passed**；端点 197（两个 legacy 端点标 deprecated，不删）。
+
+---
+
+## 20. 第十二轮：清库、外键、批量版本、legacy 端点、XSS 检查
+
+### 20.1 数据库清理
+
+- 删除 8 条孤儿行：`block_revisions` 6 条 + `reviews` 2 条（原始记录备份在
+  `/tmp/ge_orphans_backup.json`）；`PRAGMA foreign_key_check` 现在为空。
+- 删除测试用 `funnel_events` 表（3 条测试事件）。
+- 本地库执行 `init_db`：`user_version=2`、`schema_migrations` 已写入、外键打开且校验通过。
+
+### 20.2 外键默认开启
+
+- `APP_ENFORCE_FK` 默认改为 **1**；`init_db` 先提交事务再 `PRAGMA foreign_keys=ON`，
+  并用 `foreign_key_check` 阻断脏库。
+- 测试夹具显式 `APP_ENFORCE_FK=0`（测试经常故意造无父行数据）；FK 行为由
+  `test_schema_migrations.py` 单独覆盖。
+- 老块没有 `run_thread_id` 时，`reviews` 明细写路径跳过，只保留 `chapter_reviews` 当前态。
+
+### 20.3 cards/materials 批量化
+
+- 新增 `bound_cards_many`：一次查 `chapter_material_chunks`，批量查 `material_chunks`/`citation_chunks`。
+- 新增 `evidence_hash_many` / `versions_many` / `review_freshness_many`：
+  specs/points/facts 走请求级 cache，cards/materials 各一次批量查询。
+- `scoring_risk`、`project_progress`、chapter-studio 文档页改用批量 freshness。
+- 新增 `tests/services/test_writing_workspace_versions.py`，验证批量与单章哈希完全一致
+  （含绑定 cards 的场景）。
+
+### 20.4 删除 legacy 端点
+
+- 删除 `GET /api/review/{thread_id}`（`routes/review.py` 与测试）。
+- 删除 `GET /api/projects/{id}/diff`（`export.py` 的 diff 计算与测试断言）。
+- 端点 197 → **195**；路由模块 21 → **20**；README 同步。
+
+### 20.5 前端 XSS 检查
+
+- 新增 `tests/frontend/innerhtml-escape.test.mjs`：扫描 `innerHTML` 模板中的文本字段插值，
+  未包 `esc/escapeHtml` 且不在已知安全渲染函数内的直接失败。
+- 当前通过；但它是"危险文本字段"检查，不是全量 HTML sanitizer，88 处 `innerHTML`
+  的其余常量/HTML 片段仍需人工审查。
+
+### 20.6 验证
+
+- 后端 **1130 passed** / 前端 **165 passed**；`git diff --check` 通过。
+- 实库 `foreign_key_check` 空、`user_version=2`、`funnel_events` 不存在。

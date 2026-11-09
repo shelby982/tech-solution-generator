@@ -157,7 +157,8 @@ async def save_agent_finding(
     tier: str,
 ) -> None:
     """写/替换一条 per-agent 明细（同 thread+block+agent）。"""
-    if not block_code or finding is None:
+    if not block_code or not thread_id or finding is None:
+        # reviews.thread_id 有 FK；无 run 的老块不写 per-agent 明细。
         return
     await db.execute(
         "DELETE FROM reviews WHERE thread_id=? AND block_id=? AND agent=?",

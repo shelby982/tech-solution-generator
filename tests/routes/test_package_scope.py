@@ -1,4 +1,4 @@
-"""历史、差异和运行列表必须按稳定 package_id 隔离。"""
+"""历史与运行列表必须按稳定 package_id 隔离。"""
 import aiosqlite
 import pytest
 import pytest_asyncio
@@ -7,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 import db as db_module
 from db import init_db
-from routes import export, projects, revisions
+from routes import projects, revisions
 
 
 @pytest.fixture
@@ -15,7 +15,6 @@ def app():
     application = FastAPI()
     application.include_router(projects.router, prefix="/api")
     application.include_router(revisions.router, prefix="/api")
-    application.include_router(export.router, prefix="/api")
     return application
 
 
@@ -73,7 +72,7 @@ async def scope_env(tmp_path, monkeypatch, app):
 
 
 @pytest.mark.asyncio
-async def test_runs_revisions_and_diff_are_package_scoped(scope_env):
+async def test_runs_and_revisions_are_package_scoped(scope_env):
     client, pid, p1_id, p2_id = scope_env
 
     runs = await client.get(f"/api/projects/{pid}/workflow-runs?packageId={p1_id}")
@@ -84,13 +83,6 @@ async def test_runs_revisions_and_diff_are_package_scoped(scope_env):
     assert history.status_code == 200
     assert [row["block_code"] for row in history.json()["revisions"]] == ["p1-b1"]
 
-    diff = await client.get(f"/api/projects/{pid}/diff?packageId={p1_id}")
-    assert diff.status_code == 200
-    assert [row["block_id"] for row in diff.json()["added"]] == ["p1-b1"]
-    assert "p2-b1" not in str(diff.json())
-
-    other = await client.get(f"/api/projects/{pid}/diff?packageId={p2_id}")
-    assert [row["block_id"] for row in other.json()["added"]] == ["p2-b1"]
 
 
 @pytest.mark.asyncio
@@ -108,7 +100,6 @@ async def test_package_scope_rejects_cross_project_id(scope_env):
     for path in (
         f"/api/projects/{pid}/workflow-runs?packageId={foreign_package_id}",
         f"/api/projects/{pid}/revisions?packageId={foreign_package_id}",
-        f"/api/projects/{pid}/diff?packageId={foreign_package_id}",
     ):
         response = await client.get(path)
         assert response.status_code == 404, path

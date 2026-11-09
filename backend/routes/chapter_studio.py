@@ -814,11 +814,16 @@ async def get_document(project_id: int, threadId: str):
             'SELECT r.* FROM chapter_reviews r JOIN blocks b ON b.id=r.block_id WHERE b.project_id=? AND b.run_thread_id=?',
             (project_id, threadId))).fetchall()}
         review_states = {}
-        freshness_cache: dict = {}
+        review_by_code = {str(b.get('block_id')): review_rows.get(b['id'])
+                          for b in blocks if review_rows.get(b['id'])}
+        from services.writing_workspace import review_freshness_many
+        states = await review_freshness_many(db, blocks, review_by_code, cache={})
         for block in blocks:
             review = review_rows.get(block['id'])
             if review:
-                review_states[block['id']] = {'freshness': await review_freshness(db, block, review, cache=freshness_cache), 'satisfied': review['satisfied']}
+                review_states[block['id']] = {
+                    'freshness': states.get(int(block['id']), 'unknown'),
+                    'satisfied': review['satisfied']}
         return {'review_states': review_states, 'template': row[0] if row else 'standard', 'templates': templates, 'profiles': profiles,
                 'unit_ids': [b['id'] for b in units], 'jobs': jobs,
                 'node_scopes': node_scopes(blocks)}

@@ -131,9 +131,9 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
         (project_id, project_id, package_id or -1),
     )).fetchall()
     if chapter_rows:
-        from services.writing_workspace import review_freshness
-        findings = 0
-        freshness_cache: dict = {}
+        from services.writing_workspace import review_freshness_many
+        blocks_for_review = []
+        review_by_code = {}
         for row in chapter_rows:
             block = {
                 "id": row["block_pk"], "block_id": row["block_id"],
@@ -144,8 +144,10 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
                 "spec_requirement_ids": row["spec_requirement_ids"],
                 "evidence_required": row["evidence_required"],
             }
-            if await review_freshness(db, block, dict(row), cache=freshness_cache) == "current":
-                findings += 1
+            blocks_for_review.append(block)
+            review_by_code[str(row["block_id"])] = dict(row)
+        states = await review_freshness_many(db, blocks_for_review, review_by_code, cache={})
+        findings = sum(1 for block in blocks_for_review if states.get(int(block["id"])) == "current")
     else:
         # 迁移前/老项目回退
         legacy = await (await db.execute(

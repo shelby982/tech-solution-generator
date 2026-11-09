@@ -60,6 +60,9 @@ def _isolate_db(tmp_path, monkeypatch, _db_schema_template):
 
     import db as db_module
 
+    # 测试夹具经常故意造"没有父行的 reviews/block_revisions"来测聚合，
+    # 默认生产已开启外键；测试进程显式关闭，FK 本身由 test_schema_migrations 覆盖。
+    monkeypatch.setenv("APP_ENFORCE_FK", "0")
     path = tmp_path / "ge_solution_test.db"
     shutil.copyfile(_db_schema_template, path)
     monkeypatch.setattr(db_module, "DB_PATH", str(path))

@@ -78,12 +78,17 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
                WHERE b.project_id=?""", (project_id,))
     chapter_rows = [dict(r) for r in await cur.fetchall()]
     if chapter_rows:
-        for row in chapter_rows:
-            code = str(row.get("block_code") or "")
-            block = next((b for b in blocks if str(b.get("block_id")) == code), None)
-            if not block:
-                continue
-            state = await review_freshness(db, block, row, cache=freshness_cache)
+        from services.writing_workspace import review_freshness_many
+        block_by_code = {str(b.get("block_id")): b for b in blocks}
+        review_by_code = {
+            str(r.get("block_code")): r for r in chapter_rows
+            if str(r.get("block_code")) in block_by_code
+        }
+        states = await review_freshness_many(
+            db, list(block_by_code.values()), review_by_code, cache=freshness_cache)
+        for code, row in review_by_code.items():
+            block = block_by_code[code]
+            state = states.get(int(block["id"]), 'unknown')
             freshness[code] = state
             if state == 'current':
                 latest[code] = row

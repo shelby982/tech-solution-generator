@@ -1038,7 +1038,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.commit()
     # 外键默认关闭：历史库仍有孤儿行（实测 block_revisions/reviews 各有若干）。
     # 清理完成后用 APP_ENFORCE_FK=1 开启；开启前先做 foreign_key_check，避免带病运行。
-    if os.environ.get("APP_ENFORCE_FK", "0").strip().lower() in {"1", "true", "yes"}:
+    if os.environ.get("APP_ENFORCE_FK", "1").strip().lower() in {"1", "true", "yes"}:
         await conn.execute("PRAGMA foreign_keys = ON")
         violations = await (await conn.execute("PRAGMA foreign_key_check")).fetchall()
         if violations:
@@ -1056,6 +1056,6 @@ async def get_db():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
-        if os.environ.get("APP_ENFORCE_FK", "0").strip().lower() in {"1", "true", "yes"}:
+        if os.environ.get("APP_ENFORCE_FK", "1").strip().lower() in {"1", "true", "yes"}:
             await conn.execute("PRAGMA foreign_keys = ON")
         yield conn
