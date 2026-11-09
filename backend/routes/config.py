@@ -23,6 +23,9 @@ from services.config_store import (
     LLMConfig,
     DEFAULT_BASE_URLS,
     DEFAULT_MODELS,
+    DEFAULT_PROVIDER,
+    MODEL_OPTIONS,
+    PROVIDER_CATALOG,
     config_store,
 )
 from infra.llm import verify_api_key
@@ -31,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["config"])
 
 _KEEP_KEY = "__KEEP__"
-_ALLOWED_PROVIDERS = {"openai", "claude", "doubao", "kimi", "minimax", "deepseek"}
+_ALLOWED_PROVIDERS = {pid for pid, meta in PROVIDER_CATALOG.items() if meta.get("ui") is not False}
 
 
 # ─────────────────────────────────────────────
@@ -85,6 +88,27 @@ def _build_config(provider: str, api_key: str, base_url: Optional[str], model: O
 # ─────────────────────────────────────────────
 # 新接口：多配置 CRUD
 # ─────────────────────────────────────────────
+
+@router.get("/model-defaults")
+async def get_model_defaults():
+    """新建配置弹窗的唯一默认值来源（前端启动时读取，不在前端硬编码模型值）。"""
+    providers = [
+        {
+            "id": pid,
+            "name": meta["name"],
+            "default_base_url": meta["base_url"],
+            "default_model": meta["model"],
+            "placeholder": meta.get("placeholder", ""),
+        }
+        for pid, meta in PROVIDER_CATALOG.items()
+        if meta.get("ui") is not False
+    ]
+    return JSONResponse(content={
+        "default_provider": DEFAULT_PROVIDER,
+        "providers": providers,
+        "model_options": MODEL_OPTIONS,
+    })
+
 
 @router.get("/configs")
 async def list_configs():

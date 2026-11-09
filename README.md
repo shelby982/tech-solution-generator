@@ -8,7 +8,7 @@
 
 | 层 | 目录 | 职责 |
 |---|---|---|
-| 路由 | `backend/routes/` | FastAPI 端点：21 个路由模块 / 206 个端点（`/api/workflow/*` 22 个） |
+| 路由 | `backend/routes/` | FastAPI 端点：21 个路由模块 / 207 个端点（`/api/workflow/*` 22 个） |
 | 编排 | `backend/orchestrator/` | LangGraph StateGraph + 3 个人工闸门 + SSE 事件流 + SQLite checkpointer |
 | Agent | `backend/agents/` | 5 个核心 agent（张衡解析 / 沈括匹配 / 诸葛亮撰写 / 王安石技术评 / 包拯合规评）+ 章节团队（`chapter_team.py`）与评分点子模块（`subpoints.py`） |
 | 领域 | `backend/domain/` | spec / material / proposal / review 聚合与纯函数（目前仅 review 的 repository 在服务层使用） |

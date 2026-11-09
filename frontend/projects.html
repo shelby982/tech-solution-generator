@@ -689,12 +689,22 @@
 
     <script type="module">
       import { api } from './assets/api.js?v=20261016-v503';
-      import { PROVIDER_DEFAULTS, DEFAULT_MODEL_OPTIONS } from './assets/model-config.mjs?v=20261016-v503';
+      import { loadModelDefaults, EMPTY_MODEL_DEFAULTS } from './assets/model-config.mjs?v=20261016-v503';
+
+      // 默认值唯一来源：后端 GET /api/model-defaults（失败则留空，配置弹窗可手填）。
+      const MODEL_DEFAULTS = await loadModelDefaults().catch((err) => {
+        console.warn('[model-config] 读取默认模型失败，配置弹窗字段将留空', err);
+        return EMPTY_MODEL_DEFAULTS;
+      });
+      const PROVIDER_DEFAULTS = MODEL_DEFAULTS.providers;
+      const DEFAULT_MODEL_OPTIONS = MODEL_DEFAULTS.modelOptions;
+      const DEFAULT_PROVIDER = MODEL_DEFAULTS.defaultProvider;
 
       // ── 状态 ──
       const reqFiles = []; // {file, name, size, ext}
-      let selectedModel = 'claude-sonnet-4-6';
-      let selectedModelLabel = 'Sonnet 4.6';
+      const _defaultModel = DEFAULT_MODEL_OPTIONS[1] || DEFAULT_MODEL_OPTIONS[0] || {};
+      let selectedModel = _defaultModel.model || '';
+      let selectedModelLabel = _defaultModel.label || selectedModel;
       let createdProjectId = null;
 
       // ── DOM ──
@@ -973,17 +983,17 @@
       }
 
       function resetApiForm() {
-        currentProvider = 'claude';
+        currentProvider = DEFAULT_PROVIDER;
         verifiedOk = false;
         providerChips.querySelectorAll('.provider-chip').forEach(c => {
-          c.classList.toggle('active', c.dataset.provider === 'claude');
+          c.classList.toggle('active', c.dataset.provider === DEFAULT_PROVIDER);
         });
-        const d = PROVIDER_DEFAULTS['claude'];
+        const d = PROVIDER_DEFAULTS[DEFAULT_PROVIDER] || {};
         apiBaseUrl.value = '';
-        apiBaseUrl.placeholder = d.url;
+        apiBaseUrl.placeholder = d.url || '';
         apiKeyInput.value = '';
-        apiKeyInput.placeholder = d.placeholder;
-        apiModelInput.value = d.model;
+        apiKeyInput.placeholder = d.placeholder || '';
+        apiModelInput.value = d.model || '';
         testStatus.textContent = '';
         testStatus.className = 'test-status';
         apiSave.disabled = true;

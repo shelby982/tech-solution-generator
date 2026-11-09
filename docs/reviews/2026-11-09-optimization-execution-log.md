@@ -259,3 +259,22 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - `placeholder_purge._drop_empty_sections` 接线或删除。
 - 13 张 0 行表的功能验收。
 - 前端 provider 表与后端 `DEFAULT_MODELS` 是否对齐、死 CSS 后的人工视觉回归。
+
+---
+
+## 11. 第五轮：模型默认值改为后端单源
+
+- 后端 `services/config_store.py` 新增 `PROVIDER_CATALOG` / `DEFAULT_PROVIDER` / `MODEL_OPTIONS`；
+  `DEFAULT_BASE_URLS`/`DEFAULT_MODELS` 改为从 catalog 派生，避免两套后端表。
+- 新增 `GET /api/model-defaults`（`routes/config.py`）：下发默认 provider、默认 base_url/model、
+  placeholder 与模型下拉档位；`typesafe` 标 `ui=False`，不出现在弹窗。
+- 前端 `frontend/assets/model-config.mjs` 改为**加载器**：启动时 fetch 上述接口并缓存；
+  读取失败返回空目录（配置弹窗字段留空可手填），页面不崩。
+- `mode-outline.js` 与 `projects.html` 删除所有硬编码模型值，改为 `await loadModelDefaults()`；
+  默认 provider/默认选中模型也来自后端。
+- 新增测试：`tests/routes/test_config_defaults.py`（后端契约）、
+  `tests/frontend/model-config.test.mjs`（加载/缓存/失败降级）。
+- 端点总数 206 → 207；后端 1113 passed / 前端 163 passed。
+- **行为变化**：新建配置弹窗的预填值现在跟随后端保守默认值——
+  claude `claude-3-5-sonnet-20241022`、deepseek `deepseek-chat`、kimi `moonshot-v1-32k`、
+  minimax `MiniMax-M2.7`。若产品要更新这些默认值，只改后端 `PROVIDER_CATALOG` 一处即可。

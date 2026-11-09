@@ -61,27 +61,66 @@ class LLMConfig:
         }
 
 
-# 默认 Base URL 映射
-DEFAULT_BASE_URLS = {
-    "openai":    "https://api.openai.com/v1",
-    "claude":    "https://api.anthropic.com",
-    "doubao":    "https://ark.cn-beijing.volces.com/api/v3",
-    "kimi":      "https://api.moonshot.cn/v1",
-    "minimax":   "https://api.minimax.chat/v1",
-    "deepseek":  "https://api.deepseek.com/v1",
-    "typesafe":  "https://api.typesafe.ai/v1",
+# Provider 目录（**前后端唯一来源**）：前端通过 GET /api/model-defaults 读取。
+# 这里既定义默认 base_url/model，也定义新建配置弹窗的预填文案；前端不再硬编码任何模型值。
+# ui=False 的 provider 不出现在弹窗里（typesafe 只服务判断型调用，不走生成协议）。
+PROVIDER_CATALOG = {
+    "claude": {
+        "name": "Anthropic Claude",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-3-5-sonnet-20241022",
+        "placeholder": "sk-ant-…",
+    },
+    "openai": {
+        "name": "OpenAI（含兼容接口）",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "placeholder": "sk-…",
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "placeholder": "sk-…",
+    },
+    "kimi": {
+        "name": "Kimi（月之暗面）",
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-v1-32k",
+        "placeholder": "sk-…",
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "base_url": "https://api.minimax.chat/v1",
+        "model": "MiniMax-M2.7",
+        "placeholder": "",
+    },
+    "doubao": {
+        "name": "豆包（火山引擎）",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-pro-32k",
+        "placeholder": "",
+    },
+    "typesafe": {
+        "name": "TypeSafe（判断型）",
+        "base_url": "https://api.typesafe.ai/v1",
+        "model": "jev-latest",
+        "placeholder": "",
+        "ui": False,
+    },
 }
 
-# 默认模型映射
-DEFAULT_MODELS = {
-    "openai":    "gpt-4o",
-    "claude":    "claude-3-5-sonnet-20241022",
-    "doubao":    "doubao-pro-32k",
-    "kimi":      "moonshot-v1-32k",
-    "minimax":   "MiniMax-M2.7",
-    "deepseek":  "deepseek-chat",
-    "typesafe":  "jev-latest",
-}
+# 新建配置弹窗的默认 provider 与模型下拉档位（也由后端下发）
+DEFAULT_PROVIDER = "claude"
+MODEL_OPTIONS = [
+    {"model": "claude-opus-4-8", "label": "Opus 4.8"},
+    {"model": "claude-sonnet-4-6", "label": "Sonnet 4.6"},
+    {"model": "claude-haiku-4-5-20251001", "label": "Haiku 4.5"},
+]
+
+# 兼容旧代码的派生映射（不要单独维护，改 PROVIDER_CATALOG 即可）
+DEFAULT_BASE_URLS = {pid: meta["base_url"] for pid, meta in PROVIDER_CATALOG.items()}
+DEFAULT_MODELS = {pid: meta["model"] for pid, meta in PROVIDER_CATALOG.items()}
 
 # OpenAI 兼容的 provider 集合（共用 openai SDK 路径）
 OPENAI_COMPATIBLE_PROVIDERS = {"openai", "doubao", "kimi", "minimax", "deepseek"}

@@ -1,27 +1,43 @@
-// 前端模型/Provider 默认值的**唯一来源**。
+// 模型 / Provider 默认值的**前端唯一入口**。
 //
-// 背景：此前 mode-outline.js 与 projects.html 各自硬编码一份 PROVIDER_DEFAULTS，
-// 两份已经漂移（deepseek 一处 v4-pro、一处 chat；Opus 标签 4.8/4.7），且都与后端
-// services/config_store.py 的 DEFAULT_MODELS 不一致。这里收敛为一份共享表；
-// 页面只负责渲染，不再各写一套。
+// 默认值本体在后端 `services/config_store.py` 的 `PROVIDER_CATALOG`，通过
+// `GET /api/model-defaults` 下发；前端不再硬编码任何模型名，避免再次出现
+// "两页各写一份、且与后端默认值漂移"的问题。
 //
-// 注：这些是「新建配置时预填」的建议值，用户可改；后端仍以自己的默认值为准。
+// 读取失败时返回空目录（配置弹窗字段留空，用户可手填），不让整页脚本崩掉。
 
-export const PROVIDER_DEFAULTS = {
-  claude:   { url: 'https://api.anthropic.com',                 model: 'claude-sonnet-4-6', placeholder: 'sk-ant-…' },
-  openai:   { url: 'https://api.openai.com/v1',                 model: 'gpt-4o',            placeholder: 'sk-…' },
-  deepseek: { url: 'https://api.deepseek.com',                  model: 'deepseek-v4-pro',   placeholder: 'sk-…' },
-  kimi:     { url: 'https://api.moonshot.cn/v1',                model: 'moonshot-v1-8k',    placeholder: 'sk-…' },
-  minimax:  { url: 'https://api.minimax.chat/v1',               model: 'abab6.5s-chat',     placeholder: '' },
-  doubao:   { url: 'https://ark.cn-beijing.volces.com/api/v3',  model: '',                  placeholder: '' },
-};
+const EMPTY = { providers: {}, modelOptions: [], defaultProvider: 'claude' };
 
-/** 没有已保存配置时，模型下拉默认展示的几档。 */
-export const DEFAULT_MODEL_OPTIONS = [
-  { model: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { model: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { model: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-];
+let cache = null;
 
-/** 新建设置弹窗的默认 provider。 */
-export const DEFAULT_PROVIDER = 'claude';
+/** 读取并缓存后端下发的默认值。 */
+export async function loadModelDefaults() {
+  if (cache) return cache;
+
+  const resp = await fetch('/api/model-defaults', { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`读取默认模型失败（HTTP ${resp.status}）`);
+  const data = await resp.json();
+
+  const providers = {};
+  for (const p of data.providers || []) {
+    providers[p.id] = {
+      url: p.default_base_url || '',
+      model: p.default_model || '',
+      placeholder: p.placeholder || '',
+    };
+  }
+
+  cache = {
+    providers,
+    modelOptions: data.model_options || [],
+    defaultProvider: data.default_provider || 'claude',
+  };
+  return cache;
+}
+
+/** 测试用：清缓存。 */
+export function resetModelDefaultsCache() {
+  cache = null;
+}
+
+export const EMPTY_MODEL_DEFAULTS = EMPTY;

@@ -4,7 +4,7 @@
    本文件在抽取时**未改任何逻辑**。 */
 import {mountChapterStudio, exportDocument} from './chapter-studio.mjs?v=20261016-v503';
 import { api } from './api.js?v=20261016-v503';
-import { PROVIDER_DEFAULTS, DEFAULT_MODEL_OPTIONS } from './model-config.mjs?v=20261016-v503';
+import { loadModelDefaults, EMPTY_MODEL_DEFAULTS } from './model-config.mjs?v=20261016-v503';
 import { specContentHtml } from './spec-content.mjs?v=20261016-v503';
 // 顶栏（项目名旁边那行「第 N 轮 · ...」）由共享壳 workspace.js 渲染。这里要把它
 // 改成**页面自己的真实状态**：checkpoint 的 stage 在准备中/编写准备完成后都停在
@@ -33,6 +33,15 @@ import { resolvePackageScope, buildOutlineTree, isOrphanedRun, activeStages, ins
          chapterStage, filterChapters, chapterFilterCounts,
          CHAPTER_STAGE_LABELS, evidenceByChapter, expandVisibleWithAncestors
        } from './workspace-model.mjs?v=20261016-v503';
+
+// 默认值唯一来源：后端 GET /api/model-defaults（失败则留空，配置弹窗可手填）。
+const MODEL_DEFAULTS = await loadModelDefaults().catch((err) => {
+  console.warn('[model-config] 读取默认模型失败，配置弹窗字段将留空', err);
+  return EMPTY_MODEL_DEFAULTS;
+});
+const PROVIDER_DEFAULTS = MODEL_DEFAULTS.providers;
+const DEFAULT_MODEL_OPTIONS = MODEL_DEFAULTS.modelOptions;
+const DEFAULT_PROVIDER = MODEL_DEFAULTS.defaultProvider;
 
 const params = new URLSearchParams(location.search);
 // projectId **只取数字部分**：链接被误写成 `?projectId=19**(Cmd+Shift+R)`（连带说明文字）
@@ -198,8 +207,9 @@ let doneBlocks  = 0;
 let blocksReady = Promise.resolve();
 let matchedCount = 0; // 已匹配章节数（仅匹配阶段使用）
 const matchedIds = new Set();
-let selectedModel = 'claude-sonnet-4-6';
-let selectedModelLabel = 'Sonnet 4.6';
+const _defaultModel = DEFAULT_MODEL_OPTIONS[1] || DEFAULT_MODEL_OPTIONS[0] || {};
+let selectedModel = _defaultModel.model || '';
+let selectedModelLabel = _defaultModel.label || selectedModel;
 
 // ── workflow 运行态 ──
 let currentThreadId = null;
@@ -597,13 +607,13 @@ function openApiModal() {
 }
 function closeApiModal() { apiBackdrop.classList.remove('open'); }
 function resetApiForm() {
-  currentProvider = 'claude'; verifiedOk = false;
+  currentProvider = DEFAULT_PROVIDER; verifiedOk = false;
   providerChips.querySelectorAll('.provider-chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.provider === 'claude'));
-  const d = PROVIDER_DEFAULTS['claude'];
-  apiBaseUrl.value = ''; apiBaseUrl.placeholder = d.url;
-  apiKeyInput.value = ''; apiKeyInput.placeholder = d.placeholder;
-  apiModelInput.value = d.model;
+    c.classList.toggle('active', c.dataset.provider === DEFAULT_PROVIDER));
+  const d = PROVIDER_DEFAULTS[DEFAULT_PROVIDER] || {};
+  apiBaseUrl.value = ''; apiBaseUrl.placeholder = d.url || '';
+  apiKeyInput.value = ''; apiKeyInput.placeholder = d.placeholder || '';
+  apiModelInput.value = d.model || '';
   testStatus.textContent = ''; testStatus.className = 'test-status';
   apiSave.disabled = true;
 }
