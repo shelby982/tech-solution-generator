@@ -1293,19 +1293,31 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
             <label class="cs-cp-kind-row">本章类型
               <select data-cp-layout>${Object.entries(context?.layouts || {}).map(([id, l]) => `<option value="${id}" ${id === layoutId ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
             </label>
-            <p class="cs-cp-type-desc">生成提示词（本章大纲）</p>
-            <textarea class="cs-cp-type-prompt" data-cp-layout-prompt rows="5" placeholder="填写本章大纲的生成提示词">${esc(layoutPrompt)}</textarea>
-            <div class="cs-cp-type-actions">
-              <button type="button" class="cs-cp-ghost" data-cp-layout-prompt-reset>恢复默认</button>
-              <button type="button" class="cs-cp-primary" data-cp-layout-prompt-save>保存提示词</button>
-            </div>
-            <p class="cs-cp-type-desc" style="margin-top:12px">本章统一要求（每一节都要遵守）</p>
-            <textarea class="cs-cp-type-prompt" data-cp-chapter-req rows="4"
-              placeholder="例：全章口径统一；每节先结论后依据；禁止出现待补充/待填写；不得编造未提供的数字与业绩。">${esc(context?.chapter_requirement || '')}</textarea>
-            <div class="cs-cp-type-actions">
-              <button type="button" class="cs-cp-ghost" data-cp-chapter-req-clear>清空</button>
-              <button type="button" class="cs-cp-primary" data-cp-chapter-req-save>保存统一要求</button>
-            </div>
+            <details class="cs-cp-prompt-fold" data-cp-fold="layout-prompt">
+              <summary>生成提示词（本章大纲）
+                <em data-cp-layout-prompt-state>${layoutPrompt ? `已填写 ${layoutPrompt.length} 字` : '使用默认'}</em>
+              </summary>
+              <div class="cs-cp-prompt-body">
+                <textarea class="cs-cp-type-prompt" data-cp-layout-prompt rows="5" placeholder="填写本章大纲的生成提示词">${esc(layoutPrompt)}</textarea>
+                <div class="cs-cp-type-actions">
+                  <button type="button" class="cs-cp-ghost" data-cp-layout-prompt-reset>恢复默认</button>
+                  <button type="button" class="cs-cp-primary" data-cp-layout-prompt-save>保存提示词</button>
+                </div>
+              </div>
+            </details>
+            <details class="cs-cp-prompt-fold" data-cp-fold="chapter-req">
+              <summary>本章统一要求（每一节都要遵守）
+                <em data-cp-chapter-req-state>${(context?.chapter_requirement || '') ? `已填写 ${String(context?.chapter_requirement || '').length} 字` : '未填写'}</em>
+              </summary>
+              <div class="cs-cp-prompt-body">
+                <textarea class="cs-cp-type-prompt" data-cp-chapter-req rows="4"
+                  placeholder="例：全章口径统一；每节先结论后依据；禁止出现待补充/待填写；不得编造未提供的数字与业绩。">${esc(context?.chapter_requirement || '')}</textarea>
+                <div class="cs-cp-type-actions">
+                  <button type="button" class="cs-cp-ghost" data-cp-chapter-req-clear>清空</button>
+                  <button type="button" class="cs-cp-primary" data-cp-chapter-req-save>保存统一要求</button>
+                </div>
+              </div>
+            </details>
             <p class="cs-cp-type-state ${layoutStale ? 'is-warn' : ''}">${hasOutline ? (layoutStale ? '类型与大纲不一致：类型已变更，建议按新类型重建大纲。' : '类型与大纲：一致。') : '还没有大纲：先按当前类型生成章节大纲。'}</p>
           </div>
         </details>
@@ -1520,6 +1532,16 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
         const area = body.querySelector('[data-cp-layout-prompt]');
         if (area) area.value = guide.prompt || '';
         status('已恢复当前类型的默认提示词（点「保存提示词」生效）');
+      });
+      body.querySelector('[data-cp-layout-prompt]')?.addEventListener('input', (event) => {
+        const el = body.querySelector('[data-cp-layout-prompt-state]');
+        const len = String(event.target.value || '').trim().length;
+        if (el) el.textContent = len ? `已填写 ${len} 字` : '使用默认';
+      });
+      body.querySelector('[data-cp-chapter-req]')?.addEventListener('input', (event) => {
+        const el = body.querySelector('[data-cp-chapter-req-state]');
+        const len = String(event.target.value || '').trim().length;
+        if (el) el.textContent = len ? `已填写 ${len} 字` : '未填写';
       });
       body.querySelector('[data-cp-chapter-req-save]')?.addEventListener('click', async (event) => {
         const area = body.querySelector('[data-cp-chapter-req]');

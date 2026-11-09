@@ -1077,3 +1077,13 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 
 /* 大纲/进度：小节自带表·图交付物的提示 */
 .cs-ol-media { font-style: normal; color: #0369a1; }
+
+/* 本章计划：提示词折叠（默认收起，点击展开） */
+.cs-cp-prompt-fold { margin-top: 10px; border: 1px solid #eef2f7; border-radius: 9px; background: #fbfdff; }
+.cs-cp-prompt-fold > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  font-size: 12px; color: #334155; cursor: pointer; list-style: none; }
+.cs-cp-prompt-fold > summary::-webkit-details-marker { display: none; }
+.cs-cp-prompt-fold > summary::before { content: '▸'; color: #94a3b8; font-size: 10px; }
+.cs-cp-prompt-fold[open] > summary::before { content: '▾'; }
+.cs-cp-prompt-fold > summary em { font-style: normal; color: #94a3b8; font-size: 10.5px; margin-left: auto; }
+.cs-cp-prompt-body { padding: 0 10px 10px; }
