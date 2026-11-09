@@ -321,3 +321,47 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 
 - 后端测试 / 前端测试全绿（详见提交时输出）；未改端点数量（207）。
 - 浏览器 smoke 属人工验证，不在 CI；后续 CSS 大改仍建议重复此流程。
+
+---
+
+## 14. 第八轮：零调用契约同批清理 + 数据治理清单
+
+### 14.1 api.js 零调用方法（前后端同批）
+
+删除 15 个零调用客户端方法：
+`projects.createPackage/patch/lock`、`blocks.clear/update/ai/updateRequirement`、
+`revisions.list/restore/listByProject`、`export.diff/applyDiff/word`、
+`workflow.getSplitAnswers`、`review.get`。
+
+按「前端/测试/内部均无消费」原则，同批删除 7 个后端端点：
+- `PATCH /api/projects/{id}`、`POST /api/projects/{id}/lock`
+- `DELETE /api/projects/{id}/blocks`、`POST /api/blocks/{id}/ai`
+- `POST /api/blocks/{id}/revisions/{rn}/restore`
+- `POST /api/projects/{id}/diff/apply`
+- `GET /api/projects/{id}/split-answers`
+
+保留的端点（仍被直连 fetch 或测试使用，仅移除客户端封装）：
+`projects.createPackage`(intake.js 直连)、`blocks.update/updateRequirement`(chapter-studio 直连)、
+`revisions.list/listByProject`(workspace.js 直连)、`export.word`(review.js 直链)、
+`GET /diff`(test_package_scope)、`GET /review/{tid}`(test_review)。
+
+端点总数：207 → **197**（并发新增的 events 路由未计入本提交）；删除 `delete_blocks_by_project` 等零引用符号与未用 import。
+
+### 14.2 3 个测试专用端点删除
+
+- `POST /blocks/{id}/studio/coverage-review`（服务 `coverage_review` 仍被 live SSE 使用，保留）
+- `POST /blocks/{id}/studio/draft`（`DraftBody` 一并删除）
+- `POST /blocks/{id}/studio/deployment-diagrams`（`deployment_diagram` 服务仍被 diagram_design 使用，保留）
+- 对应 3 个路由测试同步删除；服务层测试保留。
+
+### 14.3 数据治理
+
+13 张「有写路径、实库 0 行」表不删表，整理为
+[2026-11-09-data-governance-backlog.md](2026-11-09-data-governance-backlog.md)：
+按功能验收、生产只读核查、保留/下线决策、schema 版本与外键、可观测性五步处理。
+
+### 14.4 并发修改提示
+
+处理期间检测到工作区有**其他方并发修改**（`backend/routes/events.py`、`backend/db.py`、
+`backend/main.py`、`frontend/landing.html` 及 `tests/routes/test_events.py` 等）。
+本轮只提交属于本次清理的文件，上述并发改动保持原样未动。
