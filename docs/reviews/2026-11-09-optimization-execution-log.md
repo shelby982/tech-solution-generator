@@ -292,3 +292,32 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - 测试：后端断言 `chip_label` 与 catalog 一致；前端新增渲染/转义用例（总 164 个前端测试）。
 - 端点总数仍为 207；后端 1113 passed / 前端 164 passed。
 - 以后增删 provider 只需改 `PROVIDER_CATALOG` + 对应 provider 的 `ui`/`chip_label`，前端按钮自动跟随。
+
+---
+
+## 13. 第七轮：浏览器 smoke 与两处收尾
+
+### 13.1 死 CSS 清理后的浏览器 smoke
+
+用 Playwright（本地 chromium）+ 当前代码 + 临时 DB 副本（`/tmp/ge_smoke.db`，不碰真实库）启动临时服务，
+打开 6 个页面（projects / project-intake / three-mode 三视图 / review / landing）：
+
+- 无 `pageerror`、无 console error、无 4xx、无横向溢出；
+- 三模式编辑器页面正常渲染（章节树、编辑器、右栏）；
+- 打开「添加配置」弹窗：provider 按钮由 `/api/model-defaults` 动态渲染为
+  Anthropic / OpenAI / DeepSeek / Kimi / MiniMax / 豆包，默认 Anthropic，
+  base URL/模型/Key placeholder 均来自后端（`claude-3-5-sonnet-20241022`）。
+- smoke 发现并修复一处回归：此前清理未用 import 时误删了 `mode-editor.js` 的
+  `constraintLevelLabel`（实际在 `renderRefCards` 等 3 处使用），已恢复导入。
+
+### 13.2 `_drop_empty_sections` 的处理
+
+尝试接线后发现实现把 `**加粗强调**` 也当成小节标题（`_ANY_HEADING` 正则），
+会把只有一句加粗文字的段落整段删掉；`tests/routes/test_chapter_studio.py` 的
+导出快照用例随即失败。该行为不可靠，故**删除**这个未接线的死函数（及新增测试），
+保持原有的占位清理行为不变。
+
+### 13.3 第七轮后状态
+
+- 后端测试 / 前端测试全绿（详见提交时输出）；未改端点数量（207）。
+- 浏览器 smoke 属人工验证，不在 CI；后续 CSS 大改仍建议重复此流程。

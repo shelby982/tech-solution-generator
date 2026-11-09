@@ -192,34 +192,6 @@ def purge(content: str) -> tuple[str, list[dict]]:
     return result, removed
 
 
-_ANY_HEADING = re.compile(r"(?m)^(?:(#{2,6})\s+(.+?)\s*|\*\*(.{1,60}?)\*\*\s*)$")
-
-
-def _drop_empty_sections(text: str) -> str:
-    """删掉"只有标题、没有正文"的小节（占位被清掉后常出现）。
-
-    判定：该标题下的内容去掉空白/标点/表格分隔后为空（或只有空表格），
-    则整段删除 —— 用户要求"没有的内容就不要体现"。
-    """
-    body = str(text or "")
-    marks = list(_ANY_HEADING.finditer(body))
-    if not marks:
-        return body
-    keep: list[str] = []
-    cursor = 0
-    for index, mark in enumerate(marks):
-        start = mark.start()
-        end = marks[index + 1].start() if index + 1 < len(marks) else len(body)
-        keep.append(body[cursor:start])
-        section_body = body[mark.end():end]
-        stripped = re.sub(r"[\s|\-:。；，、（）()]", "", section_body)
-        if len(stripped) >= 1:
-            keep.append(body[start:end])
-        cursor = end
-    keep.append(body[cursor:])
-    return "".join(keep)
-
-
 def classify(removed: list[dict]) -> dict:
     """按"系统去查 / 需要你上传 / 直接删掉"分类汇总。"""
     groups: dict[str, list[dict]] = {"search": [], "upload": [], "drop": []}
