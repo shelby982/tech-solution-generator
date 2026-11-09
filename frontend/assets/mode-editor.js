@@ -18,7 +18,7 @@ let responseItemsByBlock = {};
 // 准备字段枚举 + 素材依据的**渲染片段**与 project-init 共用（见 workspace-model.mjs 注释）：
 // 性质徽标与出处行的实现在那边只有一份，两个页面不再各写一套（曾经因此漂移出
 // "每行显示 #undefined"）。
-import { CONSTRAINT_LEVELS, evidenceKindBadgeHtml } from './workspace-model.mjs?v=20261016-v503';
+import { CONSTRAINT_LEVELS, constraintLevelLabel, evidenceKindBadgeHtml } from './workspace-model.mjs?v=20261016-v503';
 
 // 素材抽屉：默认收起（写作时右栏就是正文本身），点工具栏「素材 n ▸」打开；
 // 引用动作在抽屉里完成，编辑区底部保留「已引用 n 条」。
