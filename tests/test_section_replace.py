@@ -85,3 +85,20 @@ def test_content_sections_parse_matches_backend_styles():
     content = "## 建设范围\n\n内容一。\n\n**三层结构说明**\n\n内容二。\n"
     titles = [t for t, _, _ in section_ranges(content)]
     assert titles == ["建设范围", "三层结构说明"]
+
+
+def test_merge_media_sections_into_parent():
+    """「表：X」「图：X」是父节的交付物，不能和父节并列成独立小节。"""
+    from services.section_outline import merge_media_sections
+
+    sections = [
+        {"title": "政策要求与项目对应关系", "deliverables": []},
+        {"title": "表：政策要求与项目对应关系", "need": "table"},
+        {"title": "行业背景分析", "deliverables": []},
+    ]
+    merged = merge_media_sections(sections)
+    assert [s["title"] for s in merged] == ["政策要求与项目对应关系", "行业背景分析"]
+    assert merged[0]["deliverables"][0]["kind"] == "table"
+    assert merged[0]["deliverables"][0]["title"] == "政策要求与项目对应关系"
+    # 正常小节不受影响
+    assert merged[1]["deliverables"] == []

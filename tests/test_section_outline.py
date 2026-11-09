@@ -15,8 +15,11 @@ def test_fallback_outline_from_tasks():
         {"kind": "table", "title": "指标对比", "purpose": "对比现状与目标"},
     ]}
     sections = fallback_outline(chapter)
-    assert [s["title"] for s in sections] == ["政策导向", "指标对比"]
-    assert sections[1]["need"] == "table"
+    # 产品口径（2026-11）：表格/图示属于前一个正文小节的**交付物**，不单独占一节
+    assert [s["title"] for s in sections] == ["政策导向"]
+    delivers = sections[0]["deliverables"]
+    tables = [d for d in delivers if d.get("kind") == "table"]
+    assert tables and tables[0]["title"] == "指标对比"
 
 
 def test_normalize_outline_accepts_model_output():

@@ -1248,6 +1248,12 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
                 "has_content": bool(child_content),
             })
     outline_sections = (chapter or {}).get("outline") or []
+    # 表/图是「交付物」不是独立小节：老大纲里形如「表：X」的条目并回它的父节
+    try:
+        from services.section_outline import merge_media_sections
+        outline_sections = merge_media_sections(outline_sections)
+    except Exception:
+        pass
     materials_plan = _materials_plan(requirements, bound_kinds, len(clauses), outline_sections, clauses)
     material_gaps = _material_gaps(materials_plan, requirements)
     try:
@@ -1266,7 +1272,7 @@ async def chapter_plan(db, project_id: int, thread_id: str, block_id: str) -> di
         "self_check": _self_check(deliverables, word_plan, clauses, content, figures_plan),
         "material_gaps": material_gaps,
         "generation_gaps": generation_gaps or [],
-        "outline": (chapter or {}).get("outline") or [],
+        "outline": outline_sections,
         "practiceOverrides": await _practice_overrides(db, project_id, block_id),
         "todo": _build_todo(deliverables, materials_plan,
                             word_plan, guidance, content, is_parent_chapter, is_catalog),

@@ -29,6 +29,17 @@ def fallback_outline(chapter: dict) -> list[dict]:
     for task in chapter.get("tasks") or []:
         kind = task.get("kind") or "text"
         need = "table" if kind == "table" else ("figure" if kind == "diagram" else "")
+        # 表格/图示是**交付物**，属于它前面的正文小节，不能单独占一节（否则大纲里
+        # 会出现「表：X」和「X」并列，用户看到重复条目）
+        if need and sections:
+            title = _clean(task.get("title") or "", 40) or ("对比表" if need == "table" else "结构图")
+            items = list(sections[-1].get("deliverables") or [])
+            if not any(str((item or {}).get("title") or "") == title for item in items):
+                items.append({"kind": "table", "title": title, "words": 0, "cols": []}
+                             if need == "table" else
+                             {"kind": "figure", "title": title, "type": "layered", "nodes": 0, "elements": []})
+            sections[-1]["deliverables"] = items
+            continue
         sections.append({
             "title": _clean(task.get("title") or "本节", 40),
             "points": [_clean(task.get("purpose") or "说明本节要点", 80)],
@@ -46,6 +57,37 @@ def fallback_outline(chapter: dict) -> list[dict]:
         sections.append({"title": "思路与措施", "points": ["给出解决思路与措施"], "words": 900, "need": "",
                          "requirement_ids": [], "source": "fallback"})
     return sections[:MAX_SECTIONS]
+
+
+_MEDIA_TITLE = re.compile(r"^\s*(?:表|表格|图|图示|示意图|流程图|架构图)\s*[：:]\s*")
+
+
+def _is_media_section(title: str) -> bool:
+    """「表：X」「图：X」「图示：X」这类条目：本质是上一节的交付物，不是独立小节。"""
+    text = str(title or "").strip()
+    return bool(_MEDIA_TITLE.match(text)) or (text.startswith(("表：", "图：", "图示：")))
+
+
+def merge_media_sections(sections: list[dict]) -> list[dict]:
+    """把"表/图"条目并进前一节的 deliverables（老大纲数据读取时也用这个规整）。"""
+    out: list[dict] = []
+    for section in sections or []:
+        if not isinstance(section, dict):
+            continue
+        title = str(section.get("title") or "").strip()
+        if _is_media_section(title) and out:
+            parent = out[-1]
+            kind = "table" if re.match(r"^\s*(?:表|表格)\s*[：:]", title) else "figure"
+            name = _MEDIA_TITLE.sub("", title).strip() or title
+            items = list(parent.get("deliverables") or [])
+            if not any(str((item or {}).get("title") or "") == name for item in items):
+                items.append({"kind": kind, "title": name, "words": 0, "cols": []} if kind == "table"
+                             else {"kind": kind, "title": name, "type": section.get("need") or "layered",
+                                   "nodes": 0, "elements": []})
+            parent["deliverables"] = items
+            continue
+        out.append(section)
+    return out
 
 
 def normalize_outline(raw, chapter: dict) -> list[dict]:
@@ -85,6 +127,7 @@ def normalize_outline(raw, chapter: dict) -> list[dict]:
             "requirement_ids": [str(x) for x in (item.get("requirement_ids") or []) if str(x).strip()][:8],
             "source": "model",
         })
+    sections = merge_media_sections(sections)
     return sections if len(sections) >= 2 else fallback_outline(chapter)
 
 
