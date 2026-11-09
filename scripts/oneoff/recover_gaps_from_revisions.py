@@ -9,7 +9,7 @@
 """
 import asyncio, sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
 from db import get_db
 from services.chapter_cleanup import classify_placeholders, looks_like_basis, record_generation_gaps
 

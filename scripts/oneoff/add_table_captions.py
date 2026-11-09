@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """给已有正文里的表格补齐表名（`**表：名**`，表格上方一行）。
 
-用法：python scripts/add_table_captions.py [--project 29] [--dry]
+用法：python scripts/oneoff/add_table_captions.py [--project 29] [--dry]
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from db import get_db  # noqa: E402

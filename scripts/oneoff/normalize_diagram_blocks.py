@@ -3,12 +3,12 @@
 
 标准格式：`:::diagram type=flow|layered|timeline 标题` + 结构行 + `:::`
 - 旧写法（多行、无 type、节点过长）→ 用 services.diagrams 重新解析后渲染
-用法：python scripts/normalize_diagram_blocks.py [--apply] [--project 29]
+用法：python scripts/oneoff/normalize_diagram_blocks.py [--apply] [--project 29]
 """
 import argparse, asyncio, re, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
 
 from db import get_db                                    # noqa: E402
 from services.chapter_cleanup import strip_pending_sections  # noqa: F401  (保持导入一致性)

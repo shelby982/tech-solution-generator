@@ -3,14 +3,14 @@
 
 产品口径：正文始终是一份完整正常的内容；事实缺口留在待办/质检里。
 用法：
-  python scripts/cleanup_pending_placeholders.py            # 预演（只统计，不写库）
-  python scripts/cleanup_pending_placeholders.py --apply    # 真正执行（写 revision 后更新）
-  python scripts/cleanup_pending_placeholders.py --apply --project 29
+  python scripts/oneoff/cleanup_pending_placeholders.py            # 预演（只统计，不写库）
+  python scripts/oneoff/cleanup_pending_placeholders.py --apply    # 真正执行（写 revision 后更新）
+  python scripts/oneoff/cleanup_pending_placeholders.py --apply --project 29
 """
 import argparse, asyncio, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
 
 from db import get_db                                    # noqa: E402
 from services.chapter_cleanup import strip_pending_sections, has_pending   # noqa: E402

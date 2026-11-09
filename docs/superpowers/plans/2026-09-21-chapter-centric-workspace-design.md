@@ -412,14 +412,14 @@ prompt 不保证听话，**历史数据更不会因改 prompt 而变好**，所�
 判定规则只有一份：`response_items.is_informative()` —— 展示层与归位层共用，避免"界面说是评分口径、
 归位层不认"的发散。
 
-**③ 历史数据回填脚本**（`backend/scripts/normalize_extract_fields.py`）
+**③ 历史数据回填脚本**（`scripts/oneoff/normalize_extract_fields.py`）
 
 改 prompt 只影响新提炼。历史数据用这个脚本按同一套规则归位，**默认预演**、`--apply` 才写：
 
 ```
 cd backend
-python -m scripts.normalize_extract_fields --project 18            # 预演
-python -m scripts.normalize_extract_fields --project 18 --apply    # 写回
+python scripts/oneoff/normalize_extract_fields.py --project 18            # 预演
+python scripts/oneoff/normalize_extract_fields.py --project 18 --apply    # 写回
 ```
 
 两处都写（读者不同）：`blocks` 表（工作台 8 字段展示）+ checkpoint 的 `spec.outline_matrix`
@@ -679,7 +679,7 @@ score_items 7 行
 | 删掉 indicators 里的评分档位复述 | **52 条** |
 
 33 章里 32 章需要清理。**要真正生效需要在项目上跑一次**
-`python -m scripts.normalize_extract_fields --project 18 --apply`
+`python scripts/oneoff/normalize_extract_fields.py --project 18 --apply`
 （改 prompt 只影响新提炼；旧数据靠这个脚本，确定性规则、零模型调用、不丢信息）。
 
 ### 验证
@@ -695,7 +695,7 @@ score_items 7 行
 
 ```
 cd backend
-python -m scripts.normalize_extract_fields --project 18 --apply
+python scripts/oneoff/normalize_extract_fields.py --project 18 --apply
 ```
 
 | 动作 | 数量 |

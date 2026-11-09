@@ -35,3 +35,7 @@ cd backend && ../.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8015
 ```
 
 缺 Chrome 或后端时，第 6 步自动 SKIP（不影响前 5 步）。
+
+## 一次性脚本
+
+历史数据修复/一次性重切脚本统一归档在 `scripts/oneoff/`，见该目录 README；不参与 `check.sh`。

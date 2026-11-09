@@ -303,7 +303,7 @@ setAutoConfirm(true) → statusBar('gate_outline', …)
 ### 改法
 1. **统一 URL 生成**：`workspaceUrl()` 与三处 `VIEW_URLS` 改为 `/three-mode?…&view=…`；
    两处 `location.href = /workbench…` 改指 `/three-mode?…&view=editor`。
-2. **旧页保留重定向**（不删文件）：`project-init.html` / `workbench.html` 顶部加跳转脚本，
+2. ~~**旧页保留重定向**（不删文件）~~（2026-11-09 已改为整页删除；后端 307 早已使页面不可达）：`project-init.html` / `workbench.html` 顶部加跳转脚本，
    按 `view` 参数落到对应视图；**`?legacy=1` 可绕过**（仅供排查历史问题）。
 3. `diff-review.html` 的「材料撰写」标签改指 `/three-mode?view=editor`。
 
@@ -727,8 +727,8 @@ project list 生成的地址 = /three-mode?projectId=26&threadId=…&backend=don
 2. **`checkpoint.errors` 累加不清**（reducer 语义）：前端只在 `stage==='failed'` 时渲染失败横幅，
    不误导用户，但数据本身不干净。
 3. **「状态同步失败」横幅**对一次网络抖动反应过度（整条红条）。建议连续失败 N 次才显示，或降级成小角标。
-4. **旧页文件仍在磁盘**（`project-init.html` / `workbench.html`，带重定向）：入口已清零，
-   真正下线需要删文件。
+4. **旧页文件已删除**（2026-11-09）：`project-init.html` / `workbench.html` 已从仓库移除，
+   `/project-init`、`/workbench` 保留 307 重定向。
 5. **项目 26 的端到端链路**仍停在「准备 33/121 + 正文 5 章」，未走完 ⑤评审全量。
 
 ---
