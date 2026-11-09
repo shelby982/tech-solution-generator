@@ -965,7 +965,9 @@ async def _run_review(
     except Exception as e:
         logger.warning(f"_run_review：读取已评审章失败（{e}），本轮按全量评审")
     if not blocks:
-        return {}
+        # 全部复用：必须显式清空本轮范围，否则 aggregate 会把上一轮的
+        # reviewed_blocks 当成"本轮又复审了"重复落库。
+        return {"review": {"reviewed_blocks": []}}
     outline_matrix = {
         bid: _dict_to_row(d)
         for bid, d in (spec.get("outline_matrix") or {}).items()
@@ -1047,7 +1049,13 @@ async def _run_review(
     content_field = "tech_contents" if finding_field == "tech_findings" else "compliance_contents"
     reviewed_contents = dict((state.get("review") or {}).get(content_field) or {})
     reviewed_contents.update({bid: blocks[bid].content for bid in findings if bid in blocks})
-    return {"review": {finding_field: existing, content_field: reviewed_contents}}
+    return {"review": {
+        finding_field: existing,
+        content_field: reviewed_contents,
+        # 本轮真正送进模型的章；aggregate 只能落这些章，不能把 state 里的历史 findings
+        # 当成"本轮复审"而覆盖更新的编写时评审。
+        "reviewed_blocks": sorted(str(bid) for bid in findings),
+    }}
 
 
 # ─────────────────────────────────────────────
@@ -1086,7 +1094,12 @@ async def aggregate_review_node(
     )
     from services.writing_workspace import versions as _versions
 
-    new_codes = sorted(set(tech.keys()) | set(comp.keys()))
+    reviewed_blocks = review.get("reviewed_blocks")
+    if reviewed_blocks is not None:
+        new_codes = sorted({str(b) for b in reviewed_blocks})
+    else:
+        # 老 checkpoint 没记录本轮范围：按全部 findings 处理（兼容旧行为）
+        new_codes = sorted(set(tech.keys()) | set(comp.keys()))
     per_block: dict[str, dict] = {}
     rows: list[dict] = []
 
@@ -1162,23 +1175,29 @@ async def aggregate_review_node(
         total = 0.0
 
     risks: list[tuple[int, str, str]] = []
+    seen_risks: set[tuple[int, str, str]] = set()
+
+    def _add_risk(rank: int, bid: str, point: str) -> None:
+        key = (rank, bid, point)
+        if rank >= _SEVERITY_RANK["high"] and point and key not in seen_risks:
+            seen_risks.add(key)
+            risks.append(key)
+
     # 本轮新 findings（可能尚未落库，测试/失败路径也要进报告）
     for bid in new_codes:
         for finding in (tech.get(bid), comp.get(bid)):
             for issue in (finding or {}).get("issues") or []:
                 if not isinstance(issue, dict):
                     continue
-                rank = _SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0)
-                if rank >= _SEVERITY_RANK["high"]:
-                    risks.append((rank, str(bid), str(issue.get("point") or "")))
-    # 复用的章
+                _add_risk(_SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0),
+                          str(bid), str(issue.get("point") or ""))
+    # 复用的章（与上面同一章会有相同 issue，去重）
     for bid, row in row_by_code.items():
         for issue in _loads(row.get("issues")):
             if not isinstance(issue, dict):
                 continue
-            rank = _SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0)
-            if rank >= _SEVERITY_RANK["high"]:
-                risks.append((rank, bid, str(issue.get("point") or "")))
+            _add_risk(_SEVERITY_RANK.get(str(issue.get("severity") or "medium").lower(), 0),
+                      bid, str(issue.get("point") or ""))
     risks.sort(key=lambda x: (-x[0], x[1]))
     top_risks = [f"[{bid}] {point}" for _, bid, point in risks[:5] if point]
 

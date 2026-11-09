@@ -416,3 +416,27 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 - 旧 `chapter_reviews` 没有版本号（14 条）→ 视为 unknown，终评会重评一次，之后写入版本。
 - `reviews` 明细与 `chapter_reviews` 仍是双层（当前态+审计），但所有"当前结论"只读 `chapter_reviews`。
 - 全局一致性目前是确定性检查，不调模型；跨章语义矛盾可后续加 LLM pass。
+
+---
+
+## 16. 复核修正（统一评审落地后）
+
+复核时发现并修掉 3 个真实问题：
+
+1. **历史 findings 覆盖新章评审**：`aggregate` 原先把 `state.review.tech_findings` 里所有历史
+   findings 都当作"本轮复审"，会把未复审章的旧结果重新落库、甚至冲掉更新的编写时评审。
+   现在 `_run_review` 返回 `reviewed_blocks`（本轮真正送模型的章），`aggregate` 只落这些章；
+   全部复用时显式清空范围，避免沿用上一轮列表。
+2. **终评被手动复评降级**：对同一版本（content/evidence 未变）再点"重新评审"时，
+   原实现把当前态写回 `stage=writing`，与"终评权威"冲突。现在同版本保持 `final`；
+   内容已变才回到 writing，等下一次终评裁决。
+3. **报告 top_risks 重复**：新 findings 与复用章各收集一次，同一 issue 会出现两条；
+   已按 `(severity, block, point)` 去重。
+
+同时补了回归测试：
+- 全部复用 → `reviewed_blocks=[]`；
+- 历史 findings 不覆盖本轮未复审章；
+- chapter_reviews 优先的 scoring risk / scoring verdict；
+- 确定性全局一致性 pass。
+
+复核后：后端 **1124 passed** / 前端 **164 passed**。

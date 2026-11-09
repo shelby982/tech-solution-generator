@@ -141,3 +141,30 @@ async def test_point_verdict_worst_but_score_weighted(db):
     assert p["estimated_basis"]["reviewed"] == 2 and p["estimated_basis"]["avg"] == 0.5
     assert p["chapters_total"] == 2 and p["chapters_reviewed"] == 2
     assert p["chapters"][1]["missing_points"] == ["缺证据"]     # 章节明细可下钻
+
+
+@pytest.mark.asyncio
+async def test_verdict_reads_chapter_reviews_with_freshness(db):
+    """统一模型后 fatal risks 从 chapter_reviews 取；stale 章节不得计入。"""
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    await _seed(
+        db,
+        blocks=[{"block_id": "b1", "title": "技术方案", "points_ids": ["P1"]}],
+        points=[{"point_id": "P1", "factor": "技术", "item": "技术方案", "points": 20}],
+        reviews=[],
+    )
+    block = await (await db.execute(
+        "SELECT * FROM blocks WHERE project_id=1 AND block_id='b1'")).fetchone()
+    vs = await versions(db, dict(block))
+    await upsert_chapter_review(
+        db, block_pk=int(block["id"]), project_id=1, thread_id="t1", stage="final",
+        versions=vs, tier="final",
+        data={"tech_score": 40, "comp_score": 40, "score": 40, "satisfied": "unsatisfied",
+              "criterion_text": "", "covered_points": [], "missing_points": [],
+              "issues": [{"severity": "critical", "point": "未响应：未提供证书", "needs_material": False}],
+              "needs_material": []},
+    )
+    out = await build_scoring_verdict(db, 1, "t1")
+    assert any("未响应" in str(item.get("point") or "") for item in out["fatal_risks"])

@@ -1464,3 +1464,84 @@ async def test_aggregate_review_promotes_current_writing_review_to_final():
         cr = await (await db.execute(
             "SELECT stage, score FROM chapter_reviews WHERE block_id=?", (row["id"],))).fetchone()
     assert dict(cr) == {"stage": "final", "score": 89}
+
+
+async def test_aggregate_only_persists_blocks_reviewed_this_cycle():
+    """state 里保留的历史 findings 不能被 aggregate 当成"本轮复审"覆盖新章评审。"""
+    from db import get_db
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        for bid in ("s1", "s2"):
+            await db.execute(
+                "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+                "VALUES (1, ?, ?, 'tid-cycle', 'generating')", (bid, f"正文-{bid}"))
+        row = await (await db.execute(
+            "SELECT * FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+        vs = await versions(db, dict(row))
+        await upsert_chapter_review(
+            db, block_pk=int(row["id"]), project_id=1, thread_id="tid-cycle",
+            stage="writing", versions=vs, tier="writing",
+            data={"tech_score": 95, "comp_score": 95, "score": 95,
+                  "satisfied": "satisfied", "criterion_text": "", "covered_points": [],
+                  "missing_points": [], "issues": [], "needs_material": []},
+        )
+
+    state = {
+        "project_id": 1, "thread_id": "tid-cycle",
+        "proposal": {"blocks": {"s1": _block("s1"), "s2": _block("s2")}},
+        "review": {
+            "tech_findings": {"s1": _finding(60), "s2": _finding(60)},
+            "compliance_findings": {"s2": _finding(60)},
+            "reviewed_blocks": ["s2"],
+        },
+        "spec": {"outline_matrix": {}},
+    }
+    await nodes.aggregate_review_node(state)
+    async with get_db() as db:
+        s1 = await (await db.execute(
+            "SELECT score, stage FROM chapter_reviews WHERE block_id=?", (row["id"],))).fetchone()
+        s2_row = await (await db.execute(
+            "SELECT id FROM blocks WHERE project_id=1 AND block_id='s2'")).fetchone()
+        s2 = await (await db.execute(
+            "SELECT score, stage FROM chapter_reviews WHERE block_id=?", (s2_row["id"],))).fetchone()
+    assert dict(s1) == {"score": 95, "stage": "final"}   # 本轮没复审 → 保留并提升
+    assert dict(s2) == {"score": 60, "stage": "final"}   # 本轮复审 → 采用新结果
+
+
+async def test_run_review_clears_scope_when_all_chapters_are_reused():
+    """全部复用时必须清空 reviewed_blocks，避免 aggregate 重复落上一轮的章。"""
+    from db import get_db
+    from services.review_store import upsert_chapter_review
+    from services.writing_workspace import versions
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-s1', 'tid-reuse-all', 'generating')")
+        row = await (await db.execute(
+            "SELECT * FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+        vs = await versions(db, dict(row))
+        await upsert_chapter_review(
+            db, block_pk=int(row["id"]), project_id=1, thread_id="tid-reuse-all",
+            stage="final", versions=vs, tier="final",
+            data={"tech_score": 95, "comp_score": 95, "score": 95,
+                  "satisfied": "satisfied", "criterion_text": "", "covered_points": [],
+                  "missing_points": [], "issues": [], "needs_material": []},
+        )
+
+    agent = _RecordingReviewer()
+    state = {
+        "project_id": 1, "thread_id": "tid-reuse-all",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {"reviewed_blocks": ["s1"]},
+    }
+    patch = await nodes._run_review(
+        state, agent=agent, emitter=None,
+        finding_field="tech_findings", agent_name="wang_anshi",
+    )
+    assert agent.scopes == []
+    assert patch["review"]["reviewed_blocks"] == []

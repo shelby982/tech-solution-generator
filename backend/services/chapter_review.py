@@ -83,9 +83,20 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         output, matrix, chain = await _chapter_inputs(db, block)
         from services.writing_workspace import versions
         reviewed_versions = await versions(db, block)
+        existing = await (await db.execute(
+            "SELECT stage, content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
+            (block_pk,))).fetchone()
 
     # ── 分层调度（v3 B）：auto → L0 有 critical 走 fast，否则 full ──
     from services.review_precheck import precheck, resolve_tier, should_skip_llm
+
+    # 终评权威：终评后再手动复评同一版本，保持 final；内容已变则回到 writing，
+    # 让下一次终评重新裁决（不把过期的终评继续当权威）。
+    stage = "writing"
+    if (existing and str(existing["stage"] or "") == "final"
+            and str(existing["content_version"] or "") == str(reviewed_versions.get("content_version") or "")
+            and str(existing["evidence_version"] or "") == str(reviewed_versions.get("evidence_version") or "")):
+        stage = "final"
 
     precheck_result = precheck(output.content or "")
     resolved_tier = resolve_tier(precheck_result, tier)
@@ -105,14 +116,14 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         async with get_db() as db:
             await upsert_chapter_review(
                 db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
-                thread_id=str(block.get("run_thread_id") or ""), stage="writing",
+                thread_id=str(block.get("run_thread_id") or ""), stage=stage,
                 data={**skipped, "score": 0, "tech_score": 0, "comp_score": 0,
                       "satisfied": "unsatisfied", "needs_material": []},
                 versions=reviewed_versions, tier="skip",
             )
             await append_history(
                 db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
-                thread_id=str(block.get("run_thread_id") or ""), stage="writing",
+                thread_id=str(block.get("run_thread_id") or ""), stage=stage,
                 data={**skipped, "score": 0, "tech_score": 0, "comp_score": 0,
                       "satisfied": "unsatisfied", "needs_material": []},
                 tier="skip",
@@ -162,7 +173,7 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
     async with get_db() as db:
         await append_history(
             db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
-            thread_id=thread_id, stage="writing", data=combined, tier=resolved_tier,
+            thread_id=thread_id, stage=stage, data=combined, tier=resolved_tier,
         )
 
     # ── 写回 reviews 表：让"评审与交付页"的评分点聚合（summarize_scoring_risk）能读到 ──
@@ -170,14 +181,14 @@ async def review_block(block_pk: int, *, thread_id: str = "", tier: str = "auto"
         latest = await (await db.execute('SELECT * FROM blocks WHERE id=?', (block_pk,))).fetchone()
         still_current = bool(latest and await versions(db, dict(latest)) == reviewed_versions)
     if still_current:
-        await _write_back_reviews(block, tech, comp, combined, stage="writing",
+        await _write_back_reviews(block, tech, comp, combined, stage=stage,
                                   thread_id=thread_id, versions=reviewed_versions,
                                   tier=resolved_tier)
 
     async with get_db() as db:
         await upsert_chapter_review(
             db, block_pk=block_pk, project_id=int(block.get("project_id") or 0),
-            thread_id=thread_id, stage="writing", data=combined,
+            thread_id=thread_id, stage=stage, data=combined,
             versions=reviewed_versions, tier=resolved_tier,
         )
     return await load_review(block_pk)
