@@ -153,10 +153,6 @@ async def project_overview(project_id: int, thread_id: str = ''):
 
 
 # ── 交付门（P0）：内部语法 / 内部术语 / 占位符 ────────────────────────────
-class GateFixBody(BaseModel):
-    apply: bool = True
-
-
 @router.get('/blocks/{block_id}/delivery-gate')
 async def delivery_gate(block_id: int):
     """章级交付门：返回 blocking 清单（带 locator）+ 可自动修数量。"""

@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/review", tags=["review"])
 
 
-@router.get("/{thread_id}")
+@router.get("/{thread_id}", deprecated=True)
 async def get_review(thread_id: str):
-    """返回某次工作流的全部评审 findings 快照。"""
+    """Legacy：返回 per-agent findings 快照；新前端请用章节评审/统一当前态。"""
     from db import get_db
     from domain.review import ReviewRepository
 

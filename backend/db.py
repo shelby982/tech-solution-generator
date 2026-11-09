@@ -21,6 +21,10 @@ _this_dir = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.path.join(_this_dir, "data", "ge_solution.db")
 DB_PATH = os.path.normpath(DB_PATH)
 
+# 结构版本：每次有 schema 变更时递增，并把迁移写进 schema_migrations。
+# 目前只做版本记录（历史迁移仍是幂等 ALTER）；后续迁移可按版本条件执行。
+SCHEMA_VERSION = 2
+
 _LEADS_DDL = """
 CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1022,6 +1026,23 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_snapshots_package ON project_snapshots(project_id, package_id, id)"
     )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations ("
+        "version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+    )
+    await conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)", (SCHEMA_VERSION,)
+    )
+    await conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
+    # PRAGMA foreign_keys 在事务内是 no-op：先提交，再打开/校验。
+    await conn.commit()
+    # 外键默认关闭：历史库仍有孤儿行（实测 block_revisions/reviews 各有若干）。
+    # 清理完成后用 APP_ENFORCE_FK=1 开启；开启前先做 foreign_key_check，避免带病运行。
+    if os.environ.get("APP_ENFORCE_FK", "0").strip().lower() in {"1", "true", "yes"}:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        violations = await (await conn.execute("PRAGMA foreign_key_check")).fetchall()
+        if violations:
+            raise RuntimeError(f"schema 外键校验失败：{len(violations)} 条孤儿行，先清理再开启 APP_ENFORCE_FK")
     await conn.commit()
 
 
@@ -1035,4 +1056,6 @@ async def get_db():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
+        if os.environ.get("APP_ENFORCE_FK", "0").strip().lower() in {"1", "true", "yes"}:
+            await conn.execute("PRAGMA foreign_keys = ON")
         yield conn

@@ -167,20 +167,6 @@ async def test_list_findings_by_block_filters_correctly(db):
 
 
 @pytest.mark.asyncio
-async def test_clear_thread_removes_only_target_thread(db):
-    conn, proj_id = db
-    await _create_run(conn, proj_id, "t-keep")
-    await _create_run(conn, proj_id, "t-clear")
-    repo = ReviewRepository(conn)
-    await repo.add_finding("t-keep", Finding(block_id="s1", agent="wang_anshi"))
-    await repo.add_finding("t-clear", Finding(block_id="s1", agent="wang_anshi"))
-    await repo.add_finding("t-clear", Finding(block_id="s2", agent="bao_zheng"))
-    await repo.clear_thread("t-clear")
-    assert await repo.list_findings_by_thread("t-clear") == []
-    keep = await repo.list_findings_by_thread("t-keep")
-    assert len(keep) == 1
-
-
 @pytest.mark.asyncio
 async def test_finding_handles_corrupted_issues_json(db):
     conn, proj_id = db

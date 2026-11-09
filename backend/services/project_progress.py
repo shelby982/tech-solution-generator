@@ -133,6 +133,7 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
     if chapter_rows:
         from services.writing_workspace import review_freshness
         findings = 0
+        freshness_cache: dict = {}
         for row in chapter_rows:
             block = {
                 "id": row["block_pk"], "block_id": row["block_id"],
@@ -143,7 +144,7 @@ async def project_progress(db, project_id: int, package_id: int | None = None) -
                 "spec_requirement_ids": row["spec_requirement_ids"],
                 "evidence_required": row["evidence_required"],
             }
-            if await review_freshness(db, block, dict(row)) == "current":
+            if await review_freshness(db, block, dict(row), cache=freshness_cache) == "current":
                 findings += 1
     else:
         # 迁移前/老项目回退

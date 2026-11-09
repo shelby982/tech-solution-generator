@@ -33,6 +33,12 @@ bash start.sh                         # 默认模式
 LLM_MODE=mock pytest tests/           # 跑测试
 ```
 
+### 本地安全边界
+
+- 默认只监听 `127.0.0.1`；需要局域网访问时显式设置 `APP_HOST`，并提供 `APP_AUTH_TOKEN`。
+- `APP_AUTH_TOKEN` 设置后，所有 `/api/*` 需要带 `X-Auth-Token` 或 `Authorization: Bearer <token>`。
+- `APP_PORT` / `APP_RELOAD` 可覆盖端口与热重载；`APP_ENFORCE_FK=1` 开启外键（需先清理孤儿行）。
+
 ### 设计版图表（Diagram Design）
 
 「插入内容 → 图片 → AI 生成图表（设计版）」需要 Chromium 渲染 HTML→PNG：

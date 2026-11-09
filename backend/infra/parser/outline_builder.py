@@ -326,28 +326,6 @@ def spec_topic_sections(spec_sections: Iterable) -> list[dict]:
     return out
 
 
-def match_spec_nodes(target_text: str, spec_nodes: list[dict], *,
-                     min_hits: int = 1) -> list[dict]:
-    """按主题词把规范书节点匹配到某个评分点。
-
-    匹配是**确定性**的：用规范书节点标题里的实词（去掉"工作项N""研究技术方案"这类
-    噪音）去目标文本（评分点的因素/评审项/分项要素）里找。实测「方案先进性」的
-    分项要素原文就写着"信创适配、云原生、容灾、埋点、低延迟" —— 与规范书的五个
-    研究专题**逐词对得上**，这正是用户要的"结合点"。
-    """
-    text = _normalize(target_text)
-    if not text:
-        return []
-    hits: list[dict] = []
-    for node in spec_nodes:
-        keys = _topic_keys(node["title"])
-        if not keys:
-            continue
-        if sum(1 for k in keys if k in text) >= min_hits:
-            hits.append(node)
-    return hits
-
-
 def _topic_keys(title: str) -> list[str]:
     """标题里的主题词：去掉工作项编号与通用词，只留能与评分点对齐的实词。
 

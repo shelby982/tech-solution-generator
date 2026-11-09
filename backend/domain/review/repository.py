@@ -51,13 +51,6 @@ class ReviewRepository:
         await self.db.commit()
         return cursor.lastrowid
 
-    async def clear_thread(self, thread_id: str) -> None:
-        """清空某次工作流的所有 findings（重新评审时使用）。"""
-        await self.db.execute(
-            "DELETE FROM reviews WHERE thread_id = ?", (thread_id,),
-        )
-        await self.db.commit()
-
     # ─────────────────────────────────────────────────────
     # 读
     # ─────────────────────────────────────────────────────

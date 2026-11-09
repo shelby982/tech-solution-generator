@@ -7,7 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
 VENV_DIR="$SCRIPT_DIR/.venv"
-PORT=8000
+PORT="${APP_PORT:-8000}"
+HOST="${APP_HOST:-127.0.0.1}"
 
 # ── 彩色输出 ──────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -109,9 +110,12 @@ echo ""
 #   传入 dev 参数启用热重载：./start.sh dev
 #   默认（无参数）走生产模式不重载：./start.sh
 cd "$BACKEND_DIR"
+if [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ] && [ -z "${APP_AUTH_TOKEN:-}" ]; then
+    warn "APP_HOST=$HOST 且未设置 APP_AUTH_TOKEN：API 将对局域网开放且无认证"
+fi
 if [ "${1:-}" = "dev" ]; then
-    info "开发模式（代码改动自动重启）"
-    exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-level info --reload
+    info "开发模式（代码改动自动重启，仅限本机）"
+    exec uvicorn main:app --host "$HOST" --port "$PORT" --log-level info --reload
 else
-    exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-level info
+    exec uvicorn main:app --host "$HOST" --port "$PORT" --log-level info
 fi

@@ -256,14 +256,6 @@ async def batch_write(project_id: int, body: BatchWriteBody):
                 skipped.append({**target, 'reason': str(exc)})
     return {'targets': targets, 'created': created, 'skipped': skipped}
 
-class SelectionBody(BaseModel):
-    expected_content: str = Field(max_length=500_000)
-    before: str = Field(max_length=500_000)
-    selection: str = Field(min_length=1, max_length=50_000)
-    after: str = Field(max_length=500_000)
-    instruction: str = Field(min_length=1, max_length=3000)
-
-
 class RetryChartBody(BaseModel):
     index: int = Field(ge=0)
     title: str = Field(min_length=1, max_length=200)

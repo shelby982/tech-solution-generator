@@ -140,3 +140,16 @@ AST + 调用扫描确认（排除路由 handler）：
 3. **N+1 压测与优化**（2.2/2.3）。
 4. **死符号/测试端点清理**（4）。
 5. **XSS 冒烟 + 浏览器回归**（1.2/5）。
+
+
+---
+
+## 8. 处理状态（2026-11-09 第十一轮）
+
+- 1.1 安全边界：已处理。CORS 移除，默认 127.0.0.1，新增可选 `APP_AUTH_TOKEN`，`start.sh` 同步。
+- 2.2/2.3 N+1：已做内容优先短路径 + specs/points/facts 请求级 cache；仍有逐章 cards/materials 查询，
+  极端百章项目可继续压测。
+- 3.1 schema 版本：已加 `schema_migrations`/`user_version`。
+- 3.2 外键：已加 `APP_ENFORCE_FK` 开关；默认仍关闭，因为历史库有孤儿行，需先清理。
+- 4 死符号：已删；两个测试端点已标 `deprecated=True`。
+- 1.2 XSS：仅做了标题注入抽查，未做全量 `innerHTML` 自动检查，仍是待办。

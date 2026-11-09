@@ -493,3 +493,47 @@ domain 三仓、doc_summary、双评审表、provider 默认值、死 CSS、`api
 
 仍保留的取舍：`reviews` 仍作为 per-agent 明细层；全局一致性仍是确定性检查；
 终评复用 writing 时只提升当前态、不追加"终评采纳"历史行。
+
+---
+
+## 19. 第十一轮：按第二轮审查建议处理
+
+### 19.1 安全边界
+
+- 移除 CORS 通配中间件；页面同源访问，不再向任意 Origin 暴露 API。
+- `start.sh` 与 `python main.py` 默认绑定 `127.0.0.1`；`APP_HOST` 才能改局域网。
+- 新增可选 `APP_AUTH_TOKEN`：设置后所有 `/api/*` 必须带 `X-Auth-Token` 或
+  `Authorization: Bearer`；`APP_RELOAD=1` 才开热重载。
+- `tests/test_security.py` 覆盖 token 必需/可选；README 增加本地安全边界说明。
+
+### 19.2 schema 版本与外键
+
+- 新增 `schema_migrations` + `PRAGMA user_version = SCHEMA_VERSION(2)`。
+- `APP_ENFORCE_FK=1` 可开启外键；开启前先 `PRAGMA foreign_key_check`，有孤儿行直接报错，
+  避免默认开启后带病运行。当前历史库仍有 `block_revisions`/`reviews` 孤儿行，默认保持关闭。
+- `tests/test_schema_migrations.py` 覆盖版本记录与 FK 开关。
+
+### 19.3 N+1 优化
+
+- `review_freshness` 先比 content_version（便宜），内容不同直接 stale，不再算 evidence_hash。
+- `evidence_hash` 增加请求级 cache：specs/points/facts 同一 thread/project 只查一次。
+- `scoring_risk` / `project_progress` / chapter-studio 文档页共享 cache。
+
+### 19.4 死代码/测试端点
+
+- 删除零引用函数：`block_store` 的 `update_project/update_material_parsed/create_snapshot/
+  list_chunks_by_project/list_chunks_by_materials`、`usage.get_sink`、`outline_builder.match_spec_nodes`、
+  `ReviewRepository.clear_thread`。
+- 删除未引用请求模型：`GateFixBody/SelectionBody/SwapCitationBody/FiguresPlanBody/
+  PlanConfirmRequest/ConfirmChapterBody/SectionBody/AlignBody`。
+- `GET /api/review/{thread_id}` 与 `GET /api/projects/{id}/diff` 标 `deprecated=True`（仍保留兼容）。
+
+### 19.5 浏览器/XSS 冒烟
+
+- 用临时库启动当前代码，Playwright 打开 `/review`；无 pageerror/console error/4xx/横向溢出。
+- 在临时库的章节标题注入 `<img onerror>`：`window.__xss` 未触发，标题按文本渲染。
+  这只是抽查，不等于全量 XSS 覆盖；前端仍有 88 处动态 `innerHTML`，需后续加自动检查。
+
+### 19.6 验证
+
+- 后端 **1129 passed** / 前端 **164 passed**；端点 197（两个 legacy 端点标 deprecated，不删）。

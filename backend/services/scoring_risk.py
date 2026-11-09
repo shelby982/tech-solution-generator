@@ -62,6 +62,7 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
     # 回退到 reviews 明细，避免迁移前功能不可用。
     latest: dict[str, dict] = {}
     freshness: dict[str, str] = {}
+    freshness_cache: dict = {}
     if thread_id:
         cur = await db.execute(
             """SELECT cr.*, b.block_id AS block_code, b.content AS _content,
@@ -82,7 +83,7 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
             block = next((b for b in blocks if str(b.get("block_id")) == code), None)
             if not block:
                 continue
-            state = await review_freshness(db, block, row)
+            state = await review_freshness(db, block, row, cache=freshness_cache)
             freshness[code] = state
             if state == 'current':
                 latest[code] = row

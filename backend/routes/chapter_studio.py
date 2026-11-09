@@ -341,13 +341,6 @@ class OutlineBody(BaseModel):
     allow_locked: bool = Field(default=False)
 
 
-class SectionBody(BaseModel):
-    thread_id: str = Field(min_length=8)
-    title: str = Field(min_length=1, max_length=60)
-    points: list[str] = Field(default_factory=list)
-    words: int = Field(default=900, ge=400, le=1600)
-
-
 @router.get('/blocks/{block_id}/writing-readiness')
 async def writing_readiness(block_id: int, thread_id: str = "", threadId: str = "", section: str = ""):
     """写作前置：大纲/证据覆盖/是否允许概括写法。"""
@@ -454,10 +447,6 @@ async def build_outline(block_id: int, body: OutlineBody):
         await db.execute("UPDATE writing_plans SET plan = ? WHERE id = ?", (json.dumps(plan, ensure_ascii=False), plan_id))
         await db.commit()
     return {'outline': sections, 'model': model, 'cached': False}
-
-
-class AlignBody(BaseModel):
-    thread_id: str = Field(min_length=8)
 
 
 @router.get('/blocks/{block_id}/studio/section/stream')
@@ -825,10 +814,11 @@ async def get_document(project_id: int, threadId: str):
             'SELECT r.* FROM chapter_reviews r JOIN blocks b ON b.id=r.block_id WHERE b.project_id=? AND b.run_thread_id=?',
             (project_id, threadId))).fetchall()}
         review_states = {}
+        freshness_cache: dict = {}
         for block in blocks:
             review = review_rows.get(block['id'])
             if review:
-                review_states[block['id']] = {'freshness': await review_freshness(db, block, review), 'satisfied': review['satisfied']}
+                review_states[block['id']] = {'freshness': await review_freshness(db, block, review, cache=freshness_cache), 'satisfied': review['satisfied']}
         return {'review_states': review_states, 'template': row[0] if row else 'standard', 'templates': templates, 'profiles': profiles,
                 'unit_ids': [b['id'] for b in units], 'jobs': jobs,
                 'node_scopes': node_scopes(blocks)}

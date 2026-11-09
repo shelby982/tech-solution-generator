@@ -71,7 +71,7 @@ def _compute_diff(base_blocks: list[dict], current_blocks: list[dict]) -> dict:
     return {"added": added, "removed": removed, "changed": changed}
 
 
-@router.get("/projects/{project_id}/diff")
+@router.get("/projects/{project_id}/diff", deprecated=True)
 async def get_diff(
     project_id: int,
     package_id: int | None = Query(default=None, alias="packageId"),

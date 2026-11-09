@@ -49,10 +49,6 @@ def set_sink(sink: Optional[Sink]) -> None:
     _sink = sink
 
 
-def get_sink() -> Optional[Sink]:
-    return _sink
-
-
 async def emit(record: dict) -> None:
     """上报一条用量。
 

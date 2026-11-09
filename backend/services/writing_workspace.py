@@ -25,8 +25,12 @@ def node_scopes(blocks: list[dict]) -> dict[int, dict]:
     return scopes
 
 
-async def evidence_hash(db, block: dict) -> str:
-    """Hash adopted evidence, its content/status, and chapter requirements."""
+async def evidence_hash(db, block: dict, *, cache: dict | None = None) -> str:
+    """Hash adopted evidence, its content/status, and chapter requirements.
+
+    cache 是单次请求内的 memo：specs/points/facts 同一 thread/project 只查一次，
+    避免 100+ 章批量算 freshness 时重复查同一批全局数据。
+    """
     from services.material_cards import bound_cards
     cards = await bound_cards(db, block['id'])
     materials = await (await db.execute(
@@ -35,13 +39,24 @@ async def evidence_hash(db, block: dict) -> str:
         'LEFT JOIN material_chunks c ON c.material_id=m.id WHERE cm.block_id=? ORDER BY m.id,c.id',
         (block['id'],))).fetchall()
     tid = block.get('run_thread_id') or ''
-    specs = await (await db.execute(
-        'SELECT requirement_id,title,text,mandatory_level FROM spec_requirements WHERE run_thread_id=? ORDER BY requirement_id',
-        (tid,))).fetchall()
-    points = await (await db.execute(
-        'SELECT point_id,factor,item,criterion,points FROM review_points WHERE run_thread_id=? ORDER BY point_id',
-        (tid,))).fetchall()
-    facts = await (await db.execute('SELECT facts FROM project_writing_facts WHERE project_id=?', (block['project_id'],))).fetchone()
+    pid = block.get('project_id')
+    cache = cache if cache is not None else {}
+    key = ('specs', tid)
+    if key not in cache:
+        cache[key] = await (await db.execute(
+            'SELECT requirement_id,title,text,mandatory_level FROM spec_requirements WHERE run_thread_id=? ORDER BY requirement_id',
+            (tid,))).fetchall()
+    specs = cache[key]
+    key = ('points', tid)
+    if key not in cache:
+        cache[key] = await (await db.execute(
+            'SELECT point_id,factor,item,criterion,points FROM review_points WHERE run_thread_id=? ORDER BY point_id',
+            (tid,))).fetchall()
+    points = cache[key]
+    key = ('facts', pid)
+    if key not in cache:
+        cache[key] = await (await db.execute('SELECT facts FROM project_writing_facts WHERE project_id=?', (pid,))).fetchone()
+    facts = cache[key]
     payload = {
         'facts': facts[0] if facts else '',
         'cards': sorted(cards, key=lambda item: (item['signed_id'], item['section'], item['requirement_id'])),
@@ -52,12 +67,17 @@ async def evidence_hash(db, block: dict) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-async def versions(db, block: dict) -> dict:
-    return {'content_version': content_hash(block.get('content')), 'evidence_version': await evidence_hash(db, block)}
+async def versions(db, block: dict, *, cache: dict | None = None) -> dict:
+    return {'content_version': content_hash(block.get('content')),
+            'evidence_version': await evidence_hash(db, block, cache=cache)}
 
 
-async def review_freshness(db, block: dict, review: dict) -> str:
+async def review_freshness(db, block: dict, review: dict, *, cache: dict | None = None) -> str:
     if not review.get('content_version') or not review.get('evidence_version'):
         return 'unknown'
-    current = await versions(db, block)
-    return 'current' if all(review.get(key) == value for key, value in current.items()) else 'stale'
+    # 先比内容哈希（便宜）；内容已变就不必再算 evidence_hash（贵）。
+    if str(review.get('content_version')) != content_hash(block.get('content')):
+        return 'stale'
+    if str(review.get('evidence_version')) != await evidence_hash(db, block, cache=cache):
+        return 'stale'
+    return 'current'

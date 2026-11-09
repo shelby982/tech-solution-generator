@@ -77,24 +77,6 @@ async def list_projects(
     return [dict(row) for row in rows]
 
 
-async def update_project(
-    db: aiosqlite.Connection,
-    project_id: int,
-    **kwargs,
-) -> dict | None:
-    allowed = {"name", "status", "deadline", "summary", "base_snapshot_id", "target_pages"}
-    fields = {k: v for k, v in kwargs.items() if k in allowed}
-    if not fields:
-        return await get_project(db, project_id)
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [project_id]
-    await db.execute(
-        f"UPDATE projects SET {set_clause} WHERE id = ?", values,
-    )
-    await db.commit()
-    return await get_project(db, project_id)
-
-
 # ══════════════════════════════════════════════════
 # materials
 # ══════════════════════════════════════════════════
@@ -189,17 +171,6 @@ async def invalidate_material_packages(db, material_id: int) -> None:
                         WHERE CAST(value AS TEXT)=CAST(? AS TEXT)))""",
         (material_id, material_id),
     )
-
-
-async def update_material_parsed(
-    db: aiosqlite.Connection,
-    material_id: int,
-) -> None:
-    await db.execute(
-        "UPDATE materials SET parsed_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (material_id,),
-    )
-    await db.commit()
 
 
 async def update_material_parse_status(
@@ -928,24 +899,6 @@ async def list_revisions(
 # project_snapshots
 # ══════════════════════════════════════════════════
 
-async def create_snapshot(
-    db: aiosqlite.Connection,
-    project_id: int,
-    trigger: str,
-    snapshot_json: str,
-    *,
-    package_id: int | None = None,
-    run_thread_id: str | None = None,
-) -> dict:
-    cursor = await db.execute(
-        """INSERT INTO project_snapshots
-           (project_id, package_id, run_thread_id, trigger, snapshot) VALUES (?, ?, ?, ?, ?)""",
-        (project_id, package_id, run_thread_id, trigger, snapshot_json),
-    )
-    await db.commit()
-    return await get_snapshot(db, cursor.lastrowid)
-
-
 async def get_snapshot(
     db: aiosqlite.Connection,
     snapshot_id: int,
@@ -996,17 +949,6 @@ async def create_chunk(db, material_id: int, chunk_index: int, content: str,
     await db.commit()
     row = await (await db.execute("SELECT * FROM material_chunks WHERE id = ?", (cursor.lastrowid,))).fetchone()
     return dict(row)
-
-async def list_chunks_by_project(db, project_id: int) -> list[dict]:
-    cursor = await db.execute(
-        """SELECT mc.* FROM material_chunks mc
-           JOIN materials m ON mc.material_id = m.id
-           WHERE m.project_id = ? ORDER BY mc.material_id, mc.chunk_index""",
-        (project_id,),
-    )
-    rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
-
 
 async def list_chunks_with_filename(
     db,
@@ -1086,22 +1028,6 @@ async def update_block_source(db, block_id: int, rows: list[dict]) -> dict | Non
 # 实测曾被当成 source（我方素材）上传，于是既没结构化、也没参与目录规划。
 TENDER_MATERIAL_ROLES = ("spec", "main_rfp", "requirement", "scoring", "evaluation")
 OURS_MATERIAL_ROLES = ("source",)
-
-
-async def list_chunks_by_materials(db, material_ids: list[int]) -> list[dict]:
-    """按 material_id 列表过滤切片，附带 filename，返回顺序按 material_id 与 chunk_index 升序。"""
-    if not material_ids:
-        return []
-    placeholders = ",".join("?" * len(material_ids))
-    cursor = await db.execute(
-        f"""SELECT mc.*, m.filename FROM material_chunks mc
-            JOIN materials m ON mc.material_id = m.id
-            WHERE mc.material_id IN ({placeholders})
-            ORDER BY mc.material_id, mc.chunk_index""",
-        tuple(material_ids),
-    )
-    rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
 
 
 async def get_chunk(db, material_id: int, chunk_index: int) -> dict | None:

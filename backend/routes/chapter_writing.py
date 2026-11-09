@@ -36,21 +36,11 @@ class FigureItem(BaseModel):
     source: str = ""
 
 
-class FiguresPlanBody(BaseModel):
-    block_id: str = Field(min_length=1)
-    tables: list[FigureItem] = Field(default_factory=list)
-    figures: list[FigureItem] = Field(default_factory=list)
-
-
 class BindBody(BaseModel):
     block_id: str = Field(min_length=1)
     requirement_id: str = Field(min_length=1)
     citation_id: str = Field(min_length=1)
     indices: list[int] = Field(default_factory=list)
-
-
-class PlanConfirmRequest(BaseModel):
-    leaf_block_ids: list[str] = Field(default_factory=list)   # 空 = 确认全部
 
 
 @router.get('/projects/{project_id}/writing-plan-units')
@@ -126,10 +116,6 @@ class CondenseBody(BaseModel):
 class MatchClausesBody(BaseModel):
     threadId: str = Field(min_length=1)
     root_block_id: str = Field(min_length=1)
-
-
-class ConfirmChapterBody(BaseModel):
-    block_id: str = ""
 
 
 @router.post('/projects/{project_id}/chapters/{block_id}/condense')

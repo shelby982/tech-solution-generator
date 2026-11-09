@@ -3,6 +3,7 @@
 同时提供 REST API 和前端静态文件服务
 """
 
+import hmac
 import logging
 from typing import Optional
 import os
@@ -10,7 +11,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -217,14 +217,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS（本服务为本地单机部署，仅允许同源）──
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ── 本地安全边界 ─────────────────────────────
+# 默认只服务同源页面，因此不启用 CORS（跨域页面无法读取本机 API）。
+# 需要从别的端口/机器调用时，必须显式设置 APP_AUTH_TOKEN，并让调用方带
+# X-Auth-Token（或 Authorization: Bearer <token>）；令牌只从环境变量读取。
+@app.middleware("http")
+async def _require_api_token(request: Request, call_next):
+    token = os.environ.get("APP_AUTH_TOKEN", "").strip()
+    if token and request.url.path.startswith("/api/"):
+        supplied = request.headers.get("x-auth-token", "") or ""
+        auth = request.headers.get("authorization", "") or ""
+        if auth.lower().startswith("bearer "):
+            supplied = auth[7:].strip()
+        if not hmac.compare_digest(supplied, token):
+            return JSONResponse(status_code=401, content={"detail": "未授权"})
+    return await call_next(request)
 
 
 # ── 全局未处理异常捕获 ─────────────────────────
@@ -386,10 +393,17 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    # 默认只绑本机；要局域网访问必须显式设置 APP_HOST，并建议同时设置
+    # APP_AUTH_TOKEN。APP_RELOAD=1 才开启热重载（仅开发用）。
+    host = os.environ.get("APP_HOST", "127.0.0.1")
+    port = int(os.environ.get("APP_PORT", "8000"))
+    reload = os.environ.get("APP_RELOAD", "0").strip().lower() in {"1", "true", "yes"}
+    if host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("APP_AUTH_TOKEN"):
+        logger.warning("APP_HOST=%s 但未设置 APP_AUTH_TOKEN：API 将对局域网开放且无认证", host)
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,   # 开发模式热重载（生产请去掉此行）
+        host=host,
+        port=port,
+        reload=reload,
         log_level="info",
     )

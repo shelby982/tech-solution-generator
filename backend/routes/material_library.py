@@ -661,11 +661,6 @@ async def fill_citation(block_id: int, body: FillCitationBody):
     return {"ok": True, "label": label, "content": after}
 
 
-class SwapCitationBody(BaseModel):
-    old_label: str = ""
-    new_label: str = ""
-
-
 @router.get('/projects/{project_id}/materials/{material_id}/images')
 async def material_images(project_id: int, material_id: int):
     """某文件里抽出的图片素材（配图注与页码）。"""
