@@ -1,7 +1,6 @@
 """待办 v3 接口：章级任务（含服务端状态）+ 决策应用 + 复检 + 项目级根因汇总。"""
 from __future__ import annotations
 
-import re
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -49,12 +48,6 @@ async def _tasks(project_id: int, thread_id: str, block_code: str) -> dict:
     merged = merge_status(tasks, states)
     merged["completion"] = plan.get("completion") or {}
     return merged
-
-
-@router.get('/projects/{project_id}/todo/chapter')
-async def chapter_tasks(project_id: int, block_id: str, thread_id: str = ''):
-    """章级任务（含服务端 ignored/snoozed 状态）。"""
-    return await _tasks(project_id, thread_id, block_id)
 
 
 @router.post('/projects/{project_id}/todo/state')
@@ -164,27 +157,6 @@ class GateFixBody(BaseModel):
     apply: bool = True
 
 
-@router.post('/blocks/{block_id}/delivery-gate/auto')
-async def delivery_gate_auto(block_id: int):
-    """系统自动清理（无用户交互）：内部语法/内部术语。没有可清的就直接返回。"""
-    from services.block_store import add_revision, get_block, update_block_content
-    from services.delivery_gate import auto_fix, scan
-
-    async with get_db() as db:
-        block = await get_block(db, block_id)
-    if not block:
-        raise HTTPException(404, "章节不存在")
-    before = block.get("content") or ""
-    after, changed, changes = auto_fix(before)
-    if changed:
-        async with get_db() as db:
-            await add_revision(db, block_id, before, summary="系统自动清理：内部语法/术语", source="ai")
-            await update_block_content(db, block_id, after)
-    remaining = scan(after)
-    return {"changed": changed, "changes": changes, "content": after,
-            "remaining": remaining["summary"], "blocking": remaining["blocking"]}
-
-
 @router.get('/blocks/{block_id}/delivery-gate')
 async def delivery_gate(block_id: int):
     """章级交付门：返回 blocking 清单（带 locator）+ 可自动修数量。"""
@@ -198,27 +170,6 @@ async def delivery_gate(block_id: int):
     result = scan(block.get("content") or "")
     return {"block_id": block_id, "block_code": block.get("block_id"),
             **result}
-
-
-@router.post('/blocks/{block_id}/delivery-gate/fix')
-async def delivery_gate_fix(block_id: int, body: GateFixBody):
-    """一键清理：删内部语法残留、替换内部术语（写 revision，可回滚）。"""
-    from services.block_store import add_revision, get_block, update_block_content
-    from services.delivery_gate import auto_fix, scan
-
-    async with get_db() as db:
-        block = await get_block(db, block_id)
-    if not block:
-        raise HTTPException(404, "章节不存在")
-    before = block.get("content") or ""
-    after, changed, changes = auto_fix(before)
-    if changed:
-        async with get_db() as db:
-            await add_revision(db, block_id, before, summary="交付门：自动清理内部语法/术语", source="ai")
-            await update_block_content(db, block_id, after)
-    remaining = scan(after)
-    return {"changed": changed, "changes": changes, "content": after,
-            "remaining": remaining["summary"], "blocking": remaining["blocking"]}
 
 
 @router.post('/blocks/{block_id}/studio/citation-enrich')

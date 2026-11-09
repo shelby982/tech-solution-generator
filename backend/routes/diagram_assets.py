@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from db import get_db
 from services import diagram_assets
 from services.diagram_design import (
-    SKILL_TYPES, normalize_purpose, normalize_size, normalize_type, queue_job, recommend_type,
+    normalize_purpose, normalize_size, normalize_type, queue_job, recommend_type,
 )
 
 router = APIRouter(tags=["diagram-design"])
@@ -144,20 +144,6 @@ async def create_deployment_diagram(block_id: int, body: DeploymentDiagramBody):
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.get('/blocks/{block_id}/studio/diagram-design/types')
-async def diagram_types(block_id: int):
-    async with get_db() as db:
-        block = await (await db.execute("SELECT title, content FROM blocks WHERE id=?", (block_id,))).fetchone()
-    if not block:
-        raise HTTPException(404, "章节不存在")
-    recommended = recommend_type(str(block["title"] or ""), str(block["content"] or "")[:3000])
-    return {"types": [{"key": key, "label": label} for key, label in SKILL_TYPES.items()],
-            "recommended": recommended, "sizes": [{"key": key, "label": label} for key, label in {
-                "doc-wide": "文档宽（推荐）", "doc-inline": "文档内",
-                "print-a4-landscape": "A4 横向打印", "slide-16x9": "16:9 整页",
-            }.items()]}
-
-
 @router.post('/blocks/{block_id}/studio/diagram-assets', status_code=202)
 async def create_diagram(block_id: int, body: DiagramDesignBody):
     async with get_db() as db:
@@ -216,22 +202,6 @@ async def diagram_job(block_id: int, job_id: str):
                 "checks": json.loads(asset.get("checks_json") or "{}"),
             })
     return data
-
-
-@router.post('/studio/diagrams/{asset_id}/regenerate', status_code=202)
-async def regenerate(asset_id: str, body: DiagramDesignBody | None = None):
-    asset = await diagram_assets.get_asset(asset_id)
-    if not asset:
-        raise HTTPException(404, "图表不存在")
-    brief = json.loads(asset.get("brief_json") or "{}")
-    if body:
-        brief.update({k: v for k, v in body.model_dump().items() if v not in (None, "", [])})
-    brief["skill_type"] = normalize_type(brief.get("skill_type"))
-    brief["size_preset"] = normalize_size(brief.get("size_preset"))
-    brief["force"] = True  # 重新生成必须绕过同 prompt 缓存
-    job_id = await diagram_assets.create_job(int(asset["project_id"]), int(asset["block_id"] or 0), brief)
-    queue_job(job_id)
-    return {"job_id": job_id, "status": "queued"}
 
 
 @router.get('/studio/diagrams/{asset_id}/svg')

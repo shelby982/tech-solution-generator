@@ -13,7 +13,7 @@ import re
 
 from aiosqlite import Connection
 
-from services.block_store import add_revision, get_block, list_blocks, update_block_content
+from services.block_store import add_revision, list_blocks, update_block_content
 
 SUMMARY_MIN, SUMMARY_MAX = 280, 620
 

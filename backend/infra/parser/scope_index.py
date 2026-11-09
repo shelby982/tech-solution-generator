@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from typing import Iterable
 
 # 「适用标包：xxx」/「下列评审标准适用的标的/标包：标包2：xxx」
 _SCOPE_DECL_RE = re.compile(

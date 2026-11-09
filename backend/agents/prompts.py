@@ -144,7 +144,7 @@ def build_outline_extract_user(
 # ─────────────────────────────────────────────
 
 # 要求文件章节正文进入 prompt 的总预算（字符）。加权分配算法同
-# ``dispatcher._generate_doc_summary``，遍历时用剩余预算限制单章配额。
+# 遍历时用剩余预算限制单章配额。
 #
 # 为什么从 8000 提到 40000：实测「按标包2技术评分点 + 对应技术规范书拆目录」时，
 # 真正该进 prompt 的材料是 **34,568 字符**（评分表细则 + 技术规范书 22,895 字正文），
@@ -351,7 +351,6 @@ _CATEGORY_CONSTRAINT_TMPL = (
 
 def build_outline_draft_user(
     instruction: str,
-    doc_summary: str,
     spec_digest: str,
     previous_outline: str = "",
     material_digest: str = "",
@@ -383,9 +382,6 @@ def build_outline_draft_user(
 
     if category:
         parts.append(_CATEGORY_CONSTRAINT_TMPL.format(cn=_CATEGORY_CN.get(category, category)))
-
-    if doc_summary:
-        parts.append(f"【要求文件项目概述】\n{doc_summary.strip()}")
 
     if follow_structure:
         # 紧挨着材料放，模型读材料时是带着这条规则读的
@@ -466,44 +462,6 @@ def build_scope_select_user(
 
 # ─────────────────────────────────────────────
 # 沈括：素材 LLM 重排
-# ─────────────────────────────────────────────
-
-RERANK_SYSTEM = (
-    "你是技术应标素材匹配专家。给定一条应标要求与若干候选素材片段，"
-    "你需要为每个素材打 0-10 分（10=高度相关，0=完全无关），"
-    "并给出简短理由与命中的需求要点。\n"
-    "只输出合法 JSON 对象，不要任何额外说明或 markdown 围栏。"
-)
-
-
-# 重排的稳定指令块：前置以命中上下文缓存（见 OUTLINE_EXTRACT_INSTRUCTIONS 的说明）。
-RERANK_INSTRUCTIONS = (
-    '请对下面给出的候选素材片段逐一打分，输出形如 '
-    '{"matches":[{"chunk_id":...,"score":0-10,"reason":"...","hit_points":["..."]}]} 的 JSON。'
-    "score 越高越相关，hit_points 列出该素材命中的应标要点；"
-    "无关素材也要列出（score 设低分）。"
-)
-
-
-def build_rerank_user(chunks: list[dict], query: str, requirement: str) -> str:
-    """构造沈括 LLM 重排 user prompt（稳定指令在前，候选与查询在后）。"""
-    lines = []
-    for i, c in enumerate(chunks, start=1):
-        cid = c.get("chunk_id", c.get("id", i))
-        content = (c.get("content") or "")[:600]
-        lines.append(f"[{i}] chunk_id={cid}\n{content}")
-    chunks_block = "\n\n".join(lines)
-
-    return (
-        f"{RERANK_INSTRUCTIONS}\n\n"
-        f"【应标要求】\n{requirement}\n\n"
-        f"【检索查询】\n{query}\n\n"
-        f"【候选素材片段】\n{chunks_block}"
-    )
-
-
-# ─────────────────────────────────────────────
-# 诸葛亮：tone system prompts + 写作大纲 + 公文
 # ─────────────────────────────────────────────
 
 TONE_SYSTEM_PROMPTS: dict[str, str] = {
@@ -813,8 +771,6 @@ __all__ = [
     "BIDDER_IDENTITY_RULE",
     "OUTLINE_EXTRACT_SYSTEM",
     "build_outline_extract_user",
-    "RERANK_SYSTEM",
-    "build_rerank_user",
     "TONE_SYSTEM_PROMPTS",
     "SECTION_OUTLINE_SYSTEM",
     "build_section_outline_user",

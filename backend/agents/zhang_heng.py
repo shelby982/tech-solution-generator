@@ -1,7 +1,7 @@
 """张衡 — 规范书解析专家 agent。
 
 职责（spec §3）：
-1. parse: 把规范书文件解析为 toc + 项目概述（doc_summary）
+1. parse: 把规范书文件解析为 toc（多文件按顺序拼接）
 2. extract: 对每章节做 8 字段响应矩阵提炼（含 ★/▲ 标记的特殊处理）
 
 不持有 LLM 配置；通过依赖注入接受 services.config_store.config_store 或自己的轻量 wrapper。
@@ -39,12 +39,7 @@ class SpecParseResult:
     """
     doc_id: str
     doc_title: str
-    doc_summary: str
     toc: list[DomainSection]
-    # 项目概述生成失败的原因（空串 = 成功）。摘要生成当前已停用（见 parse），
-    # 所以恒为空串；字段与它的消费方（state、闸门 1）保留不动 —— 恢复摘要时
-    # 不该还要回头改这条链路。
-    doc_summary_error: str = ""
     # 解析失败或被跳过（解析成功但 0 章节）的文件名。非空时由 parse 节点写进
     # spec.parse_failed_files，闸门 1 展示 —— 静默缺席会让用户以为它参与了派生。
     failed_files: list[str] = field(default_factory=list)
@@ -295,7 +290,6 @@ class ZhangHengAgent:
 
         - 调 infra.parser.parse_document 拿到 ParsedDocument（逐份）
         - 把 infra.parser.Section → domain.spec.Section
-        - doc_summary 当前不生成（恒为空串），原因见下方注释
         """
         import asyncio
 
@@ -363,22 +357,6 @@ class ZhangHengAgent:
                     source_file=filename or "",
                 ))
 
-        # 摘要生成暂时停用（2026-09-17）。
-        #
-        # 用 deepseek-v4-pro 这类推理模型时这一步**必然**返回空：摘要走
-        # dispatcher._generate_doc_summary，实参是 max_tokens=2000，而推理模型的
-        # max_tokens 是「思考 + 正文」之和 —— 2000 连思考都写不完，正文一个字不吐。
-        # 跑一次只换来一条「模型返回空内容」的降级提示和一次无谓的等待。
-        #
-        # 跳过它不改变任何下游输入：doc_summary 本来就会是空串，目录派生
-        # （见本类 draft_outline 的 payload）与单章节正文生成
-        # （dispatcher.dispatch_stream_generate 的 doc_summary 形参）拿到的都是空值，
-        # 两条路径对空串都已有分支。
-        #
-        # 恢复：把 infra.llm.dispatch_doc_summary 的调用接回来，**并同时**给它足够的
-        # max_tokens（或改用非推理模型），否则接回来的只是那条降级提示。
-        doc_summary = ""
-        doc_summary_error = ""
 
         # 多份文件时 doc_title 用**文件名**拼接：各文档的 doc.title 是解析器猜的
         # （pdf 路径常常只是正文第一个一级标题），几份拼起来既不是标题也不含来源信息。
@@ -389,9 +367,7 @@ class ZhangHengAgent:
         return SpecParseResult(
             doc_id=parsed_docs[0][0].doc_id,
             doc_title=doc_title,
-            doc_summary=doc_summary,
             toc=toc,
-            doc_summary_error=doc_summary_error,
             failed_files=failed_files,
         )
 
@@ -402,7 +378,6 @@ class ZhangHengAgent:
         source_toc: list[DomainSection],
         *,
         instruction: str = "",
-        doc_summary: str = "",
         previous_toc: Optional[list[DomainSection]] = None,
         project_id: Optional[int] = None,
         thread_id: str = "",
@@ -469,7 +444,6 @@ class ZhangHengAgent:
 
         payload = {
             "instruction": instruction,
-            "doc_summary": doc_summary,
             "spec_digest": build_spec_digest(digest_sections),
             "category": extract_category(instruction),
             # 定位到了用户点名的那一部分 → 目录按那部分自身的结构拆，不重新组织

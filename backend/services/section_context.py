@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 from db import get_db
 
@@ -214,12 +213,6 @@ def render_context(context: dict) -> str:
     if manual:
         parts.append(manual)
     return "\n\n".join(parts)
-
-
-async def coverage_for_section(block: dict, thread_id: str, text: str) -> dict:
-    async with get_db() as db:
-        spec = await _load_spec_clauses(db, block, thread_id)
-    return coverage_for_text(text, {"spec_clauses": spec})
 
 
 def coverage_for_text(text: str, context: dict) -> dict:

@@ -106,9 +106,6 @@ def _template_tasks(leaf: dict) -> list[dict] | None:
     return None
 
 
-REQUIREMENT_PREFIX = {"text": "写明", "table": "用表格呈现", "figure": "配图说明", "material": "引用"}
-
-
 async def _bind_clauses_to_chapters(db, project_id: int, thread_id: str,
                                     chapters: list[dict]) -> dict[str, int]:
     """D1：把招标技术条款按关键词挂到可写章节（写回 blocks.spec_requirement_ids）。

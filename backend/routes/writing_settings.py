@@ -5,9 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from db import get_db
-from services.writing_settings import (ROLE_DEFAULTS, ROLE_LABELS, available_models,
-                                       block_settings, project_settings, resolve_model,
-                                       save_settings)
+from services.writing_settings import ROLE_LABELS, available_models, block_settings, resolve_model, save_settings
 
 router = APIRouter(tags=["writing-settings"])
 
@@ -23,14 +21,6 @@ def _validate(payload: dict[str, str]) -> None:
            if role in ROLE_LABELS and model and model not in models]
     if bad:
         raise HTTPException(422, f"模型不可用：{', '.join(bad)}")
-
-
-@router.get("/projects/{project_id}/writing-settings")
-async def get_project_settings(project_id: int):
-    async with get_db() as db:
-        values = await project_settings(db, project_id)
-    return {"scope": "project", "settings": values, "defaults": ROLE_DEFAULTS,
-            "labels": ROLE_LABELS, "available": available_models()}
 
 
 @router.put("/projects/{project_id}/writing-settings")

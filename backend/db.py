@@ -653,16 +653,6 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_site ON llm_usage(call_site, model);
 """
 
 
-async def _migrate_review_v3() -> None:
-    """评审 v3：老库补 chapter_reviews.tier 列（新库已含，忽略异常）。"""
-    try:
-        async with get_db() as db:
-            await db.execute("ALTER TABLE chapter_reviews ADD COLUMN tier TEXT DEFAULT ''")
-            await db.commit()
-    except Exception:
-        pass
-
-
 async def init_db(conn: aiosqlite.Connection) -> None:
     """执行建表 DDL（CREATE TABLE IF NOT EXISTS，幂等）。"""
     await conn.executescript(_DDL)

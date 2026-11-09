@@ -152,22 +152,6 @@ async def list_issues(db, block_pk: int) -> dict:
     return {"items": items, "counts": effective_counts}
 
 
-async def project_summary(db, project_id: int) -> dict:
-    """项目级 issue 状态汇总（供评审页/看板）。"""
-    rows = await (await db.execute(
-        'SELECT DISTINCT b.id FROM blocks b JOIN review_issue_states s ON s.block_id=b.id WHERE b.project_id=?',
-        (project_id,))).fetchall()
-    summary = {'open': 0, 'fixed': 0, 'verified': 0}
-    for row in rows:
-        result = await list_issues(db, row[0])
-        for status in summary:
-            summary[status] += result['counts'][status]
-    summary["total"] = sum(summary.values())
-    summary["verified_ratio"] = (round(summary["verified"] / summary["total"] * 100)
-                                 if summary["total"] else 0)
-    return {"counts": summary}
-
-
 def issues_from_review(review: dict) -> list[dict]:
     """从 chapter_review 的合并结果里取 issues（兼容 dict/list）。"""
     if not review:

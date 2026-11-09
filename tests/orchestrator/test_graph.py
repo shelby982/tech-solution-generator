@@ -24,7 +24,7 @@ from domain.proposal import BlockOutput
 from domain.review import Finding
 from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
-from infra.retrieval import Match
+from domain.material.models import Match
 from orchestrator import graph as graph_mod
 from orchestrator import nodes
 from orchestrator.checkpointer import checkpointer_from_path
@@ -65,8 +65,7 @@ def _parse_frame(frame: str) -> tuple[str, dict]:
 class _StubZhangHeng:
     async def parse(self, sources, *, progress_callback=None):
         return SpecParseResult(
-            doc_id="d1", doc_title="规范书", doc_summary="摘要",
-            toc=[
+            doc_id="d1", doc_title="规范书", toc=[
                 DomainSection(id="s1", level=1, title="技术方案",
                               raw_content="", special_marks=[]),
                 DomainSection(id="s2", level=1, title="实施计划",
@@ -74,8 +73,7 @@ class _StubZhangHeng:
             ],
         )
 
-    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id="", points_only=False):
+    async def draft_outline(self, source_toc, *, instruction="", previous_toc=None, project_id=None, thread_id="", points_only=False):
         """stub 沿用规范书目录（等价降级路径），保持既有 block_id 断言不变。"""
         from agents.zhang_heng import OutlineDraftResult
         return OutlineDraftResult(
@@ -678,37 +676,4 @@ async def test_outline_gate_emits_draft_frames_and_snapshot_fields(tmp_path):
     assert gate["snapshot"]["outline_revision"] == 1
     assert gate["snapshot"]["outline_error"] == "stub 未派生"
     # 概述生成成功 → 无降级提示；这条断言同时守住「键始终存在」的契约。
-    assert gate["snapshot"]["doc_summary_error"] == ""
     assert [s["id"] for s in gate["snapshot"]["toc"]] == ["s1", "s2"]
-
-
-def test_outline_gate_snapshot_carries_doc_summary_error():
-    """概述生成失败时，闸门 1 快照要带上原因，前端才有东西提示。
-
-    直接单测快照函数：验证的是「挑哪些字段」这一层，不必为此改图桩。
-    """
-    snapshot = graph_mod._gate_snapshot(
-        {
-            "spec": {
-                "doc_title": "规范书",
-                "doc_summary": "",
-                "doc_summary_error": "模型返回空内容",
-                "toc": [],
-            },
-            "config": {},
-        },
-        "review_outline",
-    )
-
-    assert snapshot["doc_summary"] == ""
-    assert snapshot["doc_summary_error"] == "模型返回空内容"
-
-
-def test_outline_gate_snapshot_tolerates_missing_doc_summary_error():
-    """老 checkpoint 的 spec 里没有这个键，快照要退化成空串而不是 KeyError。"""
-    snapshot = graph_mod._gate_snapshot(
-        {"spec": {"doc_title": "规范书", "doc_summary": "摘要"}, "config": {}},
-        "review_outline",
-    )
-
-    assert snapshot["doc_summary_error"] == ""

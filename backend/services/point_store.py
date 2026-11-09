@@ -26,7 +26,7 @@ import hashlib
 import json
 import logging
 import re
-from typing import Iterable, Optional
+from typing import Iterable
 
 logger = logging.getLogger(__name__)
 

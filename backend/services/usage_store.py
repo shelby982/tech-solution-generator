@@ -76,7 +76,3 @@ def install() -> None:
     """装配落库 sink。幂等。"""
     usage.set_sink(record)
     logger.info("LLM 用量记账已启用（llm_usage 表）")
-
-
-def uninstall() -> None:
-    usage.set_sink(None)

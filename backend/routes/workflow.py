@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -356,28 +356,6 @@ async def redraft_outline(thread_id: str, req: RedraftOutlineReq | None = None):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse({"thread_id": thread_id, "status": "redrafting_outline"})
-
-
-@router.post("/{thread_id}/analyze-points")
-async def analyze_points(thread_id: str):
-    """**只拆评分点**（不生成目录）。
-
-    用户要求的第①步：先把各标包的商务/技术/报价评分点拆出来；
-    第②步再由用户在「拆解结果」里选择类别并生成对应目录（走 redraft-outline）。
-    """
-    runner = get_runner()
-    from orchestrator.runner import WorkflowAbortedError
-
-    try:
-        await runner.redraft_outline(thread_id, "", points_only=True)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="thread_id 未知")
-    except WorkflowAbortedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc),
-                            headers={"X-Error-Code": "workflow_aborted"})
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    return JSONResponse({"thread_id": thread_id, "status": "analyzing_points"})
 
 
 @router.post("/{thread_id}/confirm-outline")

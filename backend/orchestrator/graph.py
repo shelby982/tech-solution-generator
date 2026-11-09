@@ -126,7 +126,6 @@ def _gate_snapshot(state: WorkflowState, gate_name: str) -> dict:
     if gate_name == "review_outline":
         return {
             "doc_title": spec.get("doc_title", ""),
-            "doc_summary": spec.get("doc_summary", ""),
             "toc": list(spec.get("toc") or []),
             "outline_matrix": dict(spec.get("outline_matrix") or {}),
             # 前端刷新后要回填提炼要求输入框、显示「第 N 版」与降级提示
@@ -135,9 +134,6 @@ def _gate_snapshot(state: WorkflowState, gate_name: str) -> dict:
             ),
             "outline_revision": int(spec.get("outline_revision") or 0),
             "outline_error": str(spec.get("outline_error") or ""),
-            # 项目概述生成失败的原因。失败时 doc_summary 是空串，后续每次章节
-            # 生成都会少这段全局上下文，必须让用户在闸门 1 就看到。
-            "doc_summary_error": str(spec.get("doc_summary_error") or ""),
         }
     if gate_name == "review_materials":
         return {
@@ -255,9 +251,7 @@ def build_graph(
         )
 
     async def match_node(state: WorkflowState) -> WorkflowState:
-        return await nodes.shen_kuo_match_node(
-            state, agent=deps.shen_kuo, emitter=emitter,
-        )
+        return await nodes.shen_kuo_match_node(state, emitter=emitter)
 
     async def generate_node(state: WorkflowState) -> WorkflowState:
         return await nodes.zhuge_liang_generate_node(

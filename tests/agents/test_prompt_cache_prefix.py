@@ -12,10 +12,8 @@ import pytest
 
 from agents.prompts import (
     OUTLINE_EXTRACT_INSTRUCTIONS,
-    RERANK_INSTRUCTIONS,
     SECTION_OUTLINE_INSTRUCTIONS,
     build_outline_extract_user,
-    build_rerank_user,
     build_section_outline_user,
 )
 
@@ -37,7 +35,6 @@ def test_stable_instruction_blocks_are_substantial():
     """稳定块是缓存收益的来源；被改短等于收益消失。"""
     assert len(OUTLINE_EXTRACT_INSTRUCTIONS) > 800
     assert len(SECTION_OUTLINE_INSTRUCTIONS) > 400
-    assert len(RERANK_INSTRUCTIONS) > 100
 
 
 # ─────────────────────────────────────────────
@@ -58,20 +55,6 @@ def test_extract_prompt_shares_stable_prefix_across_sections():
     # 动态内容确实还都在
     assert "第一章 总体要求" in a and "第二章 技术架构" in b
     assert "评分表内容" in b and "否决条款" in b
-
-
-def test_rerank_prompt_shares_stable_prefix_across_queries():
-    a = build_rerank_user(
-        chunks=[{"chunk_id": "c1", "content": "微服务"}], query="架构", requirement="高可用",
-    )
-    b = build_rerank_user(
-        chunks=[{"chunk_id": "c2", "content": "容灾"}], query="备份", requirement="双活",
-    )
-
-    assert a.startswith(RERANK_INSTRUCTIONS)
-    assert b.startswith(RERANK_INSTRUCTIONS)
-    assert _common_prefix_len(a, b) >= len(RERANK_INSTRUCTIONS)
-    assert "高可用" in a and "双活" in b
 
 
 def test_section_outline_prompt_shares_stable_prefix_across_blocks():

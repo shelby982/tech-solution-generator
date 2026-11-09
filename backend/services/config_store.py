@@ -144,37 +144,6 @@ class ConfigStore:
                     return c
             return None
 
-    def update(self, config_id: str, updated: LLMConfig) -> bool:
-        """更新指定 id 的配置，返回是否找到并更新"""
-        with self._lock:
-            for i, c in enumerate(self._configs):
-                if c.id == config_id:
-                    updated.id = config_id  # 确保 id 不变
-                    self._configs[i] = updated
-                    self._persist()
-                    return True
-            return False
-
-    def reorder(self, ordered_ids: list[str]) -> bool:
-        """按传入的 id 顺序重排配置列表，返回是否成功"""
-        with self._lock:
-            id_map = {c.id: c for c in self._configs}
-            if set(ordered_ids) != set(id_map.keys()):
-                return False
-            self._configs = [id_map[cid] for cid in ordered_ids]
-            self._rr_index = 0
-            self._persist()
-            return True
-
-    def get_next_index(self) -> int:
-        """原子递增轮询游标，返回本次调用应使用的起始索引"""
-        with self._lock:
-            if not self._configs:
-                return 0
-            idx = self._rr_index % len(self._configs)
-            self._rr_index = (self._rr_index + 1) % len(self._configs)
-            return idx
-
     def get_configs_and_next_index(self) -> tuple[list["LLMConfig"], int]:
         """在同一锁内原子地返回配置列表副本和当前轮询起始索引，避免两次调用之间的 race condition
 
@@ -252,30 +221,6 @@ class ConfigStore:
                     c.verified = True
                     if config_id is not None:
                         break
-
-    # ── 旧接口兼容 ────────────────────────────
-
-    def get(self) -> Optional[LLMConfig]:
-        """返回第一个配置（兼容旧代码）"""
-        with self._lock:
-            return self._configs[0] if self._configs else None
-
-    def save(self, config: LLMConfig) -> None:
-        """清空列表，仅保留这一个配置（兼容旧代码）"""
-        with self._lock:
-            # 保留 id，若已有相同 provider+model 则复用
-            if not config.id or config.id == "":
-                config.id = str(uuid.uuid4())
-            self._configs = [config]
-            self._rr_index = 0
-            self._persist()
-
-    def clear(self) -> None:
-        """清除所有配置（写入空列表到文件，比 unlink 更安全——避免删除失败后重启复活旧配置）"""
-        with self._lock:
-            self._configs = []
-            self._rr_index = 0
-            self._persist()
 
     def is_configured(self) -> bool:
         with self._lock:

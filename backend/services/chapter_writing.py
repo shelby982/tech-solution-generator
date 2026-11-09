@@ -5,7 +5,6 @@ import json
 import uuid
 
 from db import get_db
-from services.chapter_studio import content_hash
 from agents.chapter_team import ChapterChiefAgent,SpecialistAgent,assemble,review_chapter,ROLES,STREAM_SINK
 
 TASKS=set()

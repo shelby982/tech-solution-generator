@@ -9,7 +9,6 @@
 - 不抛错，让其它 block 继续评审
 """
 
-import json
 import logging
 from typing import Any, Awaitable, Callable, Optional, Union
 

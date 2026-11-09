@@ -1,5 +1,5 @@
 """全量评审跑批（不依赖 HTTP server）：逐章 review_block，进度写日志，结果落库。"""
-import asyncio, json, os, sys, time
+import asyncio, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import get_db
 from services.chapter_review import review_block

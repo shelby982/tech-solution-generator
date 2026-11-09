@@ -8,10 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from db import get_db
-from services.citations import (OFFICIAL_PORTALS, discover_candidates, fetch_candidate, link_citation,
-                                list_citations, reject_citation, remember_search, save_citation,
-                                refresh_segments, search_history, search_official, search_configured,
-                                select_segments, suggest_query, unlink_citation)
+from services.citations import OFFICIAL_PORTALS, discover_candidates, fetch_candidate, list_citations, remember_search, save_citation, refresh_segments, search_history, search_configured, select_segments, suggest_query
 
 router = APIRouter(prefix="/projects/{project_id}/citations", tags=["citations"])
 
@@ -127,22 +124,6 @@ async def download_image(project_id: int, citation_id: str, body: "ImageBody"):
     return {"material_id": material["id"], "filename": name, "image_url": f"/api/studio/materials/{material['id']}/image"}
 
 
-@router.post("/{citation_id}/link")
-async def link(project_id: int, citation_id: str, body: LinkBody):
-    """把一条已接受的官方依据关联到某章（多对多，可复用）。"""
-    async with get_db() as db:
-        try:
-            return await link_citation(db, project_id, citation_id, body.block_id)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc))
-
-
-@router.delete("/{citation_id}/link/{block_id}")
-async def unlink(project_id: int, citation_id: str, block_id: str):
-    async with get_db() as db:
-        return await unlink_citation(db, project_id, citation_id, block_id)
-
-
 class DiscoverBody(BaseModel):
     query: str = Field(min_length=2, max_length=200)
     thread_id: str = ""
@@ -191,15 +172,6 @@ async def discover(project_id: int, body: DiscoverBody):
                 "message": f"自动找来源失败：{exc}"}
 
 
-@router.get("/search")
-async def search(project_id: int, q: str = Query(min_length=2, max_length=120)):
-    """官方源检索：未配置检索 API 时返回 configured=false（不假装检索过）。"""
-    try:
-        return await search_official(q)
-    except Exception as exc:                      # 网络/配额错误 → 明确告知，不静默
-        return {"configured": True, "results": [], "message": f"检索失败：{exc}"}
-
-
 @router.post("/fetch")
 async def fetch(project_id: int, body: FetchBody):
     """抓取并核验一个官方链接，返回待接受的引用候选（不落库）。"""
@@ -220,11 +192,3 @@ async def create_citation(project_id: int, body: SaveBody):
                                        thread_id=body.thread_id, block_id=body.block_id)
         except ValueError as exc:
             raise HTTPException(409, str(exc))
-
-
-@router.post("/{citation_id}/reject")
-async def reject(project_id: int, citation_id: str):
-    async with get_db() as db:
-        if not await reject_citation(db, project_id, citation_id):
-            raise HTTPException(404, "引用不存在")
-        return {"rejected": True}

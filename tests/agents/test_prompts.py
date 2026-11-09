@@ -11,14 +11,12 @@ from agents.prompts import (
     COMPLIANCE_REVIEW_SYSTEM,
     LETTER_SYSTEM,
     OUTLINE_EXTRACT_SYSTEM,
-    RERANK_SYSTEM,
     SECTION_OUTLINE_SYSTEM,
     TECH_REVIEW_SYSTEM,
     TONE_SYSTEM_PROMPTS,
     build_compliance_review_user,
     build_letter_user,
     build_outline_extract_user,
-    build_rerank_user,
     build_section_outline_user,
     build_tech_review_user,
 )
@@ -27,8 +25,7 @@ from agents.prompts import (
 def test_all_system_prompts_non_empty():
     for s in (
         OUTLINE_EXTRACT_SYSTEM,
-        RERANK_SYSTEM,
-        SECTION_OUTLINE_SYSTEM,
+            SECTION_OUTLINE_SYSTEM,
         LETTER_SYSTEM,
         TECH_REVIEW_SYSTEM,
         COMPLIANCE_REVIEW_SYSTEM,
@@ -98,20 +95,6 @@ def test_review_users_contain_keyword_for_mock_routing():
     comp_user = build_compliance_review_user(block, matrix)
     assert "评审" in tech_user
     assert "评审" in comp_user
-
-
-def test_rerank_user_contains_chunks_and_query():
-    user = build_rerank_user(
-        chunks=[{"chunk_id": "a", "content": "微服务"}],
-        query="架构",
-        requirement="高可用",
-    )
-    assert "微服务" in user
-    assert "架构" in user
-    assert "高可用" in user
-    # 锁定 mock 路由用的稳定关键词，避免后续 prompt 调优时无意丢失
-    assert "应标要求" in user
-    assert "matches" in user
 
 
 def test_review_users_handle_none_block_fields():
@@ -187,7 +170,7 @@ def test_format_feedback_block_empty_returns_blank():
 def test_outline_draft_prompt_contains_mock_routing_keyword():
     """mock 模式靠这个关键词路由到目录 fixture，删了会让 mock/单测静默走错分支。"""
     from agents.prompts import build_outline_draft_user
-    user = build_outline_draft_user(instruction="", doc_summary="", spec_digest="【一】")
+    user = build_outline_draft_user(instruction="", spec_digest="【一】")
     assert "提炼应答文件目录" in user
 
 
@@ -195,7 +178,6 @@ def test_outline_draft_prompt_puts_instruction_first_and_marks_priority():
     from agents.prompts import build_outline_draft_user
     user = build_outline_draft_user(
         instruction="按评分项逐条拆章",
-        doc_summary="摘要",
         spec_digest="【一】正文",
     )
     assert "最高优先级" in user
@@ -211,7 +193,7 @@ def test_outline_draft_prompt_truncates_instruction():
     )
     user = build_outline_draft_user(
         instruction="x" * (OUTLINE_DRAFT_INSTRUCTION_BUDGET + 500),
-        doc_summary="", spec_digest="",
+        spec_digest="",
     )
     assert "x" * (OUTLINE_DRAFT_INSTRUCTION_BUDGET + 1) not in user
     assert "x" * OUTLINE_DRAFT_INSTRUCTION_BUDGET in user
@@ -219,7 +201,7 @@ def test_outline_draft_prompt_truncates_instruction():
 
 def test_outline_draft_prompt_omits_empty_previous_and_material():
     from agents.prompts import build_outline_draft_user
-    user = build_outline_draft_user(instruction="", doc_summary="", spec_digest="")
+    user = build_outline_draft_user(instruction="", spec_digest="")
     assert "上一版目录" not in user
     assert "原始素材摘录" not in user
 
@@ -227,7 +209,7 @@ def test_outline_draft_prompt_omits_empty_previous_and_material():
 def test_outline_draft_prompt_includes_previous_outline_when_given():
     from agents.prompts import build_outline_draft_user
     user = build_outline_draft_user(
-        instruction="", doc_summary="", spec_digest="",
+        instruction="", spec_digest="",
         previous_outline="- 上一版一级",
     )
     assert "上一版目录" in user
@@ -238,7 +220,7 @@ def test_outline_draft_prompt_keeps_material_extension_point():
     """本轮不读素材，但形参要留着 —— 下一轮接入时只改调用侧。"""
     from agents.prompts import build_outline_draft_user
     user = build_outline_draft_user(
-        instruction="", doc_summary="", spec_digest="",
+        instruction="", spec_digest="",
         material_digest="素材片段甲",
     )
     assert "原始素材摘录" in user
@@ -402,7 +384,6 @@ def test_outline_draft_prompt_follows_material_structure_when_located():
     from agents.prompts import build_outline_draft_user
     user = build_outline_draft_user(
         instruction="按照评分要求中的每一点进行大纲拆分章节",
-        doc_summary="",
         spec_digest="【已定位到的材料（请据此编排章节）】\n【标包2】\n技术评分标准：…",
         follow_structure=True,
     )
@@ -417,7 +398,7 @@ def test_outline_draft_prompt_reorganizes_by_default():
     """没定位到具体部分时维持原行为：由模型重新组织，不加结构约束。"""
     from agents.prompts import build_outline_draft_user
     user = build_outline_draft_user(
-        instruction="按评分项逐条拆章", doc_summary="", spec_digest="【一】正文",
+        instruction="按评分项逐条拆章", spec_digest="【一】正文",
     )
     assert "严格按材料自身的结构拆分章节" not in user
 
@@ -446,7 +427,7 @@ def test_outline_draft_prompt_carries_category_constraint():
     from agents.prompts import build_outline_draft_user
 
     ins = "按照技术招标文件中标包二的技术评分点和对应技术规范书，拆解评分点，输出应答目录"
-    user = build_outline_draft_user(instruction=ins, doc_summary="", spec_digest="材料",
+    user = build_outline_draft_user(instruction=ins, spec_digest="材料",
                                     category="tech")
 
     assert "评分类别约束" in user
@@ -456,5 +437,5 @@ def test_outline_draft_prompt_carries_category_constraint():
     assert user.index("评分类别约束") < user.index("材料")
 
     # 没点名类别时不追加，行为与改造前一致
-    plain = build_outline_draft_user(instruction="按评分点拆章", doc_summary="", spec_digest="材料")
+    plain = build_outline_draft_user(instruction="按评分点拆章", spec_digest="材料")
     assert "评分类别约束" not in plain

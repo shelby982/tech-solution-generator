@@ -6,9 +6,6 @@
 from __future__ import annotations
 
 LEVEL_LABEL = {"red": "不可交", "yellow": "接近可交", "green": "可以交"}
-LEVEL_ORDER = {"red": 0, "yellow": 1, "green": 2}
-
-
 def _top_items(tasks: list[dict], limit: int = 3) -> list[dict]:
     """必办清单：优先"会卡交付/废标"的，再按严重度。"""
     rank = {"export_block": 0, "completion_block": 1, "quality": 2, "suggestion": 3}

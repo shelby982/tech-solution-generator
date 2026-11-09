@@ -10,7 +10,6 @@ I/O 细节由 clients.py 承担；本模块只做 prompt 与调度。
 
 import asyncio
 import inspect
-import json
 import logging
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 
@@ -107,77 +106,6 @@ async def verify_api_key(config: LLMConfig) -> tuple[bool, str]:
 # 文档摘要（非流式）
 # ─────────────────────────────────────────────
 
-async def _generate_doc_summary(
-    config: LLMConfig,
-    sections: list[dict],
-) -> str:
-    """
-    根据所有章节标题和内容，生成整篇文档的结构化项目概述。
-    非流式调用，返回完整文本。
-    """
-    # 按内容长度加权分配字符配额：每章配额 = TOTAL_BUDGET * (该章长度 / 全部章节总长度)，
-    # 至少 100 字。遍历时用剩余预算限制单章配额，使总长度自然落在 TOTAL_BUDGET 内。
-    TOTAL_BUDGET = 8000
-    sections_with_content = [(s, len(s.get("content", ""))) for s in sections]
-    total_len = sum(l for _, l in sections_with_content) or 1
-
-    remaining = TOTAL_BUDGET
-    input_parts = []
-    for sec, content_len in sections_with_content:
-        title = sec.get("title", "")
-        content = sec.get("content", "")
-        if not content:
-            input_parts.append(f"【{title}】")
-            continue
-        if remaining <= 0:
-            input_parts.append(f"【{title}】")
-            continue
-        quota = max(100, int(TOTAL_BUDGET * content_len / total_len))
-        quota = min(quota, remaining)
-        snippet = content[:quota]
-        input_parts.append(f"【{title}】\n{snippet}")
-        remaining -= len(snippet)
-
-    doc_outline = "\n\n".join(input_parts)
-
-    system_prompt = (
-        "你是一位专业的技术方案分析专家，擅长从技术规范书中忠实提炼项目核心信息。"
-        "你只基于原文内容进行提炼，不推断或补充原文未明确提及的信息。"
-        "提炼结果必须保留原文中所有数值、技术指标、标准编号，不得模糊化处理。"
-    )
-    user_prompt = (
-        "以下是一份技术规范书的章节目录和各章节原文内容：\n\n"
-        f"---\n{doc_outline}\n---\n\n"
-        "请严格基于以上原文，按如下结构提炼项目核心信息：\n\n"
-        "## 项目基本信息\n"
-        "- 项目名称：（从原文提取，如无则填【未明确】）\n"
-        "- 建设单位（甲方）：（从原文提取，如无则填【未明确】）\n"
-        "- 承建单位（乙方）：（从原文提取，如无则填【未明确】）\n\n"
-        "## 核心技术要求\n"
-        "（每条一行，用-列出，必须保留原文中的具体数值和技术指标）\n\n"
-        "## 硬性约束条件\n"
-        "（工期要求、验收标准、引用的规范标准编号等，每条一行）\n\n"
-        "## 主要建设范围\n"
-        "（主要功能模块或建设内容，每条一行）\n\n"
-        "要求：\n"
-        "- 所有内容严格来源于原文，不添加原文未提及的内容\n"
-        "- 保留所有数值、百分比、标准编号等关键技术参数原文\n"
-        "- 如原文中某项信息确实不存在，该条目填【原文未提及】\n"
-        "- 总字数控制在 800 字以内"
-    )
-
-    if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-        return await clients.generate_oneshot_openai(
-            config, system_prompt, user_prompt, max_tokens=2000, call_site="doc_summary",
-        )
-    elif config.provider == "claude":
-        return await clients.generate_oneshot_claude(
-            config, system_prompt, user_prompt, max_tokens=2000, call_site="doc_summary",
-        )
-    else:
-        raise ValueError(f"不支持的 provider：{config.provider}")
-
-
 # ─────────────────────────────────────────────
 # 流式生成（单章节正文）
 # ─────────────────────────────────────────────
@@ -188,7 +116,6 @@ async def _stream_generate(
     section_title: str,
     original_content: str,
     target_words: int = 500,
-    doc_summary: str = "",
     extra_prompt: str = "",
     doc_template: str = "",
     tone: str = "official",
@@ -205,7 +132,6 @@ async def _stream_generate(
         target_words:     目标字数（给 max_words 时它是区间下限）
         max_words:        字数上限；给定则写入区间与收束要求，None 时沿用旧的
                           「不少于 N 字」措辞（工作台手动路径保持原行为）
-        doc_summary:      文档整体摘要（作为全局上下文）
 
     Yields:
         str — 每次 yield 一个 token 片段
@@ -286,14 +212,6 @@ async def _stream_generate(
             f"---\n{original}\n---\n"
         )
 
-    if doc_summary:
-        # 截断保护：摘要最多注入 3000 字符，避免超窗
-        safe_summary = doc_summary[:3000] + ("\n..." if len(doc_summary) > 3000 else "")
-        parts.append(
-            f"\n以下是该项目的整体概述：\n\n"
-            f"===\n{safe_summary}\n===\n"
-        )
-
     user_prompt = "".join(parts)
 
     if doc_template:
@@ -347,7 +265,6 @@ async def dispatch_stream_generate(
     section_title: str,
     original_content: str,
     target_words: int = 500,
-    doc_summary: str = "",
     extra_prompt: str = "",
     doc_template: str = "",
     tone: str = "official",
@@ -384,7 +301,7 @@ async def dispatch_stream_generate(
             logger.info(f"使用 API [{config.provider}/{config.model}] 生成章节「{section_title}」")
             async for token in _stream_generate(
                 config, section_title, original_content, target_words,
-                doc_summary, extra_prompt, doc_template, tone, max_words,
+                extra_prompt, doc_template, tone, max_words,
             ):
                 buf.append(token)
             # 正常收尾：这时才把整段交出去
@@ -421,39 +338,6 @@ async def dispatch_stream_generate(
         )
         yield best_partial[0]
         return
-
-    raise errors.exhausted_error(configs, last_error)
-
-
-async def dispatch_doc_summary(
-    configs: list[LLMConfig],
-    rr_start_index: int,
-    sections: list[dict],
-) -> str:
-    """
-    从 rr_start_index 指定的 API 开始尝试生成文档摘要，失败时自动 fallback 到下一个。
-    全部失败时上抛最后一个异常。
-    """
-    n = len(configs)
-    if n == 0:
-        raise ValueError("未配置任何 API，请先在「设置」中添加配置")
-
-    last_error: Exception | None = None
-    usable = errors.available_configs(configs, rr_start_index)
-    for i, config in enumerate(usable):
-        try:
-            logger.info(f"使用 API [{config.provider}/{config.model}] 生成文档摘要")
-            return await _generate_doc_summary(config, sections)
-        except Exception as e:
-            last_error = e
-            kind = errors.note_failure(config, e)
-            logger.warning(
-                f"API [{config.provider}/{config.model}] 摘要生成失败"
-                f"（{errors.describe_error(e)}），"
-                f"{'尝试下一个' if i < len(usable) - 1 else '已无可用 API'}：{e}"
-            )
-            if errors.blocks_chain(kind):
-                break
 
     raise errors.exhausted_error(configs, last_error)
 
@@ -519,7 +403,7 @@ async def dispatch_outline_draft_json(
     """依据规范书 + 用户提炼要求派生「应答文件目录」，返回解析后的 JSON 对象。
 
     payload 字段（全部可选，缺省空串）：
-        instruction / doc_summary / spec_digest / previous_outline / material_digest
+        instruction / spec_digest / previous_outline / material_digest
     follow_structure 为真时（提炼要求点名的那一部分已定位到），要求模型复刻材料
     自身的结构拆章节，而不是重新组织。
 
@@ -532,7 +416,6 @@ async def dispatch_outline_draft_json(
 
     user = build_outline_draft_user(
         instruction=payload.get("instruction", "") or "",
-        doc_summary=payload.get("doc_summary", "") or "",
         spec_digest=payload.get("spec_digest", "") or "",
         previous_outline=payload.get("previous_outline", "") or "",
         material_digest=payload.get("material_digest", "") or "",

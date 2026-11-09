@@ -19,7 +19,6 @@ IMPACT_TEXT = {
     "quality": "影响评分/可读性",
     "suggestion": "可选优化",
 }
-_ACTION_LABEL = {"upload": "上传", "choose": "选一种说法", "view": "查看", "locate": "定位", "confirm": "确认"}
 _SECTION_RE = re.compile(r"^#{2,6}\s+(.+?)\s*$")
 _QUOTE_LIMIT = 60
 

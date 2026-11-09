@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 
 from services.chapter_studio import content_hash, writing_units
 
@@ -62,19 +61,3 @@ async def review_freshness(db, block: dict, review: dict) -> str:
         return 'unknown'
     current = await versions(db, block)
     return 'current' if all(review.get(key) == value for key, value in current.items()) else 'stale'
-
-
-def execution_outline(block: dict, chapter: dict | None = None) -> list[dict]:
-    """Use an existing plan or one unit with the exact confirmed chapter title."""
-    chapter = chapter or {}
-    if chapter.get('outline'):
-        return chapter['outline']
-    from services.chapter_studio import ids
-    requirements = chapter.get('requirements') or []
-    points = [str(item.get('text') or '') for item in requirements if isinstance(item, dict)]
-    deliverables = [{'kind': 'figure' if task['kind'] == 'diagram' else 'table', 'title': task['title'],
-                     'purpose': task.get('purpose') or ''} for task in (chapter.get('tasks') or [])
-                    if task.get('kind') in ('table', 'diagram')]
-    return [{'title': block['title'], 'points': points or [block.get('requirement') or '逐项回应本章关联的评分要求和技术规范'],
-             'words': 900, 'requirement_ids': ids(block.get('spec_requirement_ids')),
-             'deliverables': deliverables, 'basis': [], 'source': 'confirmed_chapter'}]

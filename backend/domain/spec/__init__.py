@@ -1,4 +1,4 @@
-"""规范书聚合：Section、OutlineMatrixRow、SpecRepository、目录派生纯函数。"""
+"""规范书聚合：Section、OutlineMatrixRow、目录派生纯函数。"""
 
 from .models import OutlineMatrixRow, Section
 from .outline_draft import (
@@ -10,12 +10,9 @@ from .outline_draft import (
     count_top_level,
     normalize_nodes,
 )
-from .repository import SpecRepository
-
 __all__ = [
     "Section",
     "OutlineMatrixRow",
-    "SpecRepository",
     "NormalizedNode",
     "normalize_nodes",
     "build_sections",

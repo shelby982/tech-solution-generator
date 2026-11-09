@@ -23,7 +23,7 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 

@@ -64,37 +64,6 @@ async def test_parse_returns_domain_sections(monkeypatch):
     assert "项目概述" in result.toc[0].title
     # ★ 标记应在 special_marks 中
     assert "★" in result.toc[1].special_marks
-    # 摘要已停用（见 test_parse_does_not_call_doc_summary），恒为空串
-    assert result.doc_summary == ""
-
-
-@pytest.mark.asyncio
-async def test_parse_does_not_call_doc_summary(monkeypatch):
-    """摘要生成已停用：parse 不再调 dispatch_doc_summary。
-
-    推理型模型在 max_tokens=2000 下必然返回空（预算连思考都不够），跑一次只换来
-    一条用户无法处置的降级提示。恢复时这条用例会失败 —— 这是有意的：接回调用必须
-    同时给它足够的预算，否则接回来的只是那条提示。
-    """
-    monkeypatch.setenv("LLM_MODE", "mock")
-    import infra.llm
-
-    called = []
-
-    async def _spy(*args, **kwargs):
-        called.append(1)
-        return "不该被调用的摘要"
-
-    monkeypatch.setattr(infra.llm, "dispatch_doc_summary", _spy)
-    agent = ZhangHengAgent(configs_provider=_fake_configs)
-
-    result = await agent.parse([(_build_minimal_docx(), ".docx", "test.docx")])
-
-    assert called == []
-    assert result.doc_summary == ""
-    # 是「停用」不是「失败」，所以不记 error：别在闸门 1 上吓用户
-    assert result.doc_summary_error == ""
-    assert len(result.toc) == 2
 
 
 @pytest.mark.asyncio
@@ -620,10 +589,9 @@ async def test_draft_outline_passes_instruction_into_prompt(monkeypatch):
 
     agent = ZhangHengAgent(configs_provider=_fake_configs)
     source = [DomainSection(id="s1", level=1, title="技术方案", raw_content="正文")]
-    await agent.draft_outline(source, instruction="按评分项逐条拆章", doc_summary="项目摘要")
+    await agent.draft_outline(source, instruction="按评分项逐条拆章")
 
     assert seen["instruction"] == "按评分项逐条拆章"
-    assert seen["doc_summary"] == "项目摘要"
     assert "技术方案" in seen["spec_digest"]
     # 本轮不读素材，扩展点保留但恒为空
     assert seen["material_digest"] == ""

@@ -264,25 +264,6 @@ class SelectionBody(BaseModel):
     instruction: str = Field(min_length=1, max_length=3000)
 
 
-@router.post('/blocks/{block_id}/studio/rewrite-selection')
-async def rewrite_selection(block_id: int, body: SelectionBody):
-    from services.block_store import get_block
-    async with get_db() as db:
-        block = await get_block(db, block_id)
-    if not block:
-        raise HTTPException(404, '章节不存在')
-    if body.before + body.selection + body.after != body.expected_content or (block.get('content') or '') != body.expected_content:
-        raise HTTPException(409, '选区或正文版本已变化，请重新选择')
-    try:
-        job_id = await chapter_sse.create_job(block['project_id'], block.get('run_thread_id') or '', block_id,
-            expected_content=body.expected_content, instruction=body.instruction,
-            selection={'before': body.before, 'selection': body.selection, 'after': body.after})
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    chapter_sse.start_runner(job_id)
-    return await stream_chapter_write(block['project_id'], job_id)
-
-
 class RetryChartBody(BaseModel):
     index: int = Field(ge=0)
     title: str = Field(min_length=1, max_length=200)

@@ -15,14 +15,12 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from routes.upload import router as upload_router
 from routes.writing_settings import router as writing_settings_router
 from routes.chapter_sse import router as chapter_sse_router
 from routes.material_library import router as material_library_router
 from routes.plan_materials import router as plan_materials_router
 from routes.todo_v3 import router as todo_v3_router
 from routes.config import router as config_router
-from routes.changelog import router as changelog_router
 from routes.projects import router as projects_router
 from routes.materials import router as materials_router
 from routes.export import router as export_router
@@ -57,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── 生命周期 ──────────────────────────────────
-# 「应标要求」面板（frontend/project-init.html 的 01 区）允许上传的文件角色，
+# 「应标要求」面板（frontend/project-intake.html 的 01 区）允许上传的文件角色，
 # 与前端 reqRoles 对齐（requirement 是早期版本遗留的「主招标」写法）。
 # 提炼不再绑定技术规范书 —— 用户可能一份规范书都没有，只丢进来一份主招标文件
 # 或评分表，那就是本轮大纲唯一的依据。
@@ -240,9 +238,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ── 路由注册 ──────────────────────────────────
-app.include_router(upload_router,    prefix="/api")
 app.include_router(config_router,    prefix="/api")
-app.include_router(changelog_router, prefix="/api")
 app.include_router(projects_router,  prefix="/api")
 app.include_router(materials_router, prefix="/api")
 app.include_router(export_router,   prefix="/api")
@@ -275,7 +271,6 @@ _project_intake_path = os.path.join(frontend_dir, "project-intake.html")
 # 三模式页（把 project-init 的要求与大纲 / 素材库 与 workbench 的方案编辑合到一页）。
 # 原两页在合并验证期内保持可用，便于对照与回退。
 _three_mode_path   = os.path.join(frontend_dir, "three-mode.html")
-_diff_review_path  = os.path.join(frontend_dir, "diff-review.html")
 _review_path       = os.path.join(frontend_dir, "review.html")
 _landing_path      = os.path.join(frontend_dir, "landing.html")
 
@@ -348,13 +343,6 @@ async def serve_landing():
     if os.path.isfile(_landing_path):
         return FileResponse(_landing_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "landing.html 不存在"})
-
-
-@app.get("/diff-review", include_in_schema=False)
-async def serve_diff_review():
-    if os.path.isfile(_diff_review_path):
-        return FileResponse(_diff_review_path, headers=_HTML_NO_CACHE)
-    return JSONResponse(status_code=404, content={"detail": "diff-review.html 不存在"})
 
 
 @app.get("/project-init", include_in_schema=False)

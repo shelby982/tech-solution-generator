@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from db import get_db
@@ -367,36 +367,6 @@ async def writing_readiness(block_id: int, thread_id: str = "", threadId: str = 
     return await chapter_readiness(block, thread_id)
 
 
-@router.post('/blocks/{block_id}/studio/outline/self-heal')
-async def self_heal_outline(block_id: int):
-    """数据修复：已确认目录但本章缺大纲时，确定性补齐，不改变目录结构。"""
-    from services.outline_self_heal import heal_block_outline
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-        sections = await heal_block_outline(db, dict(block))
-    if not sections:
-        raise HTTPException(404, '这一章没有可补齐的计划条目')
-    return {"outline": sections, "healed": True, "count": len(sections)}
-
-
-@router.get('/blocks/{block_id}/studio/outline')
-async def get_outline(block_id: int, thread_id: str = ''):
-    """章节大纲（P0-1）：存在就返回，不存在返回空（前端按钮生成）。"""
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-    from services.writing_plans import plan_of_block
-    async with get_db() as db:
-        found = await plan_of_block(db, block['project_id'], thread_id, str(block['block_id']))
-    outline = []
-    if found:
-        for item in found[1].get('chapters') or []:
-            if str(item.get('block_id')) == str(block['block_id']):
-                outline = item.get('outline') or []
-                break
-    from services.section_outline import ensure_outline_elements
-    return {'outline': ensure_outline_elements(outline)}
-
-
 @router.post('/blocks/{block_id}/studio/outline')
 async def build_outline(block_id: int, body: OutlineBody):
     """生成 / 重新生成章节大纲（两级：节 → 要点），并存进计划。"""
@@ -511,13 +481,6 @@ async def coverage_review(block_id: int, body: CoverageReviewBody):
         raise HTTPException(422, "没有可核对的正文")
     result = await review_coverage(block, body.section, text, thread_id=body.thread_id, deep=body.deep)
     return result
-
-
-@router.get('/blocks/{block_id}/section-results')
-async def section_results(block_id: int):
-    """每节最近一次写作结果（持久化，刷新后可核对）。"""
-    from services.section_results import list_results
-    return {"sections": await list_results(block_id)}
 
 
 @router.get('/blocks/{block_id}/studio/section/stream')
@@ -708,77 +671,6 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
                                        'generic': bool(generic)})
 
     return StreamingResponse(events(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
-
-
-@router.post('/blocks/{block_id}/studio/align-outline')
-async def align_body_to_outline(block_id: int, body: AlignBody):
-    """按大纲重排正文：保留同名节、丢弃大纲外旧内容、修复表格（写 revision 可回滚）。"""
-    from services.writing_plans import plan_of_block
-    from services.body_align import align_to_outline, normalize_tables
-    from services.block_store import add_revision, update_block_content
-
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-        async with get_db() as fresh_db:
-            found = await plan_of_block(fresh_db, block['project_id'], body.thread_id, str(block['block_id']))
-    if not found:
-        raise HTTPException(404, '这一章还没有编写计划')
-    chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
-    outline = chapter.get('outline') or []
-    if not outline:
-        raise HTTPException(409, '还没有章节大纲，请先生成大纲')
-    before = str(block.get('content') or '')
-    aligned, stats = align_to_outline(before, outline)
-    aligned, fixed_tables = normalize_tables(aligned)
-    async with get_db() as db:
-        await add_revision(db, block_id, before, summary='按大纲重排正文', source='manual')
-        await update_block_content(db, block_id, aligned, status=block.get('status') or 'draft')
-    return {'content': aligned, **stats, 'tables_fixed': fixed_tables}
-
-
-@router.post('/blocks/{block_id}/studio/section')
-async def write_section(block_id: int, body: SectionBody):
-    """按大纲写**一节**（P0-2），写回正文的 `## 标题` 段。"""
-    from services.writing_plans import plan_of_block
-    from services.section_outline import SECTION_SYSTEM, build_section_payload, replace_section
-    from services.block_store import add_revision, update_block_content
-    from agents.chapter_team import call_role
-    import re as _re
-
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-        found = await plan_of_block(db, block['project_id'], body.thread_id, str(block['block_id']))
-    chapter = {}
-    if found:
-        chapter = next((item for item in found[1].get('chapters') or [] if str(item.get('block_id')) == str(block['block_id'])), {})
-    section = {'title': body.title, 'points': body.points, 'words': body.words}
-    evidence = str(block.get('content') or '')[:2000]
-    payload = build_section_payload(chapter, section, evidence)
-    try:
-        raw, model = await call_role('text', SECTION_SYSTEM, payload, {})
-    except ValueError as exc:
-        raise HTTPException(409, str(exc))
-    text = str(raw or '').strip()
-    text = _re.sub(r'^```[a-z]*\n|```$', '', text).strip()
-    from services.body_align import strip_invalid_diagrams
-    from services.body_tables import ensure_table_captions
-    text, _dropped = strip_invalid_diagrams(text)
-    text, _captions = ensure_table_captions(text)
-    if len(text) < 120:
-        raise HTTPException(422, '这一节没有生成出可用内容，请重试或补充要点')
-    before = str(block.get('content') or '')
-    try:
-        from services.placeholder_purge import purge
-        text, _purged = purge(text)
-    except Exception:
-        _purged = []
-    after, replaced = replace_section(before, body.title, text)
-    async with get_db() as db:
-        await add_revision(db, block_id, before, summary=f'分节生成：{body.title}', source='manual')
-        await update_block_content(db, block_id, after, status=block.get('status') or 'draft')
-    words = len(_re.sub(r'\s+', '', text))
-    return {'title': body.title, 'words': words, 'replaced': replaced, 'model': model,
-            'content': after, 'paragraphs': len([p for p in text.split('\n\n') if p.strip()])}
 
 
 @router.post('/blocks/{block_id}/studio/table')
@@ -1185,61 +1077,6 @@ async def recover_exports():
         rows = await (await db.execute("SELECT id FROM document_export_jobs WHERE status='done' AND preview_status IN ('pending','rendering')")).fetchall()
     for row in rows:
         task=asyncio.create_task(run_preview(row[0]));TASKS.add(task);task.add_done_callback(TASKS.discard)
-
-
-@router.get('/projects/{project_id}/todo')
-async def project_todo(project_id: int, thread_id: str = ''):
-    """全项目待办：跨章的阻塞项汇总（章级 + 项目级门槛）。"""
-    from services.writing_plans import chapter_plan
-    from services.block_store import list_blocks
-
-    async with get_db() as db:
-        blocks = await list_blocks(db, project_id, thread_id or None) if thread_id else await list_blocks(db, project_id)
-        chapters = []
-        gate: list[dict] = []
-        unconfirmed = 0
-        empty = 0
-        for block in blocks or []:
-            if block.get("is_catalog") or block.get("children") or block.get("has_children"):
-                continue
-            try:
-                plan = await chapter_plan(db, project_id, thread_id or "", str(block.get("block_id")))
-            except Exception:
-                continue
-            items = plan.get("todo_items") or []
-            blocking = [item for item in items if item.get("severity") == "block"]
-            status = (block.get("writing_status") or plan.get("status") or "draft")
-            if not (block.get("content") or "").strip():
-                empty += 1
-            if status != "complete":
-                unconfirmed += 1
-            if blocking:
-                chapters.append({
-                    "block_id": block.get("block_id"),
-                    "block_pk": block.get("id"),
-                    "title": block.get("title"),
-                    "status": status,
-                    "blocking": len(blocking),
-                    "top": [{"title": item.get("title"), "group": item.get("group_label")} for item in blocking[:3]],
-                })
-        chapters.sort(key=lambda row: -row["blocking"])
-        if empty:
-            gate.append({"title": f"{empty} 章正文为空", "evidence": "这些章还没有内容，导出会是空章节",
-                         "action": "go", "severity": "block"})
-        if unconfirmed:
-            gate.append({"title": f"{unconfirmed} 章未确认完成", "evidence": "确认完成表示人工核对过；未确认的章导出后仍需复核",
-                         "action": "go", "severity": "suggest"})
-        total_blocking = sum(row["blocking"] for row in chapters)
-    return {
-        "gate": gate,
-        "chapters": chapters[:40],
-        "summary": {
-            "chapters_with_blocking": len(chapters),
-            "total_blocking": total_blocking,
-            "empty_chapters": empty,
-            "unconfirmed": unconfirmed,
-        },
-    }
 
 
 class ReviewRunBody(BaseModel):

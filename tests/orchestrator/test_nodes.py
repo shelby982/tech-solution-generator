@@ -15,7 +15,7 @@ from domain.proposal import BlockOutput, Source
 from domain.review import Finding, Issue
 from domain.spec import OutlineMatrixRow
 from domain.spec import Section as DomainSection
-from infra.retrieval import Match
+from domain.material.models import Match
 from orchestrator import nodes
 from orchestrator.events import EventEmitter
 
@@ -59,7 +59,7 @@ async def test_cancel_check_raises_in_each_node():
         lambda: nodes.zhang_heng_parse_node(state, agent=stub, spec_loader=loader),
         lambda: nodes.zhang_heng_outline_draft_node(state, agent=stub),
         lambda: nodes.zhang_heng_extract_node(state, agent=stub),
-        lambda: nodes.shen_kuo_match_node(state, agent=stub),
+        lambda: nodes.shen_kuo_match_node(state),
         lambda: nodes.zhuge_liang_generate_node(state, agent=stub),
         lambda: nodes.wang_anshi_review_node(state, agent=stub),
         lambda: nodes.bao_zheng_review_node(state, agent=stub),
@@ -82,7 +82,6 @@ class _ZhangHengParseStub:
         return SpecParseResult(
             doc_id="d1",
             doc_title="要求文件",
-            doc_summary="摘要",
             toc=[
                 DomainSection(id="s1", level=1, title="技术方案",
                               raw_content="原文", special_marks=["★"]),
@@ -106,9 +105,7 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
     spec = patch["spec"]
     assert spec["doc_id"] == "d1"
     assert spec["doc_title"] == "要求文件"
-    assert spec["doc_summary"] == "摘要"
     # 成功时不带降级原因，闸门 1 才会显示「无异常」。
-    assert spec["doc_summary_error"] == ""
     assert spec["toc"] == [{
         "id": "s1", "level": 1, "title": "技术方案",
         "raw_content": "原文", "special_marks": ["★"],
@@ -120,33 +117,6 @@ async def test_zhang_heng_parse_node_writes_spec_fields():
     }]
     assert len(agent.calls) == 1 and len(agent.calls[0]) == 1
     assert agent.calls[0][0][1:] == (".pdf", "spec.pdf")
-
-
-async def test_zhang_heng_parse_node_forwards_doc_summary_error():
-    """项目概述生成失败的原因必须一路带到 spec，闸门 1 才有东西可显示。"""
-    class _FailingStub(_ZhangHengParseStub):
-        async def parse(self, sources, *, progress_callback=None):
-            return SpecParseResult(
-                doc_id="d1",
-                doc_title="要求文件",
-                doc_summary="",
-                toc=[DomainSection(id="s1", level=1, title="技术方案",
-                                   raw_content="原文", special_marks=[])],
-                doc_summary_error="模型返回空内容",
-            )
-
-    async def loader(_pid):
-        return [(io.BytesIO(b"PDF"), ".pdf", "spec.pdf")]
-
-    patch = await nodes.zhang_heng_parse_node(
-        {"project_id": 99, "thread_id": "tid"},
-        agent=_FailingStub(),
-        spec_loader=loader,
-    )
-
-    spec = patch["spec"]
-    assert spec["doc_summary"] == ""
-    assert spec["doc_summary_error"] == "模型返回空内容"
 
 
 async def test_zhang_heng_parse_node_forwards_every_requirement_file():
@@ -207,53 +177,6 @@ async def test_zhang_heng_extract_node_writes_matrix_and_emits():
     names = [n for n, _ in frames]
     assert names == ["outline_extract", "outline_extract"]
     assert {f["block_id"] for _, f in frames} == {"s1", "s2"}
-
-
-# ─────────────────────────────────────────────
-# 沈括 match
-# ─────────────────────────────────────────────
-
-class _ShenKuoStub:
-    async def match(self, toc, outline_matrix, chunks):
-        return {
-            s.id: [Match(chunk_id=f"c-{s.id}", score=0.9,
-                         reason="r", hit_points=["hp"])]
-            for s in toc
-        }
-
-
-async def test_shen_kuo_match_node_rerank_mode_writes_matches_and_emits(monkeypatch):
-    """旧路径（MATCH_MODE="rerank"）：逐章重排 + 落 state。
-
-    默认模式已切到 assign（素材 → 章节 归属），这条用例显式把模式切回去，
-    保证回滚路径仍然可用。
-    """
-    monkeypatch.setattr(nodes, "MATCH_MODE", "rerank")
-    state = {
-        "thread_id": "tid",
-        "spec": {
-            "toc": [{"id": "s1", "level": 1, "title": "T",
-                     "raw_content": "", "special_marks": []}],
-            "outline_matrix": {
-                "s1": {"block_id": "s1", "title": "T", "requirement": "req"},
-            },
-        },
-        "materials": {"chunks": [{"id": "c1", "content": "x"}]},
-    }
-    emitter = EventEmitter()
-    patch = await nodes.shen_kuo_match_node(
-        state, agent=_ShenKuoStub(), emitter=emitter,
-    )
-
-    matches = patch["materials"]["matches"]
-    assert list(matches.keys()) == ["s1"]
-    assert matches["s1"][0]["chunk_id"] == "c-s1"
-    assert matches["s1"][0]["score"] == 0.9
-    assert matches["s1"][0]["hit_points"] == ["hp"]
-
-    frames = await _drain(emitter)
-    assert [n for n, _ in frames] == ["match_progress"]
-    assert frames[0][1]["block_id"] == "s1"
 
 
 # ─────────────────────────────────────────────
@@ -694,7 +617,7 @@ async def test_collect_gaps_no_requests_is_noop():
 
 async def test_collect_gaps_appends_without_overwriting():
     """新素材追加到已有 matches，同 chunk_id 去重，旧的不被冲掉。"""
-    from infra.retrieval import Match
+    from domain.material.models import Match
 
     stub = _CollectGapsStub({"s1": [
         Match(chunk_id=2, score=8.0, reason="新", hit_points=[]),
@@ -731,7 +654,7 @@ async def test_collect_gaps_keeps_matches_of_blocks_without_new_hits():
 
     断言必须打在"合进 state 之后"的结果上：只看 patch 是看不出擦除的。
     """
-    from infra.retrieval import Match
+    from domain.material.models import Match
     from orchestrator.state import _merge_dict
 
     stub = _CollectGapsStub({"s1": [
@@ -1037,12 +960,10 @@ class _OutlineDraftStub:
         )
         self.calls = []
 
-    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id="", points_only=False):
+    async def draft_outline(self, source_toc, *, instruction="", previous_toc=None, project_id=None, thread_id="", points_only=False):
         self.calls.append({
             "source_titles": [s.title for s in source_toc],
             "instruction": instruction,
-            "doc_summary": doc_summary,
             "previous_titles": (
                 [s.title for s in previous_toc] if previous_toc else None
             ),
@@ -1056,7 +977,6 @@ def _draft_state(*, toc=None, source_toc=None, revision=0, instruction=""):
         "thread_id": "tid",
         "config": {"outline_instruction": instruction},
         "spec": {
-            "doc_summary": "摘要",
             "source_toc": source_toc if source_toc is not None else [
                 {"id": "s1", "level": 1, "title": "技术方案",
                  "raw_content": "原文", "special_marks": ["★"]},
@@ -1133,7 +1053,6 @@ async def test_outline_draft_node_passes_instruction_and_revision_upstream():
 
     first, second = stub.calls
     assert first["instruction"] == "按评分项拆章"
-    assert first["doc_summary"] == "摘要"
     # 首轮 spec.toc 就是 parse 写的规范书目录，不是用户看过的草稿，不能当「上一版」
     assert first["previous_titles"] is None
     assert second["previous_titles"] == ["上一版"]
@@ -1308,7 +1227,7 @@ async def test_shen_kuo_match_node_assign_mode_attaches_evidence_with_content():
     }
     emitter = EventEmitter()
     patch = await nodes.shen_kuo_match_node(
-        state, agent=_ShenKuoStub(), emitter=emitter,
+        state, emitter=emitter,
     )
 
     matches = patch["materials"]["matches"]
@@ -1351,7 +1270,7 @@ async def test_shen_kuo_match_node_assign_mode_is_incremental():
              "material_role": "source", "content": "技术架构设计\n新素材原文"},
         ],
     }}
-    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+    patch = await nodes.shen_kuo_match_node(state, emitter=EventEmitter())
 
     rows = patch["materials"]["matches"]["s1"]
     ids = [r["chunk_id"] for r in rows]
@@ -1397,7 +1316,7 @@ async def test_shen_kuo_match_node_loads_pool_from_db(tmp_path, monkeypatch):
                                       "requirement": "总体技术架构与分层设计"}},
         },
     }
-    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+    patch = await nodes.shen_kuo_match_node(state, emitter=EventEmitter())
 
     rows = patch["materials"]["matches"]["s1"]
     assert [r["filename"] for r in rows] == ["架构方案.docx"], f"只应挂我方素材，实际 {rows}"
@@ -1433,7 +1352,7 @@ async def test_shen_kuo_match_node_keeps_human_locked_evidence():
             ],
         },
     }
-    patch = await nodes.shen_kuo_match_node(state, agent=_ShenKuoStub(), emitter=EventEmitter())
+    patch = await nodes.shen_kuo_match_node(state, emitter=EventEmitter())
 
     rows = patch["materials"]["matches"]["s1"]
     assert rows[0]["by"] == "human" and rows[0]["locked"] is True

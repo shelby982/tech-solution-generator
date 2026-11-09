@@ -9,7 +9,7 @@ import pytest
 from agents.zhuge_liang import ZhugeLiangAgent
 from domain.proposal import BlockOutput, Source
 from domain.spec import OutlineMatrixRow
-from infra.retrieval import Match
+from domain.material.models import Match
 
 
 # ─────────────────────────────────────────────

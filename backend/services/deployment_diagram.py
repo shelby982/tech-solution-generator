@@ -10,7 +10,6 @@ from __future__ import annotations
 import html
 import json
 import re
-from pathlib import Path
 
 from db import get_db
 from services import diagram_assets
@@ -20,7 +19,6 @@ MARGIN = 28
 HEADER_H = 88
 CONTENT_TOP = 132
 CONTENT_BOTTOM = H - 84
-ZONE_H = CONTENT_BOTTOM - CONTENT_TOP
 NODE_H = 52
 NODE_GAP = 13
 NODE_KINDS = {"gateway", "server", "database", "cloud", "user", "storage", "security", "network", "service"}

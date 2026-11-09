@@ -214,8 +214,3 @@ def auto_fix(content: str, kinds: tuple[str, ...] = ("syntax", "term")) -> tuple
                 changes.append(f"「{term}」→「{replacement}」 {count} 处")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text, len(changes), changes
-
-
-def _is_legal_block_start(text: str, offset: int) -> bool:
-    """该 ::: 行是否属于一个能解析的图块的开头。"""
-    return any(match.start() == offset for match in _DIAGRAM_BLOCK.finditer(text))

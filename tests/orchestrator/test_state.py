@@ -36,8 +36,7 @@ def test_workflow_state_full_population():
         "user_choice": "",
         "cancel_requested": False,
         "spec": {
-            "doc_id": "d1", "doc_title": "T", "doc_summary": "S",
-            "toc": [{"id": "s1", "level": 1, "title": "X"}],
+            "doc_id": "d1", "doc_title": "T", "toc": [{"id": "s1", "level": 1, "title": "X"}],
             "outline_matrix": {"s1": {"requirement": "R"}},
         },
         "materials": {

@@ -4,7 +4,6 @@ from fastapi import APIRouter,HTTPException
 from pydantic import BaseModel,Field
 from db import get_db
 from services.chapter_writing import create_job,queue_job,writing_blocks,RUNNING_TASKS
-from agents.chapter_team import ROLES
 
 router=APIRouter(tags=['chapter-team'])
 
@@ -72,16 +71,6 @@ async def create_writing_plan(project_id: int, body: PlanRequest):
         except ValueError as exc:
             raise HTTPException(409, str(exc))
     return plan
-
-
-@router.get('/projects/{project_id}/writing-plans/{plan_id}')
-async def read_writing_plan(project_id: int, plan_id: str):
-    from services.writing_plans import load_plan
-    async with get_db() as db:
-        try:
-            return await load_plan(db, project_id, plan_id)
-        except ValueError as exc:
-            raise HTTPException(404, str(exc))
 
 
 @router.put('/projects/{project_id}/writing-plans/{plan_id}/requirements')
@@ -165,30 +154,6 @@ async def match_clauses(project_id: int, body: "MatchClausesBody"):
             raise HTTPException(409, str(exc))
 
 
-@router.post('/projects/{project_id}/writing-plans/{plan_id}/confirm-chapter')
-async def confirm_chapter(project_id: int, plan_id: str, body: ConfirmChapterBody):
-    """确认计划：带 block_id = 确认本章；不带 = 整份目录计划（批量确认）。"""
-    from services.writing_plans import confirm_chapter_plan
-    async with get_db() as db:
-        try:
-            return await confirm_chapter_plan(db, project_id, plan_id, body.block_id)
-        except ValueError as exc:
-            raise HTTPException(404, str(exc))
-
-
-@router.put('/projects/{project_id}/writing-plans/{plan_id}/figures-plan')
-async def put_figures_plan(project_id: int, plan_id: str, body: FiguresPlanBody):
-    """编辑本章图表计划（每张表/图的用途与来源）。"""
-    from services.writing_plans import update_figures_plan
-    async with get_db() as db:
-        try:
-            return await update_figures_plan(db, project_id, plan_id, body.block_id,
-                                             [item.model_dump() for item in body.tables],
-                                             [item.model_dump() for item in body.figures])
-        except ValueError as exc:
-            raise HTTPException(404, str(exc))
-
-
 @router.get('/projects/{project_id}/writing-plans/{plan_id}/needs')
 async def plan_needs(project_id: int, plan_id: str, threadId: str):
     """需求级充足度：每条要求 → 素材需求（已补 N 片段 / 待补）。"""
@@ -215,17 +180,6 @@ async def plan_coverage(project_id: int, plan_id: str, threadId: str):
     from services.writing_plans import requirement_coverage
     async with get_db() as db:
         return await requirement_coverage(db, project_id, plan_id, threadId)
-
-
-@router.post('/projects/{project_id}/writing-plans/{plan_id}/confirm', status_code=202)
-async def confirm_writing_plan(project_id: int, plan_id: str, body: PlanConfirmRequest):
-    """确认计划并起 job：确认过的计划会被预置进 job（主编不再重新规划）。"""
-    from services.writing_plans import confirm_plan
-    async with get_db() as db:
-        try:
-            return await confirm_plan(db, project_id, plan_id, body.leaf_block_ids)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc))
 
 
 @router.post('/projects/{project_id}/studio/writing-jobs',status_code=202)
@@ -268,17 +222,6 @@ async def start_team(project_id:int,body:TeamRequest):
             jobs.append(job_id)
     for job in jobs:queue_job(job)
     return {'jobs':jobs,'notice':'第一阶段每次最多试编三章；空章节自动保存初稿，已有正文保留为建议。'}
-
-
-@router.get('/projects/{project_id}/studio/writing-jobs')
-async def list_jobs(project_id:int,threadId:str):
-    from routes.chapter_studio import require_run
-    async with get_db() as db:
-        await require_run(db,project_id,threadId)
-        rows=await (await db.execute('''SELECT j.id,j.block_id,j.status,j.stage,j.saved,j.error,j.created_at,b.title
-            FROM chapter_writing_jobs j LEFT JOIN blocks b ON b.id=j.block_id
-            WHERE j.project_id=? AND j.thread_id=? ORDER BY j.created_at DESC,j.rowid DESC LIMIT 20''',(project_id,threadId))).fetchall()
-    return {'jobs':[dict(r) for r in rows],'roles':ROLES}
 
 
 @router.get('/projects/{project_id}/studio/writing-jobs/{job_id}')

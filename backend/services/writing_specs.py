@@ -127,10 +127,6 @@ def render_body(body) -> str:
     return "\n".join(lines)
 
 
-def _row_dict(row):
-    return row if isinstance(row, dict) else dict(row)
-
-
 async def ensure_seeded(db) -> None:
     """首次访问时写入种子规范（幂等）。"""
     seeds = [("global", SEED_GLOBAL, "global", "")] + [

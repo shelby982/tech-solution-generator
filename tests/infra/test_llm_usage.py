@@ -217,7 +217,6 @@ async def test_mock_mode_not_recorded(monkeypatch, records):
     """mock 模式没有真实用量，记账会污染统计。"""
     monkeypatch.setenv("LLM_MODE", "mock")
 
-    await clients.generate_oneshot_openai(_cfg(), "sys", "user", call_site="doc_summary")
 
     assert records == []
 

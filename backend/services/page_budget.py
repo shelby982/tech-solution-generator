@@ -111,17 +111,6 @@ def subtree_scores(chapters: list[dict]) -> dict:
 
 
 
-def _parent_key(chapters: list[dict], key: str) -> str | None:
-    """按 block_id 前缀找父节点（s1.2.1 → s1.2）。"""
-    keys = {_key(c) for c in chapters if _key(c)}
-    parts = str(key).split(".")
-    for cut in range(len(parts) - 1, 0, -1):
-        candidate = ".".join(parts[:cut])
-        if candidate in keys:
-            return candidate
-    return None
-
-
 def allocation_targets(chapters: list[dict]) -> list[dict]:
     """分配落点：前两层里**没有可分配子节点**的章节。
 
@@ -141,27 +130,6 @@ def allocation_targets(chapters: list[dict]) -> list[dict]:
         if not has_allocatable_child:
             targets.append(chapter)
     return targets
-
-
-def rollup_totals(chapters: list[dict], pages: dict) -> dict:
-    """父章节的页数 = 子树合计（只用于展示，不参与分配，避免重复计算）。"""
-    out = {}
-    for chapter in chapters:
-        key = _key(chapter)
-        if key is None:
-            continue
-        own = pages.get(key)
-        if own is not None and any(c is chapter for c in []):
-            pass
-        total = 0.0
-        for other_key, value in pages.items():
-            if other_key and (other_key == key or str(other_key).startswith(f"{key}.")):
-                total += value
-        if key in pages:
-            out[key] = int(total)
-        elif total:
-            out[key] = int(total)
-    return out
 
 
 def _weight(chapter: dict, subtree: dict | None = None) -> float:

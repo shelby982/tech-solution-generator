@@ -160,3 +160,28 @@ class MaterialEvidence:
             item_ids=list(d.get("item_ids") or []),
             locked=bool(d.get("locked")),
         )
+
+
+# ─────────────────────────────────────────────────────────
+# Match（检索结果；原 infra/retrieval/rerank.py，rerank 删除后迁入）
+# ─────────────────────────────────────────────────────────
+
+@dataclass
+class Match:
+    """单条素材检索结果。
+
+    ``content`` 及其后的字段是"检索/匹配 → 撰写"契约的一部分：
+    撰写阶段必须拿到素材原文，而不是只有一句评语。
+    """
+    chunk_id: object
+    score: float
+    reason: str
+    hit_points: list[str] = field(default_factory=list)
+    content: str = ""            # 素材原文（撰写阶段引用它）
+    filename: str = ""           # 出处：文件名
+    locator: str = ""            # 出处：第 N 段（页码/锚点）
+    kind: str = ""               # fact | solution | background
+    source_kind: str = ""        # ours | tender
+    by: str = ""                 # rule | semantic | model | human
+    confidence: float = 0.0
+    locked: bool = False

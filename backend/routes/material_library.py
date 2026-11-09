@@ -342,9 +342,6 @@ async def unbind(block_id: int, chunk_id: int):
     return {"removed": True}
 
 
-_CITE_IN_BODY = None
-
-
 @router.get('/blocks/{block_id}/citations')
 async def chapter_citations(block_id: int):
     """本章「引用清单」：正文里每处【来源：X】→ 对应素材、所在小节与段落、状态。"""
@@ -551,35 +548,6 @@ async def delete_source(project_id: int, kind: str, source_id: str):
     return {"removed": True, "materials": "invalidated"}
 
 
-@router.post('/projects/{project_id}/materials/{material_id}/recut')
-async def recut_one(project_id: int, material_id: int):
-    """按新规则重新切片（保住已选素材，按内容指纹映射）。"""
-    from services.chunk_quality import recut_material
-
-    async with get_db() as db:
-        row = await (await db.execute(
-            "SELECT id FROM materials WHERE id=? AND project_id=? AND deleted_at IS NULL",
-            (material_id, project_id))).fetchone()
-        if not row:
-            raise HTTPException(404, "素材不存在")
-        return await recut_material(db, material_id)
-
-
-@router.post('/projects/{project_id}/materials/recut-all')
-async def recut_all(project_id: int):
-    """批量重新切片（一次性改好后，之后上传的素材自动走新规则）。"""
-    from services.chunk_quality import recut_material
-
-    results = []
-    async with get_db() as db:
-        rows = await (await db.execute(
-            "SELECT id FROM materials WHERE project_id=? AND deleted_at IS NULL AND parse_status='done'",
-            (project_id,))).fetchall()
-        for row in rows:
-            results.append(await recut_material(db, row[0]))
-    return {"results": results}
-
-
 @router.get('/blocks/{block_id}/materials/recommend')
 async def recommend_materials(block_id: int, section: str = "", limit: int = 10):
     """本章/本节推荐素材：关键词 + 类型 + 要点覆盖 + 来源可信度（可解释）。"""
@@ -696,27 +664,6 @@ async def fill_citation(block_id: int, body: FillCitationBody):
 class SwapCitationBody(BaseModel):
     old_label: str = ""
     new_label: str = ""
-
-
-@router.post('/blocks/{block_id}/citations/swap')
-async def swap_citation(block_id: int, body: SwapCitationBody):
-    """换来源：把正文里的【来源：旧】替换为【来源：新】。"""
-    from services.block_store import add_revision, update_block_content
-
-    if not body.old_label or not body.new_label:
-        raise HTTPException(422, "缺少原/新来源")
-    async with get_db() as db:
-        block = await (await db.execute("SELECT * FROM blocks WHERE id=?", (block_id,))).fetchone()
-        if not block:
-            raise HTTPException(404, "章节不存在")
-        before = str(block["content"] or "")
-        old = f"【来源：{body.old_label}】"
-        if old not in before:
-            raise HTTPException(409, "正文里找不到该来源标注")
-        after = before.replace(old, f"【来源：{body.new_label}】", 1)
-        await add_revision(db, block_id, before, summary="替换引用来源", source="ai")
-        await update_block_content(db, block_id, after)
-    return {"ok": True, "content": after}
 
 
 @router.get('/projects/{project_id}/materials/{material_id}/images')
@@ -925,35 +872,3 @@ async def chapter_material_needs(block_id: int):
         seen.add(key)
         unique.append(item)
     return {"count": len(unique), "items": unique[:8], "reviewed": True}
-
-
-@router.get('/projects/{project_id}/materials/needs')
-async def project_material_needs(project_id: int):
-    """项目级：全章节评审汇总"需要补的材料"（去重、按次数排序）。"""
-    import json as _json
-
-    async with get_db() as db:
-        rows = await (await db.execute(
-            "SELECT block_id, needs_material FROM chapter_reviews WHERE project_id=?", (project_id,))).fetchall()
-        blocks = await (await db.execute(
-            "SELECT id, title, block_id FROM blocks WHERE project_id=? AND COALESCE(block_id,'')<>''",
-            (project_id,))).fetchall()
-    titles = {int(r[0]): (r[1] or r[2]) for r in blocks}
-    counter: dict[str, dict] = {}
-    for block_pk, raw in rows:
-        try:
-            needs = _json.loads(raw or "[]") or []
-        except Exception:
-            needs = []
-        for issue in needs:
-            query = str(issue.get("material_query") or issue.get("point") or "").strip()[:60]
-            if not query:
-                continue
-            entry = counter.setdefault(query, {"query": query, "reason": str(issue.get("point") or "")[:120],
-                                               "severity": issue.get("severity") or "medium",
-                                               "chapters": [], "count": 0})
-            entry["count"] += 1
-            if len(entry["chapters"]) < 5:
-                entry["chapters"].append(titles.get(int(block_pk), str(block_pk)))
-    ordered = sorted(counter.values(), key=lambda item: item["count"], reverse=True)
-    return {"count": len(ordered), "items": ordered[:12]}

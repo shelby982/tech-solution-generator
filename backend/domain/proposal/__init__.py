@@ -1,6 +1,5 @@
-"""方案聚合 — Block / BlockOutput / Source / ProposalRepository。"""
+"""方案聚合 — Block / BlockOutput / Source。"""
 
 from .models import Block, BlockOutput, Source
-from .repository import ProposalRepository
 
-__all__ = ["Block", "BlockOutput", "Source", "ProposalRepository"]
+__all__ = ["Block", "BlockOutput", "Source"]

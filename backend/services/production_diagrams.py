@@ -139,20 +139,6 @@ def _arrow_defs() -> str:
 </defs>'''
 
 
-def _edge(x1, y1, x2, y2, label="", kind="call", dashed=False):
-    color = ACCENT if kind == "call" else MUTED
-    marker = "p-arrow" if kind == "call" else "p-arrow-soft"
-    dash = ' stroke-dasharray="5,4"' if dashed else ""
-    mid_x, mid_y = (x1 + x2) / 2, (y1 + y2) / 2
-    path = f"M {x1:.1f} {y1:.1f} H {mid_x:.1f} V {y2:.1f} H {x2:.1f}"
-    out = f'<path d="{path}" fill="none" stroke="{color}" stroke-width="1.5"{dash} marker-end="url(#{marker})"/>'
-    if label:
-        width = min(140, max(38, len(label) * 10 + 12))
-        out += f'<rect x="{mid_x - width / 2:.1f}" y="{mid_y - 9:.1f}" width="{width}" height="17" rx="3" fill="{PAPER}"/>'
-        out += _text(mid_x, mid_y + 3, _clip(label, 14), 9, "#475569", anchor="middle")
-    return out
-
-
 # ── 分层架构 ─────────────────────────────────────────────────────────────
 def _layer_arrow(x, y1, y2, label):
     out = [f'<path d="M {x:.1f} {y1:.1f} V {y2:.1f}" fill="none" stroke="{ACCENT}" stroke-width="1.5" marker-end="url(#p-arrow)"/>']

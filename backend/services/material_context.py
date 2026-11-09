@@ -10,9 +10,6 @@ from __future__ import annotations
 from db import get_db
 
 MODE_LIMITS = {"cite": 0, "data": 300, "context": 500}
-MODE_LABELS = {"cite": "引用出处", "data": "数据依据", "context": "仅上下文"}
-
-
 async def chapter_material_context(db, block_id: int, block_code: str = "",
                                    section: str = "") -> dict:
     """返回 {cite: [labels], data: [texts], context: [texts], count}。
@@ -63,7 +60,3 @@ async def material_prompt_for_block(block_pk: int, block_code: str = "", section
     async with get_db() as db:
         context = await chapter_material_context(db, block_pk, block_code, section)
     return render_for_prompt(context)
-
-
-NO_MATERIAL_HINT = ("【本节无可用素材】依据招标要求编写拟实施方案。"
-                    "业绩、资质、人员、参数及承诺缺少依据时标为待补证。")

@@ -32,13 +32,11 @@ class SpecState(TypedDict, total=False):
     """张衡产出。"""
     doc_id: str
     doc_title: str
-    doc_summary: str
     source_toc: list[dict]             # 列表元素是 Section.to_dict()，parse 的正则解析结果，只读
     toc: list[dict]                    # 列表元素是 Section.to_dict()，应答文件目录（模型派生）
     outline_matrix: dict[str, dict]    # block_id → OutlineMatrixRow.to_dict()
     outline_revision: int              # 目录版本号，由 outline_draft 节点自增；0 = 未派生
     outline_error: str                 # 目录派生降级原因，空串 = 模型派生成功
-    doc_summary_error: str             # 项目概述生成失败原因，空串 = 生成成功
     parse_failed_files: list[str]      # 单份文件解析失败被跳过时的文件名（全失败才抛错）
     material_sig: str                  # 本次解析所依据的要求文件指纹（角色+文件名+大小）。
     material_files: list[str]          # 同上的文件名视图（旧 run 兜底比较用；可能含重复）。
@@ -156,7 +154,7 @@ class WorkflowState(TypedDict, total=False):
 
     嵌套二级 dict（如 ``spec.outline_matrix``）的合并由节点自行处理：
     生成节点产出 ``patch["spec"] = {"outline_matrix": full_dict}`` 后，
-    上一级 ``_merge_dict`` 会保留 spec 中其它字段（如 ``toc``、``doc_summary``），
+    上一级 ``_merge_dict`` 会保留 spec 中其它字段（如 ``toc``），
     但不会逐 block 合并 ``outline_matrix`` 内部 —— 节点应一次性给出完整字典。
     """
 

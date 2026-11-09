@@ -41,13 +41,11 @@ from orchestrator.runner import WorkflowRunner
 class _StubZhang:
     async def parse(self, sources, *, progress_callback=None):
         return SpecParseResult(
-            doc_id="d1", doc_title="规范书", doc_summary="摘要",
-            toc=[DomainSection(id="s1", level=1, title="技术方案",
+            doc_id="d1", doc_title="规范书", toc=[DomainSection(id="s1", level=1, title="技术方案",
                                raw_content="", special_marks=[])],
         )
 
-    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id="", points_only=False):
+    async def draft_outline(self, source_toc, *, instruction="", previous_toc=None, project_id=None, thread_id="", points_only=False):
         """stub 直接沿用规范书目录（等价于「模型不可用」的降级路径），
         这样现有用例断言的 block_id 仍是 s1，不受目录派生影响。"""
         from agents.zhang_heng import OutlineDraftResult
@@ -444,8 +442,7 @@ class _RecordingZhang(_StubZhang):
     def __init__(self):
         self.draft_calls = []
 
-    async def draft_outline(self, source_toc, *, instruction="", doc_summary="",
-                            previous_toc=None, project_id=None, thread_id="", points_only=False):
+    async def draft_outline(self, source_toc, *, instruction="", previous_toc=None, project_id=None, thread_id="", points_only=False):
         from agents.zhang_heng import OutlineDraftResult
         self.draft_calls.append({
             "instruction": instruction,
@@ -1256,8 +1253,7 @@ async def test_resume_extract_after_paused_extract_runs_only_remaining(runner_en
     async def _parse3(self, sources, *, progress_callback=None):
         from agents.zhang_heng import SpecParseResult
         return SpecParseResult(
-            doc_id="d1", doc_title="规范书", doc_summary="摘要",
-            toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
+            doc_id="d1", doc_title="规范书", toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
                                special_marks=[]) for i in (1, 2, 3)],
         )
 
@@ -1311,8 +1307,7 @@ async def test_failed_section_is_retried_but_no_source_is_skipped(runner_env, mo
     async def _parse3(self, sources, *, progress_callback=None):
         from agents.zhang_heng import SpecParseResult
         return SpecParseResult(
-            doc_id="d1", doc_title="规范书", doc_summary="摘要",
-            toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
+            doc_id="d1", doc_title="规范书", toc=[DomainSection(id=f"s{i}", level=1, title=f"章节{i}", raw_content="x",
                                special_marks=[]) for i in (1, 2, 3)],
         )
 

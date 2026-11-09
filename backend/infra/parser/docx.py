@@ -7,7 +7,6 @@
 """
 
 import os
-import re
 import uuid
 import logging
 from pathlib import Path
@@ -15,11 +14,10 @@ from typing import Optional, Callable, Union, BinaryIO
 
 from ._ocr import ocr_image
 from .toc import (
-    Section, ParsedDocument, TocEntry, Block,
-    _TOC_STYLES, _MANUAL_TOC_MARKERS, _SPECIAL_MARK_RE,
-    extract_special_marks, detect_level_from_numbering, clean_title,
-    _toc_style_to_level, _clean_toc_line, rows_to_markdown,
-    _normalize_for_match, _extract_numbering_prefix, _text_similarity,
+    Section, ParsedDocument, TocEntry, Block, _TOC_STYLES, _MANUAL_TOC_MARKERS,
+    extract_special_marks, detect_level_from_numbering, clean_title, _toc_style_to_level,
+    _clean_toc_line, rows_to_markdown, _normalize_for_match, _extract_numbering_prefix,
+    _text_similarity,
 )
 
 logger = logging.getLogger(__name__)

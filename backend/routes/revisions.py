@@ -46,7 +46,7 @@ async def list_project_revisions(
     返回项目下全部 block 的全部修订，按时间倒序。
 
     每行附带 block_title / order_idx / prev_content / char_delta，方便前端
-    diff-review.html 直接渲染（按时间分组、显示前后对比）。
+    前端「章节版本 / 与上次评审对比」（review.html）直接渲染（按时间分组、显示前后对比）。
     """
     async with get_db() as db:
         cursor = await db.execute(

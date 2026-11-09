@@ -23,7 +23,7 @@ from domain.letter_detector import is_letter_section
 from domain.proposal import BlockOutput, Source
 from domain.spec import OutlineMatrixRow
 from domain.spec.response_items import expand_response_items
-from infra.retrieval import Match
+from domain.material.models import Match
 
 logger = logging.getLogger(__name__)
 
