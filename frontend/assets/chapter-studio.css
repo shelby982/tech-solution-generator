@@ -1074,3 +1074,6 @@ h2.cs-sec-writing, h3.cs-sec-writing, h4.cs-sec-writing { background: #fef3c7 !i
 .cs-sec-prompt-foot [data-cancel] { margin-right:auto; }
 .cs-sec-prompt-foot button { min-width:76px; font-size:12px; }
 .cs-sec-prompt-foot [data-save-gen] { min-width:160px; }
+
+/* 大纲/进度：小节自带表·图交付物的提示 */
+.cs-ol-media { font-style: normal; color: #0369a1; }

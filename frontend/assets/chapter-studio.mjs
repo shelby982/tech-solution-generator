@@ -1331,7 +1331,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
                   <span class="cs-ol-idx">${i + 1}</span>
                   <span class="cs-ol-main"><b>${esc(sec.title)}</b>
                     <small>${(sec.points || []).map((x) => esc(x)).join(' · ')}</small></span>
-                  <span class="cs-ol-meta">${(sec.requirement_ids || []).length ? `要求 ${(sec.requirement_ids || []).length} · ` : '章节级 · '}${sec.words || 900} 字</span>
+                  <span class="cs-ol-meta">${(() => {
+                    const all = sec.deliverables || [];
+                    const tables = all.filter((d) => d.kind === 'table').length;
+                    const figs = all.filter((d) => d.kind === 'figure' || d.kind === 'diagram').length;
+                    const marks = [tables ? `表 ${tables}` : '', figs ? `图 ${figs}` : ''].filter(Boolean).join(' · ');
+                    return marks ? `<em class="cs-ol-media">${marks}</em> · ` : '';
+                  })()}${(sec.requirement_ids || []).length ? `要求 ${(sec.requirement_ids || []).length} · ` : '章节级 · '}${sec.words || 900} 字</span>
                 </summary>
                 <div class="cs-ol-detail">
                   <div class="cs-ol-how">
@@ -4227,7 +4233,13 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           <div class="cs-todo-row">
             <span class="cs-todo-idx">${i + 1}</span>
             <span class="cs-todo-text" title="${esc(sectionTrace(sec.title))}"><b>${esc(sec.title)}</b>
-              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${sectionTraceShort(sec.title)}</small></span>
+              <small style="display:block;color:#94a3b8;font-size:10.5px">${written ? `已写 · ${words} 字` : '未写'}${(() => {
+                const all = sec.deliverables || [];
+                const tables = all.filter((d) => d.kind === 'table').length;
+                const figs = all.filter((d) => d.kind === 'figure' || d.kind === 'diagram').length;
+                const marks = [tables ? `表 ${tables}` : '', figs ? `图 ${figs}` : ''].filter(Boolean).join(' · ');
+                return marks ? ` · ${marks}` : '';
+              })()}${sectionTraceShort(sec.title)}</small></span>
             <span class="cs-sec-acts"><button type="button" class="cs-todo-act" data-sec-prompt="${i}">提示词</button><button type="button" class="cs-todo-act" data-aside-write-section="${i}">${written ? '重写' : '编写'}</button></span>
           </div>
           ${figBlock}
