@@ -269,9 +269,10 @@ def section_ranges(content: str) -> list[tuple[str, int, int]]:
       3. `3. 标题` / `3.2 标题`（独占一行、≤50 字，且**后面紧跟正文**而不是列表项）
     """
     text = str(content or "")
+    # 同时收集 `## 标题` 与独占一行的 `**标题**`（真实正文常混用），按位置排序
     marks: list[tuple[str, int]] = [(m.group(1).strip(), m.start()) for m in _HEADING_RE.finditer(text)]
-    if not marks:
-        marks = [(m.group(1).strip(), m.start()) for m in _BOLD_HEADING_RE.finditer(text)]
+    marks += [(m.group(1).strip(), m.start()) for m in _BOLD_HEADING_RE.finditer(text)]
+    marks.sort(key=lambda item: item[1])
     if not marks:
         # 编号权威标题：要求该行后面有空行（避免把正文里的有序列表当成标题）
         for match in _NUM_HEADING_RE.finditer(text):

@@ -76,3 +76,12 @@ def test_job_level_replace_uses_same_logic():
     merged = replace_section_text(content, "阶段划分", "新阶段。")
     assert merged.count("**阶段划分**") == 1
     assert "旧阶段" not in merged
+
+
+def test_content_sections_parse_matches_backend_styles():
+    """进度面板兜底解析：正文里的 ## 与 **标题** 都要被识别成小节（无大纲也能重写）。"""
+    from services.section_outline import section_ranges
+
+    content = "## 建设范围\n\n内容一。\n\n**三层结构说明**\n\n内容二。\n"
+    titles = [t for t, _, _ in section_ranges(content)]
+    assert titles == ["建设范围", "三层结构说明"]

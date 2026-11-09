@@ -4124,7 +4124,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
 
   /** 本节提示词：改完可保存，并可直接按提示词重新生成本节 */
   async function openSectionPromptDialog(index) {
-    const section = (planBrief?.outline || [])[index];
+    const section = currentSections()[index];
     if (!section || !active) return;
     const practice = practiceOf(section);
     const dialog = globalThis.document.createElement('dialog'); dialog.className = 'cs-plan-dialog cs-sec-prompt-dialog';
@@ -4164,9 +4164,32 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     globalThis.document.body.append(dialog); dialog.showModal();
   }
 
+  /** 从正文里解析小节标题（`## 标题` 或独占一行的 `**标题**`），无大纲时兜底用 */
+  function contentSections(bodyText) {
+    const text = String(bodyText || '');
+    const lines = text.split('\n');
+    const heads = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (/^##[ \t]+\S/.test(line)) heads.push(line.replace(/^#+[ \t]+/, '').trim());
+      else if (/^\*\*[^*]{2,60}\*\*$/.test(line)) heads.push(line.replace(/^\*+|\*+$/g, '').trim());
+    }
+    const seen = new Set();
+    return heads
+      .filter((title) => title && !seen.has(title) && seen.add(title))
+      .map((title) => ({ title, points: [], words: 900, deliverables: [], basis: [], _fromContent: true }));
+  }
+
+  /** 当前可操作的小节列表：优先大纲，没有大纲就用正文里已有小节（否则用户没有"重写"入口） */
+  function currentSections() {
+    const outline = planBrief?.outline || [];
+    if (outline.length) return outline;
+    return contentSections(String(editor?.value || ''));
+  }
+
   /** 右栏「进度」页签：章节编写进度（大纲进度 + 编写动作） */
   function progressPaneHtml() {
-    const outline = planBrief?.outline || [];
+    const outline = currentSections();
     const bodyText = String(editor?.value || '');
     const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const escRe2 = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -4174,7 +4197,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
       sectionWordCount(bodyText, title) >= 20));
     if (!outline.length) {
       return `<section data-pane="write"><h4>章节编写进度</h4>
-        <p class="cs-todo-ok">还没有章节大纲 · 去章头「本章计划」生成大纲后开始编写</p></section>`;
+        <p class="cs-todo-ok">还没有章节大纲，正文里也没有可识别的小节 · 去章头「本章计划」生成大纲后开始编写</p></section>`;
     }
     const figures = parseFigures(bodyText);
     const figureCount = figures.length + pendingFigures(outline).length;
@@ -4210,7 +4233,9 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
           ${figBlock}
         </div>`;
     }).join('');
-    return `<section data-pane="write"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写</small></h4>
+    const fromContent = !(planBrief?.outline || []).length;
+    return `<section data-pane="write"><h4>章节编写进度 <small>${done.size}/${outline.length} 节已写${fromContent ? ' · 按正文小节识别' : ''}</small></h4>
+      ${fromContent ? '<p class="cs-dim" style="font-size:10.5px;margin:0 0 6px">本章还没有大纲：下面按正文现有小节列出，可直接「重写」；要按评分点分节请去「本章计划」生成大纲。</p>' : ''}
       <div class="cs-progress-actions">
         <button type="button" class="cs-progress-btn" data-fig-review>审阅本章图片 ${figureCount}</button>
       </div>
@@ -4799,7 +4824,7 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
     if(promptBtn && active){ await openSectionPromptDialog(Number(promptBtn.dataset.secPrompt)); return; }
     const secBtn=event.target.closest('[data-aside-write-section]');
     if(secBtn && active){
-      const sec=(planBrief?.outline||[])[Number(secBtn.dataset.asideWriteSection)];
+      const sec=currentSections()[Number(secBtn.dataset.asideWriteSection)];
       if(!sec) return;
       const doWrite = async (prompt, generic=false) => {
         const label0=secBtn.textContent; secBtn.disabled=true; secBtn.textContent='编写中…';
