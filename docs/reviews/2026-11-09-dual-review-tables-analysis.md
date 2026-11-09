@@ -215,3 +215,88 @@ review_history (保留，按轮次快照)
 4. `reset-analysis` 是否应该连同评审历史/问题状态一起清空（当前只清 `reviews`）？
 
 拍板后我可以按 B/C/D 出具体迁移脚本与改动清单。
+
+---
+
+## 8. 产品口径补充：终评与「编写时逐章评审」合并
+
+> 用户口径：现在实际只有两种评审——**终评（对最后一轮/整篇内容的评审）**，以及**各章在编写时对应的章节评审**；
+> 这两者应该合成一套结果，而不是两套各看一半。
+
+### 8.1 为什么现在终评只覆盖"最后一轮改过的章节"
+
+`_run_review` 有一个刻意的过滤（`backend/orchestrator/nodes.py:931-937`）：
+
+```python
+updated = proposal.get("updated_blocks")
+if updated:
+    blocks = {bid: blk for bid, blk in blocks.items() if bid in updated_set}
+```
+
+注释说明原因：避免未改正文被重复评审、LLM 采样随机导致分数振荡。但终评节点复用的就是这同一个 `_run_review`，
+所以**终评只拿到最后一轮 `updated_blocks`**；其他章节只有编写页的章节评审（`chapter_reviews`），
+而终评写的是 `reviews`。两套结果因此天然对不上。
+
+### 8.2 目标：一套「章节当前评审」+ 一套「评审轮次历史」
+
+```
+编写时评审（单章） ─┐
+                    ├─► review_store.upsert_chapter_review(stage, findings, versions)
+终评（整篇/跨章） ──┘        │
+                             ├─ chapter_reviews（每章当前态，1 行）
+                             │    stage = writing | final
+                             │    tech/comp/score/satisfied/issues/versions
+                             └─ review_history（每轮 1 行，含 stage）
+                                  └─ review_findings（per-agent 明细，可选）
+```
+
+- **终评不再只写 `reviews`**：它读取已有 `chapter_reviews` 作为未改章节的基线；
+  只对"内容/证据已变或从未评审"的章节重新调用 LLM；跨章一致性由终评的全局 pass 负责。
+- **终评结果按章写回**同一个当前态，`stage='final'`，并保留 `writing` 轮次到历史。
+- 编写页、评审页、评分点风险、交付判断都只读这一套当前态 + 版本 freshness，
+  不再出现"风险页看到终评、编写页看到编写评审"。
+- 全局报告（GlobalReport）仍是一个项目级聚合，单独存 `review_reports`（或继续放 state），
+  但它的 per-chapter 依据来自同一套 `chapter_reviews`。
+
+### 8.3 合并冲突规则（建议）
+
+| 场景 | 建议 |
+|---|---|
+| 章节有终评，也有编写评审 | 当前态取**终评**（交付口径），编写评审保留在历史，可在章节页切换查看 |
+| 终评未覆盖该章（未重跑） | 当前态保留最近的编写评审，`stage='writing'`，并标记"未经终评" |
+| 终评与编写评审分数不同 | **不平均**；终评权威，历史保留两者，避免假精确 |
+| 内容在评审后又被修改 | `freshness=stale`，风险页/交付页都按"待复审"，不静默采用旧分 |
+
+如果产品希望"更保守"，可把规则改成 `worst(终评, 编写)`；但那会让"终评已修复"的章节仍被旧问题拖住，不建议默认。
+
+### 8.4 终评覆盖范围：不要每次都全量重跑
+
+推荐终评的 LLM 范围：
+
+1. **未评审章节**：调用章节评审（可复用编写时同一套 prompt）。
+2. **内容/证据版本已变的章节**：重新评审该章。
+3. **未变章节**：直接采用其最近一次评审，不重复调用 LLM。
+4. **全局一致性**：一次轻量全局 pass，只读各章评审摘要/问题清单，检查跨章矛盾、重复、口径漂移；
+   产出一个项目级 `review_reports` 记录（不是 96 次全量重评）。
+
+这样既满足"终评覆盖整篇"，又不会把成本放大到全量重跑，也避免未改章节分数随机振荡。
+
+### 8.5 实施顺序（建议）
+
+1. **先修终评范围**：给 `_run_review` 增加 `review_stage`/`scope`；终评阶段不再只取 `updated_blocks`，
+   改为"changed/unreviewed + 已有章节评审基线"。
+2. **抽 `review_store`**：`upsert_chapter_review()` 一次事务写 `chapter_reviews` + `review_history`（+ 可选 findings）；
+   工作流终评和章节评审都调用它。
+3. **迁移**：`reviews` 的 22 个轮次回填为 `stage='final'` 的章级记录；已有 `chapter_reviews` 标 `stage='writing'`；
+   2 个工作流-only 轮次补建章级当前态（版本 unknown）。
+4. **改消费者**：`scoring_risk`/`scoring_verdict`/`project_progress` 改读统一当前态；旧 `/api/review` 兼容映射。
+5. **UI**：章节评审面板显示"当前（终评/编写）"+"评审历史"时间线；评审页的章节行与全局报告同源。
+6. **修 reset**：连 `chapter_reviews`、`review_history`、`review_findings`、`review_issue_states` 一起清。
+7. **测试**：终评覆盖所有章（含未改章）；编写评审→终评前可见；终评后风险/交付/编写页一致；
+   内容改动后两边都 stale；reset 无孤儿。
+
+### 8.6 需要确认的 3 件事
+
+1. 终评是否采用"已评审章节复用 + 未评审/已改章节重评 + 全局一致性 pass"（推荐），还是每次全量重评？
+2. 冲突时终评权威（推荐），还是取 worst？
+3. 章节页是否要同时展示"编写时评审"和"终评"两栏，还是只显示当前 + 可展开历史？
