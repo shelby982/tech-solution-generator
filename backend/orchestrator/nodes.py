@@ -937,6 +937,7 @@ async def _run_review(
         from services.block_store import list_blocks as _list_blocks
         from services.writing_workspace import versions as _versions
 
+        review_versions: dict[str, dict] = {}
         async with get_db() as db:
             db_rows = {
                 str(b.get("block_id")): b
@@ -948,17 +949,20 @@ async def _run_review(
                 force = {str(x) for x in (proposal.get("regenerate_targets") or [])}
                 force |= {str(x) for x in (proposal.get("updated_blocks") or [])}
             for bid in list(blocks):
-                if str(bid) in force:
-                    continue
                 row = db_rows.get(str(bid))
                 if not row:
+                    continue
+                current = await _versions(db, dict(row))
+                # 记录评审开始时的版本：模型跑完后用户可能又改了正文，
+                # aggregate 不能拿"完成时"的新版本冒充评审版本。
+                review_versions[str(bid)] = current
+                if str(bid) in force:
                     continue
                 cr = await (await db.execute(
                     "SELECT content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
                     (row.get("id"),))).fetchone()
                 if not cr:
                     continue
-                current = await _versions(db, dict(row))
                 if (str(cr["content_version"] or "") == str(current.get("content_version") or "")
                         and str(cr["evidence_version"] or "") == str(current.get("evidence_version") or "")):
                     blocks.pop(bid, None)
@@ -1055,6 +1059,7 @@ async def _run_review(
         # 本轮真正送进模型的章；aggregate 只能落这些章，不能把 state 里的历史 findings
         # 当成"本轮复审"而覆盖更新的编写时评审。
         "reviewed_blocks": sorted(str(bid) for bid in findings),
+        "review_versions": review_versions if "review_versions" in locals() else {},
     }}
 
 
@@ -1118,7 +1123,7 @@ async def aggregate_review_node(
             combined = combine_findings(t, c)
             row = db_rows.get(str(bid))
             if row and not legacy_scope:
-                vs = await _versions(db, dict(row))
+                vs = (review.get("review_versions") or {}).get(str(bid)) or await _versions(db, dict(row))
                 await upsert_chapter_review(
                     db, block_pk=int(row["id"]), project_id=project_id,
                     thread_id=thread_id, stage="final", data=combined,

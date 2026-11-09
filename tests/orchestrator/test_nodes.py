@@ -1653,3 +1653,35 @@ async def test_aggregate_old_checkpoint_does_not_persist_findings():
     async with get_db() as db:
         row = await (await db.execute("SELECT COUNT(*) AS n FROM chapter_reviews")).fetchone()
     assert row["n"] == 0
+
+
+async def test_aggregate_stamps_versions_captured_at_review_start():
+    """评审跑的过程中正文被改：当前态要写评审开始时的版本（stale），不能盖成 current。"""
+    from db import get_db
+
+    async with get_db() as db:
+        await db.execute("INSERT INTO projects (id, name) VALUES (1, 'P')")
+        await db.execute(
+            "INSERT INTO blocks (project_id, block_id, content, run_thread_id, status) "
+            "VALUES (1, 's1', '正文-改过', 'tid-race', 'generating')")
+        await db.commit()
+        row = await (await db.execute(
+            "SELECT id FROM blocks WHERE project_id=1 AND block_id='s1'")).fetchone()
+
+    state = {
+        "project_id": 1, "thread_id": "tid-race",
+        "proposal": {"blocks": {"s1": _block("s1")}},
+        "review": {
+            "tech_findings": {"s1": _finding(80)},
+            "compliance_findings": {"s1": _finding(80)},
+            "reviewed_blocks": ["s1"],
+            "review_versions": {"s1": {"content_version": "old", "evidence_version": "old"}},
+        },
+        "spec": {"outline_matrix": {}},
+    }
+    await nodes.aggregate_review_node(state)
+    async with get_db() as db:
+        cr = await (await db.execute(
+            "SELECT content_version, evidence_version FROM chapter_reviews WHERE block_id=?",
+            (row["id"],))).fetchone()
+    assert (cr["content_version"], cr["evidence_version"]) == ("old", "old")
