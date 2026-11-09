@@ -121,29 +121,6 @@ async def test_upload_image_validates_bytes_and_links_only_current_chapter(env):
     assert image.content==buf.getvalue()
 
 
-async def test_draft_uses_only_confirmed_materials_and_never_overwrites_body(env,monkeypatch):
-    from services.config_store import config_store
-    import infra.llm.clients as clients
-    monkeypatch.setattr(config_store,'is_configured',lambda:True)
-    monkeypatch.setattr(config_store,'get_configs_and_next_index',lambda:([SimpleNamespace(provider='openai')],0))
-    prompts=[]
-    async def generate(config,system,prompt,**kwargs):
-        prompts.append((system,json.loads(prompt)))
-        return '建议草稿：拟实施适配。'
-    monkeypatch.setattr(clients,'generate_oneshot_openai',generate)
-    c=env.client;bid=env.block['id']
-    await c.put(f'/api/blocks/{bid}',json={'content':'原正文'})
-    await c.put(f'/api/blocks/{bid}/studio/materials',json={'material_id':env.own['id']})
-    assert (await c.post(f'/api/blocks/{bid}/studio/draft',json={'layout':'solution'})).status_code==200
-    assert prompts[-1][1]['confirmed_materials']==[]
-    await c.put(f'/api/blocks/{bid}/studio/materials',json={'material_id':env.own['id'],'confirmed':True})
-    await c.post(f'/api/blocks/{bid}/studio/draft',json={'layout':'solution'})
-    assert prompts[-1][1]['confirmed_materials'][0]['excerpts'][0]['page']==12
-    assert '不得编造' in prompts[-1][0]
-    async with get_db() as db:
-        assert (await studio.require_block(db,bid))['content']=='原正文'
-
-
 async def test_export_snapshot_isolated_from_later_edits_and_other_runs(env):
     c=env.client;bid=env.block['id']
     await c.put(f'/api/blocks/{bid}',json={'content':'导出时正文\n\n| 要求 | 响应 |\n| --- | --- |\n| 适配 | 拟验证 |'})

@@ -22,10 +22,6 @@ from services.block_store import (
     create_project,
     get_project,
     list_projects,
-    update_project,
-    create_snapshot,
-    list_blocks,
-    current_run_thread_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,53 +150,7 @@ async def get_project_route(project_id: int):
 
 # ── PATCH /api/projects/{id} ──────────────────────────────
 
-class ProjectPatchRequest(BaseModel):
-    name: str | None = None
-    deadline: str | None = None
-    summary: str | None = None
-    target_pages: int | None = Field(default=None, ge=1, le=5000)
-
-
-@router.patch("/projects/{project_id}")
-async def patch_project(project_id: int, body: ProjectPatchRequest):
-    async with get_db() as db:
-        project = await get_project(db, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-        updates = {k: v for k, v in body.model_dump().items() if v is not None}
-        updated = await update_project(db, project_id, **updates)
-    return JSONResponse(content=updated)
-
-
 # ── POST /api/projects/{id}/lock ──────────────────────────
-
-@router.post("/projects/{project_id}/lock")
-async def lock_project(project_id: int):
-    """锁定大纲：序列化当前 blocks 为 snapshot，更新 project 状态为 authoring"""
-    async with get_db() as db:
-        project = await get_project(db, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-
-        tid = await current_run_thread_id(db, project_id)
-        blocks = await list_blocks(db, project_id, tid, fallback_all=True)
-        snapshot_json = json.dumps(blocks, ensure_ascii=False)
-        snapshot = await create_snapshot(
-            db,
-            project_id=project_id,
-            trigger="lock",
-            snapshot_json=snapshot_json,
-        )
-        updated = await update_project(
-            db,
-            project_id,
-            status="authoring",
-            base_snapshot_id=snapshot["id"],
-        )
-
-    logger.info(f"项目 {project_id} 已锁定大纲，snapshot_id={snapshot['id']}")
-    return JSONResponse(content=updated)
-
 
 # ── GET /api/projects/{id}/workflow-runs ──────────────────
 

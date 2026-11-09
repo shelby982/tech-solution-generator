@@ -65,11 +65,3 @@ async def client():
     app.include_router(studio.router, prefix="/api")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
-
-
-async def test_coverage_route(client):
-    block = await _seed()
-    resp = await client.post(f"/api/blocks/{block['id']}/studio/coverage-review",
-                             json={"thread_id": "cov-thread", "section": "云原生服务治理", "text": CLAUSE})
-    assert resp.status_code == 200
-    assert resp.json()["covered"] == 1

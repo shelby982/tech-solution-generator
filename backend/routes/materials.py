@@ -264,15 +264,6 @@ async def put_project_scope(project_id: int, payload: dict):
     return JSONResponse(content=out)
 
 
-@router.get("/projects/{project_id}/split-answers")
-async def get_split_answers(project_id: int, threadId: str | None = None):
-    """读拆分确认项的作答（run 级优先，缺省回落到项目级）。"""
-    from services.split_answers import resolve_split_context
-    async with get_db() as db:
-        ctx = await resolve_split_context(db, project_id, threadId)
-    return JSONResponse(content=ctx)
-
-
 @router.post("/projects/{project_id}/split-answers")
 async def post_split_answer(project_id: int, payload: dict):
     """作答某一项待确认内容：``{key, value, threadId?}``。

@@ -6,7 +6,6 @@ backend/routes/blocks.py — Block CRUD + SSE 生成 + AI 功能
   GET  /api/blocks/{id}/matched-sources — Block 关联的素材片段
   PUT  /api/blocks/{id}            — 更新内容，自动写 revision
   POST /api/blocks/{id}/generate   — SSE 单块 AI 生成
-  POST /api/blocks/{id}/ai         — AI 功能：polish/expand/check/search/style
 """
 
 import json
@@ -23,9 +22,8 @@ from services.block_store import (
     list_blocks, add_revision, update_block_requirement, list_revisions,
     current_run_thread_id, update_block_matrix_fields,
 )
-from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
+from services.config_store import config_store
 from infra.llm import dispatch_stream_generate
-from infra.llm.clients import generate_oneshot_openai, generate_oneshot_claude
 from utils.sse import format_sse_event
 
 logger = logging.getLogger(__name__)
@@ -46,16 +44,6 @@ async def get_project_blocks(project_id: int, threadId: str | None = None):
         tid = threadId or await current_run_thread_id(db, project_id)
         blocks = await list_blocks(db, project_id, tid, fallback_all=True)
     return JSONResponse(content=blocks)
-
-
-@router.delete("/projects/{project_id}/blocks")
-async def delete_project_blocks(project_id: int):
-    """清空指定项目的所有 blocks（前端「重新提炼」入口用）。"""
-    from services.block_store import delete_blocks_by_project
-
-    async with get_db() as db:
-        await delete_blocks_by_project(db, project_id)
-    return JSONResponse(content={"project_id": project_id, "status": "cleared"})
 
 
 # ── GET /api/blocks/{block_id}/matched-sources ───────────
@@ -283,53 +271,3 @@ async def generate_block(block_id: int, req: GenerateRequest = GenerateRequest()
 
 
 # ── POST /api/blocks/{id}/ai ─────────────────────────────
-
-_AI_PROMPTS = {
-    "polish": "你是专业方案润色助手，保留结构改善表达",
-    "expand": "你是专业方案补充助手，基于 requirement 补齐缺失内容",
-    "check":  "你是方案查漏助手，对照评分项列出未覆盖要求",
-    "search": "你是需求检索助手，从材料内容中找隐含要求",
-    "style":  "你是方案风格调整助手，调整至正式书面文风",
-}
-
-
-class AIActionRequest(BaseModel):
-    action: str
-
-    @field_validator("action")
-    @classmethod
-    def validate_action(cls, v: str) -> str:
-        if v not in _AI_PROMPTS:
-            raise ValueError(f"不支持的 action：{v}，可选：{list(_AI_PROMPTS)}")
-        return v
-
-
-@router.post("/blocks/{block_id}/ai")
-async def ai_action(block_id: int, body: AIActionRequest):
-    async with get_db() as db:
-        block = await get_block(db, block_id)
-        if block is None:
-            raise HTTPException(status_code=404, detail=f"Block 不存在：{block_id}")
-        if not config_store.is_configured():
-            raise HTTPException(status_code=400, detail="未配置 API Key")
-
-        system_prompt = _AI_PROMPTS[body.action]
-        user_prompt = (
-            f"## 标题\n{block.get('title', '')}\n\n"
-            f"## 当前内容\n{block.get('content', '（暂无）')}\n\n"
-            f"## 评分要求\n{block.get('requirement', '（未填写）')}\n\n"
-            f"请按指令处理，直接输出结果。"
-        )
-
-        configs, rr_index = config_store.get_configs_and_next_index()
-        config = configs[rr_index % len(configs)]
-
-        try:
-            if config.provider in OPENAI_COMPATIBLE_PROVIDERS:
-                suggestion = await generate_oneshot_openai(config, system_prompt, user_prompt, max_tokens=2000)
-            else:
-                suggestion = await generate_oneshot_claude(config, system_prompt, user_prompt, max_tokens=2000)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"AI 调用失败：{exc}")
-
-    return JSONResponse(content={"action": body.action, "suggestion": suggestion, "block_id": block_id})

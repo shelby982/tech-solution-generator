@@ -15,7 +15,7 @@ from db import get_db
 from infra.llm.json_utils import extract_json_object
 from services.block_store import get_block, list_blocks, create_material
 from services.chapter_studio import (LAYOUTS, TEMPLATES, ids, content_hash, writing_units,
-                                    recommend_layout, extract_material, material_key_points, build_writing_prompt)
+                                    recommend_layout, extract_material, material_key_points)
 
 router = APIRouter(tags=['chapter-studio'])
 TASKS = set()
@@ -460,29 +460,6 @@ class AlignBody(BaseModel):
     thread_id: str = Field(min_length=8)
 
 
-class CoverageReviewBody(BaseModel):
-    thread_id: str = Field(default="", max_length=120)
-    section: str = Field(default="", max_length=120)
-    text: str = Field(default="", max_length=20000)
-    deep: bool = False
-
-
-@router.post('/blocks/{block_id}/studio/coverage-review')
-async def coverage_review(block_id: int, body: CoverageReviewBody):
-    """规范条款覆盖核对；deep=true 时额外调用评标视角 LLM。"""
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-    from services.coverage_review import review_coverage
-    from services.section_context import section_body
-    text = (body.text or "").strip()
-    if not text:
-        text = section_body(block.get("content") or "", body.section)
-    if not text:
-        raise HTTPException(422, "没有可核对的正文")
-    result = await review_coverage(block, body.section, text, thread_id=body.thread_id, deep=body.deep)
-    return result
-
-
 @router.get('/blocks/{block_id}/studio/section/stream')
 async def stream_section(block_id: int, thread_id: str = '', title: str = '', points: str = '', words: int = 900, prompt: str = '', role: str = 'text', model: str = '', generic: bool = False):
     """按大纲写一节（SSE 推流）：delta 逐块下发，done 落库并回正文。"""
@@ -786,10 +763,6 @@ async def get_image(material_id: int):
                     headers={'X-Content-Type-Options': 'nosniff'})
 
 
-class DraftBody(ProfileBody):
-    model: str = Field(default='', max_length=200)
-
-
 class ContentPreviewBody(BaseModel):
     content: str = Field(max_length=500_000)
 
@@ -808,40 +781,6 @@ async def preview_content(block_id: int, body: ContentPreviewBody):
         return {'html':model_html(model), 'notice':'内容预览不模拟 Word 分页，请在导出后查看排版 PDF'}
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
-
-
-@router.post('/blocks/{block_id}/studio/draft')
-async def draft_chapter(block_id: int, body: DraftBody):
-    from services.config_store import config_store, OPENAI_COMPATIBLE_PROVIDERS
-    from infra.llm.clients import generate_oneshot_openai, generate_oneshot_claude
-    async with get_db() as db:
-        block = await require_block(db, block_id)
-        requirements, points = await chapter_context(db, block)
-        materials = [m for m in await material_rows(db, block) if m['confirmed']]
-        source = await source_for(block)
-    if not config_store.is_configured():
-        raise HTTPException(409, '请先配置可用模型；可以先编写正文或插入编排框架')
-    system, prompt = build_writing_prompt(block, requirements, points, materials, body.layout, source)
-    if len(prompt) > 180_000:
-        raise HTTPException(413, '本章依据过多，请拆分编写或减少关联素材')
-    configs, index = config_store.get_configs_and_next_index()
-    if not configs:
-        raise HTTPException(409, '没有可用于生成正文的模型配置')
-    config = configs[index % len(configs)]
-    if body.model:
-        config = next((c for c in configs if c.model == body.model), None)
-        if config is None:
-            raise HTTPException(409, '当前选择的模型不可用，请在顶部切换模型后重试')
-    generate = generate_oneshot_openai if config.provider in OPENAI_COMPATIBLE_PROVIDERS else generate_oneshot_claude
-    try:
-        from infra.llm.usage import run_context
-        kwargs = {'thinking': False} if config.provider == 'deepseek' else {}
-        with run_context(project_id=block['project_id'], thread_id=block.get('run_thread_id')):
-            suggestion = await generate(config, system, prompt, max_tokens=6500, timeout=150, raise_on_empty=True,
-                                        call_site='chapter_studio_draft', **kwargs)
-    except Exception as exc:
-        raise HTTPException(502, '草稿生成失败，请检查模型配置后重试；原正文已保留') from exc
-    return {'suggestion': suggestion, 'base_hash': content_hash(block.get('content')), 'material_ids': [m['id'] for m in materials]}
 
 
 class DocumentBody(BaseModel):

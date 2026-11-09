@@ -41,11 +41,6 @@ export const api = {
       fetch(`/api/projects/${projectId}/intake`).then(parseJsonResponse),
     identifyPackages: (projectId) =>
       fetch(`/api/projects/${projectId}/packages/identify`, { method: 'POST' }).then(parseJsonResponse),
-    createPackage: (projectId, payload) =>
-      fetch(`/api/projects/${projectId}/packages`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).then(parseJsonResponse),
     confirmPackage: (projectId, packageId, payload = {}) =>
       fetch(`/api/projects/${projectId}/packages/${packageId}/confirm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -92,14 +87,6 @@ export const api = {
     /** 清空该项目的拆解结果（评分点/规范要求/章节/评审/作答），保留材料与项目本身 */
     resetAnalysis: (id, packageId) =>
       fetch(`/api/projects/${id}/reset-analysis${packageId ? `?packageId=${encodeURIComponent(packageId)}` : ''}`, { method: 'POST' }).then(parseJsonResponse),
-    patch: (id, data) =>
-      fetch(`/api/projects/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }).then(parseJsonResponse),
-    lock: (id) =>
-      fetch(`/api/projects/${id}/lock`, { method: 'POST' }).then(parseJsonResponse),
   },
 
   materials: {
@@ -137,14 +124,6 @@ export const api = {
   blocks: {
     list: (projectId, threadId) =>
       fetch(`/api/projects/${projectId}/blocks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(parseJsonResponse),
-    clear: (projectId) =>
-      fetch(`/api/projects/${projectId}/blocks`, { method: 'DELETE' }).then(parseJsonResponse),
-    update: (id, content) =>
-      fetch(`/api/blocks/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      }).then(parseJsonResponse),
     // 局部更新提炼字段（工作台的参考卡片：改一个字段不该清空别的）。
     // 与 update 的区别：body 直接就是字段字典，且**非 2xx 会抛**（422 非法枚举等
     // 必须让调用方看见，否则下拉框会显示成已保存）。
@@ -175,46 +154,6 @@ export const api = {
         throw err;
       }
       return data;
-    },
-    ai: (id, action) =>
-      fetch(`/api/blocks/${id}/ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      }).then(parseJsonResponse),
-    updateRequirement: (blockId, requirement) =>
-      fetch(`/api/blocks/${blockId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requirement }),
-      }).then(parseJsonResponse),
-  },
-
-  revisions: {
-    list: (blockId) =>
-      fetch(`/api/blocks/${blockId}/revisions`).then(parseJsonResponse),
-    restore: (blockId, rn) =>
-      fetch(`/api/blocks/${blockId}/revisions/${rn}/restore`, {
-        method: 'POST',
-      }).then(parseJsonResponse),
-    listByProject: (projectId, packageId) =>
-      fetch(`/api/projects/${projectId}/revisions${packageId ? `?packageId=${encodeURIComponent(packageId)}` : ''}`).then(parseJsonResponse),
-  },
-
-  export: {
-    diff: (projectId, packageId) =>
-      fetch(`/api/projects/${projectId}/diff${packageId ? `?packageId=${encodeURIComponent(packageId)}` : ''}`).then(parseJsonResponse),
-    applyDiff: (projectId, data, packageId) =>
-      fetch(`/api/projects/${projectId}/diff/apply${packageId ? `?packageId=${encodeURIComponent(packageId)}` : ''}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }).then(parseJsonResponse),
-    word: (projectId, packageId, threadId) => {
-      const query = new URLSearchParams();
-      if (packageId) query.set('packageId', packageId);
-      if (threadId) query.set('threadId', threadId);
-      window.open(`/api/projects/${projectId}/export?${query}`, '_blank');
     },
   },
 
@@ -253,8 +192,6 @@ export const api = {
         body: JSON.stringify(payload),
       }).then(parseJsonResponse),
     // 拆分确认项的作答（落库后下次拆分生效）
-    getSplitAnswers: (projectId, threadId) =>
-      fetch(`/api/projects/${projectId}/split-answers${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`).then(parseJsonResponse),
     answerSplit: (projectId, payload) =>
       fetch(`/api/projects/${projectId}/split-answers`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -406,8 +343,4 @@ export const api = {
     },
   },
 
-  review: {
-    get: (threadId) =>
-      fetch(`/api/review/${threadId}`).then(parseJsonResponse),
-  },
 };

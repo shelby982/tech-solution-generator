@@ -1,10 +1,9 @@
 """
-backend/routes/export.py — diff 计算、diff apply、Word 导出
+backend/routes/export.py — diff 计算、Word 导出
 
 端点：
-  GET  /api/projects/{id}/diff         — base_snapshot vs current 差异
-  POST /api/projects/{id}/diff/apply   — 接受/拒绝 diff，生成新 snapshot
-  GET  /api/projects/{id}/export       — 导出 Word 文档
+  GET  /api/projects/{id}/diff    — base_snapshot vs current 差异
+  GET  /api/projects/{id}/export  — 导出 Word 文档
 """
 
 import json
@@ -13,7 +12,6 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
 
 from db import get_db
 from services.block_store import (
@@ -21,9 +19,6 @@ from services.block_store import (
     list_blocks,
     current_run_thread_id,
     get_snapshot,
-    create_snapshot,
-    add_revision,
-    update_block_status,
 )
 from infra.docx import sections_to_docx
 
@@ -111,78 +106,6 @@ async def get_diff(
     base_blocks: list[dict] = json.loads(snapshot["snapshot"])
     result = _compute_diff(base_blocks, current_blocks)
     return JSONResponse(content=result)
-
-
-class DiffApplyRequest(BaseModel):
-    accept: list[str] = []
-    reject: list[str] = []
-
-
-@router.post("/projects/{project_id}/diff/apply")
-async def apply_diff(
-    project_id: int,
-    body: DiffApplyRequest,
-    package_id: int | None = Query(default=None, alias="packageId"),
-):
-    """接受/拒绝 diff：reject 的 block 写回 base 内容；清除 needs_review；生成新 snapshot"""
-    async with get_db() as db:
-        project = await get_project(db, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"项目不存在：{project_id}")
-
-        package_snapshot = None
-        if package_id is not None:
-            from services.package_scope import package_run_thread
-            tid = await package_run_thread(db, project_id, package_id)
-            current_blocks = await list_blocks(db, project_id, tid, fallback_all=False) if tid else []
-            row = await (await db.execute(
-                """SELECT * FROM project_snapshots
-                   WHERE project_id = ? AND package_id = ? ORDER BY id DESC LIMIT 1""",
-                (project_id, package_id),
-            )).fetchone()
-            package_snapshot = dict(row) if row else None
-        else:
-            tid = await current_run_thread_id(db, project_id)
-            current_blocks = await list_blocks(db, project_id, tid, fallback_all=True)
-        current_map = {b["block_id"]: b for b in current_blocks}
-
-        base_map: dict[str, dict] = {}
-        if package_snapshot or project.get("base_snapshot_id"):
-            snapshot = package_snapshot or await get_snapshot(db, project["base_snapshot_id"])
-            if snapshot:
-                base_map = {b["block_id"]: b for b in json.loads(snapshot["snapshot"])}
-
-        for bid in body.reject:
-            if bid in base_map and bid in current_map:
-                base_content = base_map[bid].get("content", "")
-                db_block_id = current_map[bid]["id"]
-                await add_revision(
-                    db,
-                    block_id_int=db_block_id,
-                    content=base_content,
-                    source="restore",
-                    summary=f"diff reject — 恢复 base 版本",
-                )
-
-        for blk in current_blocks:
-            if blk.get("status") == "needs_review":
-                await update_block_status(db, blk["id"], "done")
-
-        new_snap = await create_snapshot(
-            db,
-            project_id=project_id,
-            trigger="apply_diff",
-            snapshot_json=json.dumps(current_blocks, ensure_ascii=False),
-            package_id=package_id,
-            run_thread_id=tid,
-        )
-
-    logger.info(f"diff apply 完成：project={project_id}, snapshot_id={new_snap['id']}")
-    return JSONResponse(content={
-        "snapshot_id": new_snap["id"],
-        "accepted":    body.accept,
-        "rejected":    body.reject,
-    })
 
 
 @router.get("/projects/{project_id}/export")

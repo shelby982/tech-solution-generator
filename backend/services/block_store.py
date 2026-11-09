@@ -485,14 +485,6 @@ async def update_block_status(
     await db.commit()
 
 
-async def delete_blocks_by_project(
-    db: aiosqlite.Connection,
-    project_id: int,
-) -> None:
-    await db.execute("DELETE FROM blocks WHERE project_id = ?", (project_id,))
-    await db.commit()
-
-
 def _is_same_section(row, title: str, level: int, order_idx: int) -> bool:
     """旧行的坐标是否与新写入的完全一致 —— 一致才认为真的是同一节重跑。
 

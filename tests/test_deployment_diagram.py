@@ -70,34 +70,3 @@ async def env(monkeypatch, tmp_path):
     app.include_router(routes.router, prefix="/api")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield SimpleNamespace(client=client, pid=pid, block=dict(block), queued=queued)
-
-
-async def test_deployment_job_generates_png(env, monkeypatch):
-    async def fake_extract(config, block, brief):
-        return deployment_diagram.normalize_spec(SPEC)
-
-    async def fake_render(html_path, png_path, scale=2):
-        png_path.parent.mkdir(parents=True, exist_ok=True)
-        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
-        return 1280, 760, {"texts": 10, "overflow": [], "overlaps": [], "shapes_overflow": []}
-
-    async def fake_config(db, block):
-        return SimpleNamespace(model="test", provider="openai"), {}
-
-    monkeypatch.setattr(deployment_diagram, "extract_spec", fake_extract)
-    monkeypatch.setattr(diagram_design, "resolve_config", fake_config)
-    monkeypatch.setattr("services.diagram_render.render_png", fake_render)
-    created = await env.client.post(
-        f"/api/blocks/{env.block['id']}/studio/deployment-diagrams",
-        json={"title": "图 3-1 部署拓扑", "text": "互联网、DMZ、应用区、数据区；LB、应用、数据库。", "claim": "双活"},
-    )
-    assert created.status_code == 202
-    job_id = created.json()["job_id"]
-    await diagram_design.run_job(job_id)
-    data = (await env.client.get(f"/api/blocks/{env.block['id']}/studio/diagram-assets/{job_id}")).json()
-    assert data["status"] == "done" and data["asset_id"]
-    image = await env.client.get(f"/api/studio/diagrams/{data['asset_id']}/image")
-    assert image.status_code == 200 and image.headers["content-type"] == "image/png"
-    checks = data["checks"]
-    assert checks["pipeline"] == "deployment"
-    assert checks["zones"] == 4 and checks["nodes"] == 5 and checks["edges"] == 4
