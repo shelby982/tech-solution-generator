@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>智能应标 · 60s 宣传片分镜看板</title>
+<style>
+  :root{
+    --bg:#0B1220; --panel:#0F172A; --panel-2:#111C2E; --line:#1E293B;
+    --text:#E2E8F0; --muted:#94A3B8; --muted-2:#64748B;
+    --blue:#3B82F6; --blue-soft:rgba(37,99,235,.16);
+    --amber:#F59E0B; --red:#EF4444; --green:#34D399;
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1280px;margin:0 auto;padding:0 28px}
+  a{color:inherit;text-decoration:none}
+
+  /* 顶部 */
+  header{padding:44px 0 28px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--blue);text-transform:uppercase}
+  h1{margin:14px 0 0;font-size:34px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+  .sub{margin:14px 0 0;max-width:70em;font-size:15px;line-height:1.8;color:var(--muted)}
+  .meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:22px;font-size:13px;color:var(--muted-2)}
+  .meta b{color:var(--text);font-weight:600}
+
+  /* 区块标题 */
+  .sec{padding:40px 0 0}
+  .sec-title{display:flex;align-items:baseline;gap:14px;margin-bottom:18px}
+  .sec-title h2{margin:0;font-size:19px;font-weight:600}
+  .sec-title span{font-family:var(--mono);font-size:12px;color:var(--muted-2)}
+
+  /* 分镜网格 */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px}
+  .shot{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .shot-head{
+    display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);
+    background:var(--panel-2);font-size:12.5px;
+  }
+  .shot-no{font-family:var(--mono);color:var(--blue);font-weight:600}
+  .shot-time{font-family:var(--mono);color:var(--muted)}
+  .shot-tag{
+    margin-left:auto;font-size:11.5px;color:#93C5FD;background:var(--blue-soft);
+    border:1px solid rgba(59,130,246,.28);border-radius:999px;padding:3px 10px;
+  }
+
+  /* 16:9 画格 */
+  .frame{
+    position:relative;aspect-ratio:16/9;overflow:hidden;background:#060B14;
+  }
+  .frame img{width:100%;height:100%;object-fit:cover;display:block}
+  .frame .grad{
+    position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(180deg,rgba(3,7,18,.05) 0%,rgba(3,7,18,.05) 55%,rgba(3,7,18,.82) 100%);
+  }
+  .tc{
+    position:absolute;top:12px;left:14px;font-family:var(--mono);font-size:10.5px;color:rgba(255,255,255,.75);
+    background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:3px 7px;
+  }
+  .subs{
+    position:absolute;left:0;right:0;bottom:16px;text-align:center;padding:0 26px;
+    font-size:16px;font-weight:600;line-height:1.5;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.65);
+  }
+  .subs small{display:block;font-size:12px;font-weight:400;color:#CBD5E1;margin-top:5px}
+
+  /* 纯文字画格 */
+  .type-frame{
+    position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+    padding:8% 9%;background:
+      radial-gradient(700px 340px at 80% 0%, rgba(37,99,235,.20), transparent 65%),
+      linear-gradient(160deg,#0B1220,#0F1B2E);
+  }
+  .type-frame .k{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:#7FB0FF;text-transform:uppercase}
+  .type-frame .big{margin-top:16px;font-size:clamp(20px,2.4vw,34px);font-weight:600;line-height:1.35;letter-spacing:-.01em}
+  .type-frame .big em{font-style:normal;color:#7FB0FF;background:linear-gradient(180deg,transparent 72%,rgba(37,99,235,.55) 72%)}
+  .type-frame .brandline{display:flex;align-items:center;gap:12px;margin-top:26px;font-size:13px;color:#9DB4D6}
+  .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(160deg,#3B82F6,#1D4ED8);display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff}
+
+  /* 线框示意（还没录屏的界面） */
+  .wire{
+    position:absolute;inset:0;display:flex;flex-direction:column;padding:5% 6%;
+    background:linear-gradient(180deg,#0B1220,#0E1727);
+  }
+  .wire-note{
+    align-self:flex-start;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+    color:#FCD34D;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);
+    border-radius:5px;padding:3px 8px;
+  }
+  .wire-ui{
+    flex:1;margin-top:12px;background:#F7F9FC;border-radius:8px;overflow:hidden;
+    display:flex;flex-direction:column;box-shadow:0 16px 40px rgba(0,0,0,.4);
+  }
+  .wire-top{height:26px;background:#EDF2F8;border-bottom:1px solid #DDE5EF;display:flex;align-items:center;gap:5px;padding:0 9px}
+  .wire-top i{width:5px;height:5px;border-radius:50%;background:#C3CEDD;display:block}
+  .wire-body{flex:1;display:flex}
+  .wire-rail{width:19%;background:#F2F6FB;border-right:1px solid #E3EAF3;padding:10px 8px;display:flex;flex-direction:column;gap:9px}
+  .wire-rail b{height:7px;border-radius:3px;background:#D7E1EE;display:block}
+  .wire-rail b.on{background:#2563EB;opacity:.75}
+  .wire-main{flex:1;padding:11px 13px;display:flex;flex-direction:column;gap:8px}
+  .wire-t{height:9px;width:42%;border-radius:3px;background:#CBD6E5}
+  .wire-row{height:15px;border-radius:4px;background:#EEF3FA;border:1px solid #E3EAF3;display:flex;align-items:center;gap:7px;padding:0 8px}
+  .wire-row i{height:6px;border-radius:3px;background:#D5DFEC;display:block}
+  .wire-row .sc{width:26px;background:#FDE68A}
+  .wire-table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden}
+  .wire-table td{border:1px solid #E3EAF3;height:17px;padding:0 6px}
+  .wire-table td span{display:block;height:5px;border-radius:2px;background:#E2E9F2;width:70%}
+  .wire-table tr:first-child td{background:#F3F7FC}
+  .wire-table tr:first-child td span{background:#CBD6E5}
+  .wire-task{border:1px solid #FDE68A;background:#FFFDF5;border-radius:6px;padding:7px 9px;display:flex;flex-direction:column;gap:6px}
+  .wire-task b{height:6px;width:64%;border-radius:3px;background:#F3C86B;display:block}
+  .wire-task i{height:5px;width:88%;border-radius:3px;background:#F3E2BC;display:block}
+  .wire-focus{outline:2px solid rgba(37,99,235,.55);outline-offset:2px;border-radius:6px}
+  .wire-doc{
+    flex:1;margin-top:12px;background:#fff;border-radius:8px;padding:16px 18px;
+    display:flex;flex-direction:column;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.4);position:relative;
+  }
+  .wire-doc .hl{position:absolute;border:1.5px solid rgba(239,68,68,.85);border-radius:4px}
+  .wire-doc .ln{height:6px;border-radius:3px;background:#E7EDF5;display:block}
+  /* 节奏与声音 */
+  .tl-frame{
+    position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:16px;
+    padding:6% 7%;background:linear-gradient(160deg,#0B1220,#0E1A2C);
+  }
+  .tl-k{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:#7FB0FF;text-transform:uppercase}
+  .tl-bar{display:flex;height:58px;border-radius:9px;overflow:hidden;border:1px solid rgba(255,255,255,.1)}
+  .tl-seg{display:flex;flex-direction:column;justify-content:center;padding:0 12px;gap:3px;border-right:1px solid rgba(255,255,255,.08)}
+  .tl-seg:last-child{border-right:none}
+  .tl-seg b{font-size:12.5px;color:#F1F5F9;font-weight:600}
+  .tl-seg span{font-family:var(--mono);font-size:10px;color:#94A3B8}
+  .tl-seg.s1{background:rgba(239,68,68,.16);width:13.4%}
+  .tl-seg.s2{background:rgba(37,99,235,.22);width:33.3%}
+  .tl-seg.s3{background:rgba(16,185,129,.16);width:33.3%}
+  .tl-seg.s4{background:rgba(245,158,11,.18);width:20%}
+  .tl-legend{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:11.5px;color:#94A3B8;line-height:1.55}
+  .tl-legend b{display:block;color:#CBD5E1;font-family:var(--mono);font-size:10px;letter-spacing:.1em;margin-bottom:3px}
+
+  .qr{
+    width:82px;height:82px;border-radius:8px;background:
+      repeating-linear-gradient(90deg,#0B1220 0 5px,#fff 5px 10px),
+      repeating-linear-gradient(0deg,#0B1220 0 5px,#fff 5px 10px);
+    background-blend-mode:multiply;border:4px solid #fff;position:absolute;right:7%;bottom:14%;
+  }
+
+  /* 卡内说明 */
+  .shot-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:9px;font-size:13px;line-height:1.68}
+  .row{display:flex;gap:9px}
+  .row .k{flex:none;width:34px;color:var(--muted-2);font-family:var(--mono);font-size:11px;padding-top:2px}
+  .row .v{color:#CBD5E1}
+  .row .v b{color:#fff;font-weight:600}
+  .row .v .warn{color:#FCD34D}
+
+  /* 版本表 */
+  table.vers{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+  table.vers th,table.vers td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.vers th{color:var(--muted-2);font-weight:500;font-size:12.5px}
+  table.vers td b{color:#fff}
+  table.vers tr:last-child td{border-bottom:none}
+
+  /* 红线 */
+  .rules{margin-top:18px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .rule{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .rule h3{margin:0 0 10px;font-size:13.5px}
+  .rule.ok h3{color:var(--green)}
+  .rule.check h3{color:var(--amber)}
+  .rule.no h3{color:#F87171}
+  .rule ul{margin:0;padding-left:16px;color:var(--muted);font-size:12.5px;line-height:1.8}
+
+  footer{margin-top:44px;padding:22px 0 40px;border-top:1px solid var(--line);color:var(--muted-2);font-size:12.5px}
+  footer a{color:#7FB0FF;border-bottom:1px solid rgba(127,176,255,.35)}
+
+  @media (max-width:900px){
+    .grid,.rules{grid-template-columns:1fr}
+    h1{font-size:26px}
+    .subs{font-size:13px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="eyebrow">Smart Bid · Promo Film Storyboard</div>
+    <h1>60 秒主宣传片 · 分镜看板</h1>
+    <p class="sub">
+      主张「让每一个评分点，都有对应的答案」。11 个镜头 + 1 张节奏卡、四段情绪：焦虑（漏分）→ 掌控（有计划、有分工）→ 确定（可验收）→ 行动（预约演示）。
+      真实界面录屏 + 克制动效 + 冷静旁白，不做 AI 魔法感。<br />渠道已拍板：视频号 + 抖音，成片按 9:16 竖版；本看板为 16:9 叙事参考。
+    </p>
+    <div class="meta">
+      <span>片长 <b>60s</b></span>
+      <span>比例 <b>16:9 / 1920×1080</b></span>
+      <span>帧率 <b>25fps</b></span>
+      <span>旁白 <b>190 字 · 男声中低音</b></span>
+      <span>制作 <b>录屏 + 动效 + 配音</b></span>
+      <span>成片 <b>9:16 竖版（视频号/抖音）</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="sec">
+    <div class="sec-title"><h2>分镜脚本</h2><span>11 SHOTS + RHYTHM · 60s</span></div>
+    <div class="grid">
+
+      <!-- 01 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">01</span><span class="shot-time">0:00–0:04</span><span>4s</span>
+          <span class="shot-tag">痛点</span>
+        </div>
+        <div class="frame">
+          <div class="type-frame">
+            <div class="k">开场 · 黑场白字</div>
+            <div class="big">方案写了 <em>300 页</em>，<br />评分表上还是漏了 <em>6 分</em>。</div>
+            <div class="brandline"><span class="mark">应</span> 智能应标 · 投标应答作业系统</div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:00</div>
+          <div class="subs">方案写了 300 页，评分表上还是漏了 6 分</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">纯黑底，白字分行落下；最后一字落下时画面轻微震动 2px。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">方案写了 300 页，评分表上还是漏了 6 分。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">低频单音 + 心跳底噪，第 3 秒静音 0.3s 留白。</span></div>
+        </div>
+      </article>
+
+      <!-- 02 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">02</span><span class="shot-time">0:04–0:08</span><span>4s</span>
+          <span class="shot-tag">痛点</span>
+        </div>
+        <div class="frame">
+          <div class="wire">
+            <span class="wire-note">实拍/文档特写 · 示意</span>
+            <div class="wire-doc">
+              <span class="ln" style="width:46%;height:9px;background:#C9D5E4"></span>
+              <span class="ln" style="width:88%"></span>
+              <span class="ln" style="width:76%"></span>
+              <span class="ln" style="width:82%"></span>
+              <span class="ln" style="width:64%"></span>
+              <span class="ln" style="width:90%"></span>
+              <span class="ln" style="width:58%"></span>
+              <span class="ln" style="width:84%"></span>
+              <span class="hl" style="left:17%;top:33%;width:70%;height:9%"></span>
+              <span class="hl" style="left:17%;top:55%;width:56%;height:9%"></span>
+              <span class="hl" style="left:17%;top:76%;width:64%;height:9%"></span>
+            </div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:04</div>
+          <div class="subs">评委翻的是评分表，不是你的目录</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">评分表文档特写，镜头缓慢推近；红框依次圈出 3 条漏掉的评分点。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">评委翻的是评分表，不是你的目录。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">纸张翻动 + 单次鼠标点击，红框出现配轻"滴"。</span></div>
+        </div>
+      </article>
+
+      <!-- 03 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">03</span><span class="shot-time">0:08–0:14</span><span>6s</span>
+          <span class="shot-tag">拆解</span>
+        </div>
+        <div class="frame">
+          <div class="wire">
+            <span class="wire-note">待录屏 · 解析依据 / 评分点清单</span>
+            <div class="wire-ui">
+              <div class="wire-top"><i></i><i></i><i></i></div>
+              <div class="wire-body">
+                <div class="wire-rail"><b class="on"></b><b></b><b></b><b></b></div>
+                <div class="wire-main">
+                  <div class="wire-t"></div>
+                  <div class="wire-row"><i style="width:34%"></i><i class="sc"></i><i style="width:18%;margin-left:auto"></i></div>
+                  <div class="wire-row"><i style="width:42%"></i><i class="sc"></i><i style="width:18%;margin-left:auto"></i></div>
+                  <div class="wire-row wire-focus"><i style="width:30%"></i><i class="sc"></i><i style="width:18%;margin-left:auto"></i></div>
+                  <div class="wire-row"><i style="width:38%"></i><i class="sc"></i><i style="width:18%;margin-left:auto"></i></div>
+                  <div class="wire-row"><i style="width:26%"></i><i class="sc"></i><i style="width:18%;margin-left:auto"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:08</div>
+          <div class="subs">先拆评分点，再动笔</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">评分点清单：<b>13 个 · 合计 100 分</b>；分值、得分口径、否决项逐行高亮，关键词放大 1.2 倍。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">智能应标先读招标文件和评分办法，把评分点、分值、得分口径拆出来。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">BGM 轻进入，界面音效克制（每行高亮一声轻点）。</span></div>
+        </div>
+      </article>
+
+      <!-- 04 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">04</span><span class="shot-time">0:14–0:21</span><span>7s</span>
+          <span class="shot-tag">计划</span>
+        </div>
+        <div class="frame">
+          <img src="../screenshots/plan-outline.png" alt="本章编写计划弹窗" />
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:14</div>
+          <div class="subs">每一章，先给计划<small>写什么 · 交付什么 · 多少字</small></div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">「本章计划」弹窗：8 节逐条展开，显示要点、交付物（文字/表/图）、字数；镜头在 <b>1000 字</b> 与 <b>表格</b> 处停顿。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">每一章先给一份编写计划：写什么、交付什么、多少字。写手不用再猜。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">BGM 节奏推进，进入主段。</span></div>
+        </div>
+      </article>
+
+      <!-- 05 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">05</span><span class="shot-time">0:21–0:28</span><span>7s</span>
+          <span class="shot-tag">落稿</span>
+        </div>
+        <div class="frame">
+          <img src="../screenshots/agent-bar-4.png" alt="主编/文字/图片/表格四角色并行" style="object-position:top center" />
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:21</div>
+          <div class="subs">四个角色，按计划落稿<small>主编 · 文字 · 图片 · 表格</small></div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">四角色状态条依次点亮；右侧正文落稿、章节进度推进到 <b>8/8</b>。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">主编定结构，文字写正文，图片和表格同时产出。按节落稿，图表不用等正文。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">四个"落点"音效，与角色点亮对齐。</span></div>
+        </div>
+      </article>
+
+      <!-- 06 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">06</span><span class="shot-time">0:28–0:35</span><span>7s</span>
+          <span class="shot-tag">举证</span>
+        </div>
+        <div class="frame">
+          <img src="../screenshots/todo-v3b.png" alt="正文表格与引用来源" />
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:28</div>
+          <div class="subs">每一处引用，都能回到原文</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">正文中的表格与图示；引用来源角标被光标划过并展开原文片段。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">每个引用都标了来源，点开能回到原文片段。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">点击 + 展开声，BGM 保持。</span></div>
+        </div>
+      </article>
+
+      <!-- 07 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">07</span><span class="shot-time">0:35–0:42</span><span>7s</span>
+          <span class="shot-tag">收口</span>
+        </div>
+        <div class="frame">
+          <img src="../screenshots/project-todo.png" alt="待办三区" />
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:35</div>
+          <div class="subs">只把人能给的，留给人<small>给材料 · 定口径 · 系统去挖</small></div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">待办三区依次高亮；演示一次「上传」与一次「去选择」，系统项显示"不用你操作"。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">缺的材料、要定的口径进待办；检索、核对、重写，系统自己做。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">上传成功提示音，BGM 微微上扬。</span></div>
+        </div>
+      </article>
+
+      <!-- 08 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">08</span><span class="shot-time">0:42–0:48</span><span>6s</span>
+          <span class="shot-tag">验收</span>
+        </div>
+        <div class="frame">
+          <div class="wire">
+            <span class="wire-note">待录屏 · 质检 / 评分点自评</span>
+            <div class="wire-ui">
+              <div class="wire-top"><i></i><i></i><i></i></div>
+              <div class="wire-body">
+                <div class="wire-rail"><b></b><b></b><b class="on"></b><b></b></div>
+                <div class="wire-main">
+                  <div class="wire-t"></div>
+                  <div class="wire-row"><i style="width:20%"></i><i class="sc" style="background:#BBF7D0"></i><i style="width:30%;margin-left:auto"></i></div>
+                  <div class="wire-row"><i style="width:26%"></i><i class="sc" style="background:#FECACA"></i><i style="width:30%;margin-left:auto"></i></div>
+                  <div class="wire-row wire-focus"><i style="width:18%"></i><i class="sc" style="background:#FDE68A"></i><i style="width:30%;margin-left:auto"></i></div>
+                  <div class="wire-row"><i style="width:24%"></i><i class="sc" style="background:#BBF7D0"></i><i style="width:30%;margin-left:auto"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:42</div>
+          <div class="subs">按评分点验收，缺哪补哪</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">质检视图：评分点自评、失分点列表；点「重写本节」，单节重新生成。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">写完全书按评分点质检，缺哪补哪，单节重写不用整章推倒。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">BGM 再上扬一档，进入收尾。</span></div>
+        </div>
+      </article>
+
+      <!-- 09 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">09</span><span class="shot-time">0:48–0:53</span><span>5s</span>
+          <span class="shot-tag">交付</span>
+        </div>
+        <div class="frame">
+          <div class="wire">
+            <span class="wire-note">待录屏 · 导出 Word / 目录树</span>
+            <div class="wire-ui">
+              <div class="wire-top"><i></i><i></i><i></i></div>
+              <div class="wire-body">
+                <div class="wire-rail"><b></b><b></b><b></b><b class="on"></b></div>
+                <div class="wire-main">
+                  <div class="wire-doc" style="box-shadow:none;margin-top:0;padding:12px 14px;gap:7px">
+                    <span class="ln" style="width:40%;height:8px;background:#C9D5E4"></span>
+                    <span class="ln" style="width:30%;margin-left:8%"></span>
+                    <span class="ln" style="width:26%;margin-left:8%"></span>
+                    <span class="ln" style="width:34%;margin-left:16%"></span>
+                    <span class="ln" style="width:28%;margin-left:16%"></span>
+                    <span class="ln" style="width:36%;margin-left:8%"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:48</div>
+          <div class="subs">交付，是 Word</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">导出 Word：文件名落地、目录树滚动、章节与引用清单一起出现在文件里。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">一键导出 Word，章节树和引用清单一起交付。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">文件落地声，BGM 开始收。</span></div>
+        </div>
+      </article>
+
+      <!-- 10 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">10</span><span class="shot-time">0:53–0:57</span><span>4s</span>
+          <span class="shot-tag">品牌</span>
+        </div>
+        <div class="frame">
+          <div class="type-frame">
+            <div class="k">Slogan</div>
+            <div class="big">让每一个评分点，<br />都有对应的答案。</div>
+            <div class="brandline"><span class="mark">应</span> 智能应标</div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:53</div>
+          <div class="subs">让每一个评分点，都有对应的答案</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">深色底 + 主张两行居中；logo 从下方 8px 浮现，网格线缓慢淡入。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">智能应标，让每一个评分点，都有对应的答案。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">BGM 最后一个和弦，尾音留 1s。</span></div>
+        </div>
+      </article>
+
+      <!-- 11 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">11</span><span class="shot-time">0:57–1:00</span><span>3s</span>
+          <span class="shot-tag">CTA</span>
+        </div>
+        <div class="frame">
+          <div class="type-frame">
+            <div class="k">行动</div>
+            <div class="big" style="font-size:clamp(18px,2vw,28px)">预约 30 分钟演示<br /><span style="color:#8FA6C2;font-size:.62em;font-weight:400">用你手上的一个真实标包走一遍</span></div>
+            <div class="brandline" style="color:#7C90AC">www.example.com · 1 个工作日内联系你</div>
+            <div class="qr"></div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">REC 00:00:57</div>
+          <div class="subs">预约演示</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">画面</span><span class="v">右下角二维码（可扫码），顶部小字官网地址；停留 2s 便于截屏。</span></div>
+          <div class="row"><span class="k">旁白</span><span class="v">（无）</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">静音收尾。</span></div>
+        </div>
+      </article>
+
+      <!-- 12 -->
+      <article class="shot">
+        <div class="shot-head">
+          <span class="shot-no">12</span><span class="shot-time">全片节奏</span><span>60s</span>
+          <span class="shot-tag">声音设计</span>
+        </div>
+        <div class="frame">
+          <div class="tl-frame">
+            <div class="tl-k">Emotion Curve / 0–60s</div>
+            <div class="tl-bar">
+              <div class="tl-seg s1"><b>焦虑</b><span>0–8s</span></div>
+              <div class="tl-seg s2"><b>掌控</b><span>8–28s</span></div>
+              <div class="tl-seg s3"><b>确定</b><span>28–48s</span></div>
+              <div class="tl-seg s4"><b>行动</b><span>48–60s</span></div>
+            </div>
+            <div class="tl-legend">
+              <div><b>BGM</b>低频单音起，28s 进入推进，48s 收。</div>
+              <div><b>旁白</b>190 字，中低音，每句留 0.2–0.4s。</div>
+              <div><b>音效</b>只留点击/上传/落地三种，克制。</div>
+            </div>
+          </div>
+          <div class="grad"></div>
+          <div class="tc">STRUCTURE</div>
+          <div class="subs">60s 里做四次情绪切换</div>
+        </div>
+        <div class="shot-body">
+          <div class="row"><span class="k">节奏</span><span class="v">每 4–7s 换画面，不出现超过 3s 的静态界面；关键数字放大 1.2 倍。</span></div>
+          <div class="row"><span class="k">字幕</span><span class="v">18–22 字/行，最多 2 行；硬字幕，关键词加粗。</span></div>
+          <div class="row"><span class="k">声音</span><span class="v">无旁白段留白；收尾静音 1s，避免和官网自动播放冲突。</span></div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title"><h2>其他版本</h2><span>3 VERSIONS</span></div>
+    <table class="vers">
+      <tr><th style="width:16%">版本</th><th style="width:12%">时长</th><th style="width:12%">比例</th><th>结构</th></tr>
+      <tr><td><b>3min 演示片</b></td><td>3:00</td><td>16:9</td><td>痛点定位 20s → 项目准备与解析依据 35s → 应答策划 30s → 应答编写 50s → 待办与质检交付 35s → 安全收尾 10s（章节标题卡分隔）</td></tr>
+      <tr><td><b>15s 竖版</b></td><td>0:15</td><td>9:16</td><td>漏 6 分（3s）→ 评分点 + 计划（4s）→ 四角色 + 待办（4s）→ 主张 + 二维码（4s）；全部用界面局部特写</td></tr>
+      <tr><td><b>30s 展会无声</b></td><td>0:30</td><td>16:9</td><td>5 张卡片轮播，每卡 6s；无旁白，字幕 3 米可读；结尾二维码</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title"><h2>口径红线</h2><span>开拍前必须确认</span></div>
+    <div class="rules">
+      <div class="rule ok">
+        <h3>✓ 可以讲（界面已具备）</h3>
+        <ul>
+          <li>标包识别、确认与隔离</li>
+          <li>评分点拆解 / 分值 / 得分口径</li>
+          <li>目录承载评分点</li>
+          <li>本章编写计划（要点/交付物/字数）</li>
+          <li>四角色并行、按节落稿、单节重写</li>
+          <li>待办三区、引用可回看原文</li>
+          <li>评分点自评与失分点、Word 导出</li>
+        </ul>
+      </div>
+      <div class="rule check">
+        <h3>! 需核实后再讲</h3>
+        <ul>
+          <li>素材库三页签</li>
+          <li>片段挑选器 / 计划阶段按节挑素材</li>
+          <li>写完即交付的自动质检</li>
+          <li>缺口自动重写</li>
+          <li>交付硬门（不合格不许导出）</li>
+        </ul>
+      </div>
+      <div class="rule no">
+        <h3>✕ 绝对不讲</h3>
+        <ul>
+          <li>「AI 自动中标」「提升 300%」</li>
+          <li>「完全替代写手 / 不用人审」</li>
+          <li>真实客户名、项目名、金额</li>
+          <li>竞品名称</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    完整方案见 <a href="../design/官网宣传视频-方案.md">docs/design/官网宣传视频-方案.md</a> ·
+    录屏清单 R1–R8 · 排期 5 个工作日 · 预算档位 A/B/C。
+  </footer>
+</div>
+
+</body>
+</html>

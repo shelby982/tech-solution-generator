@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI 视频工作流选型 · 智能应标</title>
+<style>
+  :root{
+    --ink:#0F172A;--ink-2:#334155;--muted:#64748B;--muted-2:#94A3B8;
+    --bg:#F6F8FB;--panel:#fff;--line:#E2E8F0;--line-2:#EDF2F7;
+    --blue:#2563EB;--blue-d:#1D4ED8;--blue-soft:#EAF1FF;
+    --green:#0F9F6E;--green-soft:#EAFBF4;--amber:#D97706;--amber-soft:#FFF6E8;
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .page{width:1440px;margin:0 auto;padding:56px 64px 48px}
+  .eyebrow{font-family:var(--mono);font-size:13px;letter-spacing:.14em;color:var(--blue);text-transform:uppercase}
+  h1{margin:14px 0 0;font-size:38px;font-weight:600;letter-spacing:-.02em;line-height:1.25}
+  .sub{margin:14px 0 0;font-size:15.5px;line-height:1.8;color:var(--muted);max-width:70em}
+  .sec{margin-top:42px}
+  .sec-title{display:flex;align-items:baseline;gap:12px;margin-bottom:18px}
+  .sec-title h2{margin:0;font-size:18px;font-weight:600}
+  .sec-title span{font-family:var(--mono);font-size:11.5px;color:var(--muted-2)}
+
+  /* 矩阵 */
+  .matrix{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:40px 0 40px 54px}
+  .axis-y{position:absolute;left:0;top:60px;bottom:60px;display:flex;align-items:center}
+  .axis-y span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:12.5px;color:var(--muted-2);letter-spacing:.08em}
+  .axis-x{position:absolute;left:54px;right:0;bottom:8px;text-align:center;font-size:12.5px;color:var(--muted-2);letter-spacing:.08em}
+  .axis-tick{position:absolute;font-family:var(--mono);font-size:10.5px;color:#B6C2D2}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;position:relative}
+  .card.rec{border-color:#BFD4FF;background:linear-gradient(180deg,#F7FAFF,#fff);box-shadow:0 14px 36px rgba(37,99,235,.09)}
+  .card .tag{position:absolute;top:16px;right:18px;font-size:11px;border-radius:999px;padding:3px 9px}
+  .card .tag.rec{color:#1D4ED8;background:#E7F0FF;border:1px solid #C7DBFF}
+  .card .tag.no{color:#B45309;background:#FFF7E8;border:1px solid #FCE7C4}
+  .card .tag.ok{color:#047857;background:#EAFBF4;border:1px solid #BFEBD9}
+  .card h3{margin:0 0 6px;font-size:17px;font-weight:600}
+  .card .who{margin:0 0 10px;font-size:12px;color:var(--muted-2);font-family:var(--mono)}
+  .card p{margin:0;font-size:13.2px;line-height:1.7;color:var(--muted)}
+  .card .use{margin-top:12px;font-size:12.5px;color:var(--ink-2);display:flex;gap:7px;align-items:flex-start}
+  .card .use i{font-style:normal;width:5px;height:5px;border-radius:50%;background:var(--blue);margin-top:7px;flex:none}
+  .card .use.warn i{background:var(--amber)}
+  .card .use.good i{background:var(--green)}
+
+  /* 管线 */
+  .pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .step{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px;position:relative}
+  .step .n{font-family:var(--mono);font-size:11px;color:var(--blue);background:var(--blue-soft);border-radius:6px;padding:2px 7px;display:inline-block}
+  .step h4{margin:10px 0 6px;font-size:14.5px;font-weight:600}
+  .step .tool{font-family:var(--mono);font-size:11.5px;color:#1D4ED8;margin-bottom:7px}
+  .step p{margin:0;font-size:12.3px;line-height:1.6;color:var(--muted)}
+  .step.rec{border-color:#CFE0FF}
+  .note{margin-top:18px;display:flex;gap:10px;align-items:flex-start;background:#FFFDF5;border:1px solid #FDE7B0;border-radius:12px;padding:13px 16px;font-size:13px;color:#8A5A12;line-height:1.7}
+  .note b{color:#B45309}
+  .legend{margin-top:14px;font-size:12px;color:var(--muted-2)}
+  footer{margin-top:26px;font-size:12px;color:var(--muted-2)}
+  footer a{color:#1D4ED8;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="eyebrow">AI Video Workflow · Research 2026</div>
+  <h1>AI 视频工作流：四类路线，一张选型图</h1>
+  <p class="sub">
+    按「与真实产品的一致性 × 自动化程度」分类，而不是按"是否用了大模型"。ToB 产品宣传片要的是真实 UI、可信证据、多版本迭代——落点在高控制、高自动化这一格。
+  </p>
+
+  <div class="sec">
+    <div class="sec-title"><h2>选型矩阵</h2><span>REALITY × AUTOMATION</span></div>
+    <div class="matrix">
+      <div class="axis-y"><span>与 真 实 产 品 的 一 致 性 →</span></div>
+      <div class="axis-x">自 动 化 程 度 →</div>
+
+      <!-- 左上：高一致 / 低自动化 -->
+      <div class="card">
+        <span class="tag ok">仅实拍</span>
+        <h3>传统实拍 / 人工剪辑</h3>
+        <div class="who">实拍 + 剪辑师</div>
+        <p>品牌大片质感最好，但单条 8k–20k、迭代慢，多版本要重做。</p>
+        <div class="use"><i></i><span>我们只用它拍 3 个实拍镜头（纸、笔、合上标书）</span></div>
+      </div>
+      <!-- 右上：高一致 / 高自动化 -->
+      <div class="card rec">
+        <span class="tag rec">推荐</span>
+        <h3>程序化渲染 + 真实录屏</h3>
+        <div class="who">Remotion · Revideo · Playwright · agentic-product-demo</div>
+        <p>脚本/分镜 JSON 驱动模板渲染；产品界面用 Playwright 录真实交互，或用代码复刻 UI。</p>
+        <div class="use good"><i></i><span>一套模板出 9:16 / 16:9 / 15s / 多语言；改版可一键重录</span></div>
+      </div>
+      <!-- 左下：低一致 / 低自动化 -->
+      <div class="card">
+        <span class="tag no">现状</span>
+        <h3>截图 / PPT 拼贴</h3>
+        <div class="who">手工截图 + 剪辑软件</div>
+        <p>把界面截图贴进时间线，加淡入淡出。快，但不像"产品在动"，也没有证据感。</p>
+        <div class="use warn"><i></i><span>就是我们现在 animatic 阶段的做法，只能验证节奏</span></div>
+      </div>
+      <!-- 右下：低一致 / 高自动化 -->
+      <div class="card">
+        <span class="tag no">不可用于界面</span>
+        <h3>一键成片 + 生成式 b-roll</h3>
+        <div class="who">MoneyPrinterTurbo · ShortGPT · ComfyUI / Wan2.1</div>
+        <p>文案 → TTS → 库存素材自动合成；生成模型做氛围空镜。快，但与真实产品无关。</p>
+        <div class="use warn"><i></i><span>生成 UI 会篡改表格与中文，只做转场/空镜</span></div>
+      </div>
+    </div>
+    <div class="legend">纵轴：与真实产品的一致性（上高下低）；横轴：自动化程度（右高左低）。<b style="color:#1D4ED8">右上角才是我们要去的地方。</b></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title"><h2>推荐管线：脚本驱动 + 程序化渲染</h2><span>8 STEPS</span></div>
+    <div class="pipe">
+      <div class="step"><span class="n">01</span><h4>主张与脚本</h4><div class="tool">LLM + 人定稿</div><p>一句话主张、旁白、逐镜头文案。</p></div>
+      <div class="step"><span class="n">02</span><h4>script.json</h4><div class="tool">唯一事实源</div><p>镜头 / 字幕 / 时长 / 素材类型 / 证据点。</p></div>
+      <div class="step"><span class="n">03</span><h4>素材采集</h4><div class="tool">Playwright + 实拍</div><p>自动录真实 UI；补 3 个实拍镜头。</p></div>
+      <div class="step"><span class="n">04</span><h4>模板渲染</h4><div class="tool">Remotion</div><p>一套组件出多比例、多时长。</p></div>
+      <div class="step"><span class="n">05</span><h4>配音</h4><div class="tool">CosyVoice / ElevenLabs</div><p>逐句生成，便于对齐与改词。</p></div>
+      <div class="step"><span class="n">06</span><h4>字幕对齐</h4><div class="tool">WhisperX</div><p>词级时间戳，替代手工卡点。</p></div>
+      <div class="step"><span class="n">07</span><h4>后期封装</h4><div class="tool">auto-editor + ffmpeg</div><p>去静音、响度标准化、导出。</p></div>
+      <div class="step rec"><span class="n">08</span><h4>质量门</h4><div class="tool">LLM 初检 + 人工终审</div><p>术语 / 数字 / 脱敏 / 字幕校对。</p></div>
+    </div>
+    <div class="note">
+      <b>边界：</b>生成式模型只做 b-roll；产品界面一律"录屏或代码复刻"，否则会出现表格错位、中文乱码、按钮幻觉——这是 ToB 宣传片最不可接受的事故。
+    </div>
+  </div>
+
+  <footer>参考：<a href="https://github.com/remotion-dev/remotion">Remotion</a> · <a href="https://github.com/redotvideo/revideo">Revideo</a> · <a href="https://github.com/Alexwtlf/agentic-product-demo">agentic-product-demo</a> · <a href="https://github.com/digitalsamba/claude-code-video-toolkit">claude-code-video-toolkit</a> · <a href="https://github.com/microsoft/playwright">Playwright</a> · <a href="https://github.com/m-bain/whisperX">WhisperX</a></footer>
+</div>
+</body>
+</html>

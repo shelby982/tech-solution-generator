@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1280" />
+<meta name="robots" content="noindex" />
+<title>应标文件生成系统 · 把评分办法，变成逐条落地的写作与评审</title>
+<!--
+  PC 端落地页 · 2026-11-10
+  依据：最新产品内容（评审体系 v1→v4：L0 规则预检 / 分层调度 / 加权得分 /
+  否决风险三色 / issue 状态机 / 证据链 / 达标线 / 统一交付判断）
+  自包含单文件：无外链字体、无图片依赖（示意图为内联 SVG），离线可直接打开。
+-->
+<style>
+  :root{
+    --ink:#0F172A; --ink-2:#334155; --muted:#64748B; --muted-2:#94A3B8;
+    --bg:#F6F8FB; --panel:#FFFFFF; --line:#E2E8F0; --line-2:#EEF2F7;
+    --blue:#2563EB; --blue-d:#1D4ED8; --blue-soft:#EAF1FF;
+    --green:#0F9F6E; --green-soft:#E7F8F1;
+    --amber:#D97706; --amber-soft:#FEF6E7;
+    --red:#DC2626; --red-soft:#FDEDED;
+    --navy:#0B1220; --navy-2:#111C2E;
+    --r-lg:18px; --r-md:12px; --r-sm:9px;
+    --shadow-s:0 2px 8px rgba(15,23,42,.06);
+    --shadow-m:0 14px 36px rgba(15,23,42,.10);
+    --shadow-l:0 30px 70px rgba(15,23,42,.16);
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,-apple-system,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 32px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ── 导航 ── */
+  .nav{position:sticky;top:0;z-index:50;background:rgba(11,18,32,.86);
+    backdrop-filter:blur(14px);border-bottom:1px solid rgba(255,255,255,.08)}
+  .nav .wrap{display:flex;align-items:center;gap:34px;height:66px}
+  .brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:600}
+  .brand-mark{width:28px;height:28px;border-radius:8px;flex:none;
+    background:linear-gradient(160deg,#3B82F6,#1D4ED8);display:grid;place-items:center;
+    color:#fff;font-size:13px;font-weight:700}
+  .brand-sub{font-size:11px;color:#8FA3BD;font-weight:400;margin-left:2px}
+  .nav-links{display:flex;gap:26px;margin-left:6px}
+  .nav-links a{color:#C7D2E0;font-size:13.5px;transition:color .15s}
+  .nav-links a:hover{color:#fff}
+  .nav-cta{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .nav-login{color:#C7D2E0;font-size:13.5px}
+  .nav-login:hover{color:#fff}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;
+    border:1px solid transparent;padding:11px 20px;font-size:14px;font-weight:600;line-height:1;
+    transition:.18s;white-space:nowrap}
+  .btn-blue{background:var(--blue);color:#fff}
+  .btn-blue:hover{background:var(--blue-d);transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.22)}
+  .btn-ghost:hover{border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.06)}
+  .btn-line{background:#fff;color:var(--ink-2);border-color:var(--line)}
+  .btn-line:hover{border-color:#CBD5E1;color:var(--ink)}
+
+  /* ── Hero ── */
+  .hero{position:relative;overflow:hidden;color:#fff;padding:76px 0 0;
+    background:
+      radial-gradient(900px 480px at 78% -10%, rgba(37,99,235,.34), transparent 62%),
+      radial-gradient(700px 420px at 6% 6%, rgba(37,99,235,.12), transparent 60%),
+      linear-gradient(180deg,#0B1220 0%,#0C1526 62%,#0B1220 100%)}
+  .hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.5) 55%,transparent 100%);
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.5) 55%,transparent 100%)}
+  .hero-grid{position:relative;display:grid;grid-template-columns:1.12fr .88fr;gap:48px;align-items:start}
+  .kicker{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;
+    background:rgba(37,99,235,.16);border:1px solid rgba(96,165,250,.35);color:#BFDBFE;
+    font-size:12px;letter-spacing:.02em}
+  .kicker b{color:#fff}
+  h1{margin:18px 0 0;font-size:42px;line-height:1.2;letter-spacing:-.02em;font-weight:700;max-width:540px}
+  h1 em{font-style:normal;background:linear-gradient(90deg,#93C5FD,#60A5FA);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-sub{margin:18px 0 0;font-size:15.5px;line-height:1.85;color:#C3CEDD;max-width:520px}
+  .hero-cta{margin-top:26px;display:flex;gap:12px;align-items:center}
+  .hero-note{margin-top:14px;font-size:12px;color:#7F93AD}
+  .hero-stats{margin:38px 0 0;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;
+    border-top:1px solid rgba(255,255,255,.10);padding-top:22px}
+  .hero-stats .st b{display:block;font-size:24px;letter-spacing:-.01em}
+  .hero-stats .st > span{display:block;margin-top:5px;font-size:11.5px;color:#8FA3BD;line-height:1.5}
+  .hero-stats .st b span{display:inline;margin:0;font-size:13px;color:#8FA3BD;font-weight:600}
+
+  /* Hero 右侧产品卡 */
+  .peek{background:linear-gradient(180deg,#131F33,#0E1728);border:1px solid rgba(255,255,255,.10);
+    border-radius:16px;box-shadow:var(--shadow-l);overflow:hidden}
+  .peek-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);
+    font-size:11.5px;color:#8FA3BD}
+  .peek-dot{width:8px;height:8px;border-radius:50%;background:#334155}
+  .peek-body{padding:14px}
+  .pblock{border-radius:11px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);
+    padding:11px 12px;margin-bottom:10px}
+  .pblock:last-child{margin-bottom:0}
+  .prow{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .pname{font-size:12.5px;color:#DDE6F2;font-weight:600}
+  .pscore{font-family:var(--mono);font-size:12px;color:#93C5FD}
+  .pline{margin-top:8px;height:6px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+  .pline i{display:block;height:100%;border-radius:99px}
+  .pitem{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#B6C4D6;padding:4px 0}
+  .tag{font-size:10px;padding:1.5px 6px;border-radius:5px;white-space:nowrap;font-weight:600}
+  .tag-red{background:rgba(220,38,38,.16);color:#FCA5A5}
+  .tag-amber{background:rgba(217,119,6,.16);color:#FCD34D}
+  .tag-green{background:rgba(15,159,110,.16);color:#86EFAC}
+  .tag-blue{background:rgba(37,99,235,.18);color:#93C5FD}
+  .tag-gray{background:rgba(148,163,184,.16);color:#CBD5E1}
+
+  /* ── 通用 section ── */
+  .sec{padding:76px 0;scroll-margin-top:78px}
+  .sec-head{max-width:760px}
+  .eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--blue);text-transform:uppercase}
+  h2{margin:12px 0 0;font-size:31px;line-height:1.35;letter-spacing:-.015em}
+  .sec-sub{margin:14px 0 0;font-size:14.5px;line-height:1.85;color:var(--muted)}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:34px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:34px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);
+    padding:20px;box-shadow:var(--shadow-s)}
+  .card h3{margin:0;font-size:15.5px;letter-spacing:-.01em}
+  .card p{margin:9px 0 0;font-size:13px;line-height:1.8;color:var(--muted)}
+  .card .ico{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:var(--blue-soft);color:var(--blue);font-size:15px;margin-bottom:13px}
+  .card .ico.g{background:var(--green-soft);color:var(--green)}
+  .card .ico.a{background:var(--amber-soft);color:var(--amber)}
+  .card .ico.r{background:var(--red-soft);color:var(--red)}
+  .card .meta{margin-top:12px;font-size:11.5px;color:var(--muted-2);font-family:var(--mono)}
+
+  /* ── 评审流水线 ── */
+  .pipe{margin-top:36px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
+    padding:26px;box-shadow:var(--shadow-m)}
+  .pipe-rail{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;position:relative}
+  .pipe-step{position:relative;padding:14px 14px 15px;border-radius:11px;border:1px solid var(--line-2);
+    background:linear-gradient(180deg,#FCFDFF,#F8FAFD)}
+  .pipe-step .no{display:inline-flex;width:20px;height:20px;border-radius:6px;background:var(--blue-soft);
+    color:var(--blue-d);font-size:11px;font-weight:700;align-items:center;justify-content:center;margin-bottom:9px}
+  .pipe-step b{display:block;font-size:13px}
+  .pipe-step small{display:block;margin-top:6px;font-size:11.5px;line-height:1.65;color:var(--muted)}
+  .pipe-step .cost{margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--green)}
+  .pipe-foot{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+    padding-top:16px;border-top:1px dashed var(--line)}
+  .chip{font-size:11.5px;color:var(--ink-2);background:#F1F5F9;border:1px solid var(--line);
+    border-radius:99px;padding:5px 11px}
+  .chip b{color:var(--ink)}
+  .chip.g{background:var(--green-soft);border-color:#BFEBD9;color:#0B7A55}
+  .chip.a{background:var(--amber-soft);border-color:#FBE0B0;color:#9A5B06}
+  .chip.r{background:var(--red-soft);border-color:#F7C9C9;color:#A61B1B}
+
+  /* ── 对照（可验证的修复） ── */
+  .fix-demo{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
+  .pane{border-radius:var(--r-md);border:1px solid var(--line);overflow:hidden;background:#fff}
+  .pane-h{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
+    font-size:11.5px;font-weight:600;border-bottom:1px solid var(--line-2)}
+  .pane.before .pane-h{background:var(--red-soft);color:#A61B1B}
+  .pane.after .pane-h{background:var(--green-soft);color:#0B7A55}
+  .pane-body{padding:14px;font-size:12.5px;line-height:1.85;color:var(--ink-2)}
+  .pane-body mark{background:#FEF08A;color:#713F12;padding:0 2px;border-radius:3px}
+  .state-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px;font-size:12px;color:var(--muted)}
+
+  /* ── 指标条 ── */
+  .kpis{margin-top:34px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r-md);padding:18px;box-shadow:var(--shadow-s)}
+  .kpi b{display:block;font-size:26px;letter-spacing:-.02em}
+  .kpi b span{font-size:13px;color:var(--muted);font-weight:600;margin-left:3px}
+  .kpi p{margin:7px 0 0;font-size:12px;line-height:1.7;color:var(--muted)}
+
+  /* ── 表格式对比 ── */
+  .cmp{margin-top:30px;background:#fff;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:13px 16px;font-size:13px;border-bottom:1px solid var(--line-2)}
+  th{background:#F8FAFC;font-size:12px;color:var(--muted);font-weight:600}
+  td:first-child{color:var(--ink-2)}
+  tr:last-child td{border-bottom:none}
+  .yes{color:var(--green);font-weight:700}
+  .no{color:var(--muted-2)}
+
+  /* ── 安全/交付 ── */
+  .dark{background:var(--navy);color:#fff}
+  .dark h2{color:#fff}
+  .dark .sec-sub{color:#9FB0C6}
+  .dark .card{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.10);box-shadow:none}
+  .dark .card h3{color:#fff}
+  .dark .card p{color:#9FB0C6}
+  .dark .card .ico{background:rgba(37,99,235,.20);color:#93C5FD}
+
+  /* ── FAQ ── */
+  .faq{margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  details.qa{background:#fff;border:1px solid var(--line);border-radius:var(--r-md);padding:16px 18px}
+  details.qa summary{cursor:pointer;font-size:13.5px;font-weight:600;list-style:none;display:flex;gap:10px}
+  details.qa summary::-webkit-details-marker{display:none}
+  details.qa summary::before{content:"＋";color:var(--blue);font-weight:700}
+  details.qa[open] summary::before{content:"－"}
+  details.qa p{margin:10px 0 0;font-size:12.5px;line-height:1.85;color:var(--muted)}
+
+  /* ── CTA ── */
+  .cta{margin:0 0 80px}
+  .cta-box{position:relative;overflow:hidden;border-radius:20px;padding:52px 48px;
+    background:radial-gradient(720px 340px at 82% -20%, rgba(59,130,246,.40), transparent 60%),
+      linear-gradient(140deg,#0B1220,#111C2E 60%,#0B1220);
+    color:#fff;box-shadow:var(--shadow-l)}
+  .cta-box h2{max-width:640px}
+  .cta-box p{margin:14px 0 0;font-size:14.5px;line-height:1.85;color:#B7C5D8;max-width:600px}
+  .cta-actions{margin-top:26px;display:flex;gap:12px}
+
+  footer{border-top:1px solid var(--line);padding:26px 0 40px;color:var(--muted);font-size:12.5px}
+  footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span class="brand-mark">应</span>
+      <span>应标文件生成系统<span class="brand-sub">· 电力行业标书智能编制</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="#pain">为什么难</a>
+      <a href="#capability">核心能力</a>
+      <a href="#review">评审体系</a>
+      <a href="#efficiency">成本与效率</a>
+      <a href="#security">安全与交付</a>
+      <a href="#faq">常见问题</a>
+    </div>
+    <div class="nav-cta">
+      <a class="nav-login" href="#">登录</a>
+      <a class="btn btn-blue" href="#cta">申请试用</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="kicker">评审体系 v4 · <b>可解释的得分</b>与<b>可验证的修复</b></span>
+      <h1>把评分办法，<br />变成<em>逐条落地</em>的写作与评审。</h1>
+      <p class="hero-sub">
+        从招标文件、评分点、技术规范书出发，系统自动拆目录、定写法、绑素材、写正文，
+        再逐章评审：规则预检 48 毫秒、双角色评审、否决风险三色提示、问题级定点重写。
+        每一页正文都能回答两件事：<b>对应哪条要求</b>、<b>凭什么这么写</b>。
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-blue" href="#cta">申请试用</a>
+        <a class="btn btn-ghost" href="#review">看看评审是怎么做的</a>
+      </div>
+      <p class="hero-note">私有化部署 · Word 原生交付 · 全文可追溯</p>
+      <div class="hero-stats">
+        <div class="st"><b class="num">48<span style="font-size:14px">ms</span></b><span>单章规则预检<br/>零模型调用</span></div>
+        <div class="st"><b class="num">11.8k<span style="font-size:14px">token</span></b><span>单章双角色评审<br/>真实用量统计</span></div>
+        <div class="st"><b class="num">3<span style="font-size:14px">层</span></b><span>规则 / 快评 / 精评<br/>成本减半</span></div>
+      </div>
+    </div>
+
+    <div class="peek">
+      <div class="peek-bar"><i class="peek-dot"></i><i class="peek-dot"></i><i class="peek-dot"></i>
+        <span style="margin-left:8px">评审与交付 · 按评分点</span></div>
+      <div class="peek-body">
+        <div class="pblock">
+          <div class="prow"><span class="pname">技术方案 · 30 分</span><span class="pscore">7 章</span></div>
+          <div class="pline"><i style="width:62%;background:linear-gradient(90deg,#F59E0B,#FBBF24)"></i></div>
+          <div class="pitem" style="margin-top:8px"><span class="tag tag-amber">部分满足</span>
+            <span>预估 18 分 · 依据 3/7 章</span></div>
+        </div>
+        <div class="pblock">
+          <div class="prow"><span class="pname">否决风险</span><span class="pscore" style="color:#FCA5A5">2 条</span></div>
+          <div class="pitem"><span class="tag tag-red">废标</span><span>承诺位置留有占位符</span></div>
+          <div class="pitem"><span class="tag tag-red">废标</span><span>未逐条响应★条款</span></div>
+        </div>
+        <div class="pblock">
+          <div class="prow"><span class="pname">问题闭环</span><span class="pscore">未修 6 / 已修待验 1 / 已验 11</span></div>
+          <div class="pitem"><span class="tag tag-green">已验</span><span>缺量化事实 → 已补齐来源</span></div>
+          <div class="pitem"><span class="tag tag-blue">已修待验</span><span>结尾截断 → 已重写本节</span></div>
+          <div class="pitem"><span class="tag tag-gray">未修</span><span>缺业绩材料（需上传）</span></div>
+        </div>
+        <div class="pblock">
+          <div class="prow"><span class="pname">交付判断</span><span class="pscore" style="color:#86EFAC">81 · 接近可交</span></div>
+          <div class="pitem"><span class="tag tag-gray">规则</span><span>80 · 预检 0 硬伤 · 评审 62</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="sec" id="pain">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">为什么难</div>
+      <h2>标书不是"写不出来"，<br />是写完了还是漏分、废标、返工。</h2>
+      <p class="sec-sub">一本响应文件动辄两三百页、上千条要求。人工做，问题不在产能，在"对不齐"。</p>
+    </div>
+    <div class="grid-4">
+      <div class="card"><div class="ico r">分</div><h3>漏分点</h3>
+        <p>评分办法 30 分项下分十几条要素，写着写着就漏了；事后才发现，改动牵一发动全身。</p></div>
+      <div class="card"><div class="ico a">废</div><h3>废标风险</h3>
+        <p>★ 条款、资格条件、证明材料齐备性——这类问题一条就出局，却和普通问题混在一起看不见。</p></div>
+      <div class="card"><div class="ico">散</div><h3>素材散</h3>
+        <p>业绩、资质、参数、政策文件散在十几个附件里，写的时候靠翻，翻到也不敢直接引。</p></div>
+      <div class="card"><div class="ico g">审</div><h3>不可审计</h3>
+        <p>"这页为什么这么写"说不清；评审意见只有一句"缺细节"，改完也无法证明真的改好了。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="capability" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">核心能力</div>
+      <h2>从招标文件到可交付 Word，一条链路走完。</h2>
+      <p class="sec-sub">五步工作台 · 计划即入口 · 素材按节绑定 · 四角色并行 · 评审分层 · 原生交付。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card"><div class="ico">①</div><h3>计划即入口</h3>
+        <p>按评分点与交付物拆出章节大纲；每节写清"要回应什么、多少字、哪些交付物"。
+          还支持<b>章级统一要求</b>与<b>节级写法</b>两层提示词：统一口径写一次，每节自动叠加。</p>
+        <div class="meta">章级统一要求 · 本节写法 · 交付物（表/图）归属到节</div></div>
+      <div class="card"><div class="ico">②</div><h3>素材按节绑定</h3>
+        <p>上传文件或联网检索成为素材出处，片段即素材；按节绑定"引用 / 数据 / 背景"三种用法。
+          自动剥离 HTML、识别表单范本类噪声并降权，候选不再全是资格清单。</p>
+        <div class="meta">出处 → 片段 → 按节绑定 · 智能备料 · 料源诊断</div></div>
+      <div class="card"><div class="ico">③</div><h3>四角色并行编制</h3>
+        <p>主编拆任务，文字 / 表格 / 图示三个角色并行产出，最后合成整章。
+          图表只在有助于回应要求时安排，不硬配图。</p>
+        <div class="meta">主编 · 文字 · 表格 · 图示 · 断点续跑</div></div>
+      <div class="card"><div class="ico g">④</div><h3>评审分层</h3>
+        <p>先跑规则预检（占位符 / 空表 / 无数字 / 无来源 / 截断…，48 毫秒、零模型），
+          干净再走双角色精评；有硬伤先修，不浪费精评成本。</p>
+        <div class="meta">L0 规则 → L1 单角色快评 → L2 技术+合规双评</div></div>
+      <div class="card"><div class="ico a">⑤</div><h3>可验证的修复</h3>
+        <p>问题分到"需补料 / 可自动改"：可自动改的点一下只改<b>问题那一段</b>（改前/改后对照），
+          应用后自动复评审，看分数与问题是否真的收敛。</p>
+        <div class="meta">定点重写 · 自动复评 · 问题状态：未修 / 已修待验 / 已验</div></div>
+      <div class="card"><div class="ico">⑥</div><h3>Word 原生交付</h3>
+        <p>目录、页码、图表编号、表格样式、图示矢量渲染全部按导出规范生成；
+          预览与导出同一套渲染，不会出现"预览好好的，导出跑版"。</p>
+        <div class="meta">.docx · 排版预览 PDF · 表格/图示规范化</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="review" style="background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">评审体系 v4</div>
+      <h2>不是打个分，是给出一条能执行的改法。</h2>
+      <p class="sec-sub">
+        很多工具的"评审"是一段泛泛的点评。这里的评审要能回答四个问题：
+        <b>这章够不够分</b>、<b>会不会废标</b>、<b>问题在哪一句</b>、<b>改完有没有真的改好</b>。
+      </p>
+    </div>
+
+    <div class="pipe">
+      <div class="pipe-rail">
+        <div class="pipe-step"><span class="no">1</span><b>L0 规则预检</b>
+          <small>占位符 / 空表 / 无数字 / 无来源 / 短节 / 重复段 / 结尾截断</small>
+          <div class="cost">48ms · 零模型调用</div></div>
+        <div class="pipe-step"><span class="no">2</span><b>分层调度</b>
+          <small>有硬伤先走单角色快评；干净再走双角色精评</small>
+          <div class="cost">单章 21s（快评）</div></div>
+        <div class="pipe-step"><span class="no">3</span><b>双角色评审</b>
+          <small>技术视角（能不能做）+ 合规视角（敢不敢交），各出问题清单</small>
+          <div class="cost">10~118s / 章</div></div>
+        <div class="pipe-step"><span class="no">4</span><b>加权得分</b>
+          <small>按已评章节权重折算，不再"一章不满足整项归零"</small>
+          <div class="cost">可解释 · 依据可查</div></div>
+        <div class="pipe-step"><span class="no">5</span><b>风险与闭环</b>
+          <small>否决风险单列三色；问题进状态机，修完复评验证</small>
+          <div class="cost">未修 / 已修待验 / 已验</div></div>
+      </div>
+      <div class="pipe-foot">
+        <span class="chip r"><b>红</b> 有废标风险</span>
+        <span class="chip a"><b>黄</b> 需要关注</span>
+        <span class="chip g"><b>绿</b> 无明显风险</span>
+        <span class="chip">评分点章节数与章节目录一致</span>
+        <span class="chip">评审证据链：原文片段 + 评分口径</span>
+        <span class="chip">达标线：按章类型给满分要素清单</span>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top:26px">
+      <div class="card">
+        <h3>每条意见都带"依据"</h3>
+        <p>不是"缺少量化事实"一句话了事，而是给出<b>正文里的原文片段</b>、命中的<b>评分口径</b>、
+          以及<b>这条属于哪一类</b>（硬伤 / 得分点 / 需补料）。</p>
+        <div class="pane" style="margin-top:14px">
+          <div class="pane-h"><span>问题 · 高</span><span>可定位</span></div>
+          <div class="pane-body">
+            <div>现状描述缺少量化事实（系统数量 / 数据量 / 用户数 / 等保级别）</div>
+            <div style="margin-top:8px;color:var(--muted);font-size:11.5px">
+              依据：<mark>「现有系统运行情况良好」</mark> · 口径「本章应含量化数据，关键结论须标来源」
+            </div>
+          </div>
+        </div>
+        <div class="pane" style="margin-top:12px">
+          <div class="pane-h"><span>达标线 · 现状/背景类</span><span>3 / 4 达成</span></div>
+          <div class="pane-body" style="line-height:2">
+            <span class="tag tag-green">✓</span> 量化事实（≥5 处具体数字）&nbsp;&nbsp;
+            <span class="tag tag-green">✓</span> 事实来源（【来源】/页码）<br/>
+            <span class="tag tag-green">✓</span> 现存问题（≥2 条痛点差距）&nbsp;&nbsp;
+            <span class="tag tag-red">✗</span> 现状→目标衔接（缺"因此本项目…"）
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>修改只动"问题那一段"</h3>
+        <p>点「按此重写」不是整章重生成：系统定位到问题对应的段落，
+          给出改前 / 改后对照，确认后才落库（写版本、可回退）。</p>
+        <div class="fix-demo" style="margin-top:14px;grid-template-columns:1fr">
+          <div class="pane before"><div class="pane-h"><span>改前</span><span>问题段</span></div>
+            <div class="pane-body">现状描述以文字概括为主，<mark>缺少可核实的数据支撑</mark>。</div></div>
+          <div class="pane after"><div class="pane-h"><span>改后</span><span>已定位替换</span></div>
+            <div class="pane-body">现有服务器 12 台、用户约 3000 人、数据量 2TB，
+              日均请求 12 万次，运行于等保三级环境<span class="num">【来源：招标文件（第 12 页）】</span>。</div></div>
+        </div>
+        <div class="state-row">
+          <span class="tag tag-gray">未修</span>→
+          <span class="tag tag-blue">已修待验</span>→
+          <span class="tag tag-green">已验</span>
+          <span style="color:var(--muted-2)">复评确认问题消失才算"已验"</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><b class="num">1<span>个数字</span></b><p>统一交付判断：可交 / 接近可交 / 不可交，替代"评审 58 分 vs 就绪度 71"的两套口径</p></div>
+      <div class="kpi"><b class="num">3<span>条必办</span></b><p>永远只把最挡交付的 3 件事放最前；其余折叠，不制造焦虑</p></div>
+      <div class="kpi"><b class="num">0<span>占位符</span></b><p>正文永不留"待补充 / 待填写"：缺失内容写成完整表述，缺料转成待办</p></div>
+      <div class="kpi"><b class="num">100<span>%</span></b><p>评审结论可追溯：谁、何时、基于哪一版正文、哪条口径</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="efficiency">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">成本与效率</div>
+      <h2>能算清楚"跑一遍要多少钱"，才敢全量跑。</h2>
+      <p class="sec-sub">先规则、后模型；能单角色就不双角色。全量跑之前先给预算，跑完给结账。</p>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><b class="num">11.8k<span>token / 章</span></b><p>双角色精评的平均消耗（按历史真实用量统计）</p></div>
+      <div class="kpi"><b class="num">≈½<span>成本</span></b><p>走单角色快评时约减半；规则预检完全不消耗模型</p></div>
+      <div class="kpi"><b class="num">4.2<span>分钟</span></b><p>10 章全量评审实测（并发 2）；单章快评 21 秒起</p></div>
+      <div class="kpi"><b class="num">96<span>章 · 45 分钟</span></b><p>按同样并发估算的全书评审时间（可后台跑、断点续跑）</p></div>
+    </div>
+
+    <div class="cmp">
+      <table>
+        <thead><tr><th style="width:26%">能力</th><th>通用写作工具</th><th>应标文件生成系统</th></tr></thead>
+        <tbody>
+          <tr><td>评分点覆盖</td><td class="no">靠人对照评分办法</td><td><span class="yes">✓</span> 评分点 → 章节 → 逐条响应，可查覆盖</td></tr>
+          <tr><td>废标风险</td><td class="no">不区分</td><td><span class="yes">✓</span> 否决风险单列，红黄绿提示</td></tr>
+          <tr><td>问题定位</td><td class="no">"这里再充实一下"</td><td><span class="yes">✓</span> 定位到原文那一句 + 命中口径</td></tr>
+          <tr><td>修改方式</td><td class="no">整段重写、越改越散</td><td><span class="yes">✓</span> 定点重写（改前/改后对照）</td></tr>
+          <tr><td>修复验证</td><td class="no">无法验证</td><td><span class="yes">✓</span> 问题状态机 + 自动复评</td></tr>
+          <tr><td>成本可见</td><td class="no">不知道花多少</td><td><span class="yes">✓</span> 跑前预算、跑后结账</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="sec dark" id="security">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">安全与交付</div>
+      <h2>投标资料出不了公司的门，才敢用。</h2>
+      <p class="sec-sub">私有化部署、数据不出内网、全程留痕、可回溯到每一版正文。</p>
+    </div>
+    <div class="grid-4">
+      <div class="card"><div class="ico">私</div><h3>私有化部署</h3>
+        <p>支持内网部署与私有模型接入；文件、素材、正文、评审记录均留在企业内。</p></div>
+      <div class="card"><div class="ico">痕</div><h3>全程留痕</h3>
+        <p>生成、修改、重写、定点替换都写版本；谁改的、改了什么、依据哪条，都可追溯。</p></div>
+      <div class="card"><div class="ico">版</div><h3>Word 原生</h3>
+        <p>交付 .docx：目录、页码、图表编号、样式规范；可选 PDF 排版预览。</p></div>
+      <div class="card"><div class="ico">续</div><h3>中断可恢复</h3>
+        <p>长任务后台跑、断点续跑；关掉页面第二天接着来，不丢进度。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="faq">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">常见问题</div>
+      <h2>你可能关心</h2>
+    </div>
+    <div class="faq">
+      <details class="qa" open><summary>会不会写出"待补充"这种半成品？</summary>
+        <p>不会。正文红线：不留占位符。缺的内容写成完整但概括的表述；确实需要材料的，转成"需你上传"的待办，并在此前提示。</p></details>
+      <details class="qa"><summary>评审分数能直接当"能不能中标"看吗？</summary>
+        <p>不能，也不该。系统把结论拆成三层：<b>否决风险</b>（会不会废标）、<b>得分预估</b>（能拿几分、缺口在哪）、
+          <b>交付判断</b>（现在能不能交）。分数只作趋势参考。</p></details>
+      <details class="qa"><summary>评审会不会把一章的问题放大到整项？</summary>
+        <p>不会。得分按已评章节加权折算，未评章节不计入分母并单列"待评"；评分点风险仍按最差章节提示，但不再等价于整项零分。</p></details>
+      <details class="qa"><summary>改完之后怎么知道真的改好了？</summary>
+        <p>问题有状态：<b>未修 → 已修待验 → 已验</b>。应用修改后自动复评审，问题消失才置"已验"；
+          若仍在，回到"未修"，避免"分数涨了但问题没解决"。</p></details>
+      <details class="qa"><summary>能不能控制成本？</summary>
+        <p>可以。跑量前先给预算（章节数 / 调用次数 / token / 预计耗时）；规则预检零成本；
+          有硬伤时先走单角色快评，成本约为双角色的一半。</p></details>
+      <details class="qa"><summary>适合多大体量的标书？</summary>
+        <p>从单章到上百章都支持：章节级计划、按节绑定素材、后台批量评审、断点续跑；
+          目前实测包含 14 章 / 1.9 万字级章节的完整链路。</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="cta" id="cta">
+  <div class="wrap">
+    <div class="cta-box">
+      <h2>先拿一本真实的标书跑一遍，<br />看它能不能挑出你漏的那 6 分。</h2>
+      <p>我们会用你近期的招标文件与在写的响应文件做一次端到端演示：
+        出目录、写一章、跑评审、给出定点改法与修复验证。不需要你改现有流程。</p>
+      <div class="cta-actions">
+        <a class="btn btn-blue" href="#">申请试用</a>
+        <a class="btn btn-ghost" href="#">预约演示</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 应标文件生成系统 · 电力行业标书智能编制</span>
+    <span>私有化部署 · 数据不出内网 · 支持国产化环境</span>
+  </div>
+</footer>
+
+</body>
+</html>

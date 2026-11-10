@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>智能应标 · 60s 竖版动态分镜</title>
+<!--
+  60s 竖版动态分镜（animatic）逐帧渲染页
+  用法：video-animatic.html?f=1 ... ?f=11
+  1080 × 1920，配合 Chrome 截图 + ffmpeg 合成
+  素材：2026-10-28 真实界面截图 + 2026-10-20~22 最新界面
+-->
+<style>
+  :root{
+    --bg:#0B1220; --panel:#0F172A; --line:#1E293B;
+    --text:#E8EEF7; --muted:#94A3B8; --muted-2:#64748B;
+    --blue:#3B82F6; --blue-soft:rgba(37,99,235,.16);
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:1080px;height:1920px;overflow:hidden;background:var(--bg)}
+  body{font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased}
+  .frame{
+    position:relative;width:1080px;height:1920px;display:flex;flex-direction:column;
+    padding:150px 72px 0;
+    background:
+      radial-gradient(900px 520px at 82% -6%, rgba(37,99,235,.26), transparent 62%),
+      radial-gradient(700px 420px at 6% 10%, rgba(37,99,235,.10), transparent 60%),
+      linear-gradient(180deg,#0B1220 0%,#0C1526 64%,#0B1220 100%);
+  }
+  .frame::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);
+    background-size:60px 60px;
+    mask-image:linear-gradient(180deg,#000,rgba(0,0,0,.5) 55%,transparent 92%);
+    -webkit-mask-image:linear-gradient(180deg,#000,rgba(0,0,0,.5) 55%,transparent 92%);
+  }
+  .top{position:relative;z-index:2;display:flex;align-items:center;gap:18px;font-size:19px;color:var(--muted-2)}
+  .top .no{font-family:var(--mono);color:#7FB0FF;font-weight:600;letter-spacing:.06em}
+  .top .tm{font-family:var(--mono)}
+  .top .tag{
+    margin-left:auto;font-size:17px;color:#93C5FD;background:var(--blue-soft);
+    border:1px solid rgba(59,130,246,.3);border-radius:999px;padding:6px 16px;
+  }
+  .headline{
+    position:relative;z-index:2;margin:44px 0 0;font-size:58px;font-weight:600;line-height:1.28;
+    letter-spacing:-.015em;
+  }
+  .headline em{
+    font-style:normal;background:linear-gradient(180deg,transparent 74%,rgba(37,99,235,.62) 74%);
+    padding:0 .05em;
+  }
+  .sub{position:relative;z-index:2;margin:24px 0 0;font-size:26px;line-height:1.7;color:#A9BDD6;max-width:46em}
+
+  /* 画面卡 */
+  .visual{position:relative;z-index:2;flex:1;display:flex;flex-direction:column;justify-content:center;gap:26px;padding:20px 0 250px}
+  .shot-card{
+    position:relative;width:100%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+    background:#0E1727;box-shadow:0 40px 90px rgba(0,0,0,.5);
+  }
+  .shot-card img{width:100%;aspect-ratio:3/2;object-fit:cover;object-position:center top;display:block}
+  .shot-card .glow{
+    position:absolute;inset:0;border-radius:20px;pointer-events:none;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .chip-row{display:flex;flex-wrap:wrap;gap:14px}
+  .chip{
+    display:inline-flex;align-items:center;gap:10px;font-size:21px;color:#D5E2F2;
+    background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);
+    border-radius:12px;padding:12px 18px;
+  }
+  .chip b{color:#fff;font-weight:600}
+  .chip i{font-style:normal;width:7px;height:7px;border-radius:50%;background:#60A5FA;display:block;flex:none}
+
+  /* 字幕 */
+  .subs{
+    position:absolute;left:0;right:0;bottom:0;z-index:3;padding:120px 72px 170px;
+    background:linear-gradient(180deg,transparent,rgba(3,7,18,.86) 55%,rgba(3,7,18,.96));
+    text-align:center;font-size:34px;font-weight:600;line-height:1.5;color:#fff;
+    text-shadow:0 3px 14px rgba(0,0,0,.6);
+  }
+  .subs small{display:block;margin-top:12px;font-size:21px;font-weight:400;color:#9FB3CB}
+
+  /* 纯文字帧 */
+  .type-frame{justify-content:center;padding:0 72px}
+  .type-frame .headline{margin-top:0;font-size:76px;line-height:1.24}
+  .type-frame .sub{font-size:30px}
+  .type-frame .brand{display:flex;align-items:center;gap:16px;margin-top:64px;font-size:28px;color:#C7D2E0}
+  .mark{width:52px;height:52px;border-radius:13px;background:linear-gradient(160deg,#3B82F6,#1D4ED8);display:grid;place-items:center;font-size:23px;font-weight:700;color:#fff}
+  .type-frame .subs{position:relative;padding:0;background:none;text-align:left;margin-top:0}
+
+  /* 文档示意 */
+  .doc-mock{
+    width:100%;background:#F8FAFC;border-radius:20px;padding:64px 56px;position:relative;
+    box-shadow:0 40px 90px rgba(0,0,0,.5);
+  }
+  .doc-mock .h{height:22px;width:46%;border-radius:6px;background:#C9D5E4;margin-bottom:34px}
+  .doc-mock .l{height:13px;border-radius:5px;background:#E2E9F2;margin-bottom:18px}
+  .doc-mock .g{position:absolute;border:2px solid rgba(239,68,68,.9);border-radius:8px}
+  .doc-mock .cap{position:absolute;font-family:var(--mono);font-size:16px;color:#B91C1C;background:#FEE2E2;border:1px solid #FCA5A5;border-radius:6px;padding:4px 10px}
+
+  /* Word 示意 */
+  .word-mock{
+    width:100%;background:#fff;border-radius:20px;padding:56px 52px;box-shadow:0 40px 90px rgba(0,0,0,.5);
+    display:flex;gap:36px;
+  }
+  .word-mock .side{width:32%;border-right:1px solid #E7EDF5;padding-right:26px;display:flex;flex-direction:column;gap:16px}
+  .word-mock .side b{height:12px;border-radius:4px;background:#CBD6E5;display:block}
+  .word-mock .side i{height:10px;border-radius:4px;background:#E2E9F2;display:block;margin-left:12px}
+  .word-mock .main{flex:1;display:flex;flex-direction:column;gap:16px}
+  .word-mock .main .t{height:18px;width:52%;border-radius:5px;background:#C9D5E4}
+  .word-mock .main .p{height:11px;border-radius:4px;background:#E7EDF5}
+  .word-mock .main .p.s{width:72%}
+  .word-mock .main .p.m{width:86%}
+  .word-mock .file{
+    position:absolute;right:54px;bottom:54px;font-family:var(--mono);font-size:18px;color:#0F172A;
+    background:#DBEAFE;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;
+  }
+  .word-mock{position:relative}
+</style>
+</head>
+<body>
+<div class="frame" id="frame"></div>
+
+<script>
+const SHOTS = [
+  {no:"01", tm:"0:00–0:04", tag:"痛点", type:"text",
+   headline:'方案写了 <em>300 页</em>，<br />评分表上还是漏了 <em>6 分</em>。',
+   subtitle:"方案写了 300 页，评分表上还是漏了 6 分",
+   brand:true},
+
+  {no:"02", tm:"0:04–0:08", tag:"痛点", type:"doc",
+   headline:'评委翻的是评分表，<br />不是你的目录。',
+   chips:["3 条评分点漏项","分值 5 / 8 / 10","到评审才发现"],
+   subtitle:"评委翻的是评分表，不是你的目录"},
+
+  {no:"03", tm:"0:08–0:14", tag:"拆解", type:"img",
+   img:"assets/live-outline.png",
+   headline:'先拆评分点，<br />再动笔。',
+   chips:["商务 8 · 技术 8","合计 100 分","得分口径逐条展开"],
+   subtitle:"先拆评分点，再动笔"},
+
+  {no:"04", tm:"0:14–0:21", tag:"计划", type:"img",
+   img:"assets/plan.png",
+   headline:'每一章，<br />先给计划。',
+   chips:["计划 12 页","8 节","每节 1000 字"],
+   subtitle:"每一章先给一份计划：写什么、交付什么、多少字"},
+
+  {no:"05", tm:"0:21–0:28", tag:"落稿", type:"img",
+   img:"assets/agents.png",
+   headline:'四个角色，<br />按计划落稿。',
+   chips:["主编 · 文字 · 图片 · 表格","8/8 节已写","单节可重写"],
+   subtitle:"四个角色按计划落稿，图表不用等正文"},
+
+  {no:"06", tm:"0:28–0:35", tag:"举证", type:"img",
+   img:"assets/editor.png",
+   headline:'每一处引用，<br />都能回到原文。',
+   chips:["【来源：…】标注","本章回应评分点 10 分","正文可逐块编辑"],
+   subtitle:"每个引用都标了来源，点开能回到原文"},
+
+  {no:"07", tm:"0:35–0:42", tag:"收口", type:"img",
+   img:"assets/todo.png",
+   headline:'只把人能给的，<br />留给人。',
+   chips:["你要给的 · 材料","要你拍板的 · 口径","系统去挖的 · 检索核对"],
+   subtitle:"缺的材料、要定的口径进待办，其余系统自己做"},
+
+  {no:"08", tm:"0:42–0:48", tag:"验收", type:"img",
+   img:"assets/review.png",
+   headline:'按评分点验收，<br />缺哪补哪。',
+   chips:["得分预估","缺口 0 项","待处理章节 12"],
+   subtitle:"写完全书按评分点质检，缺哪补哪"},
+
+  {no:"09", tm:"0:48–0:53", tag:"交付", type:"word",
+   headline:'交付，<br />是 Word。',
+   chips:["标准 docx","目录树","引用清单"],
+   subtitle:"一键导出 Word，章节树和引用清单一起交付"},
+
+  {no:"10", tm:"0:53–0:57", tag:"品牌", type:"text",
+   headline:'让每一个评分点，<br />都有对应的答案。',
+   subtitle:"让每一个评分点，都有对应的答案",
+   brand:true},
+
+  {no:"11", tm:"0:57–1:00", tag:"行动", type:"cta",
+   headline:'预约 30 分钟演示',
+   subtitle:"主页预约 · 评论区留言，1 个工作日内联系"}
+];
+
+function render(i){
+  const s = SHOTS[i-1]; if(!s) return;
+  const f = document.getElementById('frame');
+  let inner = `
+    <div class="top">
+      <span class="no">SHOT ${s.no} / 11</span>
+      <span class="tm">${s.tm}</span>
+      <span class="tag">${s.tag}</span>
+    </div>`;
+
+  if (s.type === 'text' || s.type === 'cta') {
+    f.classList.add('type-frame');
+    inner += `<h1 class="headline">${s.headline}</h1>`;
+    if (s.type === 'cta') {
+      inner += `<p class="sub">用你手上的一个真实标包走一遍</p>
+        <div class="chip-row" style="margin-top:40px">
+          <span class="chip"><i></i><b>主页预约</b></span>
+          <span class="chip"><i></i><b>评论区留言</b></span>
+          <span class="chip"><i></i><b>1 个工作日内联系</b></span>
+        </div>
+        <div class="brand" style="color:#7C90AC;font-size:22px">www.example.com</div>`;
+    }
+    if (s.brand && s.type === 'text') {
+      inner += `<div class="brand"><span class="mark">应</span> 智能应标</div>`;
+    }
+    inner += `<div class="subs" style="margin-top:56px;font-size:30px;text-align:left">${s.subtitle}</div>`;
+  } else {
+    inner += `<h1 class="headline">${s.headline}</h1>`;
+    if (s.type === 'img') {
+      inner += `<div class="visual">
+        <div class="shot-card"><img src="${s.img}" alt="" /><span class="glow"></span></div>
+        <div class="chip-row">${s.chips.map(c=>`<span class="chip"><i></i>${c}</span>`).join('')}</div>
+      </div>`;
+    } else if (s.type === 'doc') {
+      inner += `<div class="visual">
+        <div class="doc-mock">
+          <div class="h"></div>
+          <div class="l" style="width:92%"></div>
+          <div class="l" style="width:78%"></div>
+          <div class="l" style="width:86%"></div>
+          <div class="l" style="width:64%"></div>
+          <div class="l" style="width:90%"></div>
+          <div class="l" style="width:58%"></div>
+          <div class="l" style="width:80%"></div>
+          <div class="g" style="left:6%;top:31%;width:72%;height:9%"></div>
+          <div class="g" style="left:6%;top:53%;width:58%;height:9%"></div>
+          <div class="g" style="left:6%;top:75%;width:66%;height:9%"></div>
+          <span class="cap" style="left:80%;top:29%">-5 分</span>
+          <span class="cap" style="left:66%;top:51%">-8 分</span>
+          <span class="cap" style="left:74%;top:73%">-10 分</span>
+        </div>
+        <div class="chip-row">${s.chips.map(c=>`<span class="chip"><i></i>${c}</span>`).join('')}</div>
+      </div>`;
+    } else if (s.type === 'word') {
+      inner += `<div class="visual">
+        <div class="word-mock">
+          <div class="side"><b style="width:64%"></b><i style="width:70%"></i><i style="width:52%"></i><i style="width:60%"></i><i style="width:44%"></i></div>
+          <div class="main"><div class="t"></div><div class="p"></div><div class="p m"></div><div class="p s"></div><div class="p"></div><div class="p m"></div><div class="p s"></div></div>
+          <span class="file">技术应答.docx</span>
+        </div>
+        <div class="chip-row">${s.chips.map(c=>`<span class="chip"><i></i>${c}</span>`).join('')}</div>
+      </div>`;
+    }
+    inner += `<div class="subs">${s.subtitle}</div>`;
+  }
+  f.innerHTML = inner;
+}
+
+const n = parseInt(new URLSearchParams(location.search).get('f') || '1', 10);
+render(n);
+document.title = 'SHOT ' + n;
+</script>
+</body>
+</html>
