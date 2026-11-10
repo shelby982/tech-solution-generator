@@ -95,6 +95,15 @@ async def run_job(job_id):
         try:
             with run_context(project_id=row['project_id'],thread_id=row['thread_id']):
                 package,settings=snapshot['package'],snapshot['settings']
+                # 本章统一要求（用户在「本章计划」里填的）：整章编写必须遵守
+                try:
+                    async with get_db() as _rc:
+                        row = await (await _rc.execute(
+                            "SELECT chapter_requirement FROM chapter_studio WHERE block_id=?",
+                            (row['block_id'],))).fetchone()
+                    package['chapter_requirement'] = str((row['chapter_requirement'] if row else '') or '').strip()
+                except Exception:
+                    package['chapter_requirement'] = ''
                 if 'chief' not in artifacts:
                     await stage(job_id,'章节主编制定编排计划')
                     artifacts['chief']=await ChapterChiefAgent().plan(package,settings)

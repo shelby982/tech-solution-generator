@@ -121,7 +121,10 @@ class ChapterChiefAgent:
             'tasks 总共必须为 1 到 8 项，必须包含正文任务；将相近内容合并，不要按段落逐一创建任务。gaps 最多30项。结构：'
             '{"objective":"本章目标","tasks":[{"id":"t1","kind":"text|table|diagram","title":"标题",'
             '"purpose":"表达目的及统一参数约束","requirement_ids":[]}],"gaps":["缺口"]}',
-            {'source_package':package,'allowed_requirement_ids':sorted(allowed)},settings)
+            {'source_package':package,'allowed_requirement_ids':sorted(allowed),
+             'chapter_requirement':package.get('chapter_requirement') or '',
+             'chapter_requirement_rule':'若 chapter_requirement 非空，编排任务时必须遵守（它是本章每一节都要执行的统一要求）'},
+            settings)
         plan=Plan.model_validate(extract_json_object(raw))
         if len({t.id for t in plan.tasks})!=len(plan.tasks):raise ValueError('主编任务 ID 重复')
         if any(set(t.requirement_ids)-allowed for t in plan.tasks):raise ValueError('主编引用了不存在的规范要求')
@@ -140,8 +143,13 @@ class SpecialistAgent:
         formats={'text':'{"pieces":[{"task_id":"任务ID","markdown":"仅文字说明，可含小标题和列表，不另生成图表"}]}',
                  'table':'{"pieces":[{"task_id":"任务ID","columns":["列名"],"rows":[["单元格"]]}]}',
                  'diagram':'{"pieces":[{"task_id":"任务ID","nodes":["关系链节点1","节点2"]}]}。这是首版关系链图，不伪装为复杂架构图；每节点不超过60字'}
-        raw,model=await call_role(self.role,f'你是{ROLES[self.role]}，完成分配的全部任务，每个 task_id 只输出一次。输出格式：'+formats[self.role],
-                                 {'package':package,'shared_plan':plan,'assigned_tasks':tasks},settings)
+        requirement = str(package.get('chapter_requirement') or '').strip()
+        rule = (f'【本章统一要求（每一节都要遵守）】{requirement}\n' if requirement else '')
+        raw,model=await call_role(self.role,
+                                 (f'你是{ROLES[self.role]}，完成分配的全部任务，每个 task_id 只输出一次。' + rule +
+                                  '输出格式：' + formats[self.role]),
+                                 {'package':package,'shared_plan':plan,'assigned_tasks':tasks,
+                                  'chapter_requirement':requirement},settings)
         delivery=schemas[self.role].model_validate(extract_json_object(raw)).model_dump()
         if sorted(p['task_id'] for p in delivery['pieces'])!=sorted(t['id'] for t in tasks):raise ValueError(f'{ROLES[self.role]} 的任务交付不完整')
         for piece in delivery['pieces']:

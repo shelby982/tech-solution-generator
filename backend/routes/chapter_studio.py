@@ -491,9 +491,21 @@ async def stream_section(block_id: int, thread_id: str = '', title: str = '', po
     from services.writing_readiness import section_readiness
     _ready = await section_readiness(block, section, thread_id)
     if _ready.get("status") == "no_outline":
-        async def _blocked():
-            yield format_sse_event('error', {'message': '还没有章节大纲：请先在「本章计划」生成大纲', 'code': 'no_outline'})
-        return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
+        # 没有大纲时：只要正文里已有这一节（标题能匹配），允许"按正文小节重写/编写"
+        # —— 否则右栏列出的节点了按钮却报"还没有章节大纲"，自相矛盾。
+        has_section = False
+        try:
+            from services.section_outline import normalize_title, section_ranges
+            target = normalize_title(title)
+            has_section = any(normalize_title(name) == target
+                              for name, _start, _end in section_ranges(str(block.get('content') or '')))
+        except Exception:
+            has_section = False
+        if not has_section:
+            async def _blocked():
+                yield format_sse_event('error', {'message': '还没有章节大纲：请先在「本章计划」生成大纲', 'code': 'no_outline'})
+            return StreamingResponse(_blocked(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache'})
+        _ready = {**_ready, "status": "content_section", "needs_total": 0, "covered": 0, "missing": 0}
     _coverage_before = {"total": _ready.get("needs_total", 0), "covered": _ready.get("covered", 0),
                         "missing": _ready.get("missing", 0)}
     try:
