@@ -102,3 +102,13 @@ def test_merge_media_sections_into_parent():
     assert merged[0]["deliverables"][0]["title"] == "政策要求与项目对应关系"
     # 正常小节不受影响
     assert merged[1]["deliverables"] == []
+
+
+def test_section_ranges_skips_media_captions():
+    """正文里的「**表：X**」是表名（caption），不能当成小节 → 否则列表里会与父节并列编号。"""
+    from services.section_outline import section_ranges
+
+    content = ("**项目现状描述**\n\n正文一。\n\n"
+               "**表：项目现状描述**\n\n| 指标 | 值 |\n| --- | --- |\n| 并发 | 500 |\n\n"
+               "**现状差距分析**\n\n正文二。\n")
+    assert [t for t, _, _ in section_ranges(content)] == ["项目现状描述", "现状差距分析"]

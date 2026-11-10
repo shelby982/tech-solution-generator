@@ -4193,19 +4193,47 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 从正文里解析小节标题（`## 标题` 或独占一行的 `**标题**`），无大纲时兜底用 */
+  /** 表/图是某一节的交付物（正文里用 `**表：X**` 做表名），不是小节 → 不进小节列表 */
+  function isMediaTitle(title) {
+    const text = String(title || '').trim();
+    return /^(表|表格|图|图示|示意图|流程图|架构图|对比图)\s*[：:]/.test(text);
+  }
+
   function contentSections(bodyText) {
     const text = String(bodyText || '');
     const lines = text.split('\n');
     const heads = [];
+    const mediaByParent = {};              // 父节标题 → 表/图数量（展示用）
+    let parent = '';
     for (const raw of lines) {
       const line = raw.trim();
-      if (/^##[ \t]+\S/.test(line)) heads.push(line.replace(/^#+[ \t]+/, '').trim());
-      else if (/^\*\*[^*]{2,60}\*\*$/.test(line)) heads.push(line.replace(/^\*+|\*+$/g, '').trim());
+      let title = '';
+      if (/^##[ \t]+\S/.test(line)) title = line.replace(/^#+[ \t]+/, '').trim();
+      else if (/^\*\*[^*]{2,60}\*\*$/.test(line)) title = line.replace(/^\*+|\*+$/g, '').trim();
+      if (!title) continue;
+      if (isMediaTitle(title)) {
+        // 归到上一个正文小节名下（只做计数，不成为可重写的一节）
+        if (parent) {
+          const bucket = mediaByParent[parent] || { table: 0, figure: 0 };
+          if (/^(表|表格)\s*[：:]/.test(title)) bucket.table += 1; else bucket.figure += 1;
+          mediaByParent[parent] = bucket;
+        }
+        continue;
+      }
+      heads.push(title);
+      parent = title;
     }
     const seen = new Set();
     return heads
       .filter((title) => title && !seen.has(title) && seen.add(title))
-      .map((title) => ({ title, points: [], words: 900, deliverables: [], basis: [], _fromContent: true }));
+      .map((title) => {
+        const media = mediaByParent[title] || { table: 0, figure: 0 };
+        const deliverables = [
+          ...Array.from({ length: media.table }, () => ({ kind: 'table', title: '' })),
+          ...Array.from({ length: media.figure }, () => ({ kind: 'figure', title: '' })),
+        ];
+        return { title, points: [], words: 900, deliverables, basis: [], _fromContent: true };
+      });
   }
 
   /** 当前可操作的小节列表：优先大纲，没有大纲就用正文里已有小节（否则用户没有"重写"入口） */

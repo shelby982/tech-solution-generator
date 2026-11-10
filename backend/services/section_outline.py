@@ -315,6 +315,8 @@ def section_ranges(content: str) -> list[tuple[str, int, int]]:
     # 同时收集 `## 标题` 与独占一行的 `**标题**`（真实正文常混用），按位置排序
     marks: list[tuple[str, int]] = [(m.group(1).strip(), m.start()) for m in _HEADING_RE.finditer(text)]
     marks += [(m.group(1).strip(), m.start()) for m in _BOLD_HEADING_RE.finditer(text)]
+    # 「表：X」「图：X」是表名/图名（caption），不是小节 → 不参与分段
+    marks = [(title, start) for title, start in marks if not _is_media_section(title)]
     marks.sort(key=lambda item: item[1])
     if not marks:
         # 编号权威标题：要求该行后面有空行（避免把正文里的有序列表当成标题）
