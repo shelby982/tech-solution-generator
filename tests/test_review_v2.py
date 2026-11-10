@@ -138,3 +138,19 @@ def test_fatal_risks_skip_meta_issues():
     risks = collect_fatal_risks([meta, real])
     assert len(risks) == 1
     assert "实质性条款" in risks[0]["point"]
+
+
+def test_scoring_point_excludes_directory_nodes():
+    """评分点的「N 章」要和章节目录一致：目录节点（有子节无正文）不算章。"""
+    from services.scoring_risk import is_directory_node
+
+    blocks = [
+        {"block_id": "s1.3", "content": "", "title": "技术方案"},
+        {"block_id": "s1.3.1", "content": "正文", "title": "顶层设计"},
+        {"block_id": "s1.3.2", "content": "", "title": "总体架构"},
+        {"block_id": "s1.4", "content": "总述正文", "title": "实施"},
+        {"block_id": "s1.4.1", "content": "正文", "title": "进度"},
+    ]
+    assert is_directory_node(blocks, blocks[0]) is True     # 有子节 + 空正文 → 目录节点
+    assert is_directory_node(blocks, blocks[1]) is False     # 叶子
+    assert is_directory_node(blocks, blocks[3]) is False     # 有子节但有总述正文 → 算章

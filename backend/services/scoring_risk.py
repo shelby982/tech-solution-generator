@@ -35,6 +35,17 @@ def _load_ids(raw) -> list[str]:
         return []
 
 
+def is_directory_node(blocks: list[dict], block: dict) -> bool:
+    """是不是"目录节点"（有子节且没正文）——它不算一章，不该计入评分点章节数。"""
+    code = str(block.get("block_id") or "")
+    if not code:
+        return False
+    has_child = any(str(other.get("block_id") or "") != code
+                    and str(other.get("block_id") or "").startswith(code + ".")
+                    for other in blocks)
+    return has_child and not str(block.get("content") or "").strip()
+
+
 def _chapter_risk(finding: dict | None) -> tuple[str, list[str]]:
     """单章的得分风险：优先看审查给的满足度，其次看缺口清单。"""
     if not finding:
@@ -120,7 +131,11 @@ async def summarize_scoring_risk(db, project_id: int, thread_id: str | None) -> 
     # 没有评分点数据时（老项目）：也要给出按章节的风险，不让功能不可用
     unlinked: list[dict] = []
 
+    # 只把「目录里的可写章节」算进来：父/目录节点（有子节且正文为空）不是章，
+    # 否则评分点下会多出"8 章"这种与章节目录不一致的数字。
     for b in blocks:
+        if is_directory_node(blocks, b):
+            continue
         bid = str(b.get("block_id"))
         risk, missing = _chapter_risk(latest.get(bid))
         entry = {
