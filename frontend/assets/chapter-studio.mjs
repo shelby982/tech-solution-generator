@@ -4481,16 +4481,38 @@ export async function mountChapterStudio(host, {projectId, threadId, onStats, ge
   }
 
   /** 在光标处插入，并选中新内容（便于继续编辑 / 撤销） */
+  let lastCaret = { start: -1, end: -1 };
+  const rememberCaret = () => {
+    try {
+      lastCaret = { start: editor.selectionStart | 0, end: editor.selectionEnd | 0 };
+    } catch (error) { /* ignore */ }
+  };
+  ['click', 'keyup', 'input', 'select', 'focus'].forEach((name) => {
+    editor.addEventListener(name, rememberCaret);
+  });
+
+  /** 当前插入位置：编辑器有焦点用实时选区，否则用最后一次记住的光标（避免插到文末） */
+  function currentCaret() {
+    const focused = globalThis.document.activeElement === editor;
+    let start = focused ? editor.selectionStart : lastCaret.start;
+    let end = focused ? editor.selectionEnd : lastCaret.end;
+    const len = String(editor.value || '').length;
+    if (!(start >= 0 && start <= len)) start = len;
+    if (!(end >= start && end <= len)) end = start;
+    return { start, end };
+  }
+
   function insertAtCursor(text, { kind = 'text', select = true } = {}) {
     if (writingBusy) { status('AI 正在编制，结束后可手动插入内容。'); return; }
     paintView(false);
     if (live.active) { live.add(kind, text); status('已插入到实时编制区'); return; }
-    const start = editor.selectionStart;
+    const { start, end } = currentCaret();
     const payload = `\n\n${text}\n\n`;
-    editor.setRangeText(payload, start, editor.selectionEnd, 'end');
+    editor.setRangeText(payload, start, end, 'end');
     // 光标落在插入内容末尾（不选中）：否则下一次"插入"会把刚插入的内容替换掉
     const to = start + 2 + text.length;
     if (select) editor.setSelectionRange(to, to);
+    lastCaret = { start: to, end: to };
     editor.focus();
     changed();
     status('已插入；确认后可继续编辑（⌘Z / Ctrl+Z 撤销）');
