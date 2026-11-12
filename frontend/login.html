@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>登录 · 应标文件生成系统</title>
+<style>
+  :root{
+    --ink:#0F172A;--ink-2:#334155;--muted:#64748B;--muted-2:#94A3B8;
+    --line:#E2E8F0;--blue:#2563EB;--blue-d:#1D4ED8;--red:#DC2626;--green:#0F9F6E;
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:#0B1220;
+    min-height:100vh;display:grid;place-items:center;padding:24px}
+  .bg{position:fixed;inset:0;
+    background:radial-gradient(900px 520px at 76% -10%,rgba(37,99,235,.34),transparent 62%),
+      radial-gradient(700px 420px at 6% 10%,rgba(37,99,235,.12),transparent 60%),
+      linear-gradient(180deg,#0B1220,#0C1526 62%,#0B1220)}
+  .bg::after{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:linear-gradient(180deg,#000,rgba(0,0,0,.4) 60%,transparent)}
+  .card{position:relative;width:100%;max-width:420px;background:#fff;border-radius:18px;
+    box-shadow:0 30px 70px rgba(2,6,23,.45);padding:30px 28px 26px}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#3B82F6,#1D4ED8);
+    color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center}
+  .brand b{font-size:15px}
+  h1{margin:16px 0 0;font-size:22px;letter-spacing:-.01em}
+  .sub{margin:8px 0 0;font-size:13px;color:var(--muted);line-height:1.7}
+  label{display:block;margin-top:16px;font-size:12.5px;color:var(--ink-2);font-weight:600}
+  input{width:100%;margin-top:7px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font-size:13.5px;font-family:inherit;background:#FBFDFF;transition:.15s}
+  input:focus{outline:none;border-color:#93C5FD;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .pw{position:relative}
+  .pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;
+    color:var(--muted);font-size:11.5px;cursor:pointer}
+  .btn{width:100%;margin-top:22px;padding:12px;border:0;border-radius:10px;background:var(--blue);
+    color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:.18s;font-family:inherit}
+  .btn:hover{background:var(--blue-d)}
+  .btn[disabled]{opacity:.65;cursor:default}
+  .msg{margin-top:12px;font-size:12.5px;line-height:1.6;min-height:18px}
+  .msg.err{color:var(--red)}
+  .msg.ok{color:var(--green)}
+  .foot{margin-top:18px;padding-top:16px;border-top:1px solid #EEF2F7;font-size:12.5px;color:var(--muted);
+    display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .foot a{color:var(--blue);font-weight:600}
+  .fine{margin:14px 0 0;font-size:11.5px;color:var(--muted-2);line-height:1.7}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="card">
+  <div class="brand"><span class="mark">应</span><b>应标文件生成系统</b></div>
+  <h1>登录</h1>
+  <p class="sub">用注册邮箱登录，继续你的投标文件编制。</p>
+
+  <form id="f" autocomplete="on">
+    <label for="email">邮箱</label>
+    <input id="email" name="email" type="email" required placeholder="you@company.com" autocomplete="username" />
+    <label for="password">密码</label>
+    <div class="pw">
+      <input id="password" name="password" type="password" required placeholder="请输入密码"
+             autocomplete="current-password" />
+      <button type="button" id="eye">显示</button>
+    </div>
+    <button class="btn" id="go" type="submit">登录</button>
+    <p class="msg" id="msg"></p>
+  </form>
+
+  <div class="foot">
+    <span>还没有账号？<a href="/register">申请试用</a></span>
+    <a href="/">返回首页</a>
+  </div>
+  <p class="fine">首次联系可用同一邮箱提交试用申请；企业内部部署请用管理员分配的账号登录。</p>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const msg = $('msg');
+  const setMsg = (text, kind) => { msg.textContent = text || ''; msg.className = 'msg' + (kind ? ' ' + kind : ''); };
+  $('eye').onclick = () => {
+    const input = $('password');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    $('eye').textContent = show ? '隐藏' : '显示';
+  };
+  // 已登录则直接进应用
+  fetch('/api/auth/me', { credentials: 'same-origin' }).then(async (r) => {
+    if (!r.ok) return;
+    const data = await r.json().catch(() => ({}));
+    if (data && data.account) location.replace('/');
+  }).catch(() => {});
+
+  $('f').onsubmit = async (event) => {
+    event.preventDefault();
+    const btn = $('go');
+    btn.disabled = true;
+    setMsg('正在登录…');
+    try {
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email: $('email').value.trim(), password: $('password').value }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '登录失败，请稍后重试');
+      setMsg('登录成功，正在进入…', 'ok');
+      location.href = '/';
+    } catch (error) {
+      setMsg(error.message, 'err');
+      btn.disabled = false;
+    }
+  };
+</script>
+</body>
+</html>

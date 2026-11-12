@@ -9,6 +9,12 @@ services:
         value: /data
       - key: PORT
         value: 8000
+      - key: SAAS_MODE
+        value: "1"
+      - key: SAAS_TRIAL_DAYS
+        value: "14"
+      - key: SAAS_SESSION_DAYS
+        value: "30"
     disk:
       name: config-data
       mountPath: /data

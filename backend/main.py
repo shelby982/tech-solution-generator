@@ -35,6 +35,7 @@ from routes.writing_specs import router as specs_router
 from routes.citations import router as citations_router
 from routes.diagram_assets import router as diagram_assets_router
 from routes.leads import router as leads_router
+from routes.auth import router as auth_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -264,6 +265,7 @@ app.include_router(material_library_router, prefix="/api")
 app.include_router(diagram_assets_router, prefix="/api")
 app.include_router(plan_materials_router, prefix="/api")
 app.include_router(leads_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -312,16 +314,52 @@ async def _assets_no_cache(request, call_next):
 _HTML_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
 
 
+_login_path = os.path.join(frontend_dir, "login.html")
+_register_path = os.path.join(frontend_dir, "register.html")
+
+
+def _saas_gate(request: Request):
+    """SaaS 模式下的页面守卫：未登录跳 /login；本地未开启则放行。"""
+    from services import accounts as acc
+
+    if not acc.saas_enabled():
+        return None
+    token = request.cookies.get(acc.SESSION_COOKIE) or ""
+    if not token:
+        return RedirectResponse("/login", status_code=307)
+    return None  # 有 token：交给接口层判定有效性（无效时前端会收到 401 并跳登录）
+
+
+@app.get("/login", include_in_schema=False)
+async def serve_login():
+    if os.path.isfile(_login_path):
+        return FileResponse(_login_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "login.html 不存在"})
+
+
+@app.get("/register", include_in_schema=False)
+async def serve_register():
+    if os.path.isfile(_register_path):
+        return FileResponse(_register_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "register.html 不存在"})
+
+
 @app.get("/", include_in_schema=False)
-async def serve_frontend():
+async def serve_frontend(request: Request):
+    gate = _saas_gate(request)
+    if gate:
+        return gate
     if os.path.isfile(_projects_path):
         return FileResponse(_projects_path, headers=_HTML_NO_CACHE)
     return JSONResponse(content={"message": "技术方案生成助手 API 运行中", "docs": "/docs"})
 
 
 @app.get("/three-mode", include_in_schema=False)
-async def serve_three_mode():
+async def serve_three_mode(request: Request):
     """三模式工作台（合并验证期入口）。"""
+    gate = _saas_gate(request)
+    if gate:
+        return gate
     if os.path.isfile(_three_mode_path):
         return FileResponse(_three_mode_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "three-mode.html 不存在"})
@@ -359,14 +397,20 @@ async def serve_project_init(request: Request):
 
 
 @app.get("/project-intake", include_in_schema=False)
-async def serve_project_intake():
+async def serve_project_intake(request: Request):
+    gate = _saas_gate(request)
+    if gate:
+        return gate
     if os.path.isfile(_project_intake_path):
         return FileResponse(_project_intake_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "project-intake.html 不存在"})
 
 
 @app.get("/review", include_in_schema=False)
-async def serve_review():
+async def serve_review(request: Request):
+    gate = _saas_gate(request)
+    if gate:
+        return gate
     if os.path.isfile(_review_path):
         # HTML 不缓存：避免改完顶部模块用户强刷仍看到旧版（CSS/JS 已带版本戳）
         return FileResponse(_review_path, headers=_HTML_NO_CACHE)

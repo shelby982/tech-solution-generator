@@ -12,11 +12,12 @@ backend/routes/projects.py — Vault CRUD + lock
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from db import get_db
+from routes.auth import maybe_account
 from domain.review import WorkflowRunRepository
 from services.block_store import (
     create_project,
@@ -126,9 +127,14 @@ async def reset_analysis(
 
 
 @router.get("/projects")
-async def get_projects(status: str | None = None):
+async def get_projects(status: str | None = None,
+                       account: dict | None = Depends(maybe_account)):
+    """SaaS 模式下只返回当前账号的项目。"""
     async with get_db() as db:
-        projects = await list_projects(db, status=status)
+        projects = await list_projects(
+            db, status=status,
+            owner_account_id=(int(account["id"]) if account else None),
+        )
     return JSONResponse(content=projects)
 
 
@@ -141,10 +147,19 @@ class ProjectCreateRequest(BaseModel):
 
 
 @router.post("/projects")
-async def create_project_route(body: ProjectCreateRequest):
+async def create_project_route(body: ProjectCreateRequest,
+                               account: dict | None = Depends(maybe_account)):
+    """SaaS 模式下：必须登录、试用未过期，项目归到当前账号。"""
+    from services import accounts as acc
+
+    if acc.saas_enabled():
+        can, why = acc.can_create_project(account)
+        if not can:
+            raise HTTPException(status_code=403, detail=why)
     async with get_db() as db:
         project = await create_project(
             db, name=body.name, deadline=body.deadline, target_pages=body.target_pages,
+            owner_account_id=(int(account["id"]) if account else None),
         )
     return JSONResponse(content=project)
 

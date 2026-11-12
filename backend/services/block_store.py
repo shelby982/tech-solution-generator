@@ -37,10 +37,11 @@ async def create_project(
     name: str,
     deadline: str | None = None,
     target_pages: int | None = None,
+    owner_account_id: int | None = None,
 ) -> dict:
     cursor = await db.execute(
-        "INSERT INTO projects (name, deadline, target_pages) VALUES (?, ?, ?)",
-        (name, deadline, target_pages),
+        "INSERT INTO projects (name, deadline, target_pages, owner_account_id) VALUES (?, ?, ?, ?)",
+        (name, deadline, target_pages, owner_account_id),
     )
     await db.commit()
     return await get_project(db, cursor.lastrowid)
@@ -60,6 +61,7 @@ async def get_project(
 async def list_projects(
     db: aiosqlite.Connection,
     status: str | None = None,
+    owner_account_id: int | None = None,
 ) -> list[dict]:
     sql = """SELECT p.*,
                     COUNT(pkg.id) AS package_count,
@@ -68,9 +70,15 @@ async def list_projects(
                FROM projects p
                LEFT JOIN packages pkg ON pkg.project_id = p.id AND pkg.status != 'archived'"""
     params: tuple = ()
+    where: list[str] = []
     if status is not None:
-        sql += " WHERE p.status = ?"
-        params = (status,)
+        where.append("p.status = ?")
+        params += (status,)
+    if owner_account_id is not None:
+        where.append("p.owner_account_id = ?")
+        params += (owner_account_id,)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     sql += " GROUP BY p.id ORDER BY p.created_at DESC"
     cursor = await db.execute(sql, params)
     rows = await cursor.fetchall()

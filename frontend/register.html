@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>申请试用 · 应标文件生成系统</title>
+<style>
+  :root{
+    --ink:#0F172A;--ink-2:#334155;--muted:#64748B;--muted-2:#94A3B8;
+    --line:#E2E8F0;--blue:#2563EB;--blue-d:#1D4ED8;--red:#DC2626;--green:#0F9F6E;
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:#0B1220;
+    min-height:100vh;display:grid;place-items:center;padding:24px}
+  .bg{position:fixed;inset:0;
+    background:radial-gradient(900px 520px at 72% -12%,rgba(37,99,235,.36),transparent 62%),
+      radial-gradient(700px 420px at 4% 8%,rgba(37,99,235,.12),transparent 60%),
+      linear-gradient(180deg,#0B1220,#0C1526 62%,#0B1220)}
+  .bg::after{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+    background-size:56px 56px;mask-image:linear-gradient(180deg,#000,rgba(0,0,0,.4) 60%,transparent)}
+  .card{position:relative;width:100%;max-width:460px;background:#fff;border-radius:18px;
+    box-shadow:0 30px 70px rgba(2,6,23,.45);padding:30px 28px 26px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#3B82F6,#1D4ED8);
+    color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center}
+  .brand b{font-size:15px}
+  h1{margin:16px 0 0;font-size:22px;letter-spacing:-.01em}
+  .sub{margin:8px 0 0;font-size:13px;color:var(--muted);line-height:1.75}
+  .trial{display:inline-flex;align-items:center;gap:6px;margin-top:12px;padding:5px 10px;border-radius:999px;
+    background:#EAF1FF;color:#1D4ED8;font-size:11.5px;font-weight:600}
+  label{display:block;margin-top:15px;font-size:12.5px;color:var(--ink-2);font-weight:600}
+  label i{font-style:normal;color:var(--muted-2);font-weight:400}
+  input{width:100%;margin-top:7px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font-size:13.5px;font-family:inherit;background:#FBFDFF;transition:.15s}
+  input:focus{outline:none;border-color:#93C5FD;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .pw{position:relative}
+  .pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;
+    color:var(--muted);font-size:11.5px;cursor:pointer}
+  .hint{margin:6px 0 0;font-size:11px;color:var(--muted-2)}
+  .btn{width:100%;margin-top:22px;padding:12px;border:0;border-radius:10px;background:var(--blue);
+    color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:.18s;font-family:inherit}
+  .btn:hover{background:var(--blue-d)}
+  .btn[disabled]{opacity:.65;cursor:default}
+  .msg{margin-top:12px;font-size:12.5px;line-height:1.6;min-height:18px}
+  .msg.err{color:var(--red)}
+  .msg.ok{color:var(--green)}
+  .foot{margin-top:18px;padding-top:16px;border-top:1px solid #EEF2F7;font-size:12.5px;color:var(--muted);
+    display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .foot a{color:var(--blue);font-weight:600}
+  .fine{margin:14px 0 0;font-size:11.5px;color:var(--muted-2);line-height:1.7}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="card">
+  <div class="brand"><span class="mark">应</span><b>应标文件生成系统</b></div>
+  <h1>申请试用</h1>
+  <p class="sub">注册即开通试用，无需等待审批。上传一份招标文件，就能看到目录拆解、章节编写与逐章评审。</p>
+  <span class="trial" id="trial">试用期 14 天 · 全功能</span>
+
+  <form id="f">
+    <label for="email">企业邮箱 <i>*</i></label>
+    <input id="email" type="email" required placeholder="you@company.com" autocomplete="username" />
+    <label for="password">设置密码 <i>*</i></label>
+    <div class="pw">
+      <input id="password" type="password" required placeholder="至少 8 位，含字母和数字"
+             autocomplete="new-password" />
+      <button type="button" id="eye">显示</button>
+    </div>
+    <p class="hint">8 位以上，需同时包含字母和数字</p>
+    <label for="company">公司名称 <i>选填</i></label>
+    <input id="company" placeholder="例如：XX 科技有限公司" autocomplete="organization" />
+    <label for="phone">手机号 <i>选填</i></label>
+    <input id="phone" inputmode="tel" placeholder="方便我们联系你做 onboarding" autocomplete="tel" />
+    <button class="btn" id="go" type="submit">注册并开始试用</button>
+    <p class="msg" id="msg"></p>
+  </form>
+
+  <div class="foot">
+    <span>已有账号？<a href="/login">登录</a></span>
+    <a href="/">返回首页</a>
+  </div>
+  <p class="fine">注册即表示同意试用条款：试用账号仅用于评估产品，请勿上传涉密资料；数据保存在你的部署实例内。</p>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const msg = $('msg');
+  const setMsg = (text, kind) => { msg.textContent = text || ''; msg.className = 'msg' + (kind ? ' ' + kind : ''); };
+  $('eye').onclick = () => {
+    const input = $('password');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    $('eye').textContent = show ? '隐藏' : '显示';
+  };
+  // 展示实际试用天数（后端可配）
+  fetch('/api/auth/enabled').then(async (r) => {
+    const data = await r.json().catch(() => ({}));
+    if (data && data.saas === false) {
+      document.getElementById('trial').textContent = '当前为内网版，可直接进入系统';
+    }
+  }).catch(() => {});
+  // 已登录直接进应用
+  fetch('/api/auth/me', { credentials: 'same-origin' }).then(async (r) => {
+    if (!r.ok) return;
+    const data = await r.json().catch(() => ({}));
+    if (data && data.account) location.replace('/');
+  }).catch(() => {});
+
+  $('f').onsubmit = async (event) => {
+    event.preventDefault();
+    const btn = $('go');
+    btn.disabled = true;
+    setMsg('正在创建账号…');
+    try {
+      const resp = await fetch('/api/auth/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          email: $('email').value.trim(),
+          password: $('password').value,
+          company: $('company').value.trim(),
+          phone: $('phone').value.trim(),
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '注册失败，请稍后重试');
+      setMsg('账号已创建，正在进入…', 'ok');
+      location.href = '/';
+    } catch (error) {
+      setMsg(error.message, 'err');
+      btn.disabled = false;
+    }
+  };
+</script>
+</body>
+</html>

@@ -324,6 +324,27 @@ CREATE TABLE IF NOT EXISTS review_jobs (
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    phone         TEXT NOT NULL DEFAULT '',
+    plan          TEXT NOT NULL DEFAULT 'trial',      -- trial | pro | paused
+    trial_ends_at DATETIME,
+    status        TEXT NOT NULL DEFAULT 'active',     -- active | disabled
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
+
+CREATE TABLE IF NOT EXISTS account_sessions (
+    token      TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_account_sessions_account ON account_sessions(account_id);
+
 CREATE TABLE IF NOT EXISTS block_purged_items (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     block_id    INTEGER NOT NULL,
@@ -791,6 +812,14 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     if material_cols and 'mode' not in material_cols:
         await conn.execute("ALTER TABLE chapter_materials ADD COLUMN mode TEXT DEFAULT 'cite'")
     cs_cols = {r[1] for r in await (await conn.execute('PRAGMA table_info(chapter_studio)')).fetchall()}
+    try:
+        cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(projects)")).fetchall()}
+        if cols and 'owner_account_id' not in cols:
+            await conn.execute("ALTER TABLE projects ADD COLUMN owner_account_id INTEGER")
+            await conn.commit()
+    except Exception:
+        pass
+
     if cs_cols and 'chapter_requirement' not in cs_cols:
         await conn.execute("ALTER TABLE chapter_studio ADD COLUMN chapter_requirement TEXT DEFAULT ''")
     if cs_cols and 'layout_prompt' not in cs_cols:
