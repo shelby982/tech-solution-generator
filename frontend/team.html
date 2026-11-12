@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>团队协作 · 应标文件生成系统</title>
+<link rel="stylesheet" href="/assets/saas.css" />
+</head><body>
+<header class="top"><span class="mark">应</span><b>应标文件生成系统</b>
+  <nav><a href="/">工作台</a><a href="/upgrade">升级套餐</a><a href="/login">登录</a></nav></header>
+<main class="wrap">
+  <h1>团队协作</h1>
+  <p class="sub" id="who">正在读取…</p>
+
+  <div class="card" style="margin-bottom:18px">
+    <b>邀请成员</b>
+    <div class="row" style="margin-top:10px">
+      <input id="email" type="email" placeholder="同事的邮箱" style="flex:1;min-width:220px;margin:0" />
+      <button class="btn" id="invite">发送邀请</button>
+      <span class="muted" id="seats"></span>
+    </div>
+    <p class="msg" id="msg"></p>
+  </div>
+
+  <table><thead><tr>
+    <th style="width:60px">ID</th><th>邮箱</th><th>角色</th><th>状态</th><th>操作</th>
+  </tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">—</td></tr></tbody></table>
+
+  <div class="card" style="margin-top:18px" id="joinedBox" hidden>
+    <b>我加入的团队</b>
+    <div id="joined" class="muted" style="margin-top:8px"></div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = 'msg' + (err ? ' err' : ' ok'); };
+  async function api(path, options = {}) {
+    const resp = await fetch(path, { credentials: 'same-origin', ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    return data;
+  }
+  async function load() {
+    let me;
+    try { me = await api('/api/auth/me'); } catch (e) { location.href = '/login'; return; }
+    const account = me.account || {};
+    $('who').textContent = `${account.email} · ${account.plan} 套餐`;
+    const data = await api('/api/team/members');
+    $('seats').textContent = `席位 ${data.used} / ${data.seats}`;
+    $('rows').innerHTML = (data.members || []).length ? data.members.map((m) => `
+      <tr><td class="mono">${m.id}</td><td>${m.member_email}</td><td>${m.role}</td>
+        <td><span class="tag ${m.status === 'active' ? 'ok' : 'wait'}">${m.status === 'active' ? '已加入' : '待接受'}</span></td>
+        <td><button class="btn ghost" data-remove="${m.id}">移除</button></td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">还没有成员</td></tr>';
+    const joined = data.joined || [];
+    $('joinedBox').hidden = !joined.length;
+    $('joined').innerHTML = joined.map((j) => `· ${j.owner_email}（团队 owner）`).join('<br/>');
+  }
+  $('invite').onclick = async () => {
+    $('invite').disabled = true;
+    try {
+      const out = await api('/api/team/invite', { method: 'POST', body: JSON.stringify({ email: $('email').value.trim() }) });
+      setMsg(out.status === 'active'
+        ? `已加入团队：${out.email}`
+        : `邀请已生成：${out.link}（邮件未配置时可在运营后台 outbox 复制链接）`);
+      $('email').value = '';
+      await load();
+    } catch (error) { setMsg(error.message, true); }
+    finally { $('invite').disabled = false; }
+  };
+  $('rows').addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-remove]');
+    if (!btn) return;
+    try { await api(`/api/team/members/${btn.dataset.remove}`, { method: 'DELETE' }); await load(); }
+    catch (error) { setMsg(error.message, true); }
+  });
+  load().catch((e) => setMsg(e.message, true));
+</script></body></html>

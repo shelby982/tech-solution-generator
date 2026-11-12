@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>找回密码 · 应标文件生成系统</title>
+<link rel="stylesheet" href="/assets/saas.css" />
+</head><body>
+<header class="top"><span class="mark">应</span><b>应标文件生成系统</b>
+  <nav><a href="/login">登录</a><a href="/register">申请试用</a></nav></header>
+<main class="wrap" style="max-width:520px">
+  <h1>找回密码</h1>
+  <p class="sub">输入注册邮箱，我们会发一封重置链接（2 小时内有效）。</p>
+  <div class="card">
+    <form id="f">
+      <label>邮箱</label>
+      <input id="email" type="email" required placeholder="you@company.com" autocomplete="username" />
+      <button class="btn" id="go" type="submit" style="margin-top:16px;width:100%">发送重置链接</button>
+      <p class="msg" id="msg"></p>
+    </form>
+    <p class="muted" style="margin-bottom:0">没收到？内测阶段邮件可能未配置发信通道，请联系你的对接人协助重置。</p>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('f').onsubmit = async (event) => {
+    event.preventDefault();
+    $('go').disabled = true;
+    const msg = $('msg');
+    try {
+      const resp = await fetch('/api/auth/forgot', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: $('email').value.trim() }) });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+      msg.textContent = data.message || '如果该邮箱已注册，重置链接已发送。';
+      msg.className = 'msg ok';
+    } catch (error) { msg.textContent = error.message; msg.className = 'msg err'; $('go').disabled = false; }
+  };
+</script></body></html>

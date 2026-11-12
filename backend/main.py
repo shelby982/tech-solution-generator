@@ -37,6 +37,8 @@ from routes.diagram_assets import router as diagram_assets_router
 from routes.leads import router as leads_router
 from routes.auth import router as auth_router
 from routes.admin import router as admin_router
+from routes.billing import router as billing_router
+from routes.team import router as team_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -268,6 +270,8 @@ app.include_router(plan_materials_router, prefix="/api")
 app.include_router(leads_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(billing_router, prefix="/api")
+app.include_router(team_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -454,6 +458,47 @@ async def serve_review(request: Request):
 
 
 _admin_path = os.path.join(frontend_dir, "admin.html")
+
+
+_upgrade_path = os.path.join(frontend_dir, "upgrade.html")
+_forgot_path = os.path.join(frontend_dir, "forgot.html")
+_reset_path = os.path.join(frontend_dir, "reset.html")
+_team_path = os.path.join(frontend_dir, "team.html")
+
+
+def _serve_page(path: str, name: str, request: Request, *, need_login: bool = True):
+    if need_login:
+        gate = _saas_gate(request)
+        if gate:
+            return gate
+    if os.path.isfile(path):
+        return FileResponse(path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": f"{name} 不存在"})
+
+
+@app.get("/upgrade", include_in_schema=False)
+async def serve_upgrade(request: Request):
+    return _serve_page(_upgrade_path, "upgrade.html", request)
+
+
+@app.get("/forgot", include_in_schema=False)
+async def serve_forgot():
+    """找回密码：未登录也要能打开。"""
+    if os.path.isfile(_forgot_path):
+        return FileResponse(_forgot_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "forgot.html 不存在"})
+
+
+@app.get("/reset", include_in_schema=False)
+async def serve_reset():
+    if os.path.isfile(_reset_path):
+        return FileResponse(_reset_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "reset.html 不存在"})
+
+
+@app.get("/team", include_in_schema=False)
+async def serve_team(request: Request):
+    return _serve_page(_team_path, "team.html", request)
 
 
 @app.get("/admin", include_in_schema=False)

@@ -325,6 +325,56 @@ CREATE TABLE IF NOT EXISTS review_jobs (
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS billing_orders (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    plan          TEXT NOT NULL DEFAULT 'pro',
+    amount_cents  INTEGER NOT NULL DEFAULT 0,
+    months        INTEGER NOT NULL DEFAULT 12,
+    status        TEXT NOT NULL DEFAULT 'pending',   -- pending | paid | cancelled
+    channel       TEXT NOT NULL DEFAULT 'manual',    -- manual | stripe | wechat | alipay
+    external_id   TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    paid_at       DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_billing_orders_account ON billing_orders(account_id);
+
+CREATE TABLE IF NOT EXISTS email_tokens (
+    token       TEXT PRIMARY KEY,
+    account_id  INTEGER NOT NULL,
+    kind        TEXT NOT NULL,                        -- verify | reset | invite
+    email       TEXT NOT NULL DEFAULT '',
+    expires_at  DATETIME NOT NULL,
+    used_at     DATETIME,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_email_tokens_account ON email_tokens(account_id);
+
+CREATE TABLE IF NOT EXISTS mail_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    to_email    TEXT NOT NULL,
+    subject     TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL DEFAULT '',
+    provider    TEXT NOT NULL DEFAULT '',
+    ok          INTEGER NOT NULL DEFAULT 1,
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS team_members (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id     INTEGER NOT NULL,
+    member_id    INTEGER,
+    member_email TEXT NOT NULL DEFAULT '',
+    role         TEXT NOT NULL DEFAULT 'member',      -- owner | member
+    status       TEXT NOT NULL DEFAULT 'invited',     -- invited | active | removed
+    invite_token TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_team_owner ON team_members(owner_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_team_unique ON team_members(owner_id, member_email);
+
 CREATE TABLE IF NOT EXISTS accounts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT NOT NULL UNIQUE,

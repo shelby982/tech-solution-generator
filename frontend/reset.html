@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设置新密码 · 应标文件生成系统</title>
+<link rel="stylesheet" href="/assets/saas.css" />
+</head><body>
+<header class="top"><span class="mark">应</span><b>应标文件生成系统</b>
+  <nav><a href="/login">登录</a></nav></header>
+<main class="wrap" style="max-width:520px">
+  <h1>设置新密码</h1>
+  <p class="sub">至少 8 位，需同时包含字母和数字。</p>
+  <div class="card">
+    <form id="f">
+      <label>新密码</label>
+      <input id="password" type="password" required placeholder="请输入新密码" autocomplete="new-password" />
+      <button class="btn" id="go" type="submit" style="margin-top:16px;width:100%">保存并去登录</button>
+      <p class="msg" id="msg"></p>
+    </form>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const token = new URLSearchParams(location.search).get('token') || '';
+  if (!token) { $('msg').textContent = '链接缺少 token，请重新申请找回密码。'; $('msg').className = 'msg err'; }
+  $('f').onsubmit = async (event) => {
+    event.preventDefault();
+    $('go').disabled = true;
+    try {
+      const resp = await fetch('/api/auth/reset', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password: $('password').value }) });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+      $('msg').textContent = '密码已更新，正在跳转登录…'; $('msg').className = 'msg ok';
+      setTimeout(() => { location.href = '/login'; }, 1200);
+    } catch (error) { $('msg').textContent = error.message; $('msg').className = 'msg err'; $('go').disabled = false; }
+  };
+</script></body></html>

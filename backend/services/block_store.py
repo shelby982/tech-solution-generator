@@ -62,6 +62,7 @@ async def list_projects(
     db: aiosqlite.Connection,
     status: str | None = None,
     owner_account_id: int | None = None,
+    owner_account_ids: list[int] | None = None,
 ) -> list[dict]:
     sql = """SELECT p.*,
                     COUNT(pkg.id) AS package_count,
@@ -74,7 +75,10 @@ async def list_projects(
     if status is not None:
         where.append("p.status = ?")
         params += (status,)
-    if owner_account_id is not None:
+    if owner_account_ids:
+        where.append("p.owner_account_id IN (" + ",".join("?" * len(owner_account_ids)) + ")")
+        params += tuple(owner_account_ids)
+    elif owner_account_id is not None:
         where.append("p.owner_account_id = ?")
         params += (owner_account_id,)
     if where:

@@ -131,10 +131,11 @@ async def get_projects(status: str | None = None,
                        account: dict | None = Depends(maybe_account)):
     """SaaS 模式下只返回当前账号的项目。"""
     async with get_db() as db:
-        projects = await list_projects(
-            db, status=status,
-            owner_account_id=(int(account["id"]) if account else None),
-        )
+        ids = None
+        if account:
+            from services.team import accessible_account_ids
+            ids = await accessible_account_ids(db, account)
+        projects = await list_projects(db, status=status, owner_account_ids=ids)
     return JSONResponse(content=projects)
 
 
@@ -157,9 +158,14 @@ async def create_project_route(body: ProjectCreateRequest,
         if not can:
             raise HTTPException(status_code=403, detail=why)
     async with get_db() as db:
+        owner_id = None
+        if account:
+            from services.team import accessible_account_ids
+            team_ids = await accessible_account_ids(db, account)
+            owner_id = team_ids[0] if team_ids else int(account["id"])   # 成员创建的项目归团队 owner
         project = await create_project(
             db, name=body.name, deadline=body.deadline, target_pages=body.target_pages,
-            owner_account_id=(int(account["id"]) if account else None),
+            owner_account_id=owner_id,
         )
     return JSONResponse(content=project)
 

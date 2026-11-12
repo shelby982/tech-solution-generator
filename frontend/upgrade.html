@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>升级套餐 · 应标文件生成系统</title>
+<link rel="stylesheet" href="/assets/saas.css" />
+</head><body>
+<header class="top"><span class="mark">应</span><b>应标文件生成系统</b>
+  <nav><a href="/">工作台</a><a href="/team">团队</a><a href="/login">登录</a></nav></header>
+<main class="wrap">
+  <h1>升级套餐</h1>
+  <p class="sub" id="who">正在读取账号信息…</p>
+  <div class="grid" id="plans"></div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b>我的订单</b><span class="muted" id="orderHint"></span>
+    </div>
+    <table style="margin-top:12px"><thead><tr>
+      <th style="width:60px">ID</th><th>套餐</th><th>金额</th><th>状态</th><th>下单时间</th><th>操作</th>
+    </tr></thead><tbody id="orders"><tr><td colspan="6" class="muted">—</td></tr></tbody></table>
+    <p class="msg" id="msg"></p>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const money = (cents) => (cents ? `¥ ${(cents/100).toLocaleString('zh-CN')}` : '免费');
+  const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = 'msg' + (err ? ' err' : ' ok'); };
+
+  async function api(path, options = {}) {
+    const resp = await fetch(path, { credentials: 'same-origin', ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    return data;
+  }
+
+  async function load() {
+    let me = {};
+    try { me = await api('/api/auth/me'); } catch (e) { location.href = '/login'; return; }
+    const account = me.account || {};
+    const usage = me.usage || {};
+    $('who').textContent = `${account.email} · 当前 ${account.plan} · 试用到期 ${account.trial_ends_at || '—'} · 用量 ${(usage.used_tokens||0).toLocaleString()} / ${(usage.limit_tokens||0).toLocaleString()} token`;
+
+    const { plans, stripe } = await api('/api/billing/plans');
+    $('plans').innerHTML = plans.map((p) => `
+      <div class="plan ${p.id === 'pro' ? 'is-hot' : ''}">
+        <h3>${p.label} ${p.id === 'pro' ? '<span class="tag blue">推荐</span>' : ''}</h3>
+        <div class="price">${p.price_yuan ? `¥ ${p.price_yuan.toLocaleString('zh-CN')}` : '免费'}<small>${p.months ? ` / ${p.months} 个月` : ''}</small></div>
+        <ul>${(p.features || []).map((f) => `<li>${f}</li>`).join('')}</ul>
+        ${p.id === 'trial' ? '<button class="btn ghost" disabled>当前可用</button>'
+          : `<button class="btn" data-plan="${p.id}">升级到此套餐</button>`}
+      </div>`).join('');
+    $('orderHint').textContent = stripe ? '支持在线支付（Stripe）' : '当前为人工开通：下单后我们会联系你';
+
+    const orders = (await api('/api/billing/orders')).orders || [];
+    $('orders').innerHTML = orders.length ? orders.map((o) => `
+      <tr><td class="mono">${o.id}</td><td>${o.plan}</td><td class="mono">${money(o.amount_cents)}</td>
+        <td><span class="tag ${o.status === 'paid' ? 'ok' : 'wait'}">${o.status === 'paid' ? '已开通' : '待开通'}</span></td>
+        <td class="mono">${o.created_at}</td>
+        <td>${o.status === 'paid' ? '—' : `<button class="btn ghost" data-pay="${o.id}">查支付链接</button>`}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">还没有订单</td></tr>';
+  }
+
+  $('plans').addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-plan]');
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      const out = await api('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan: btn.dataset.plan }) });
+      if (out.pay_url) { setMsg('正在跳转支付…'); location.href = out.pay_url; return; }
+      setMsg(out.message || '订单已创建');
+      await load();
+    } catch (error) { setMsg(error.message, true); }
+    finally { btn.disabled = false; }
+  });
+
+  $('orders').addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-pay]');
+    if (!btn) return;
+    setMsg('人工开通订单：我们已收到，请在运营后台标记已付款后自动生效。');
+  });
+
+  load().catch((e) => setMsg(e.message, true));
+</script></body></html>

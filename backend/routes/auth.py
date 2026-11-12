@@ -116,3 +116,95 @@ async def require_account(ge_session: str | None = Cookie(default=None)):
         if not row:
             raise HTTPException(401, "未登录")
         return acc._public_account(row)
+
+
+# ── 找回密码 / 邮箱验证 ───────────────────────────
+
+import secrets as _secrets
+from datetime import datetime as _dt, timedelta as _td
+
+
+class ForgotBody(BaseModel):
+    email: str = Field(..., max_length=200)
+
+
+class ResetBody(BaseModel):
+    token: str = Field(..., max_length=200)
+    password: str = Field(..., max_length=128)
+
+
+async def _issue_token(db, account_id: int, kind: str, email: str) -> str:
+    token = _secrets.token_urlsafe(24)
+    expires = (_dt.now() + _td(hours=2 if kind == "reset" else 24)).strftime("%Y-%m-%d %H:%M:%S")
+    await db.execute("INSERT INTO email_tokens (token, account_id, kind, email, expires_at) "
+                     "VALUES (?,?,?,?,?)", (token, account_id, kind, email, expires))
+    await db.commit()
+    return token
+
+
+@router.post('/forgot')
+async def forgot(body: ForgotBody):
+    """申请重置密码：无论邮箱是否存在都返回成功（不泄露账号是否存在）。"""
+    from services import mailer
+
+    email_n = acc.normalize_email(body.email)
+    async with get_db() as db:
+        row = await acc.get_account_by_email(db, email_n)
+        link_sent = False
+        if row:
+            token = await _issue_token(db, int(row["id"]), "reset", email_n)
+            link = f"/reset?token={token}"
+            await mailer.send(email_n, "重置密码 · 应标文件生成系统",
+                              f"点此重置密码（2 小时内有效）：{link}\n\n如非本人操作请忽略。")
+            link_sent = True
+    return {"ok": True, "sent": link_sent,
+            "message": "如果该邮箱已注册，重置链接已发送（也可能在运营后台 outbox 里）。"}
+
+
+@router.post('/reset')
+async def reset(body: ResetBody):
+    ok, reason = acc.valid_password(body.password)
+    if not ok:
+        raise HTTPException(422, reason)
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT * FROM email_tokens WHERE token = ? AND kind = 'reset'", (body.token,))).fetchone()
+        if not row or row["used_at"]:
+            raise HTTPException(422, "链接无效或已使用")
+        if str(row["expires_at"] or "") < _dt.now().strftime("%Y-%m-%d %H:%M:%S"):
+            raise HTTPException(422, "链接已过期，请重新申请")
+        await db.execute("UPDATE accounts SET password_hash = ? WHERE id = ?",
+                         (acc.hash_password(body.password), int(row["account_id"])))
+        await db.execute("UPDATE email_tokens SET used_at = CURRENT_TIMESTAMP WHERE token = ?",
+                         (body.token,))
+        await db.execute("DELETE FROM account_sessions WHERE account_id = ?", (int(row["account_id"]),))
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post('/verify/send')
+async def send_verify(ge_session: str | None = Cookie(default=None)):
+    from services import mailer
+
+    async with get_db() as db:
+        row = await acc.session_account(db, ge_session or "")
+        if not row:
+            raise HTTPException(401, "请先登录")
+        account = acc._public_account(row)
+        token = await _issue_token(db, int(account["id"]), "verify", account["email"])
+    await mailer.send(account["email"], "验证邮箱 · 应标文件生成系统",
+                      f"验证链接（24 小时内有效）：/api/auth/verify?token={token}")
+    return {"ok": True}
+
+
+@router.get('/verify')
+async def verify(token: str = ""):
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT * FROM email_tokens WHERE token = ? AND kind = 'verify'", (str(token),))).fetchone()
+        if not row or row["used_at"]:
+            raise HTTPException(422, "链接无效或已使用")
+        await db.execute("UPDATE email_tokens SET used_at = CURRENT_TIMESTAMP WHERE token = ?",
+                         (str(token),))
+        await db.commit()
+    return {"ok": True, "message": "邮箱已验证"}

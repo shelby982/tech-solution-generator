@@ -15,6 +15,12 @@ services:
         value: "14"
       - key: SAAS_SESSION_DAYS
         value: "30"
+      - key: SAAS_TRIAL_TOKEN_LIMIT
+        value: "2000000"
+      # 下面三项按需在 Render 后台填写（此处留空 = 用人工开通 + 发件箱）
+      # ADMIN_TOKEN: 运营后台口令
+      # STRIPE_SECRET_KEY: 在线支付（不填 = 人工开通）
+      # SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_FROM 或 RESEND_API_KEY: 发信
     disk:
       name: config-data
       mountPath: /data

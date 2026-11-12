@@ -70,6 +70,19 @@
     </tr></thead>
     <tbody id="rows"><tr><td colspan="8" class="msg">—</td></tr></tbody>
   </table>
+
+  <h3 style="margin:24px 0 10px;font-size:14px">订单（人工开通 / Stripe）</h3>
+  <table>
+    <thead><tr><th style="width:56px">ID</th><th>账号</th><th>套餐</th><th>金额</th><th>状态</th>
+      <th>下单时间</th><th style="width:120px">操作</th></tr></thead>
+    <tbody id="orders"><tr><td colspan="7" class="msg">—</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:24px 0 10px;font-size:14px">发件箱（未配邮件服务时的验证/重置/邀请链接在这里）</h3>
+  <table>
+    <thead><tr><th style="width:56px">ID</th><th>收件人</th><th>主题</th><th>通道</th><th>时间</th></tr></thead>
+    <tbody id="outbox"><tr><td colspan="5" class="msg">—</td></tr></tbody>
+  </table>
 </main>
 
 <dialog id="dlg">
@@ -204,9 +217,39 @@
     openDialog(account, btn.dataset.act);
   });
 
-  $('load').onclick = load;
+  async function loadOrders() {
+    try {
+      const data = await api('/api/admin/orders');
+      $('orders').innerHTML = (data.orders || []).length ? data.orders.map((o) => `
+        <tr><td class="mono">${o.id}</td><td>${o.account_email || ('#' + o.account_id)}</td>
+          <td>${o.plan}</td><td class="mono">¥${((o.amount_cents||0)/100).toLocaleString('zh-CN')}</td>
+          <td><span class="tag ${o.status === 'paid' ? 'pro' : 'trial'}">${o.status}</span></td>
+          <td class="mono">${o.created_at}</td>
+          <td>${o.status === 'paid' ? '—' : `<button class="mini" data-paid="${o.id}">标记已付款</button>`}</td></tr>`).join('')
+        : '<tr><td colspan="7" class="msg">还没有订单</td></tr>';
+    } catch (error) { /* ignore */ }
+  }
+  async function loadOutbox() {
+    try {
+      const data = await api('/api/admin/outbox');
+      $('outbox').innerHTML = (data.items || []).length ? data.items.map((m) => `
+        <tr><td class="mono">${m.id}</td><td>${m.to_email}</td><td>${m.subject}<br/>
+          <span style="color:var(--muted);font-size:11px">${(m.body || '').slice(0, 90)}…</span></td>
+          <td>${m.provider}${m.ok ? '' : ' · 失败'}</td><td class="mono">${m.created_at}</td></tr>`).join('')
+        : '<tr><td colspan="5" class="msg">发件箱为空</td></tr>';
+    } catch (error) { /* ignore */ }
+  }
+  document.addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-paid]');
+    if (!btn) return;
+    try {
+      await api(`/api/admin/orders/${btn.dataset.paid}/mark-paid`, { method: 'POST' });
+      await loadOrders(); await load(); setMsg('已标记付款并升级账号');
+    } catch (error) { setMsg(`操作失败：${error.message}`, true); }
+  });
+  $('load').onclick = async () => { await load(); await loadOrders(); await loadOutbox(); };
   $('logout').onclick = () => { sessionStorage.removeItem('admin_token'); $('token').value = ''; location.reload(); };
-  if (store.token) load();
+  if (store.token) { load(); loadOrders(); loadOutbox(); }
 </script>
 </body>
 </html>

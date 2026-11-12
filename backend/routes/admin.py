@@ -127,3 +127,42 @@ async def set_status(account_id: int, body: StatusBody,
         await db.commit()
         row = await acc.get_account(db, account_id)
     return {"account": acc._public_account(row)}
+
+
+@router.get('/orders')
+async def list_orders(x_admin_token: str | None = Header(default=None), limit: int = 100):
+    _check(x_admin_token)
+    from services import billing
+
+    async with get_db() as db:
+        orders = await billing.list_orders(db, None, limit)
+        emails = {int(r["id"]): r["email"] for r in await (await db.execute(
+            "SELECT id, email FROM accounts")).fetchall()}
+    for order in orders:
+        order["account_email"] = emails.get(int(order["account_id"]), "")
+    return {"orders": orders, "stripe": billing.stripe_enabled()}
+
+
+@router.post('/orders/{order_id}/mark-paid')
+async def mark_order_paid(order_id: int, x_admin_token: str | None = Header(default=None)):
+    _check(x_admin_token)
+    from services import billing
+
+    async with get_db() as db:
+        try:
+            order = await billing.mark_paid(db, order_id, note="后台手动开通")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        account = await acc.account_public(db, int(order["account_id"]))
+    return {"order": order, "account": account}
+
+
+@router.get('/outbox')
+async def outbox(x_admin_token: str | None = Header(default=None), limit: int = 50):
+    """未配置邮件服务时的"发件箱"：能直接看到验证/重置/邀请链接。"""
+    _check(x_admin_token)
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT id, to_email, subject, body, provider, ok, error, created_at "
+            "FROM mail_outbox ORDER BY id DESC LIMIT ?", (limit,))).fetchall()
+    return {"items": [dict(r) for r in rows]}
