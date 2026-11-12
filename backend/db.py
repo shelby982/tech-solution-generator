@@ -18,8 +18,26 @@ import aiosqlite
 logger = logging.getLogger(__name__)
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
-DB_PATH: str = os.path.join(_this_dir, "data", "ge_solution.db")
-DB_PATH = os.path.normpath(DB_PATH)
+
+
+def _default_db_path() -> str:
+    """库文件位置：优先环境变量，其次容器持久盘，最后仓库内默认目录。
+
+    线上（Render）必须落在持久盘上，否则**每次重新部署都会清空数据**：
+      GE_DB_PATH        —— 显式指定（最高优先）
+      CONFIG_PATH=/data —— 容器持久盘（render.yaml 已挂载），库放 /data/ge_solution.db
+      否则              —— backend/data/ge_solution.db（本地开发）
+    """
+    explicit = os.environ.get("GE_DB_PATH", "").strip()
+    if explicit:
+        return os.path.normpath(explicit)
+    data_dir = os.environ.get("CONFIG_PATH", "").strip()
+    if data_dir and os.path.isdir(data_dir):
+        return os.path.normpath(os.path.join(data_dir, "ge_solution.db"))
+    return os.path.normpath(os.path.join(_this_dir, "data", "ge_solution.db"))
+
+
+DB_PATH: str = _default_db_path()
 
 # 结构版本：每次有 schema 变更时递增，并把迁移写进 schema_migrations。
 # 目前只做版本记录（历史迁移仍是幂等 ALTER）；后续迁移可按版本条件执行。

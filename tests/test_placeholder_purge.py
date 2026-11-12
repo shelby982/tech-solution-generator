@@ -61,3 +61,23 @@ def test_conflict_check_tolerates_system_normalization():
     assert _normalized_for_compare(client_view) == _normalized_for_compare(stored)
     # 真正的内容差异仍然要能识别
     assert _normalized_for_compare("完全不同的正文内容。") != _normalized_for_compare(stored)
+
+
+def test_db_path_prefers_persistent_disk(monkeypatch, tmp_path):
+    """线上必须把库放到持久盘，否则每次重新部署清空数据。"""
+    import importlib
+
+    import db as dbmod
+
+    monkeypatch.setenv("GE_DB_PATH", str(tmp_path / "explicit.db"))
+    importlib.reload(dbmod)
+    assert dbmod.DB_PATH == str(tmp_path / "explicit.db")
+
+    monkeypatch.delenv("GE_DB_PATH", raising=False)
+    monkeypatch.setenv("CONFIG_PATH", str(tmp_path))
+    importlib.reload(dbmod)
+    assert dbmod.DB_PATH == str(tmp_path / "ge_solution.db")
+
+    monkeypatch.delenv("CONFIG_PATH", raising=False)
+    importlib.reload(dbmod)
+    assert dbmod.DB_PATH.endswith("data/ge_solution.db") or dbmod.DB_PATH.endswith("data\\ge_solution.db")
