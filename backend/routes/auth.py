@@ -92,7 +92,9 @@ async def me(ge_session: str | None = Cookie(default=None)):
             raise HTTPException(401, "未登录")
         account = acc._public_account(row)
         can, why = acc.can_create_project(account)
-        return {"saas": True, "account": account, "can_create_project": can, "reason": why}
+        usage = await acc.usage_summary(db, int(account["id"]))
+        return {"saas": True, "account": account, "can_create_project": can, "reason": why,
+                "usage": usage}
 
 
 # ── 业务接口用的账号依赖 ──────────────────────────

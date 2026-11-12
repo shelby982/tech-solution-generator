@@ -18,6 +18,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 TRIAL_DAYS = int(os.environ.get("SAAS_TRIAL_DAYS", "14"))
+# 试用期 token 上限（默认 200 万 ≈ 一章几千 token × 上百次生成 / 一轮全量评审）
+DEFAULT_TOKEN_LIMIT = int(os.environ.get("SAAS_TRIAL_TOKEN_LIMIT", "2000000"))
+USAGE_WINDOW_DAYS = int(os.environ.get("SAAS_USAGE_WINDOW_DAYS", "30"))
 SESSION_COOKIE = "ge_session"
 SESSION_DAYS = int(os.environ.get("SAAS_SESSION_DAYS", "30"))
 _SCRYPT_N = 2 ** 14
@@ -199,3 +202,35 @@ def can_create_project(account: dict | None) -> tuple[bool, str]:
     if account.get("trial_expired"):
         return False, "试用期已结束，请升级后继续新建项目"
     return True, ""
+
+
+async def usage_summary(db, account_id: int | None) -> dict:
+    """按账号统计近 N 天 token 用量。
+
+    归集方式：`llm_usage.project_id ∈ 该账号的项目`（不额外改调用链上下文）。
+    """
+    if not account_id:
+        return {"used_tokens": 0, "limit_tokens": DEFAULT_TOKEN_LIMIT,
+                "remaining_tokens": DEFAULT_TOKEN_LIMIT, "calls": 0,
+                "window_days": USAGE_WINDOW_DAYS, "over_limit": False}
+    row = await (await db.execute(
+        "SELECT COALESCE(SUM(u.total_tokens),0) AS used, COUNT(*) AS calls "
+        "FROM llm_usage u JOIN projects p ON p.id = u.project_id "
+        "WHERE p.owner_account_id = ? AND u.created_at >= datetime('now', ?)",
+        (account_id, f"-{USAGE_WINDOW_DAYS} days"))).fetchone()
+    used = int((row["used"] if row else 0) or 0)
+    calls = int((row["calls"] if row else 0) or 0)
+    acc_row = await (await db.execute("SELECT token_limit FROM accounts WHERE id = ?",
+                                     (account_id,))).fetchone()
+    limit = int((acc_row["token_limit"] if acc_row else 0) or DEFAULT_TOKEN_LIMIT)
+    return {"used_tokens": used, "limit_tokens": limit,
+            "remaining_tokens": max(0, limit - used), "calls": calls,
+            "window_days": USAGE_WINDOW_DAYS, "over_limit": limit > 0 and used >= limit}
+
+
+def quota_exceeded(usage: dict) -> tuple[bool, str]:
+    """是否已超出可用额度（超出则阻止"烧 token"的接口）。"""
+    if not usage or not usage.get("over_limit"):
+        return False, ""
+    return True, (f"试用额度已用完（{usage['used_tokens']}/{usage['limit_tokens']} token，"
+                  f"近 {usage['window_days']} 天）。请升级套餐后继续生成。")

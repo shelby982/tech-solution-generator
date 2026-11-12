@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>运营后台 · 应标文件生成系统</title>
+<style>
+  :root{--ink:#0F172A;--ink-2:#334155;--muted:#64748B;--muted-2:#94A3B8;--line:#E2E8F0;
+    --blue:#2563EB;--green:#0F9F6E;--red:#DC2626;--amber:#D97706;
+    --font:"PingFang SC","HarmonyOS Sans","Noto Sans SC","Microsoft YaHei",Inter,system-ui,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);background:#F6F8FB;color:var(--ink);font-size:13px}
+  header{background:#0B1220;color:#fff;padding:14px 22px;display:flex;align-items:center;gap:14px}
+  header b{font-size:14px}
+  header small{color:#9FB0C6}
+  header .sp{margin-left:auto;display:flex;gap:10px;align-items:center}
+  input,button{font:inherit}
+  .token{padding:7px 10px;border-radius:8px;border:1px solid #2A3A52;background:#111C2E;color:#DDE6F2;width:230px}
+  .btn{padding:7px 14px;border-radius:8px;border:1px solid transparent;background:var(--blue);color:#fff;
+    font-weight:600;cursor:pointer}
+  .btn.ghost{background:transparent;border-color:#2A3A52;color:#C7D2E0}
+  main{padding:22px}
+  .stats{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px}
+  .stat b{display:block;font-size:20px;font-family:var(--mono)}
+  .stat span{color:var(--muted);font-size:11.5px}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;
+    overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #EEF2F7;vertical-align:middle}
+  th{background:#F8FAFC;color:var(--muted);font-size:11.5px;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .mono{font-family:var(--mono);font-size:12px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:5px;font-size:11px;font-weight:600}
+  .tag.trial{background:#EAF1FF;color:#1D4ED8}
+  .tag.pro{background:#E7F8F1;color:#0B7A55}
+  .tag.off{background:#FDEDED;color:#A61B1B}
+  .bar{height:6px;border-radius:99px;background:#EEF2F7;overflow:hidden;min-width:90px}
+  .bar i{display:block;height:100%}
+  .rowacts{display:flex;gap:6px;flex-wrap:wrap}
+  .mini{padding:4px 9px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:11.5px}
+  .mini:hover{border-color:#CBD5E1}
+  .mini.warn{color:var(--red);border-color:#F7C9C9}
+  .msg{margin:0 0 12px;color:var(--muted)}
+  .msg.err{color:var(--red)}
+  dialog{border:0;border-radius:14px;padding:0;width:340px;box-shadow:0 30px 70px rgba(2,6,23,.3)}
+  dialog form{padding:18px}
+  dialog h3{margin:0 0 12px;font-size:15px}
+  dialog label{display:block;margin:10px 0 0;font-size:12px;color:var(--ink-2)}
+  dialog input{width:100%;margin-top:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+  dialog .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+</style>
+</head>
+<body>
+<header>
+  <b>运营后台</b><small>账号 / 用量 / 试用管理</small>
+  <span class="sp">
+    <input class="token" id="token" type="password" placeholder="管理口令（ADMIN_TOKEN）" />
+    <button class="btn" id="load">加载</button>
+    <button class="btn ghost" id="logout">清空</button>
+  </span>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+  <p class="msg" id="msg">输入管理口令后点「加载」。</p>
+  <table>
+    <thead><tr>
+      <th style="width:56px">ID</th><th>邮箱 / 公司</th><th>套餐</th><th>试用到期</th>
+      <th>用量（近 30 天）</th><th>项目</th><th>状态</th><th style="width:230px">操作</th>
+    </tr></thead>
+    <tbody id="rows"><tr><td colspan="8" class="msg">—</td></tr></tbody>
+  </table>
+</main>
+
+<dialog id="dlg">
+  <form id="dlgform">
+    <h3 id="dlgtitle">操作</h3>
+    <label>天数（延期）<input id="dlgdays" type="number" value="14" min="1" max="3650" /></label>
+    <label>套餐名（如 trial / pro）<input id="dlgplan" type="text" value="pro" /></label>
+    <label>token 上限（0 = 不限）<input id="dlglimit" type="number" value="5000000" min="0" /></label>
+    <div class="acts">
+      <button type="button" class="mini" id="dlgcancel">取消</button>
+      <button type="submit" class="btn" id="dlgok">确定</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const store = { token: sessionStorage.getItem('admin_token') || '', accounts: [] };
+  if (store.token) $('token').value = store.token;
+  const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('zh-CN'));
+  const pct = (u, l) => (l ? Math.min(100, Math.round((u / l) * 100)) : 0);
+
+  function setMsg(text, err) { const el = $('msg'); el.textContent = text; el.className = 'msg' + (err ? ' err' : ''); }
+
+  async function api(path, options = {}) {
+    const resp = await fetch(path, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': store.token, ...(options.headers || {}) },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    return data;
+  }
+
+  function render() {
+    const list = store.accounts || [];
+    const totalAccounts = list.length;
+    const totalProjects = list.reduce((sum, a) => sum + (a.project_count || 0), 0);
+    const totalTokens = list.reduce((sum, a) => sum + ((a.usage || {}).used_tokens || 0), 0);
+    const overQuota = list.filter((a) => (a.usage || {}).over_limit).length;
+    $('stats').innerHTML = [
+      ['账号总数', fmt(totalAccounts)], ['项目总数', fmt(totalProjects)],
+      ['近 30 天 token', fmt(totalTokens)], ['额度用尽账号', fmt(overQuota)],
+    ].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+
+    $('rows').innerHTML = list.map((a) => {
+      const usage = a.usage || {};
+      const used = usage.used_tokens || 0, limit = usage.limit_tokens || 0;
+      const p = pct(used, limit);
+      const color = p >= 100 ? 'var(--red)' : p >= 70 ? 'var(--amber)' : 'var(--green)';
+      const planCls = a.plan === 'pro' ? 'pro' : a.status !== 'active' ? 'off' : 'trial';
+      return `<tr>
+        <td class="mono">${a.id}</td>
+        <td><b>${a.email}</b><br/><span style="color:var(--muted)">${a.company || '—'}</span></td>
+        <td><span class="tag ${planCls}">${a.plan}${a.status !== 'active' ? ' · 停用' : ''}</span></td>
+        <td class="mono" style="color:${a.trial_expired ? 'var(--red)' : 'var(--muted)'}">${a.trial_ends_at || '—'}</td>
+        <td>
+          <div class="mono" style="font-size:11.5px">${fmt(used)} / ${fmt(limit)} · ${p}%</div>
+          <div class="bar"><i style="width:${p}%;background:${color}"></i></div>
+        </td>
+        <td class="mono">${a.project_count}</td>
+        <td>${a.status === 'active' ? '<span class="tag pro">正常</span>' : '<span class="tag off">停用</span>'}</td>
+        <td><div class="rowacts">
+          <button class="mini" data-act="extend" data-id="${a.id}">延期</button>
+          <button class="mini" data-act="plan" data-id="${a.id}">套餐/额度</button>
+          <button class="mini warn" data-act="toggle" data-id="${a.id}">${a.status === 'active' ? '停用' : '启用'}</button>
+        </div></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8" class="msg">还没有账号</td></tr>';
+  }
+
+  async function load() {
+    store.token = $('token').value.trim();
+    sessionStorage.setItem('admin_token', store.token);
+    if (!store.token) { setMsg('请先输入管理口令（服务端环境变量 ADMIN_TOKEN）', true); return; }
+    setMsg('加载中…');
+    try {
+      const data = await api('/api/admin/accounts');
+      store.accounts = data.accounts || [];
+      render();
+      setMsg(`已加载 ${data.total || store.accounts.length} 个账号 · 更新于 ${new Date().toLocaleTimeString()}`);
+    } catch (error) { setMsg(`加载失败：${error.message}`, true); }
+  }
+
+  let pending = null;
+  function openDialog(account, mode) {
+    pending = { account, mode };
+    $('dlgtitle').textContent = mode === 'extend' ? `延期试用 · ${account.email}` : `套餐与额度 · ${account.email}`;
+    $('dlgdays').parentElement.style.display = mode === 'extend' ? 'block' : 'none';
+    $('dlgplan').parentElement.style.display = mode === 'extend' ? 'none' : 'block';
+    $('dlglimit').parentElement.style.display = mode === 'extend' ? 'none' : 'block';
+    $('dlgplan').value = account.plan || 'pro';
+    $('dlglimit').value = account.token_limit || 5000000;
+    $('dlg').showModal();
+  }
+  $('dlgcancel').onclick = () => $('dlg').close();
+  $('dlgform').onsubmit = async (event) => {
+    event.preventDefault();
+    if (!pending) return;
+    const { account, mode } = pending;
+    try {
+      if (mode === 'extend') {
+        await api(`/api/admin/accounts/${account.id}/extend`, {
+          method: 'POST', body: JSON.stringify({ days: Number($('dlgdays').value) || 14 }),
+        });
+      } else {
+        await api(`/api/admin/accounts/${account.id}/plan`, {
+          method: 'POST',
+          body: JSON.stringify({ plan: $('dlgplan').value.trim() || 'pro',
+                                 token_limit: Number($('dlglimit').value) || 0 }),
+        });
+      }
+      $('dlg').close();
+      await load();
+    } catch (error) { setMsg(`操作失败：${error.message}`, true); }
+  };
+
+  $('rows').addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-act]');
+    if (!btn) return;
+    const account = store.accounts.find((a) => String(a.id) === btn.dataset.id);
+    if (!account) return;
+    if (btn.dataset.act === 'toggle') {
+      try {
+        await api(`/api/admin/accounts/${account.id}/status`, {
+          method: 'POST', body: JSON.stringify({ status: account.status === 'active' ? 'disabled' : 'active' }),
+        });
+        await load();
+      } catch (error) { setMsg(`操作失败：${error.message}`, true); }
+      return;
+    }
+    openDialog(account, btn.dataset.act);
+  });
+
+  $('load').onclick = load;
+  $('logout').onclick = () => { sessionStorage.removeItem('admin_token'); $('token').value = ''; location.reload(); };
+  if (store.token) load();
+</script>
+</body>
+</html>

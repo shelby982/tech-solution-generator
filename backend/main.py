@@ -36,6 +36,7 @@ from routes.citations import router as citations_router
 from routes.diagram_assets import router as diagram_assets_router
 from routes.leads import router as leads_router
 from routes.auth import router as auth_router
+from routes.admin import router as admin_router
 
 from orchestrator.runner import WorkflowRunner
 from orchestrator.graph import GraphDeps
@@ -266,6 +267,7 @@ app.include_router(diagram_assets_router, prefix="/api")
 app.include_router(plan_materials_router, prefix="/api")
 app.include_router(leads_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 # ── 前端静态文件 ──────────────────────────────
@@ -328,6 +330,40 @@ def _saas_gate(request: Request):
     if not token:
         return RedirectResponse("/login", status_code=307)
     return None  # 有 token：交给接口层判定有效性（无效时前端会收到 401 并跳登录）
+
+
+# 会消耗模型额度的接口前缀（额度用完时拦截；只读接口不受影响）
+_QUOTA_GUARDED = (
+    "/api/blocks/", "/api/projects/", "/api/studio/", "/api/workflow/",
+)
+
+
+@app.middleware("http")
+async def saas_quota_guard(request: Request, call_next):
+    """SaaS 额度闸门：超出试用额度时，阻止会烧 token 的写操作（生成/评审/重写）。"""
+    from services import accounts as acc
+
+    path = request.url.path
+    if not acc.saas_enabled() or request.method not in ("POST", "PUT", "PATCH"):
+        return await call_next(request)
+    if not (path.startswith(_QUOTA_GUARDED) and any(
+            key in path for key in ("/studio/", "/review", "/section", "/diagram", "/table",
+                                    "/chapter-writes", "/generate", "/write"))):
+        return await call_next(request)
+    from db import get_db
+
+    token = request.cookies.get(acc.SESSION_COOKIE) or ""
+    if not token:
+        return JSONResponse(status_code=401, content={"detail": "未登录"})
+    async with get_db() as db:
+        row = await acc.session_account(db, token)
+        if not row:
+            return JSONResponse(status_code=401, content={"detail": "未登录"})
+        usage = await acc.usage_summary(db, int(row["id"]))
+    blocked, why = acc.quota_exceeded(usage)
+    if blocked:
+        return JSONResponse(status_code=429, content={"detail": why, "usage": usage})
+    return await call_next(request)
 
 
 @app.get("/login", include_in_schema=False)
@@ -415,6 +451,17 @@ async def serve_review(request: Request):
         # HTML 不缓存：避免改完顶部模块用户强刷仍看到旧版（CSS/JS 已带版本戳）
         return FileResponse(_review_path, headers=_HTML_NO_CACHE)
     return JSONResponse(status_code=404, content={"detail": "review.html 不存在"})
+
+
+_admin_path = os.path.join(frontend_dir, "admin.html")
+
+
+@app.get("/admin", include_in_schema=False)
+async def serve_admin():
+    """运营后台（页面本身不含数据，接口需 X-Admin-Token）。"""
+    if os.path.isfile(_admin_path):
+        return FileResponse(_admin_path, headers=_HTML_NO_CACHE)
+    return JSONResponse(status_code=404, content={"detail": "admin.html 不存在"})
 
 
 @app.get("/api/readme", include_in_schema=False)

@@ -106,3 +106,58 @@ def test_saas_mode_flag(monkeypatch):
     assert acc.saas_enabled() is False
     monkeypatch.delenv("SAAS_MODE", raising=False)
     assert acc.saas_enabled() is False
+
+
+def test_usage_summary_and_quota():
+    """额度：按账号项目归集用量；超限给出拦截原因。"""
+    from services import accounts as acc
+
+    async def run():
+        conn = await aiosqlite.connect(":memory:")
+        conn.row_factory = aiosqlite.Row
+        await conn.executescript('''
+            CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE,
+              password_hash TEXT DEFAULT '', company TEXT DEFAULT '', phone TEXT DEFAULT '',
+              plan TEXT DEFAULT 'trial', trial_ends_at DATETIME, token_limit INTEGER DEFAULT 1000,
+              status TEXT DEFAULT 'active', created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, owner_account_id INTEGER);
+            CREATE TABLE llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER,
+              total_tokens INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+        ''')
+        await conn.execute("INSERT INTO accounts (email, token_limit) VALUES ('a@b.co', 1000)")
+        await conn.execute("INSERT INTO projects (name, owner_account_id) VALUES ('P1', 1), ('P2', 2)")
+        await conn.execute("INSERT INTO llm_usage (project_id, total_tokens) VALUES (1, 600), (1, 500), (2, 9999)")
+        await conn.commit()
+        usage = await acc.usage_summary(conn, 1)
+        assert usage["used_tokens"] == 1100          # 只算自己的项目
+        assert usage["limit_tokens"] == 1000
+        assert usage["over_limit"] is True
+        blocked, why = acc.quota_exceeded(usage)
+        assert blocked and "试用额度已用完" in why
+        # 未超限
+        await conn.execute("UPDATE accounts SET token_limit = 5000 WHERE id = 1")
+        await conn.commit()
+        usage2 = await acc.usage_summary(conn, 1)
+        assert usage2["over_limit"] is False and usage2["remaining_tokens"] == 3900
+        await conn.close()
+
+    asyncio.run(run())
+
+
+def test_admin_requires_token(monkeypatch):
+    """管理接口：未配置 ADMIN_TOKEN 时整体关闭；配了要校验口令。"""
+    import asyncio as aio
+
+    from fastapi import HTTPException
+    from routes import admin as admin_mod
+
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+    with pytest.raises(HTTPException) as exc1:
+        admin_mod._check("x")
+    assert exc1.value.status_code == 404
+
+    monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
+    with pytest.raises(HTTPException) as exc2:
+        admin_mod._check("wrong")
+    assert exc2.value.status_code == 401
+    admin_mod._check("secret-token")     # 正确口令不抛

@@ -32,7 +32,8 @@ def _default_db_path() -> str:
     if explicit:
         return os.path.normpath(explicit)
     data_dir = os.environ.get("CONFIG_PATH", "").strip()
-    if data_dir and os.path.isdir(data_dir):
+    if data_dir:
+        # 目录可能还没建（首启）：直接用这个路径，init_db 会 makedirs
         return os.path.normpath(os.path.join(data_dir, "ge_solution.db"))
     return os.path.normpath(os.path.join(_this_dir, "data", "ge_solution.db"))
 
@@ -332,6 +333,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     phone         TEXT NOT NULL DEFAULT '',
     plan          TEXT NOT NULL DEFAULT 'trial',      -- trial | pro | paused
     trial_ends_at DATETIME,
+    token_limit   INTEGER NOT NULL DEFAULT 2000000,   -- 试用期可用 token 上限
     status        TEXT NOT NULL DEFAULT 'active',     -- active | disabled
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -816,6 +818,13 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(projects)")).fetchall()}
         if cols and 'owner_account_id' not in cols:
             await conn.execute("ALTER TABLE projects ADD COLUMN owner_account_id INTEGER")
+            await conn.commit()
+    except Exception:
+        pass
+    try:
+        acc_cols = {row[1] for row in await (await conn.execute("PRAGMA table_info(accounts)")).fetchall()}
+        if acc_cols and 'token_limit' not in acc_cols:
+            await conn.execute("ALTER TABLE accounts ADD COLUMN token_limit INTEGER NOT NULL DEFAULT 2000000")
             await conn.commit()
     except Exception:
         pass
