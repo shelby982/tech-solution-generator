@@ -91,6 +91,15 @@ def test_trial_expired_blocks_create_project():
 def test_saas_mode_flag(monkeypatch):
     from services import accounts as acc
 
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    # 托管平台自动开启（无需额外配环境变量）
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.delenv("SAAS_MODE", raising=False)
+    assert acc.saas_enabled() is True
+    monkeypatch.setenv("SAAS_MODE", "0")
+    assert acc.saas_enabled() is False          # 显式关闭优先
+    monkeypatch.delenv("RENDER", raising=False)
     monkeypatch.setenv("SAAS_MODE", "1")
     assert acc.saas_enabled() is True
     monkeypatch.setenv("SAAS_MODE", "0")

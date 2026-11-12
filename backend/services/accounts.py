@@ -27,7 +27,17 @@ _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
 
 def saas_enabled() -> bool:
-    return os.environ.get("SAAS_MODE", "").strip() in ("1", "true", "True", "on")
+    """是否启用 SaaS 账号体系。
+
+    优先级：
+      1. `SAAS_MODE` 显式设置（1/0）—— 本地开发默认不开，避免影响测试
+      2. 托管平台环境变量（Render 会注入 `RENDER=true`）—— **自动开启**，
+         这样部署到云上不需要额外点一次环境变量配置
+    """
+    flag = os.environ.get("SAAS_MODE", "").strip().lower()
+    if flag:
+        return flag in ("1", "true", "on", "yes")
+    return bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT"))
 
 
 def _now() -> str:
